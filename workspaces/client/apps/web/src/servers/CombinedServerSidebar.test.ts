@@ -4,15 +4,17 @@ import type { CombinedSidebarServices } from "./combinedSidebarServices.ts";
 import type { ApiPostPath, PostInput, PostResult } from "../api.ts";
 import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type { SidebarCommands } from "../components/sidebar/support/commands.ts";
-import { CombinedSidebarServicesProvider } from "./combinedSidebarServices.ts";
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { createSidebarList } from "../components/sidebar/support/viewModel.ts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, it, vi } from "vitest";
-import { CombinedSidebarFixture as CombinedServerSidebar } from "./CombinedServerSidebar.fixture.tsx";
+import { afterEach, expect, it, vi } from "vitest";
+import {
+  createCombinedSidebarFixture,
+  CombinedSidebarFixtureView,
+} from "./CombinedServerSidebar.fixture.tsx";
 import type { SidebarListOwner } from "../app/shell/SidebarOwner.ts";
 import type { ServerCommand } from "./navigation.ts";
 import { createMergedSidebarSelector, mergeSidebar } from "./mergedSidebar.ts";
@@ -129,45 +131,51 @@ function renderCombined(
   return required(captured.props);
 }
 
+let fixture: ReturnType<typeof createCombinedSidebarFixture> | undefined;
+let stopFixture = () => {};
+afterEach(() => {
+  stopFixture();
+  fixture = undefined;
+});
 function combinedElement(
   model: ReturnType<typeof mergeSidebar>,
   executeCommand: (owner: string, command: ServerCommand) => Promise<void>,
   send: (owner: string, command: ServerCommand) => void = vi.fn(),
   overrides: Partial<CombinedSidebarServices> = {},
 ) {
-  return createElement(
-    CombinedSidebarServicesProvider,
-    {
-      value: {
-        backends: new Map(
-          ["local", "remote"].map((id) => [
-            id,
-            { ...localSidebarBackend, ownerId: id },
-          ]),
-        ),
-        online: () => true,
-        refreshOwner: async () => navigationSnapshot(undefined, null, ""),
-        executeCommand,
-        aliases: {},
-        send,
-        applyNavigation: vi.fn(),
-        settings: vi.fn(),
-        search: vi.fn(),
-        notify: vi.fn(),
-        ...overrides,
-      },
-    },
-    createElement(CombinedServerSidebar, {
-      model,
-      current: "remote",
-      navigation: {},
-      mobile: false,
-      hidden: false,
-      close: vi.fn(),
-      notice: "",
-      hideOldChatsThreshold: 3,
-    }),
-  );
+  const services: CombinedSidebarServices = {
+    backends: new Map(
+      ["local", "remote"].map((id) => [
+        id,
+        { ...localSidebarBackend, ownerId: id },
+      ]),
+    ),
+    online: () => true,
+    refreshOwner: async () => navigationSnapshot(undefined, null, ""),
+    executeCommand,
+    aliases: {},
+    send,
+    applyNavigation: vi.fn(),
+    settings: vi.fn(),
+    search: vi.fn(),
+    notify: vi.fn(),
+    ...overrides,
+  };
+  const input = {
+    model,
+    current: "remote",
+    navigation: {},
+    mobile: false,
+    hidden: false,
+    close: vi.fn(),
+    notice: "",
+    hideOldChatsThreshold: 3,
+  };
+  if (!fixture) {
+    fixture = createCombinedSidebarFixture(input, services);
+    stopFixture = fixture.start();
+  } else fixture.update(input, services);
+  return createElement(CombinedSidebarFixtureView, { fixture });
 }
 
 it("freezes a queued read CAS target while its generated row mirror advances", async () => {

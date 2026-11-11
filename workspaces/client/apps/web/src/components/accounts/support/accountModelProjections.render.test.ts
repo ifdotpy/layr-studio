@@ -1,3 +1,4 @@
+import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
 import Workspace from "../../shell/Workspace/Workspace.tsx";
 import { componentSnapshot as snapshotFixture } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
 // @vitest-environment happy-dom
@@ -29,13 +30,6 @@ vi.mock(
     useServerApi: () => ({ get: vi.fn() }),
   }),
 );
-vi.mock("../../shell/Workspace/useWorkspaceResource.ts", () => ({
-  useWorkspaceResource: () => ({
-    data: { profiles: [] },
-    error: "",
-    loading: false,
-  }),
-}));
 vi.mock("../../shell/WorkspacePanelHost/WorkspacePanelHost.tsx", () => ({
   WorkspacePanelHost: ({ children }: { children: import("react").ReactNode }) =>
     children,
@@ -180,7 +174,11 @@ it("updates an actual model consumer when generated models change", async () => 
         createElement(
           MantineProvider,
           null,
-          createElement(ModelWhitelistSettings),
+          createElement(
+            ServerAreasContextProvider,
+            { value: f.areas },
+            createElement(ModelWhitelistSettings),
+          ),
         ),
       ),
     ),
@@ -208,6 +206,9 @@ it("updates an open Profiles draft when its generated catalog changes", async ()
     })),
   );
   const f = fixture();
+  const getProfiles = vi
+    .spyOn(f.areas.scope.services.api, "get")
+    .mockResolvedValue({ profiles: [] });
   f.models.apply([model("gpt-6-astra")]);
   const host = document.createElement("div");
   document.body.append(host);
@@ -225,16 +226,24 @@ it("updates an open Profiles draft when its generated catalog changes", async ()
         createElement(
           MantineProvider,
           null,
-          createElement(Workspace, {
-            opened: true,
-            initialSection: "profiles",
-            onClose: noop,
-            onSelect: noop,
-            notify: noop,
-          }),
+          createElement(
+            ServerAreasContextProvider,
+            { value: f.areas },
+            createElement(Workspace, {
+              opened: true,
+              initialSection: "profiles",
+              onClose: noop,
+              onSelect: noop,
+              notify: noop,
+            }),
+          ),
         ),
       ),
     ),
+  );
+  expect(getProfiles).toHaveBeenCalledWith(
+    "/api/profiles",
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
   );
   const add = [...document.querySelectorAll("button")].find(
     (button) => button.textContent === "New profile",

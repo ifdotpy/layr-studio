@@ -845,7 +845,23 @@ async fn main() -> Result<()> {
             let busy_before = BUSY_NS.load(Ordering::Relaxed);
             let began = Instant::now();
             if options.hot_paths {
-                hot_paths::operation(&store, family, n).await?;
+                match hot_paths::operation(&store, family, n).await? {
+                    hot_paths::Observation::Write {
+                        changed,
+                        before,
+                        after,
+                    } => {
+                        std::hint::black_box((changed, before, after));
+                    }
+                    hot_paths::Observation::Resume {
+                        high,
+                        rows,
+                        resumed,
+                    } => {
+                        std::hint::black_box((high, rows, resumed));
+                    }
+                    hot_paths::Observation::Other => {}
+                }
             } else {
                 operation(&store, &output, family, n, &mut offset).await?;
             }

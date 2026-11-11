@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { observable, runInAction } from "mobx";
+import { makeAutoObservable, observable } from "mobx";
 
 /** Text of one item that the server sent live, before the durable item holds it. `start` and
  * `length` count Unicode scalars, as the server does. */
@@ -21,10 +21,10 @@ export function withLiveText(durable: string, live: LiveText | undefined) {
 /** One ephemeral owner for the open history; each leaf observes only its key. */
 export function createLiveText() {
   const runs = observable.map<string, LiveText>(undefined, { deep: false });
-  return {
-    get: (id: string) => runs.get(id),
-    add(delta: { itemId: string; offset: number; text: string }) {
-      runInAction(() => {
+  return makeAutoObservable(
+    {
+      get: (id: string) => runs.get(id),
+      add(delta: { itemId: string; offset: number; text: string }) {
         const run = runs.get(delta.itemId);
         const length = Array.from(delta.text).length;
         runs.delete(delta.itemId);
@@ -40,15 +40,17 @@ export function createLiveText() {
         );
         while (runs.size > MAX_LIVE_ITEMS)
           runs.delete(runs.keys().next().value!);
-      });
+      },
+      remove(id: string) {
+        runs.delete(id);
+      },
+      clear() {
+        runs.clear();
+      },
     },
-    remove(id: string) {
-      runInAction(() => runs.delete(id));
-    },
-    clear() {
-      runInAction(() => runs.clear());
-    },
-  };
+    {},
+    { autoBind: true },
+  );
 }
 export const HistoryLiveText = createContext<ReturnType<
   typeof createLiveText

@@ -1,3 +1,7 @@
+import {
+  conversationActionsFixture,
+  observableFixture,
+} from "../../shell/integration-support/observableFixture.tsx";
 import { AgentMode } from "../../../generated/api.ts";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
@@ -10,6 +14,7 @@ vi.mock("../support/state.ts", async (original) => ({
 import { expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { initialConfirmedLead } from "../../../../tests/teams/concurrency-fixture-data";
+let areas: ReturnType<typeof conversationActionsFixture>;
 const fixture = vi.hoisted(() => ({
   cells: [] as unknown[],
   cursor: 0,
@@ -18,6 +23,7 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("react", async (load) => ({
   ...(await load<typeof import("react")>()),
+  useContext: () => areas,
   useState: (initial: unknown) => {
     const index = fixture.cursor++;
     if (!(index in fixture.cells))
@@ -39,7 +45,10 @@ vi.mock("react", async (load) => ({
 }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
+  async (load) => ({
+    ...(await load<
+      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+    >()),
     useServerStore: () => ({
       agentDetail: () => ({
         current: { status: "live", data: initialConfirmedLead },
@@ -69,7 +78,23 @@ it("retains and blocks a malformed request introduced while a save is pending", 
   fixture.disk.clear();
   const result = Promise.withResolvers<unknown>();
   fixture.post.mockReturnValue(result.promise);
+  const model = observableFixture([initialConfirmedLead]);
+  areas = conversationActionsFixture(undefined, model.store);
+  areas.scope.services.storage.getItem = (key) => fixture.disk.get(key) ?? null;
+  areas.scope.services.storage.setItem = (key, value) => {
+    fixture.disk.set(key, value);
+  };
+  areas.scope.services.storage.removeItem = (key) => {
+    fixture.disk.delete(key);
+  };
+  areas.scope.services.api.post = fixture.post;
+  areas.agentsUi.control(
+    initialConfirmedLead,
+    JSON.stringify(["state", "workspace", initialConfirmedLead.id]),
+    "workspace",
+  );
   const props = {
+    agentsUi: areas.agentsUi,
     lead: initialConfirmedLead,
     stateDir: "state",
     workspaceId: "workspace",

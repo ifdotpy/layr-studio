@@ -19,12 +19,11 @@ vi.mock("./PromptComposer.tsx", async (original) => {
 
 it("50 draft changes render the input leaf without the form or static settings", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const listeners = new Set<() => void>();
+  const drafts = observable.map<string, string>();
   const model = observable({ label: "Draft" }, {}, { name: "DraftDisplay" });
   configure({ observableRequiresReaction: true });
   const warnings = vi.spyOn(console, "warn").mockImplementation(() => {});
-  let draft = "",
-    inputRenders = 0,
+  let inputRenders = 0,
     settingsRenders = 0;
   function Settings() {
     settingsRenders++;
@@ -38,13 +37,7 @@ it("50 draft changes render the input leaf without the form or static settings",
       root.render(
         createElement(PromptComposer, {
           session: "chat",
-          getDraft: () => draft,
-          subscribeDraft: (_session, notify) => {
-            listeners.add(notify);
-            return () => {
-              listeners.delete(notify);
-            };
-          },
+          getDraft: () => drafts.get("chat") ?? "",
           onSubmit: (event) => event.preventDefault(),
           children: (value) => {
             inputRenders++;
@@ -66,8 +59,7 @@ it("50 draft changes render the input leaf without the form or static settings",
     warnings.mockClear();
     for (let index = 0; index < 50; index++)
       await act(async () => {
-        draft += "x";
-        listeners.forEach((notify) => notify());
+        runInAction(() => drafts.set("chat", "x".repeat(index + 1)));
       });
     expect(host.querySelector("input")?.value).toBe("x".repeat(50));
     console.log("50 drafts", {
@@ -104,7 +96,6 @@ it("tracks observable render-prop reads in the draft leaf without waking the for
         createElement(PromptComposer, {
           session: "chat",
           getDraft: () => "draft",
-          subscribeDraft: () => () => {},
           onSubmit: (event) => event.preventDefault(),
           children: (draft) => {
             renders++;
@@ -129,6 +120,76 @@ it("tracks observable render-prop reads in the draft leaf without waking the for
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("renders restored and programmatic drafts from the real draft owner", async () => {
+  const { createDrafts } = await import("../../../../sync/drafts.ts");
+  type Version =
+    import("../../../../sync/subscriptions/contracts.ts").ResourceVersion;
+  let receive: ((version?: Version) => void) | undefined;
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.useFakeTimers();
+  const drafts = createDrafts({
+    serverId: "composer-real-owner",
+    api: { syncPost: async () => [] },
+    resources: {
+      watchResourceChanges: (_ref, listener) => {
+        receive = listener;
+        return () => {};
+      },
+      replaceStream: vi.fn(),
+    },
+  });
+  const stop = drafts.start();
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(PromptComposer, {
+          session: "chat",
+          getDraft: drafts.getDraft,
+          onSubmit: (event) => event.preventDefault(),
+          children: (value) =>
+            createElement("textarea", { value, readOnly: true }),
+        }),
+      ),
+    );
+    await act(async () =>
+      receive?.({
+        epoch: "composer",
+        revision: 1,
+        reason: "initial",
+        draftSnapshot: {
+          complete: true,
+          documents: [
+            {
+              id: "remote:chat",
+              seq: 1,
+              _deleted: false,
+              payload: JSON.stringify({
+                id: "remote:chat",
+                device: "remote",
+                session: "chat",
+                text: "Restored draft",
+                updated: 1,
+              }),
+            },
+          ],
+        },
+      }),
+    );
+    expect(drafts.getDraft("chat")).toBe("Restored draft");
+    expect(host.querySelector("textarea")?.value).toBe("Restored draft");
+    await act(async () => drafts.setDrafts({ chat: "Programmatic draft" }));
+    expect(host.querySelector("textarea")?.value).toBe("Programmatic draft");
+  } finally {
+    await act(async () => root.unmount());
+    stop();
+    host.remove();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   }
 });

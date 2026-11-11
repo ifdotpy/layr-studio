@@ -1,3 +1,5 @@
+import { createNativeDictation } from "./NativeDictationStore.ts";
+import { useServerAudio } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,6 +16,7 @@ const fixture = vi.hoisted(() => {
     {};
   return {
     recordings,
+    owner: undefined as ReturnType<typeof createNativeDictation> | undefined,
     permission: vi.fn(async () => true),
     prepare: vi.fn(async () => "permit"),
     transcribe: vi.fn(
@@ -40,9 +43,6 @@ const fixture = vi.hoisted(() => {
   };
 });
 vi.mock("../../../native/client.ts", () => ({ hasNativeClient: () => false }));
-vi.mock("../../../servers/activity.ts", () => ({
-  useServerActivity: () => {},
-}));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
@@ -59,6 +59,9 @@ vi.mock(
     }),
   }),
 );
+vi.mock("../support/ConversationStore.ts", () => ({
+  useConversationStore: () => ({ context: { nativeDictation: fixture.owner } }),
+}));
 import { Dictation } from "./Dictation.tsx";
 
 function storage() {
@@ -114,8 +117,19 @@ async function mount(
   document.body.append(host);
   const root = createRoot(host);
   const insert = vi.fn();
-  const render = async (chatId: string) =>
-    act(async () =>
+  let selected = "";
+  const render = async (chatId: string) => {
+    if (selected !== chatId) {
+      fixture.owner?.dispose();
+      selected = chatId;
+      fixture.owner = createNativeDictation(
+        { recordings: fixture.recordings.current!, audio: useServerAudio() },
+        new DictationStore(),
+        chatId,
+      );
+      fixture.owner.startOwner();
+    }
+    await act(async () =>
       root.render(
         createElement(
           MantineProvider,
@@ -124,6 +138,7 @@ async function mount(
         ),
       ),
     );
+  };
   await render("first");
   await act(async () =>
     host.querySelector<HTMLButtonElement>('[aria-label="Dictation"]')?.click(),
@@ -133,6 +148,8 @@ async function mount(
     render,
     cleanup: async () => {
       await act(async () => root.unmount());
+      fixture.owner?.dispose();
+      fixture.owner = undefined;
       host.remove();
     },
   };

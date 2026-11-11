@@ -1,13 +1,20 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ConversationProvider } from "../../src/components/conversation/support/navigation.ts";
 import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
-import { RequestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  RequestFixture,
+  createRequestFixture,
+} from "../../src/components/conversation/questions/support/requestFixtures.ts";
 import { ApiError } from "../../src/api.ts";
 import { flushSync } from "react-dom";
-import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { components } from "../../src/generated/api.ts";
 import { approval } from "../../src/approvalFixtures.ts";
@@ -27,11 +34,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Requests, {
-  RequestArea,
-} from "../../src/components/conversation/questions/Requests/Requests.tsx";
+import Requests from "../../src/components/conversation/questions/Requests/Requests.tsx";
 import UserMessages from "../../src/components/shell/messages/UserMessages/UserMessages.tsx";
-import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
+import { BackgroundTasksFixture as BackgroundTasks } from "../fixtures/owner-support.tsx";
 import CapacityRetry from "../../src/components/conversation/CapacityRetry/CapacityRetry.tsx";
 import SafetyBuffering from "../../src/components/conversation/transcript/SafetyBuffering/SafetyBuffering.tsx";
 import { Dictation } from "../../src/components/conversation/Dictation/Dictation.tsx";
@@ -66,7 +71,13 @@ class Boundary extends React.Component<React.PropsWithChildren> {
       : this.props.children;
   }
 }
+let requestOwner: ReturnType<typeof createRequestFixture> | undefined;
+window.addEventListener("pagehide", () => requestOwner?.dispose(), {
+  once: true,
+});
 window.renderCase = async (which, value) => {
+  requestOwner?.dispose();
+  requestOwner = undefined;
   let component: React.ReactNode;
   if (which === "request") {
     const request = approval({
@@ -79,23 +90,23 @@ window.renderCase = async (which, value) => {
         reason: "Structured operation failed",
       },
     });
+    requestOwner = createRequestFixture({
+      scope: "fixture",
+      notify: () => {},
+      requests: [request],
+      agents: [
+        agentSummaryFixture(agent.id, {
+          name: agent.name,
+          rootId: agent.rootId,
+        }),
+      ],
+      details: [{ id: agent.id }],
+    });
+    requestOwner.start();
     component = React.createElement(
       RequestFixture,
-      {
-        requests: [request],
-        agents: [
-          agentSummaryFixture(agent.id, {
-            name: agent.name,
-            rootId: agent.rootId,
-          }),
-        ],
-        details: [{ id: agent.id }],
-      },
-      React.createElement(
-        RequestArea,
-        { scope: "fixture", notify: () => {} },
-        React.createElement(Requests, { all: true }),
-      ),
+      { owner: requestOwner },
+      React.createElement(Requests, { all: true }),
     );
   }
   if (which === "message") {
@@ -231,8 +242,8 @@ window.renderCase = async (which, value) => {
         MantineProvider,
         null,
         React.createElement(
-          ServerViewStoreProvider,
-          null,
+          ServerStoreProvider,
+          { value: fixtureServerStore },
           React.createElement(Boundary, { key: ++renderId }, component),
         ),
       ),

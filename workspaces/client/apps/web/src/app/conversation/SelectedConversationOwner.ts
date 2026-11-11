@@ -1,6 +1,9 @@
+import type { UploadRecovery } from "../../components/conversation/support/useUploadRecovery.ts";
+import { createConversationContext } from "../../components/conversation/support/conversationContext.ts";
+import { AttachmentDrafts } from "../../components/conversation/support/useAttachmentDrafts.ts";
 import {
   ConversationStore,
-  type ConversationContext,
+  ConversationOperations,
 } from "../../components/conversation/support/ConversationStore.ts";
 import { accountLimits } from "../../usage/accountUsage.ts";
 import { trimTranscriptPageCache } from "../../transcriptPageBounds.ts";
@@ -12,7 +15,7 @@ import { createRemovedMessages } from "./delivery/removedMessages.ts";
 import { TranscriptHistory } from "../../conversation/historySession.ts";
 import { RoomHistory } from "../../conversation/roomHistory.ts";
 import { nativeThreadError } from "../../nativeErrors.ts";
-import { createRequestsView } from "../../components/conversation/support/requestView.ts";
+import { RequestAreaOwner } from "../../components/conversation/questions/RequestArea/RequestArea.tsx";
 import { createQuestionCards } from "../../components/conversation/support/useQuestionCards.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import {
@@ -22,7 +25,6 @@ import {
   observable,
   observableRef,
   reaction,
-  runInAction,
 } from "mobx";
 import {
   AgentSource,
@@ -39,35 +41,36 @@ import {
 } from "../../generated/observableResources.ts";
 import { resourceData } from "../../store/runtime.ts";
 import {
-  observeServerAliases,
+  currentServerAliases,
   DEFAULT_LOCAL_SERVER_ALIAS,
 } from "../../servers/serverAliases.ts";
 import { readServerAliases } from "../../servers/registry.ts";
 import { errorText } from "../../api.ts";
 import { busy } from "../../types.ts";
-import { createConversationMenuTools } from "../../components/conversation/ConversationMenuTools/ConversationMenuTools.tsx";
+import { DisplayPhase } from "../../components/conversation/support/useDisplayPhase.ts";
 import type { NativeActionOwner } from "./NativeActionOwner.ts";
 
 export class SelectedConversationOwner {
+  requestOwner: RequestAreaOwner;
   conversation: ConversationStore | undefined;
-  openConversation(context: ConversationContext) {
-    if (
-      this.conversation?.context.opened === context.opened &&
-      this.conversation.context.stateDir === context.stateDir &&
-      this.conversation.context.kind === context.kind
-    ) {
-      Object.assign(this.conversation.context, context);
-      return this.conversation;
-    }
-    this.closeConversation();
-    return (this.conversation = new ConversationStore(context));
-  }
+  readonly operations = new ConversationOperations();
+  attachmentDrafts: AttachmentDrafts;
+  stopConversation: (() => void) | undefined;
   closeConversation() {
     if (this.conversation) this.conversation.navigationAttempt++;
-    this.conversation?.dispose();
+    this.conversation?.resetRecall();
+    this.requestOwner?.dispose();
+    this.stopConversation?.();
+    this.stopConversation = undefined;
     this.conversation = undefined;
   }
-  serverAliases: Record<string, string> = {};
+  get serverAliases() {
+    return currentServerAliases(readServerAliases);
+  }
+  readonly displayPhase;
+  get repairReport() {
+    return this.conversation?.repairReport;
+  }
   suspended = observable.set<string>();
   pendingDeletion = observable.map<string, AbortController>();
   get planType() {
@@ -102,7 +105,6 @@ export class SelectedConversationOwner {
       )?.length
     );
   }
-  railTools = createConversationMenuTools();
   stopReaders: (() => void) | undefined;
   history: TranscriptHistory | RoomHistory;
   historyScope = "";
@@ -112,6 +114,7 @@ export class SelectedConversationOwner {
   readonly areas;
   constructor(areas: ServerAreas) {
     this.areas = areas;
+    this.requestOwner = this.createRequestOwner();
     const {
       startup,
       navigation,
@@ -123,24 +126,62 @@ export class SelectedConversationOwner {
       navigation.selectedId,
       services.storage,
     );
+    this.attachmentDrafts = new AttachmentDrafts(
+      services.uploads.attachmentCancelled,
+      areas.notices.notify,
+      {
+        key: `codex-agent-attachments:${startup.creationScope || ""}`,
+        storage: services.storage,
+        eventKey: services.storageEventKey,
+      },
+    );
     this.history = this.createHistory();
     this.historyScope = this.historyKey;
+    this.displayPhase = new DisplayPhase(() => [
+      areas.navigation.selectedId,
+      this.detail?.activity?.phase || "thinking",
+    ]);
     makeAutoObservable(
       this,
       {
         areas: false,
         history: observableRef,
         conversation: observableRef,
+        requestOwner: observableRef,
         removed: observableRef,
         historyScope: false,
         histories: false,
         historyNamespaces: false,
-        serverAliases: observableRef,
-        railTools: false,
+        displayPhase: false,
         stopReaders: false,
+        stopConversation: false,
         team: computed({ equals: compareShallow }),
       },
       { autoBind: true },
+    );
+  }
+  createRequestOwner() {
+    const { scope } = this.areas;
+    return new RequestAreaOwner(
+      {
+        api: () => scope.services.api,
+        store: scope.store,
+        storage: scope.services.storage,
+        server: scope.services.owner.id,
+      },
+      () => ({
+        scope: this.areas.startup.creationScope || "",
+        notify: this.areas.notices.notify,
+        onAnswerOpen: () =>
+          this.conversation?.context.scrolling.setFollow(false),
+        onAnswerPosition: (node) =>
+          this.conversation?.context.scrolling.revealRequest(node),
+      }),
+      () => ({
+        agentId: this.areas.navigation.selectedId,
+        familyId: this.areas.navigation.selectedRoom?.rootId,
+        includeTeam: !this.areas.layout.isMobile,
+      }),
     );
   }
   get receipts() {
@@ -277,12 +318,8 @@ export class SelectedConversationOwner {
     );
   }
   get requestArea() {
-    const { navigation, scope, layout } = this.areas;
-    const requests = createRequestsView(scope.store, {
-      agentId: navigation.selectedId,
-      familyId: navigation.selectedRoom?.rootId,
-      includeTeam: !layout.isMobile,
-    });
+    const { navigation, scope } = this.areas;
+    const requests = this.requestOwner.list;
     return {
       requests,
       cards: createQuestionCards(
@@ -439,9 +476,9 @@ export class SelectedConversationOwner {
   nativeAction(...args: Parameters<NativeActionOwner["submit"]>) {
     void this.run(() => this.areas.native.submit(...args));
   }
-  async run(command: () => Promise<unknown>) {
+  *run(command: () => Promise<unknown>) {
     try {
-      await command();
+      yield command();
     } catch (error) {
       this.areas.notices.notify(errorText(error));
     }
@@ -483,22 +520,27 @@ export class SelectedConversationOwner {
   }
   start() {
     const { scope } = this.areas;
-    const aliases = observeServerAliases(readServerAliases, (value) =>
-      runInAction(() => {
-        this.serverAliases = value;
-      }),
-    );
-    const stop = reaction(
-      () =>
-        [
-          this.historyKey,
-          this.isConversationVisible &&
-            !this.areas.navigation.selectedRoom?.radio,
-        ] as const,
-      ([key, active]) => {
+    let uploadRecovery: UploadRecovery | undefined;
+    let stopUploads: (() => void) | undefined;
+    const stopPhase = this.displayPhase.start();
+    const stop = reaction<[string, boolean, boolean], true>(
+      () => [this.historyKey, this.isConversationVisible, scope.screen.active],
+      ([key, active, screenActive]) => {
         this.releaseReaders();
-        const stops: (() => void)[] = [];
         if (key !== this.historyScope) {
+          if (
+            this.attachmentDrafts.options?.key !==
+            `codex-agent-attachments:${this.areas.startup.creationScope || ""}`
+          )
+            this.attachmentDrafts = new AttachmentDrafts(
+              scope.services.uploads.attachmentCancelled,
+              this.areas.notices.notify,
+              {
+                key: `codex-agent-attachments:${this.areas.startup.creationScope || ""}`,
+                storage: scope.services.storage,
+                eventKey: scope.services.storageEventKey,
+              },
+            );
           this.closeConversation();
           this.historyScope = key;
           this.history = this.createHistory();
@@ -509,10 +551,38 @@ export class SelectedConversationOwner {
             scope.services.storage,
           );
         }
-        if (active) stops.push(this.history.start());
-        this.stopReaders = () => stops.forEach((dispose) => dispose());
+        if (!screenActive) this.closeConversation();
+        if (!this.conversation && screenActive) {
+          const context = createConversationContext(
+            this.areas,
+            this.attachmentDrafts,
+            uploadRecovery,
+          );
+          if (context.uploadRecovery !== uploadRecovery) {
+            stopUploads?.();
+            uploadRecovery = context.uploadRecovery;
+            stopUploads = uploadRecovery.start();
+          }
+          this.requestOwner = this.createRequestOwner();
+          this.requestOwner.start();
+          this.conversation = new ConversationStore(context);
+          const stopContext = context.start();
+          const stopView = this.conversation.start();
+          this.stopConversation = () => {
+            stopView();
+            stopContext();
+          };
+        }
+        this.stopReaders = active ? this.history.start() : undefined;
       },
       { fireImmediately: true, equals: compareShallow },
+    );
+    const sends = reaction(
+      () => this.deliveryTranscript.observed.join(","),
+      (ids) => {
+        if (ids) this.areas.delivery.observeSends(ids.split(","));
+      },
+      { fireImmediately: true },
     );
     const boundCache = reaction(
       () => this.history.size,
@@ -523,12 +593,14 @@ export class SelectedConversationOwner {
         ),
     );
     return () => {
+      sends();
       boundCache();
       this.histories.clear();
-      aliases();
+      stopPhase();
       stop();
       this.closeConversation();
-      runInAction(this.releaseReaders);
+      stopUploads?.();
+      this.releaseReaders();
     };
   }
 }

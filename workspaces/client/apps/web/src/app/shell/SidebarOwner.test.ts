@@ -1,3 +1,4 @@
+import { publishServerAliases } from "../../servers/serverAliases.ts";
 import {
   sidebarFixtureAreas,
   sidebarFixtureRun,
@@ -163,4 +164,53 @@ it("groups published remote projects as read-only discovery and filters them by 
   f.owner.setQuery("missing");
   expect(f.owner.remoteGroups).toEqual([]);
   f.state.store.dispose();
+});
+
+it("reads frame aliases before start and tracks direct frame updates", () => {
+  publishServerAliases({ remote: "ONE" });
+  const f = fixture();
+  const seen: (string | undefined)[] = [];
+  const stop = reaction(
+    () => f.owner.aliases.get("remote"),
+    (alias) => seen.push(alias),
+    { fireImmediately: true },
+  );
+  try {
+    publishServerAliases({ remote: "TWO" });
+    expect(seen).toEqual(["ONE", "TWO"]);
+  } finally {
+    stop();
+    publishServerAliases({});
+  }
+});
+
+it("reads saved compact and collapsed choices directly before start and preserves later sibling edits", () => {
+  const f = fixture();
+  const cache = f.owner.services.cache;
+  cache.editPreference(f.owner.compactKey, {}, { project: true });
+  cache.editPreference(f.owner.projectKey, {}, { folder: true });
+  expect(f.owner.compactProjects).toEqual({ project: true });
+  expect(f.owner.collapsed).toEqual({ folder: true });
+  const seen: boolean[] = [];
+  const stop = reaction(
+    () => !!f.owner.collapsed.folder,
+    (value) => seen.push(value),
+    { fireImmediately: true },
+  );
+  try {
+    cache.editPreference(
+      f.owner.projectKey,
+      { folder: true },
+      { folder: false, sibling: true },
+    );
+    f.owner.toggleTree("folder");
+    expect(f.owner.collapsed).toEqual({ folder: true, sibling: true });
+    expect(seen).toEqual([true, false, true]);
+    f.owner.setCompactProject("project", false);
+    expect(f.owner.compactProjects).toEqual({ project: false });
+  } finally {
+    stop();
+    cache.storage.removeItem(f.owner.compactKey);
+    cache.storage.removeItem(f.owner.projectKey);
+  }
 });

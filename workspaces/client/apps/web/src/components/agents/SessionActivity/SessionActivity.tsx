@@ -1,10 +1,12 @@
 import { ChevronRight, Clock3, Terminal, Users } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { now } from "../../../clock.ts";
+import { observer } from "mobx-react-lite";
 
 import { useVisualActivity } from "../../../hooks/useVisualActivity.ts";
 import type { ChatActivity as SessionActivityItem } from "../../sidebar/chat-status/support/chatActivity.ts";
 
-export default function SessionActivity({
+export default observer(function SessionActivity({
   activities,
   onOpen,
   compact = false,
@@ -15,22 +17,11 @@ export default function SessionActivity({
 }) {
   const [visualRef, visualActive] = useVisualActivity<HTMLElement>();
   const [expanded, setExpanded] = useState(false);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  const timed = activities.some(
-    (activity) =>
-      activity.created !== undefined && Number.isFinite(activity.created),
-  );
-  useEffect(() => {
-    if (!timed || !visualActive) return;
-    setNow(Date.now() / 1000);
-    const timer = setInterval(() => setNow(Date.now() / 1000), 30000);
-    return () => clearInterval(timer);
-  }, [timed, visualActive]);
-  useEffect(() => {
-    if (activities.length <= 1) setExpanded(false);
-  }, [activities.length]);
   if (!activities.length) return null;
-  const shown = expanded && !compact ? activities : activities.slice(0, 1);
+  const shown =
+    expanded && activities.length > 1 && !compact
+      ? activities
+      : activities.slice(0, 1);
   return (
     <section
       ref={visualRef}
@@ -47,7 +38,10 @@ export default function SessionActivity({
               : activity.kind === "monitor"
                 ? Clock3
                 : Terminal;
-          const age = elapsed(activity.created, now);
+          const age = elapsed(
+            activity.created,
+            visualActive ? now() / 1000 : Date.now() / 1000,
+          );
           return (
             <li key={`${activity.kind}:${activity.id}`}>
               <button
@@ -109,7 +103,7 @@ export default function SessionActivity({
       )}
     </section>
   );
-}
+});
 
 export type { ChatActivity as SessionActivityItem } from "../../sidebar/chat-status/support/chatActivity.ts";
 

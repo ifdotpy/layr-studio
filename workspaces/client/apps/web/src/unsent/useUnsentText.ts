@@ -1,61 +1,111 @@
-import { useEffect, useMemo } from "react";
-import { flowResult, makeAutoObservable } from "mobx";
-import { useServerServices } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { serverViewId } from "../servers/environment.ts";
+import { whileObserved } from "../observed.ts";
+import { flowValue } from "../flowValue.ts";
+import {
+  action,
+  computed,
+  flow,
+  flowResult,
+  makeAutoObservable,
+  observable,
+  isFlowCancellationError,
+  type IComputedValue,
+} from "mobx";
+import { useServerAreas } from "../app/ServerAreasProvider.tsx";
 import { reportUnsentFailure, unsentStore, type TextFeature } from "./store.ts";
 
-/** One editing subject's device buffer. Writes retain the existing close barrier. */
+/** Each mounted editor observes its own durable text through the server owner. */
 export class UnsentText {
-  value: string | null = null;
-  changed = false;
-  #store: ReturnType<typeof unsentStore>;
-  #id: string;
-  constructor(server: string, feature: TextFeature, id: string) {
-    this.#store = unsentStore(server, feature);
-    this.#id = id;
+  readonly server;
+  readonly values = observable.map<string, string | null>();
+  readonly #changed = new Set<string>();
+  readonly #views = new Map<string, IComputedValue<string | null>>();
+  constructor(server: string) {
+    this.server = server;
     makeAutoObservable(this, {}, { autoBind: true });
   }
-  start() {
-    let active = true;
-    void flowResult(this.restore(() => active)).catch(reportUnsentFailure);
-    return () => {
-      active = false;
-    };
+  key(feature: TextFeature, id: string) {
+    return JSON.stringify([feature, id]);
   }
   *restore(
-    active: () => boolean,
+    feature: TextFeature,
+    id: string,
   ): Generator<Promise<string | undefined>, void, string | undefined> {
-    const saved = yield this.#store.get(this.#id);
-    if (active() && !this.changed && typeof saved === "string")
-      this.value = saved;
+    const key = this.key(feature, id);
+    const saved = yield unsentStore(this.server, feature).get(id);
+    if (this.#changed.has(key)) return;
+    if (saved === undefined) this.values.delete(key);
+    else this.values.set(key, saved);
   }
-  clear(expected = this.value) {
-    this.changed = true;
-    return expected === null
-      ? Promise.resolve()
-      : this.#store
-          .deleteIfEqual(this.#id, expected)
-          .catch((error: unknown) => {
-            reportUnsentFailure();
-            throw error;
+  cached(feature: TextFeature, id: string) {
+    return this.values.get(this.key(feature, id)) ?? null;
+  }
+  read(feature: TextFeature, id: string) {
+    const key = this.key(feature, id);
+    let view = this.#views.get(key);
+    if (!view) {
+      view = computed(() => this.cached(feature, id));
+      this.#changed.delete(key);
+      const release = action(() => {
+        this.#views.delete(key);
+        this.#changed.delete(key);
+        this.values.delete(key);
+      });
+      whileObserved(
+        view,
+        undefined,
+        () => {
+          const request = flowResult(this.restore(feature, id));
+          void request.catch((error: unknown) => {
+            if (!(error instanceof Error && isFlowCancellationError(error)))
+              reportUnsentFailure();
           });
+          return action(() => {
+            request.cancel();
+            release();
+          });
+        },
+        release,
+      );
+      this.#views.set(key, view);
+    }
+    return view.get();
   }
-  update(next: string | null) {
-    const previous = this.value;
-    this.changed = true;
-    this.value = next;
+  clear = flow(function* (
+    this: UnsentText,
+    feature: TextFeature,
+    id: string,
+    expected = this.cached(feature, id),
+  ) {
+    this.#changed.add(this.key(feature, id));
+    if (expected === null) return;
+    try {
+      yield* flowValue(
+        unsentStore(this.server, feature).deleteIfEqual(id, expected),
+      );
+      if (this.cached(feature, id) === expected)
+        this.values.set(this.key(feature, id), null);
+    } catch (error) {
+      reportUnsentFailure();
+      throw error;
+    }
+  });
+  update(feature: TextFeature, id: string, next: string | null) {
+    const previous = this.cached(feature, id);
+    this.#changed.add(this.key(feature, id));
+    this.values.set(this.key(feature, id), next);
     void (
-      next === null ? this.clear(previous) : this.#store.put(this.#id, next)
+      next === null
+        ? this.clear(feature, id, previous)
+        : unsentStore(this.server, feature).put(id, next)
     ).catch(reportUnsentFailure);
   }
 }
 
 export function useUnsentText(feature: TextFeature, id: string) {
-  const server = useServerServices()?.owner.id ?? serverViewId ?? "local";
-  const owner = useMemo(
-    () => new UnsentText(server, feature, id),
-    [server, feature, id],
-  );
-  useEffect(() => owner.start(), [owner]);
-  return [owner.value, owner.update, owner.clear] as const;
+  const owner = useServerAreas().unsentText;
+  return [
+    owner.read(feature, id),
+    (value: string | null) => owner.update(feature, id, value),
+    (expected?: string | null) => owner.clear(feature, id, expected),
+  ] as const;
 }

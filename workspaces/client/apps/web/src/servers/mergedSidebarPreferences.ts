@@ -1,3 +1,4 @@
+import { observable } from "mobx";
 import { encodeSidebarRanks, decodeSidebarRanks } from "./sidebarOrderRanks.ts";
 import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type {
@@ -120,7 +121,10 @@ export function mergedSidebarPreferences(
   const treeKey = treePrefix + scope;
   const orderKey = orderPrefix + scope;
   let order: SidebarOrder = model.order;
-  const explicitEdits = new Map<string, Record<string, unknown>>();
+  const explicitEdits = observable.map<string, Record<string, unknown>>(
+    undefined,
+    { deep: false },
+  );
   const prefixFor = (key: string) =>
     key === compactKey
       ? compactPrefix
@@ -261,7 +265,7 @@ export function mergedSidebarPreferences(
       backend.adoptPreferenceFields?.(latestFields(update.source, sourceKey));
       backend.editPreference(sourceKey, update.previous, update.next);
     }
-    const choices = explicitEdits.get(key) || {};
+    const choices = { ...explicitEdits.get(key) };
     for (const field of changed) {
       if (field in next) choices[field] = next[field];
       else delete choices[field];
@@ -287,17 +291,6 @@ export function mergedSidebarPreferences(
     },
     editPreference(key, previous, next) {
       return edits(key, previous, next) as typeof next;
-    },
-    subscribePreference(key, update) {
-      const prefix = prefixFor(key);
-      if (!prefix) return () => {};
-      const stops = model.sources.map((source) =>
-        backendFor(source.id).subscribePreference(
-          originalKey(prefix, source),
-          update,
-        ),
-      );
-      return () => stops.forEach((stop) => stop());
     },
   };
 }

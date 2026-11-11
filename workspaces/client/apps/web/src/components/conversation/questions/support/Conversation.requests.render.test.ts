@@ -1,6 +1,7 @@
+import { mountConversationFixture } from "../../ConversationView/ConversationView.fixture.tsx";
 import { autorun, runInAction } from "mobx";
 // @vitest-environment happy-dom
-import { act, createElement, useRef } from "react";
+import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -53,68 +54,25 @@ vi.mock("../../../../conversation/liveText.ts", async (original) => ({
   ...(await original<typeof import("../../../../conversation/liveText.ts")>()),
   useLiveText: () => h.liveText,
 }));
-vi.mock("../../../../servers/activity.ts", async (original) => ({
-  ...(await original<typeof import("../../../../servers/activity.ts")>()),
-  useServerActivity: () => {},
-}));
 vi.mock("../../support/usePromptRecall.ts", () => ({
   usePromptRecall: () => ({}),
-}));
-vi.mock("../../support/useConversationScroll.ts", async (original) => ({
-  ...(await original<
-    typeof import("../../support/useConversationScroll.ts")
-  >()),
-  useConversationScroll: () => ({
-    scroll: useRef<HTMLDivElement>(null),
-    content: useRef<HTMLDivElement>(null),
-    getFollow: () => true,
-    subscribeFollow: () => () => {},
-    setFollow() {},
-    onScroll() {},
-    hasRecentScrollInput: () => false,
-    consumeHistoryScrollInput: () => false,
-    remember() {},
-    revealRequest() {},
-    getAnchorId: () => null,
-  }),
-}));
-vi.mock("../../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
-}));
-vi.mock("../../support/useUploadRecovery.ts", () => ({
-  useUploadRecovery: () => ({ pending: h.empty }),
 }));
 vi.mock("../../support/useChatReadState.ts", () => ({
   useVisibleChatResult() {},
 }));
-vi.mock("../../support/useDisplayPhase.ts", () => ({
-  useDisplayPhase: () => "thinking",
-}));
 vi.mock("../../../agents/support/WorkerModelPicker.tsx", () => ({
   useWorkerModels: () => ({ models: h.empty }),
-}));
-vi.mock("../../support/useMessageQueue.ts", () => ({
-  useMessageQueue: () => {
-    if (h.withdrawalPending) {
-      h.withdrawalReads++;
-      // Match the real queue hook's fresh filter while a withdrawal is pending.
-      // Bound the reproduction so a regression fails without an endless render loop.
-      return {
-        items: h.withdrawalReads < 12 ? h.empty.filter(() => true) : h.empty,
-      };
-    }
-    return { items: h.empty };
-  },
-}));
-vi.mock("../../support/useSendingMessageRemoval.ts", () => ({
-  useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../../../../hooks/conversationData", () => ({
   useChatWait: () => undefined,
 }));
-vi.mock("../../Usage/Usage.tsx", () => ({ default: () => null }));
+vi.mock("../../Usage/Usage.tsx", async (original) => ({
+  ...(await original<typeof import("../../Usage/Usage.tsx")>()),
+  default: () => null,
+}));
 vi.mock("../../Dictation/Dictation.tsx", () => ({ Dictation: () => null }));
-vi.mock("../../RealtimeVoice/RealtimeVoice.tsx", () => ({
+vi.mock("../../RealtimeVoice/RealtimeVoice.tsx", async (original) => ({
+  ...(await original<typeof import("../../RealtimeVoice/RealtimeVoice.tsx")>()),
   default: () => null,
 }));
 vi.mock("../../prompt-composer/PromptInput/PromptInput.tsx", () => ({
@@ -166,6 +124,7 @@ it.each(["add", "remove"] as const)(
     );
     const actions = conversationActionsFixture(() => {}, f.store);
     actions.navigation.selectedId = "lead";
+    mountConversationFixture(actions);
     actions.selected.history.items = h.items;
     const root = createRoot(
       document.body.appendChild(document.createElement("div")),
@@ -261,6 +220,7 @@ it("a pending withdrawal causes no repeated partition invalidation across render
   );
   const actions = conversationActionsFixture(() => {}, f.store);
   actions.navigation.selectedId = "lead";
+  mountConversationFixture(actions);
   const render = (sending: boolean) =>
     act(async () => {
       runInAction(() => {

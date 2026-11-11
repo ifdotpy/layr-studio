@@ -495,6 +495,19 @@ export function scanTypeScript(
       });
     if (ts.isStringLiteralLike(node) || ts.isTemplateExpression(node)) {
       const text = node.getText(tree);
+      // Only static labels directly inside a JSX data array are presentation.
+      const property = node.parent;
+      if (
+        ts.isStringLiteralLike(node) &&
+        ts.isPropertyAssignment(property) &&
+        property.name.getText(tree) === "label" &&
+        ts.isObjectLiteralExpression(property.parent) &&
+        ts.isArrayLiteralExpression(property.parent.parent) &&
+        ts.isJsxExpression(property.parent.parent.parent) &&
+        ts.isJsxAttribute(property.parent.parent.parent.parent) &&
+        property.parent.parent.parent.parent.name.getText(tree) === "data"
+      )
+        return;
       if (
         !file.includes("/generated/") &&
         !file.endsWith("/sql-ratchet.ts") &&

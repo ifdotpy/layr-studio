@@ -1,3 +1,13 @@
+import { createUsageView } from "../Usage/Usage.tsx";
+import {
+  createMessageQueueStore,
+  type QueueProps,
+} from "../MessageQueue/MessageQueue.tsx";
+import { providerSupports } from "../../../generated/providerKind.ts";
+import { mergeQueueOrder } from "./messageDelivery.ts";
+import { createRealtimeVoice } from "../RealtimeVoice/RealtimeVoice.tsx";
+import { createPromptNavigation } from "../PromptNavigator/PromptNavigator.tsx";
+import { ClaudeRepairReportStore } from "../ClaudeRepairNotice/ClaudeRepairNotice.tsx";
 import {
   resetHistoryWindowAnchor,
   revealHistoryMessage,
@@ -5,7 +15,7 @@ import {
 import { isMessagePending } from "../../../messageSendStatus.ts";
 import { transcriptMessages } from "../../../conversation/messageView.ts";
 import type { KeyboardEvent } from "react";
-import type { useConversationContext } from "../ConversationView/ConversationView.tsx";
+import type { createConversationContext } from "./conversationContext.ts";
 
 import { useConversationActions } from "./navigation.ts";
 import {
@@ -59,10 +69,15 @@ export class ConversationOperations {
   uploadLock = false;
 }
 
-export type ConversationContext = ReturnType<typeof useConversationContext>;
+export type ConversationContext = ReturnType<typeof createConversationContext>;
 
 export class ConversationStore {
   context: ConversationContext;
+  readonly voice;
+  readonly promptNavigation;
+  readonly repairReport;
+  readonly queueEditor;
+  readonly usageStore;
   session: ConversationContext["actions"]["selected"]["history"];
   status: {
     direction: "older" | "newer";
@@ -198,46 +213,101 @@ export class ConversationStore {
   limitsOpen = false;
   limitsOpenRequest = 0;
   toolsExpanded = false;
-  pendingRevision = 0;
-  stopWatching: (() => void) | undefined;
   constructor(context: ConversationContext) {
     this.context = context;
+    this.usageStore = createUsageView(
+      context.api,
+      context.actions.scope.store,
+      () => this.agent?.accountKey || "default",
+    );
     this.session = context.actions.selected.history;
+    const { actions } = context,
+      { services, store } = actions.scope;
+    this.voice = createRealtimeVoice({
+      agentId: context.opened || "",
+      notify: actions.notices.notify,
+      store,
+      api: services.api,
+      audio: services.audio,
+      connection: services.net.status,
+    });
+    this.promptNavigation = createPromptNavigation(
+      () => actions.selected.visibleMessages,
+    );
+    this.repairReport = new ClaudeRepairReportStore(
+      services.api,
+      () => actions.navigation.selectedAgent,
+    );
+    this.queueEditor = createMessageQueueStore(
+      () => this.queueProps,
+      context.actions.scope.services.owner.id,
+    );
     makeAutoObservable(
       this,
       {
         context: false,
+        voice: false,
+        promptNavigation: false,
+        repairReport: false,
+        queueEditor: false,
+        usageStore: false,
         lastAssistantByTurn: computed({ equals: compareShallow }),
         inlineRequests: computed({ equals: compareShallow }),
       },
       { autoBind: true, deep: false },
     );
   }
-  dispose() {
-    this.resetRecall();
-    this.stopWatching?.();
-    this.stopWatching = undefined;
-  }
   start() {
-    this.dispose();
-    const pending = this.context.actions.scope.services.api.pending.subscribe(
-      () => this.commandsChanged(),
-    );
-    const observed = reaction(
-      () => this.context.actions.selected.deliveryTranscript.observed.join(","),
-      (ids) => {
-        if (ids) this.context.actions.delivery.observeSends?.(ids.split(","));
+    this.usageStore.start();
+    const compact = reaction(
+      () => this.context.actions.layout.usesCompactConversationTools,
+      (value) => {
+        if (!value) this.toolsExpanded = false;
       },
       { fireImmediately: true },
     );
-    this.stopWatching = () => {
-      pending();
-      observed();
+    const jump = reaction(
+      () => this.context.actions.navigation.selectedJumpTarget,
+      (value) => {
+        if (!value || this.handledJump === value.requestId) return;
+        this.handledJump = value.requestId;
+        this.jumpToPrompt(value.messageId);
+      },
+      { fireImmediately: true },
+    );
+    return () => {
+      compact();
+      jump();
+      this.voice.dispose();
+      this.repairReport.dispose();
+      this.usageStore.dispose();
     };
-    return this.dispose;
   }
-  commandsChanged() {
-    this.pendingRevision++;
+  get queueProps(): QueueProps {
+    const { messageQueue, stateDir, opened, actions } = this.context;
+    return {
+      items: this.nextTurnQueue,
+      scope: `${stateDir}:${actions.startup.workspaceId || ""}:${opened}`,
+      onEdit: messageQueue.edit,
+      onCancel: messageQueue.cancel,
+      onSendNow: providerSupports(this.agent?.provider, "steer")
+        ? messageQueue.sendNow
+        : undefined,
+      onReorder: (ids) =>
+        messageQueue.reorder(
+          mergeQueueOrder(
+            messageQueue.items.map((item) => item.id),
+            this.nextTurnQueue.map((item) => item.id),
+            ids,
+          ),
+        ),
+      canReorder:
+        messageQueue.canReorder &&
+        !this.nextTurnQueue.some((item) => item.localDelivery),
+      refreshing: messageQueue.busy,
+      loading: messageQueue.loading,
+      error: messageQueue.error,
+    };
   }
   addingFiles = false;
   stopping = false;
@@ -247,7 +317,6 @@ export class ConversationStore {
   dragging = false;
   removingSending = false;
   editAttempt = 0;
-  modelCommandRequest = 0;
   branchDraft: BranchDraft | null = null;
   get agent() {
     return this.context.actions.navigation.selectedAgent;
@@ -271,7 +340,6 @@ export class ConversationStore {
   }
   get stopShown() {
     const { opened, actions } = this.context;
-    void this.pendingRevision;
     const commands = actions.scope.services.api.pending.list();
     return (
       this.stopping ||
@@ -619,7 +687,7 @@ export class ConversationStore {
         this.resetRecall();
         input.current?.focus({ preventScroll: true });
         delivery.editDraft("");
-        this.modelCommandRequest++;
+        actions.agentsUi.openSettings(agent.id);
       }
       return;
     }

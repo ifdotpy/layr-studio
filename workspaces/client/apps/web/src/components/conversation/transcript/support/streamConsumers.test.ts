@@ -20,9 +20,10 @@ import { UserMessage } from "../../../shell/messages/UserMessage/UserMessage.tsx
 import { useConversationHistory } from "../../../../conversation/historyFixture.ts";
 
 const h = vi.hoisted(() => ({ get: vi.fn(), connection: vi.fn() }));
-vi.mock("../../../../unsent/useUnsentText.ts", async () => {
+vi.mock("../../../../unsent/useUnsentText.ts", async (original) => {
   const { useState } = await import("react");
   return {
+    ...(await original<typeof import("../../../../unsent/useUnsentText.ts")>()),
     useUnsentText: () => {
       const [text, setText] = useState<string | null>(null);
       return [text, setText, async () => {}];

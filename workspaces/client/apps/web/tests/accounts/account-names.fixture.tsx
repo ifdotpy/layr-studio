@@ -1,10 +1,8 @@
 import "../../src/rendererStyles.ts";
-import {
-  conversationActionsFixture,
-  observableFixture,
-} from "../../src/components/shell/integration-support/observableFixture.tsx";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { AccountsState } from "../../src/components/accounts/support/Accounts.tsx";
-import type { ServerCommand } from "../../src/servers/navigation.ts";
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { Provider } from "../../src/app/ServerAreasProvider.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
@@ -19,7 +17,7 @@ import "../../src/style.css";
 import "../../src/appearance.css";
 
 const models = observableFixture();
-const areas = conversationActionsFixture(undefined, models.store);
+const areas = browserAreas(models.store);
 declare global {
   interface Window {
     setTheme: (value: "dark" | "light") => void;
@@ -32,11 +30,6 @@ window.publishAccounts(await (await fetch("/fixture-data")).json());
 
 const Fixture = observer(function Fixture() {
   const [color, setColor] = useState<"dark" | "light">("dark");
-  const [command, setCommand] = useState<Extract<
-    ServerCommand,
-    { action: "account-action" | "account-sign-in" }
-  > | null>(null);
-  const [error, setError] = useState("");
   window.setTheme = setColor;
   const accounts = areas.accounts;
   const server = { id: "local", origin: location.origin, label: "Fixture" };
@@ -45,30 +38,24 @@ const Fixture = observer(function Fixture() {
       <main
         style={{ padding: 16, width: "100%", maxWidth: 760, overflow: "auto" }}
       >
-        <Accounts
-          state={accounts}
-          scope="fixture"
-          managerOnly
-          onError={setError}
-          externalCommand={command}
-          onExternalCommandHandled={() => setCommand(null)}
-        />
+        <Accounts />
         {accounts && (
           <ServerAccountsPanel
             servers={[server]}
             accountsByServer={{ local: frameAccounts(accounts) }}
             statuses={{ local: "live" }}
-            startAccount={(_id, value) => setCommand(value)}
-            accountAction={(_id, value) => setCommand(value)}
+            startAccount={(_id, value) => areas.accountsUi.receive(value)}
+            accountAction={(_id, value) => areas.accountsUi.receive(value)}
           />
         )}
-        {error && <p role="alert">{error}</p>}
       </main>
     </MantineProvider>
   );
 });
 createRoot(document.getElementById("root")!).render(
   <models.Provider>
-    <Fixture />
+    <Provider value={areas}>
+      <Fixture />
+    </Provider>
   </models.Provider>,
 );

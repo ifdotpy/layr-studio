@@ -16,10 +16,6 @@ const mocks = vi.hoisted(() => ({
   streams: [] as EventTarget[],
   fetch: vi.fn(async () => Response.json({})),
 }));
-vi.mock("react", () => ({
-  useEffect: (effect: () => void | (() => void)) => mocks.effects.push(effect),
-  useRef: (current: unknown) => ({ current }),
-}));
 vi.mock(
   "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
@@ -35,7 +31,7 @@ vi.mock("./net/eventSource.ts", () => ({
     close() {}
   },
 }));
-import { useUiPreferenceSync } from "./useUiPreferenceSync.ts";
+import { startUiPreferenceSync } from "./useUiPreferenceSync.ts";
 
 const local = { id: "local", origin: "http://local.invalid", label: "Local" };
 const paired = {
@@ -53,11 +49,7 @@ function mount(
     { ...paired, workspaceId: "paired-workspace" },
   ],
 ) {
-  useUiPreferenceSync(servers);
-  cleanups = mocks.effects.flatMap((effect) => {
-    const cleanup = effect();
-    return cleanup ? [cleanup] : [];
-  });
+  cleanups.push(startUiPreferenceSync(servers));
 }
 beforeEach(() => {
   preferenceMemory.clear();
@@ -138,4 +130,16 @@ it("applies a server preference using the streamed workspace identity", () => {
   expect(
     JSON.parse(localStorage.getItem(SERVER_REGISTRY_KEY)!)[0].label,
   ).toBeUndefined();
+});
+
+it("applies streamed preference changes through the observable cache after startup", () => {
+  mount();
+  receivePreferenceFields("user", {
+    '["server-label:paired-workspace"]': {
+      value: "Live name",
+      timestamp: 2,
+      writer: "remote",
+    },
+  });
+  expect(readServers()[0]?.label).toBe("Live name");
 });

@@ -1,6 +1,6 @@
 import { useReadView } from "../../ui/support/useReadView.ts";
 import { observer } from "mobx-react-lite";
-import { observable, runInAction } from "mobx";
+import { flow, observable } from "mobx";
 import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { GetResult } from "../../../api.ts";
@@ -50,9 +50,9 @@ export function browseDirectory(
     {},
     { deep: false },
   );
-  void browse.directory
-    .read()
-    .then((result) => {
+  void flow(function* (): Generator<Promise<unknown>, void, Directory> {
+    try {
+      const result = yield browse.directory.read();
       if (!project) return;
       const matches = net.reads.projectLocations({
         project,
@@ -60,12 +60,12 @@ export function browseDirectory(
         action: "matches",
         path: result.path,
       });
-      runInAction(() => {
-        browse.matches = matches;
-      });
-      void matches.read().catch(() => {});
-    })
-    .catch(() => {});
+      browse.matches = matches;
+      yield matches.read();
+    } catch {
+      /* Read slots own the displayed failure. */
+    }
+  })();
   return browse;
 }
 

@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+import {
+  GLUE_MANIFEST,
+  glueManifestErrors,
+  isGlueSource,
+} from "./react-glue.ts";
+
 import ts from "typescript";
 import {
   enumLiteralDiagnostics,
@@ -366,6 +372,11 @@ function main() {
           ),
       );
     const allPaths = [...getIndexPaths()];
+    const glueErrors = glueManifestErrors(repositoryRoot, allPaths);
+    if (glueErrors.length) {
+      for (const error of glueErrors) console.error(error);
+      return 1;
+    }
     const selected = allPaths
       .filter(
         (file) =>
@@ -476,6 +487,10 @@ function main() {
               toolingTarget(file),
           )
         : [];
+    const glueChanged =
+      check !== "format" &&
+      changedPaths.some((file) => isGlueSource(file) || file === GLUE_MANIFEST);
+    const gluePaths = glueChanged ? [...indexPaths].filter(isGlueSource) : [];
     const enumSources = typeTargets.length
       ? [...indexPaths].filter((file) => /\.(?:[cm]?[jt]sx?|json)$/.test(file))
       : [];
@@ -490,6 +505,8 @@ function main() {
       ...formatPaths,
       ...policyPaths,
       ...enumSources,
+      ...gluePaths,
+      ...(glueChanged ? [GLUE_MANIFEST] : []),
       ...[...indexPaths].filter(
         (file) => isTypeScriptProject(file) || file === "tsconfig.base.json",
       ),
@@ -505,6 +522,14 @@ function main() {
         path.join(temporaryRoot, relativePath),
         git(["cat-file", "blob", `:${relativePath}`]),
       );
+    }
+
+    if (glueChanged) {
+      const errors = glueManifestErrors(temporaryRoot, gluePaths);
+      if (errors.length) {
+        for (const error of errors) console.error(error);
+        return 1;
+      }
     }
 
     const policyFindings = javascriptFindings(

@@ -8,25 +8,15 @@ import { Button, Modal, Textarea } from "@mantine/core";
 import { createPortal } from "react-dom";
 import { ListTree } from "lucide-react";
 import { useLayoutEffect, useEffect, useState } from "react";
-import { errorText } from "../../../api.ts";
 import { currentCapacityRetry } from "../../../capacityRetry.ts";
 import { nativeThreadError } from "../../../nativeErrors.ts";
-import PromptNavigator from "../PromptNavigator/PromptNavigator.tsx";
+import { ConversationPromptNavigation } from "../ConversationPromptNavigation/ConversationPromptNavigation.tsx";
 export function renderConversationHeaderTools() {
   const control = useConversationStore();
-  const { actions, opened, stateDir } = control.context;
-  const { layout, navigation, selected, notices, creation, sidebar } = actions;
+  const { actions, opened, api } = control.context;
+  const { layout, navigation, selected, creation, sidebar } = actions;
   const { selectedRoom: room, selectedAgent: agent } = navigation;
-  const {
-    visibleMessages,
-    history: historySession,
-    detail,
-    planType,
-  } = selected;
-  const { before, setPageAnchor, older, pageLoading } = historySession;
-  const { setFollow, getAnchorId, scroll } = control.context.scrolling;
-  const managed = control.managed;
-  const api = control.context.api;
+  const { detail, planType } = selected;
   const threadBlock = nativeThreadError(agent, detail);
   const capacityRetry = agent ? currentCapacityRetry(agent) : null;
   const accountKey = agent?.accountKey || "default";
@@ -44,12 +34,6 @@ export function renderConversationHeaderTools() {
         : document.getElementById("conversation-header-tools"),
     );
   }, [layout.usesMenuHeaderTools]);
-  useEffect(
-    action(() => {
-      if (!compactHeaderTools) control.toolsExpanded = false;
-    }),
-    [compactHeaderTools],
-  );
   useEffect(
     action(() => {
       if (!compactHeaderTools || !control.toolsExpanded || !headerTools) return;
@@ -133,42 +117,6 @@ export function renderConversationHeaderTools() {
     }),
     [compactHeaderTools, headerTools, control.toolsExpanded],
   );
-  const promptNavigation =
-    !room && opened ? (
-      <PromptNavigator
-        compact
-        inMenu={layout.usesMenuHeaderTools}
-        key={opened}
-        messages={visibleMessages}
-        loadOlder={
-          before
-            ? () => {
-                setFollow(false);
-                setPageAnchor(getAnchorId());
-                void older().catch((e) => notices.notify(errorText(e)));
-              }
-            : undefined
-        }
-        loadingOlder={pageLoading}
-        agentId={managed ? opened || undefined : undefined}
-        container={scroll}
-        storageKey={`studio-prompt-bookmarks:${stateDir}:${opened}`}
-        jump={control.jumpToPrompt}
-      />
-    ) : null;
-  useLayoutEffect(() => {
-    selected.railTools.publish?.(
-      layout.usesMenuHeaderTools ? promptNavigation : null,
-    );
-  }, [
-    layout.usesMenuHeaderTools,
-    selected.railTools.publish,
-    promptNavigation,
-  ]);
-  useLayoutEffect(
-    () => () => selected.railTools.publish?.(null),
-    [selected.railTools.publish],
-  );
   const limitRefresh = useLimitRefresh(api.get);
   return (
     <>
@@ -249,7 +197,7 @@ export function renderConversationHeaderTools() {
       {!layout.usesMenuHeaderTools &&
         headerTools &&
         !room &&
-        (opened || managed) &&
+        (opened || control.managed) &&
         createPortal(
           <details
             className="conversation-header-tools-menu"
@@ -284,7 +232,7 @@ export function renderConversationHeaderTools() {
             >
               {!room && opened && (
                 <div className="conversation-prompt-navigation-slot">
-                  {promptNavigation}
+                  <ConversationPromptNavigation />
                 </div>
               )}
             </div>

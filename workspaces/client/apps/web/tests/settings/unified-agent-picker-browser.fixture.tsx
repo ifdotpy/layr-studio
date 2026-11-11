@@ -55,7 +55,10 @@ import "@mantine/core/styles.css";
 import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
 import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/shell/integration-support/observableFixture.tsx";
-import { ModelCatalogFixture } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
+import {
+  ModelCatalogFixture,
+  createModelCatalogFixture,
+} from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 import { SettingsRow } from "../../src/components/ui/SettingsRow/SettingsRow.tsx";
 import "../../src/appearance.css";
 import { AccountTiles } from "../../src/components/accounts/AccountTiles/AccountTiles.tsx";
@@ -63,6 +66,17 @@ import ProjectAccount from "../../src/components/projects/ProjectAccount/Project
 import SharedChatCreate from "../../src/components/projects/SharedChatCreate/SharedChatCreate.tsx";
 import { writeModelChoices } from "../../src/components/settings/models/support/modelChoices.ts";
 
+import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
+import {
+  browserAreas,
+  browserProjectSaves,
+} from "../fixtures/owner-support.tsx";
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
+const store = createServerStore(defaultSubscriptions);
+const areas = browserAreas(store);
+const saves = browserProjectSaves(async () => {});
+window.addEventListener("pagehide", () => store.dispose(), { once: true });
 const accounts: Account[] = Array.from({ length: 7 }, (_, i) => ({
   id: "account-" + i,
   home: "/fixture/" + i,
@@ -250,6 +264,31 @@ const accountsData = {
   supportsDelete: false,
   supportsDisconnect: false,
 } satisfies AccountsState;
+const catalog = createModelCatalogFixture({
+  scope: "fixture-model-catalog",
+  read: async () => ({ data: [...codex, ...claude] }),
+  subscribeState: (accept) => {
+    accept({
+      entitiesComplete: true,
+      runtime: {
+        modelsByAccount: {
+          "account-0": codex.map((model, catalogPosition) => ({
+            ...model,
+            accountKey: "account-0",
+            catalogPosition,
+          })),
+          "account-4": claude.map((model, catalogPosition) => ({
+            ...model,
+            accountKey: "account-4",
+            catalogPosition,
+          })),
+        },
+      },
+    });
+    return () => {};
+  },
+});
+window.addEventListener("pagehide", catalog.dispose, { once: true });
 function Fixture() {
   const [agent, setAgent] = useState<Agent>(initial),
     [scene, setScene] = useState<PickerScene>("picker"),
@@ -273,164 +312,141 @@ function Fixture() {
   return (
     <MantineProvider theme={theme} forceColorScheme={scheme}>
       <AgentModelsFixture agents={[agent]}>
-        <ModelCatalogFixture
-          value={{
-            scope: "fixture-model-catalog",
-            read: async () => ({ data: [...codex, ...claude] }),
-            subscribeState: (accept) => {
-              accept({
-                entitiesComplete: true,
-                runtime: {
-                  modelsByAccount: {
-                    "account-0": codex.map((model, catalogPosition) => ({
-                      ...model,
-                      accountKey: "account-0",
-                      catalogPosition,
-                    })),
-                    "account-4": claude.map((model, catalogPosition) => ({
-                      ...model,
-                      accountKey: "account-4",
-                      catalogPosition,
-                    })),
-                  },
-                },
-              });
-              return () => {};
-            },
-          }}
-        >
-          <main style={{ padding: 20, maxWidth: 720, margin: "0 auto" }}>
-            <h2>Agent setup</h2>
-            {scene === "picker" ? (
-              <ExecutionSettings
-                agent={agent}
-                accounts={accounts}
-                workerExcludedAccountKeys={
-                  agent.workerExcludedAccountKeys ?? []
-                }
-                reviewerExcludedAccountKeys={
-                  agent.reviewerExcludedAccountKeys ?? []
-                }
-                onWorkerExcludedAccountKeysChange={(keys) =>
-                  setAgent({ ...agent, workerExcludedAccountKeys: keys })
-                }
-                onReviewerExcludedAccountKeysChange={(keys) =>
-                  setAgent({ ...agent, reviewerExcludedAccountKeys: keys })
-                }
-                catalog={{
-                  models: agent.provider === "claude" ? claude : codex,
-                  loading: false,
-                  error: "",
-                  retry: () => {},
-                }}
-                onAccountChange={(key) => {
-                  window.pickerCalls.push({
-                    path: "account-selection",
-                    key,
-                  });
-                  const provider = required(
-                    accounts.find((a) => a.id === key),
-                  ).provider;
-                  setAgent({
-                    ...agent,
-                    accountKey: key,
-                    provider,
-                    model:
-                      provider === "claude"
-                        ? required(claude[0]).model
-                        : required(codex[0]).model,
-                    effort: "medium",
-                  });
-                }}
-              />
-            ) : scene === "rows" ? (
-              <div className="chat-settings-panel chat-settings-rows">
-                {(["orchestrator", "worker", "review"] as const).map((role) => (
-                  <SettingsRow
-                    key={role}
-                    label={
-                      role === "orchestrator"
-                        ? "Model"
-                        : role === "worker"
-                          ? "Workers"
-                          : "Review"
-                    }
-                  >
-                    <ExecutionSettings
-                      settingsRow
-                      initialRole={role}
-                      agent={agent}
-                      accounts={accounts}
-                      catalog={{
-                        models: agent.provider === "claude" ? claude : codex,
-                        loading: false,
-                        error: "",
-                        retry: () => {},
-                      }}
-                      onAccountChange={() => {}}
-                    />
-                  </SettingsRow>
-                ))}
-              </div>
-            ) : scene === "chat-account" ? (
-              <AccountTiles
-                label="Account"
-                accounts={accounts}
-                value={account}
-                onChange={setAccount}
-              />
-            ) : scene === "project" ? (
-              <ProjectAccount
-                path="/fixture/project"
-                project={{
-                  id: "project",
-                  path: "/fixture/project",
-                  name: "Project",
-                  created: 1,
-                  accountKey: "account-0",
-                  accountKeys: accounts.map((a) => a.id),
-                }}
-                defaultAccountKey="account-0"
-                accounts={accountsData}
-                saved={async () => {}}
-              />
-            ) : (
-              <SharedChatCreate
-                source={{
-                  startup: { creationScope: data.stateDir },
-                  state: {
-                    projects: new Map(
-                      data.runtime.projects.map((project) => [
-                        project.id,
-                        project,
-                      ]),
+        <AreasProvider value={areas}>
+          <ModelCatalogFixture value={catalog}>
+            <main style={{ padding: 20, maxWidth: 720, margin: "0 auto" }}>
+              <h2>Agent setup</h2>
+              {scene === "picker" ? (
+                <ExecutionSettings
+                  agent={agent}
+                  accounts={accounts}
+                  workerExcludedAccountKeys={
+                    agent.workerExcludedAccountKeys ?? []
+                  }
+                  reviewerExcludedAccountKeys={
+                    agent.reviewerExcludedAccountKeys ?? []
+                  }
+                  onWorkerExcludedAccountKeysChange={(keys) =>
+                    setAgent({ ...agent, workerExcludedAccountKeys: keys })
+                  }
+                  onReviewerExcludedAccountKeysChange={(keys) =>
+                    setAgent({ ...agent, reviewerExcludedAccountKeys: keys })
+                  }
+                  catalog={{
+                    models: agent.provider === "claude" ? claude : codex,
+                    loading: false,
+                    error: "",
+                    retry: () => {},
+                  }}
+                  onAccountChange={(key) => {
+                    window.pickerCalls.push({
+                      path: "account-selection",
+                      key,
+                    });
+                    const provider = required(
+                      accounts.find((a) => a.id === key),
+                    ).provider;
+                    setAgent({
+                      ...agent,
+                      accountKey: key,
+                      provider,
+                      model:
+                        provider === "claude"
+                          ? required(claude[0]).model
+                          : required(codex[0]).model,
+                      effort: "medium",
+                    });
+                  }}
+                />
+              ) : scene === "rows" ? (
+                <div className="chat-settings-panel chat-settings-rows">
+                  {(["orchestrator", "worker", "review"] as const).map(
+                    (role) => (
+                      <SettingsRow
+                        key={role}
+                        label={
+                          role === "orchestrator"
+                            ? "Model"
+                            : role === "worker"
+                              ? "Workers"
+                              : "Review"
+                        }
+                      >
+                        <ExecutionSettings
+                          settingsRow
+                          initialRole={role}
+                          agent={agent}
+                          accounts={accounts}
+                          catalog={{
+                            models:
+                              agent.provider === "claude" ? claude : codex,
+                            loading: false,
+                            error: "",
+                            retry: () => {},
+                          }}
+                          onAccountChange={() => {}}
+                        />
+                      </SettingsRow>
                     ),
-                    agents: new Map(
-                      data.threads.map((agent) => [
-                        agent.id,
-                        {
-                          ...agentSummaryFixture(agent.id),
-                          ...agent,
-                          inFlight: agent.inFlight === true,
-                          projectServerId: agent.projectServerId ?? null,
-                        },
-                      ]),
-                    ),
-                    rooms: new Map(
-                      data.runtime.rooms.map((room) => [room.id, room]),
-                    ),
-                  },
-                }}
-                accounts={accountsData}
-                initialPath="/fixture/project"
-
-                created={(id) => {
-                  window.created = id;
-                }}
-              />
-            )}
-          </main>
-        </ModelCatalogFixture>
+                  )}
+                </div>
+              ) : scene === "chat-account" ? (
+                <AccountTiles
+                  label="Account"
+                  accounts={accounts}
+                  value={account}
+                  onChange={setAccount}
+                />
+              ) : scene === "project" ? (
+                <ProjectAccount
+                  path="/fixture/project"
+                  project={{
+                    id: "project",
+                    path: "/fixture/project",
+                    name: "Project",
+                    created: 1,
+                    accountKey: "account-0",
+                    accountKeys: accounts.map((a) => a.id),
+                  }}
+                  defaultAccountKey="account-0"
+                  accounts={accountsData}
+                  saves={saves}
+                />
+              ) : (
+                <SharedChatCreate
+                  source={{
+                    creation: areas.creation,
+                    startup: { creationScope: data.stateDir },
+                    state: {
+                      projects: new Map(
+                        data.runtime.projects.map((project) => [
+                          project.id,
+                          project,
+                        ]),
+                      ),
+                      agents: new Map(
+                        data.threads.map((agent) => [
+                          agent.id,
+                          {
+                            ...agentSummaryFixture(agent.id),
+                            ...agent,
+                            inFlight: agent.inFlight === true,
+                            projectServerId: agent.projectServerId ?? null,
+                          },
+                        ]),
+                      ),
+                      rooms: new Map(
+                        data.runtime.rooms.map((room) => [room.id, room]),
+                      ),
+                    },
+                  }}
+                  accounts={accountsData}
+                  initialPath="/fixture/project"
+                />
+              )}
+            </main>
+          </ModelCatalogFixture>
+        </AreasProvider>
       </AgentModelsFixture>
     </MantineProvider>
   );

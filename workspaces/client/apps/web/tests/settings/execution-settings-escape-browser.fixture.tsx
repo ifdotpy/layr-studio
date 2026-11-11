@@ -3,7 +3,7 @@ import { AgentModelsFixture } from "../../src/components/shell/integration-suppo
 import type { Agent } from "../../src/types.ts";
 import { fixtureAccount } from "./fixture-helpers.ts";
 const fixtureRoot = document.getElementById("root");
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -35,6 +35,24 @@ declare global {
     escapeState: { parent: boolean; opened: boolean; account: boolean };
   }
 }
+function SettingsTrigger({
+  opened,
+  ref,
+  onClick,
+  changed,
+}: {
+  opened: boolean;
+  ref: React.RefObject<HTMLButtonElement | null>;
+  onClick: () => void;
+  changed: (opened: boolean) => void;
+}) {
+  useEffect(() => changed(opened), [changed, opened]);
+  return (
+    <Button ref={ref} onClick={onClick} aria-expanded={opened}>
+      Main agent settings
+    </Button>
+  );
+}
 function Fixture() {
   const [parent, setParent] = useState(true),
     [opened, setOpened] = useState(false),
@@ -62,7 +80,9 @@ function Fixture() {
               }),
             ]}
             onAccountChange={() => setAccount(true)}
-            onOpenChange={setOpened}
+            renderTrigger={(props) => (
+              <SettingsTrigger {...props} changed={setOpened} />
+            )}
             accountModalOpen={account}
           />
         </Modal>

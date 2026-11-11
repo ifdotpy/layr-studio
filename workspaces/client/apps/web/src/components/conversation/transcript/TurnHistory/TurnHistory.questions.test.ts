@@ -5,10 +5,6 @@ vi.mock(
       typeof import("../../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
     useServerNet: () => ({}),
-    useServerStore: () => ({
-      state: () => ({ current: { status: "loading" } }),
-      agentDetail: () => ({ current: { status: "loading" } }),
-    }),
   }),
 );
 import { AgentStatus as GeneratedApiAgentStatus } from "../../../../generated/api.ts";
@@ -17,9 +13,9 @@ import {
   question as questionField,
 } from "../../../../approvalFixtures.ts";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { Agent, Message } from "../../../../types.ts";
 import TurnHistory from "./TurnHistory.fixture.tsx";
 import {
@@ -30,11 +26,34 @@ import {
   type QuestionHistoryEntry,
   type QuestionLookup,
 } from "../../support/questionCardModel.ts";
+import { RequestCard } from "../../questions/Requests/Requests.tsx";
 import {
-  RequestCard,
-  RequestArea,
-} from "../../questions/Requests/Requests.tsx";
-import { RequestFixture } from "../../questions/support/requestFixtures.ts";
+  RequestFixture,
+  createRequestFixture,
+} from "../../questions/support/requestFixtures.ts";
+
+const requestFixtures: ReturnType<typeof createRequestFixture>[] = [];
+afterEach(() =>
+  requestFixtures.splice(0).forEach((fixture) => fixture.dispose()),
+);
+function ownedRequests(
+  requests: Parameters<typeof createRequestFixture>[0]["requests"],
+  scope: string,
+) {
+  const fixture = createRequestFixture({ requests, scope, notify() {} });
+  fixture.start();
+  requestFixtures.push(fixture);
+  return fixture;
+}
+function renderToStaticMarkup(node: import("react").ReactNode) {
+  return renderMarkup(
+    createElement(
+      RequestFixture,
+      { owner: ownedRequests([], "history") },
+      node,
+    ),
+  );
+}
 
 const question: Message = {
   id: "lead:toolu_9",
@@ -125,15 +144,8 @@ for (const afterTool of [false, true]) {
               entry &&
                 createElement(
                   RequestFixture,
-                  { requests: [entry] },
-                  createElement(
-                    RequestArea,
-                    {
-                      scope: "empty-async-question",
-                      notify() {},
-                    },
-                    createElement(RequestCard, { request: entry, messageId }),
-                  ),
+                  { owner: ownedRequests([entry], "empty-async-question") },
+                  createElement(RequestCard, { request: entry, messageId }),
                 ),
             ]),
           ),

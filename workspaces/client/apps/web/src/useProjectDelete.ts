@@ -1,7 +1,12 @@
 import { StopOutcome } from "./generated/api.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { useEffect, useLayoutEffect, useState } from "react";
-import { autorun, makeAutoObservable, observableRef, runInAction } from "mobx";
+import {
+  autorun,
+  reaction,
+  flowResult,
+  makeAutoObservable,
+  observableRef,
+} from "mobx";
 import { errorText } from "./api.ts";
 import type {
   SidebarBackend,
@@ -52,6 +57,24 @@ export class ProjectDeletion {
       },
       { autoBind: true },
     );
+  }
+  start() {
+    let active = true;
+    const reconcile = autorun(() => this.reconcile());
+    const submit = reaction(
+      () => this.pending,
+      () => {
+        queueMicrotask(() => {
+          if (active) void flowResult(this.submit());
+        });
+      },
+      { fireImmediately: true },
+    );
+    return () => {
+      active = false;
+      reconcile();
+      submit();
+    };
   }
   get complete() {
     const { state, metadata, workspaceId } = this.options;
@@ -209,10 +232,10 @@ export class ProjectDeletion {
       this.error = errorText(failure);
     }
   }
-  async submit() {
+  *submit(): Generator<Promise<boolean>, void, boolean> {
     const pending = this.pending;
     if (!pending || pending.intent.phase !== "submitting") return;
-    const submitted = await pending.intent.submit(pending.backend.post);
+    const submitted = yield pending.intent.submit(pending.backend.post);
     if (
       !submitted ||
       this.pending !== pending ||
@@ -222,38 +245,36 @@ export class ProjectDeletion {
         pending.intent.request.expected_workspace_id
     )
       return;
-    runInAction(() => {
-      const { intent } = pending;
-      if (intent.phase === "deleted" && intent.result) {
-        if (intent.result.stopped === StopOutcome.unconfirmed)
-          this.options.notify(
-            "The project was deleted, but stopping its commands could not be confirmed.",
-          );
-        if (intent.error) this.options.notify(intent.error);
-        const ids = [
-          ...intent.result.deletedAgentIds,
-          ...intent.result.deletedRoomIds,
-        ];
-        if (this.confirmed.workspaceId !== this.options.workspaceId) {
-          this.confirmed.workspaceId = this.options.workspaceId;
-          this.confirmed.ids.clear();
-        }
-        const present = this.present;
-        for (const id of ids)
-          if (!this.complete || present.has(id)) this.confirmed.ids.add(id);
-        this.publishSuppression();
-        this.options.onFinish(ids);
-        this.pending = null;
-        this.target = null;
-      } else {
-        if (intent.phase === "rejected") {
-          if (this.confirmed.ids.size) this.publishSuppression();
-          else this.options.onResume(new Set(intent.scope));
-          this.options.notify(intent.error);
-        }
-        this.pending = { ...pending };
+    const { intent } = pending;
+    if (intent.phase === "deleted" && intent.result) {
+      if (intent.result.stopped === StopOutcome.unconfirmed)
+        this.options.notify(
+          "The project was deleted, but stopping its commands could not be confirmed.",
+        );
+      if (intent.error) this.options.notify(intent.error);
+      const ids = [
+        ...intent.result.deletedAgentIds,
+        ...intent.result.deletedRoomIds,
+      ];
+      if (this.confirmed.workspaceId !== this.options.workspaceId) {
+        this.confirmed.workspaceId = this.options.workspaceId;
+        this.confirmed.ids.clear();
       }
-    });
+      const present = this.present;
+      for (const id of ids)
+        if (!this.complete || present.has(id)) this.confirmed.ids.add(id);
+      this.publishSuppression();
+      this.options.onFinish(ids);
+      this.pending = null;
+      this.target = null;
+    } else {
+      if (intent.phase === "rejected") {
+        if (this.confirmed.ids.size) this.publishSuppression();
+        else this.options.onResume(new Set(intent.scope));
+        this.options.notify(intent.error);
+      }
+      this.pending = { ...pending };
+    }
   }
   cancel() {
     if (this.pending && this.pending.intent.phase !== "rejected") return;
@@ -289,18 +310,4 @@ export class ProjectDeletion {
       onRecover: this.recover,
     };
   }
-}
-
-export function useProjectDelete(options: Options) {
-  const [owner] = useState(() => new ProjectDeletion(options));
-  owner.options = options;
-  useLayoutEffect(
-    () => autorun(() => owner.reconcile()),
-    [owner, options.state, options.workspaceId],
-  );
-  // Submit only after the commit that unmounts affected readers.
-  useEffect(() => {
-    void owner.submit();
-  }, [owner, owner.pending]);
-  return owner;
 }

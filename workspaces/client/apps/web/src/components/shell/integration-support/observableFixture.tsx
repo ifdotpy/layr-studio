@@ -1,6 +1,10 @@
+import { createNet } from "../../../servers/net/net.ts";
 import { runInAction } from "mobx";
 import "@mantine/core/styles.css";
-import { ServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import {
+  ServerAreas,
+  useServerAreas,
+} from "../../../app/ServerAreasProvider.tsx";
 import {
   createServerServices,
   type ServerServices,
@@ -202,6 +206,13 @@ export function conversationActionsFixture(
       close(removeCache);
     };
   }
+  Object.defineProperty(services, "net", {
+    value: createNet(services.api, () => store, undefined, {
+      storage: services.storage,
+      updateQueueRequest: services.localDrafts.updateQueueRequest,
+    }),
+    configurable: true,
+  });
   const areas = new ServerAreas({
     services,
     store,
@@ -217,7 +228,10 @@ export const ExecutionSettingsFixture = observer(
     agent,
     lead,
     ...props
-  }: Omit<ComponentProps<typeof ExecutionSettings>, "input" | "leadInput"> & {
+  }: Omit<
+    ComponentProps<typeof ExecutionSettings>,
+    "input" | "leadInput" | "agentsUi"
+  > & {
     agent: Agent;
     lead?: Agent | undefined;
   }) {
@@ -229,6 +243,7 @@ export const ExecutionSettingsFixture = observer(
     return (
       <ExecutionSettings
         {...props}
+        agentsUi={useServerAreas().agentsUi}
         input={{ kind: "agent", summary: agent, detail }}
         leadInput={
           lead

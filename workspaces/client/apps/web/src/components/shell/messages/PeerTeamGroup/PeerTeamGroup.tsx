@@ -1,3 +1,5 @@
+import { whileObserved } from "../../../../observed.ts";
+import type { ShellFlow } from "../../support/flow.ts";
 import { observer } from "mobx-react-lite";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
@@ -10,7 +12,6 @@ import {
 } from "@mantine/core";
 import { ChevronDown, MoreHorizontal } from "lucide-react";
 import {
-  useEffect,
   useRef,
   useState,
   type FormEvent,
@@ -29,7 +30,7 @@ import type { DeepReadonly } from "../../../../deepReadonly.ts";
 import type { components } from "../../../../generated/api.ts";
 export type PeerTeam = DeepReadonly<components["schemas"]["PeerTeamEntityDto"]>;
 import { createArea } from "../../../../app/area.ts";
-import { observable, runInAction } from "mobx";
+import { makeAutoObservable, flowResult, reaction } from "mobx";
 import type { SidebarChatView } from "../../../sidebar/support/viewModel.ts";
 import type { Project } from "../../../../app/projects/ProjectOrganization.tsx";
 
@@ -170,78 +171,107 @@ export const PeerTeamGroup = observer(function PeerTeamGroup({
   );
 });
 
-function usePeerTeamRoom(team: PeerTeam) {
-  const { scope, openRoom } = usePeerTeamActions();
-  const roomId = usePeerTeamActions().room(team);
-  const backend = useRef(useSidebarBackend()).current;
+function createPeerTeamRoom(
+  team: PeerTeam,
+  backend: ReturnType<typeof useSidebarBackend>,
+  actions: PeerTeamActions,
+) {
   const { post, saved, save } = backend;
-  const requestKey = `studio-radio-open:${scope}:${team.id}`;
-  const [request, setRequest] = useState<RadioRequest | null>(() =>
-    saved<RadioRequest | null>(requestKey, null),
-  );
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-  const [selectRoom, setSelectRoom] = useState(false);
-  const lock = useRef(false);
-  useEffect(() => {
-    if (selectRoom && roomId) {
-      setSelectRoom(false);
-      openRoom(roomId);
+  const requestKey = `studio-radio-open:${actions.scope}:${team.id}`;
+  class Room {
+    request = saved<RadioRequest | null>(requestKey, null);
+    pending = false;
+    error = "";
+    selectRoom = false;
+    constructor() {
+      makeAutoObservable(this, {}, { autoBind: true });
+      whileObserved(this, "pending", () => {
+        return reaction(
+          () => this.selectRoom && actions.room(team),
+          (id) => {
+            if (id) {
+              this.selectRoom = false;
+              actions.openRoom(id);
+            }
+          },
+          { fireImmediately: true },
+        );
+      });
     }
-  }, [selectRoom, roomId, openRoom]);
-  const openShared = async () => {
-    if (lock.current) return;
-    if (roomId && !request) {
-      openRoom(roomId);
-      return;
+    openShared() {
+      return flowResult(this.open());
     }
-    if (typeof team.projectPath !== "string") {
-      setError("This team has no project path for a shared chat.");
-      return;
-    }
-    lock.current = true;
-    setPending(true);
-    setError("");
-    let next: RadioRequest = request || {
-      body: {
-        action: "radio",
-        radio_action: "open",
-        path: team.projectPath,
-        team_id: team.id,
-        request_id: randomUUID(),
-      },
-    };
-    const remember = () => {
-      setRequest(next);
-      save(requestKey, next);
-    };
-    remember();
-    try {
-      if (!next.acknowledged && !next.rejected) {
-        await post("/api/peer-teams", next.body, { timeoutMs: 15000 });
-        next = { ...next, acknowledged: true };
-        remember();
+    *open(): ShellFlow {
+      if (this.pending) return;
+      const roomId = actions.room(team);
+      if (roomId && !this.request) {
+        actions.openRoom(roomId);
+        return;
       }
-      if (next.acknowledged) setSelectRoom(true);
-      setRequest(null);
-      save(requestKey, null);
-    } catch (e) {
-      if (
-        !next.acknowledged &&
-        e instanceof ApiError &&
-        e.status >= 400 &&
-        e.status < 500
-      ) {
-        next = { ...next, rejected: true };
-        remember();
+      if (typeof team.projectPath !== "string") {
+        this.error = "This team has no project path for a shared chat.";
+        return;
       }
-      setError(errorText(e));
-    } finally {
-      lock.current = false;
-      setPending(false);
+      this.pending = true;
+      this.error = "";
+      let next: RadioRequest = this.request || {
+        body: {
+          action: "radio",
+          radio_action: "open",
+          path: team.projectPath,
+          team_id: team.id,
+          request_id: randomUUID(),
+        },
+      };
+      this.remember(next);
+      try {
+        if (!next.acknowledged && !next.rejected) {
+          yield post("/api/peer-teams", next.body, { timeoutMs: 15000 });
+          next = { ...next, acknowledged: true };
+          this.remember(next);
+        }
+        if (next.acknowledged) this.selectRoom = true;
+        this.remember(null);
+      } catch (error) {
+        if (
+          !next.acknowledged &&
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        )
+          this.remember({ ...next, rejected: true });
+        this.error = errorText(error);
+      } finally {
+        this.pending = false;
+      }
     }
+    remember(request: RadioRequest | null) {
+      this.request = request;
+      save(requestKey, request);
+    }
+  }
+  return new Room();
+}
+
+function usePeerTeamRoom(team: PeerTeam) {
+  const actions = usePeerTeamActions(),
+    backend = useSidebarBackend();
+  const [room, setRoom] = useState<ReturnType<typeof createPeerTeamRoom>>();
+  return {
+    request: room
+      ? room.request
+      : backend.saved<RadioRequest | null>(
+          `studio-radio-open:${actions.scope}:${team.id}`,
+          null,
+        ),
+    pending: room?.pending || false,
+    error: room?.error || "",
+    openShared() {
+      const model = room || createPeerTeamRoom(team, backend, actions);
+      setRoom(model);
+      return model.openShared();
+    },
   };
-  return { openShared, pending, request, error };
 }
 
 const PeerTeamName = observer(function PeerTeamName({
@@ -442,25 +472,27 @@ function usePeerTeamForm(
 ) {
   const backend = useRef(useSidebarBackend()).current;
   const { closeForm: close } = usePeerTeamActions();
-  const [draft] = useState(() =>
-    observable({
-      name: team?.name || "",
-      members: [...(team?.members || [])],
-      frozen: false,
-    }),
-  );
-  const [mutation] = useState(() => new PeerTeamMutation(() => close()));
+  const [draft, setDraft] = useState(() => ({
+    name: team?.name || "",
+    members: [...(team?.members || [])],
+    frozen: false,
+  }));
+  const [mutation, setMutation] = useState<PeerTeamMutation>();
+  const update = (patch: Partial<typeof draft>) =>
+    setDraft((previous) => ({ ...previous, ...patch }));
   const id = useRef(team?.id || randomUUID());
   const revision = useRef(project.peerTeamsRevision || 0);
   const submit = () => {
     if (typeof project.path !== "string") {
-      mutation.reportError("This team has no project path.");
+      const model = mutation || new PeerTeamMutation(() => close());
+      model.reportError("This team has no project path.");
+      setMutation(model);
       return;
     }
-    runInAction(() => {
-      draft.frozen = true;
-    });
-    void mutation.submit(
+    const model = mutation || new PeerTeamMutation(() => close());
+    setMutation(model);
+    update({ frozen: true });
+    void model.submit(
       {
         path: project.path,
         team_id: id.current,
@@ -474,14 +506,14 @@ function usePeerTeamForm(
     );
   };
   return {
-    draft,
+    draft: { ...draft, update },
     submit,
     close,
-    error: mutation.error,
-    pending: mutation.pending,
-    rejected: mutation.rejected,
-    committed: mutation.committed,
-    reload: mutation.reload,
+    error: mutation?.error || "",
+    pending: mutation?.pending || false,
+    rejected: mutation?.rejected || false,
+    committed: mutation?.committed || false,
+    reload: () => mutation?.reload(),
   };
 }
 type TeamDraft = ReturnType<typeof usePeerTeamForm>["draft"];
@@ -496,11 +528,7 @@ const PeerTeamNameInput = observer(function PeerTeamNameInput({
       value={draft.name}
       maxLength={80}
       disabled={draft.frozen}
-      onChange={(e) =>
-        runInAction(() => {
-          draft.name = e.currentTarget.value;
-        })
-      }
+      onChange={(e) => draft.update({ name: e.currentTarget.value })}
       autoFocus
     />
   );
@@ -540,10 +568,10 @@ const PeerTeamCandidate = observer(function PeerTeamCandidate({
       checked={draft.members.includes(row.id)}
       disabled={draft.frozen}
       onChange={(e) =>
-        runInAction(() => {
-          draft.members = e.currentTarget.checked
+        draft.update({
+          members: e.currentTarget.checked
             ? [...draft.members, row.id]
-            : draft.members.filter((id) => id !== row.id);
+            : draft.members.filter((id) => id !== row.id),
         })
       }
     />

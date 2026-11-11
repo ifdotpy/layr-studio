@@ -59,12 +59,30 @@ export function createCollector() {
 }
 export const collector = /* @__PURE__ */ createCollector();
 let stopReporting: (() => void) | undefined;
+const reportingOwners: { api: ReportingApi }[] = [];
 export type ReportingApi = {
   fetchAuthenticatedRequest(path: string, init: RequestInit): Promise<Response>;
 };
 
-export function startPerformanceReporting(api: ReportingApi) {
-  if (stopReporting) return stopReporting;
+function isReportingApi(value: object): value is ReportingApi {
+  return (
+    "fetchAuthenticatedRequest" in value &&
+    typeof value.fetchAuthenticatedRequest === "function"
+  );
+}
+
+export function startPerformanceReporting(api: object) {
+  if (!isReportingApi(api))
+    throw new Error("Performance reporting requires the instrumented API.");
+  const owner = { api };
+  reportingOwners.push(owner);
+  const release = () => {
+    const index = reportingOwners.indexOf(owner);
+    if (index < 0) return;
+    if (reportingOwners.length === 1) stopReporting?.();
+    reportingOwners.splice(index, 1);
+  };
+  if (stopReporting) return release;
   const observers: PerformanceObserver[] = [];
   if (typeof PerformanceObserver !== "undefined") {
     if (PerformanceObserver.supportedEntryTypes?.includes("longtask")) {
@@ -97,7 +115,7 @@ export function startPerformanceReporting(api: ReportingApi) {
   const flush = () => {
     const report = collector.take();
     if (report)
-      void api
+      void reportingOwners[0]?.api
         .fetchAuthenticatedRequest("/api/perf-reporting/client", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -114,5 +132,5 @@ export function startPerformanceReporting(api: ReportingApi) {
     flush();
   };
   stopReporting = dispose;
-  return dispose;
+  return release;
 }

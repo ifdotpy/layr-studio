@@ -1,4 +1,7 @@
-import { useBackgroundTaskArea } from "../support/backgroundTaskActions.tsx";
+import {
+  createBackgroundTaskArea,
+  type BackgroundTaskActions,
+} from "../support/backgroundTaskActions.tsx";
 import {
   BackgroundTaskIndicator,
   BackgroundTaskKind,
@@ -49,14 +52,13 @@ const task: components["schemas"]["ProcessView"] = {
     actions: ["readOutput"],
   },
 };
-function StoryArea({ children }: { children: ReactNode }) {
-  const actions = useBackgroundTaskArea({
-    opened: true,
-    leadId: "worker",
-    close() {},
-    openAgent() {},
-    notify() {},
-  });
+function StoryArea({
+  children,
+  actions,
+}: {
+  children: ReactNode;
+  actions: BackgroundTaskActions;
+}) {
   return (
     <BackgroundTaskActionsProvider value={actions}>
       {children}
@@ -116,7 +118,20 @@ const meta = {
       });
       return (
         <ServerServicesProvider services={services}>
-          <StoryArea>
+          <StoryArea
+            actions={createBackgroundTaskArea(
+              services.api,
+              services.store,
+              "story",
+              {
+                opened: true,
+                leadId: "worker",
+                close() {},
+                openAgent() {},
+                notify() {},
+              },
+            )}
+          >
             <div
               className="tasks-drawer"
               style={{ width: "min(var(--studio-team-size), 100%)" }}

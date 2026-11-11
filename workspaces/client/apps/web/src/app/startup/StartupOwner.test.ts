@@ -1,3 +1,8 @@
+vi.mock("../../servers/environment.ts", async (original) => ({
+  ...(await original<typeof import("../../servers/environment.ts")>()),
+  serverViewId: "local",
+  serverParentOrigin: "https://parent.test",
+}));
 // Startup retry budgets exclude the separately observed remote-name transport.
 vi.mock("../../servers/serverNames.ts", () => ({
   watchServerName: () => () => {},
@@ -9,7 +14,7 @@ import {
 import { LocalCollection } from "../../sync/localCollection.ts";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
-import { reaction } from "mobx";
+import { reaction, makeAutoObservable } from "mobx";
 import { createServerServices } from "../../servers/serverServices.ts";
 import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { READ_RECOVERY_MAX_ATTEMPTS } from "../../sync/readRetry.ts";
@@ -26,7 +31,10 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
-function fixture(credentialId = "first") {
+function fixture(
+  credentialId = "first",
+  rendererBusy: () => boolean = () => false,
+) {
   const services = createServerServices({
     id: "same",
     origin: "https://same.test",
@@ -60,17 +68,16 @@ function fixture(credentialId = "first") {
     .spyOn(services.api, "automaticallyUpdateRenderer")
     .mockResolvedValue(false);
   const preferences = vi.fn();
+  Object.assign(services.sync, { syncDatabase: database });
   const owner = new StartupOwner(
     {
-      services: {
-        ...services,
-        sync: Object.assign(services.sync, { syncDatabase: database }),
-      },
+      services,
       store: models.store,
       screen: services.screen,
     },
     {
       canUpdateRenderer: () => true,
+      rendererBusy,
       acceptUiPreferences: preferences,
     },
   );
@@ -243,7 +250,9 @@ it("shows a generated state query failure before its first value and reload reco
         stateDir: "/fixture",
       }),
     );
+    const stopSelected = areas.selected.start();
     release = () => {
+      stopSelected();
       areas.dispose();
       store.dispose();
       resources.dispose();
@@ -325,4 +334,42 @@ it("delivers generated preference field updates only after the durable baseline 
     user: { fields: next },
     server: undefined,
   });
+});
+
+it("blocks renderer replacement and publishes each computed busy transition to its parent", () => {
+  const messages = vi.fn();
+  const parent = window.parent;
+  Object.defineProperty(window, "parent", {
+    value: { postMessage: messages },
+    configurable: true,
+  });
+  const activity = makeAutoObservable({
+    busy: false,
+    set(value: boolean) {
+      this.busy = value;
+    },
+  });
+  const f = fixture("first", () => activity.busy);
+  try {
+    f.owner.start();
+    expect(f.owner.isRendererUpdateSafe).toBe(true);
+    activity.set(true);
+    expect(f.owner.isRendererUpdateSafe).toBe(false);
+    activity.set(false);
+    expect(f.owner.isRendererUpdateSafe).toBe(true);
+    expect(messages.mock.calls).toEqual(
+      [false, true, false].map((busy) => [
+        { kind: "studio-server-activity", serverId: "local", busy },
+        "https://parent.test",
+      ]),
+    );
+    f.owner.dispose();
+    activity.set(true);
+    expect(messages).toHaveBeenCalledTimes(3);
+  } finally {
+    Object.defineProperty(window, "parent", {
+      value: parent,
+      configurable: true,
+    });
+  }
 });

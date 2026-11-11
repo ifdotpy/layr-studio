@@ -1,3 +1,5 @@
+import { autorun } from "mobx";
+import { ClaudeRepairReportStore } from "../../ClaudeRepairNotice/ClaudeRepairReportStore.ts";
 import type { ComponentSnapshot as Snapshot } from "../../ComposerAttachments/componentTestFixtures.ts";
 import { createRequestsView } from "../../support/requestView.ts";
 import { createRetainedWorktreesMirror } from "../../../../generated/observableResources.ts";
@@ -18,11 +20,7 @@ const h = vi.hoisted(() => ({
   cursor: 0,
   cells: [] as ComponentHookCell[],
   effects: [] as Array<() => unknown>,
-  get: vi.fn(async () => ({
-    items: [],
-    retainedWorktrees: [],
-    status: "none",
-  })),
+  get: vi.fn(),
   questions: null as ReturnType<typeof requestFixture> | null,
   projections: new Set<(snapshot: Snapshot) => void>(),
 }));
@@ -42,6 +40,11 @@ vi.mock("react", async (original) => {
               : value;
         },
       ];
+    },
+    useRef: (initial: unknown) => {
+      const index = h.cursor++;
+      h.cells[index] ??= { current: initial };
+      return h.cells[index];
     },
     useMemo: (compute: () => unknown) => compute(),
     useEffect: (effect: EffectCallback, deps: unknown[]) => {
@@ -180,17 +183,28 @@ it("question history follows projected answers without a request-triggered HTTP 
   expect(h.get).not.toHaveBeenCalled();
 });
 
-it("agent status and completed turns do not refetch saved repair evidence", async () => {
+it("agent status and completed turns do not refetch saved repair evidence", async (ctx) => {
+  h.get.mockResolvedValue({ status: "none" });
   const agent: Agent = {
     id: "lead",
     threadId: "thread",
     epoch: 1,
     status: GeneratedApiAgentStatus.running,
   };
-  render(() => ClaudeRepairNotice({ agent }));
+  const report = new ClaudeRepairReportStore(
+    { get: (...args: unknown[]) => h.get(...args) },
+    () => agent,
+  );
+  const stop = autorun(() => report.current);
+  ctx.onTestFinished(() => {
+    stop();
+    report.dispose();
+  });
+  render(() => ClaudeRepairNotice({ agent, store: report }));
   await Promise.resolve();
   render(() =>
     ClaudeRepairNotice({
+      store: report,
       agent: {
         ...agent,
         status: GeneratedApiAgentStatus.idle,

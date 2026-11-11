@@ -231,8 +231,9 @@ test("Sync http connection budget browser", async ({
     ).length;
     const started = Date.now();
     await pages[0].evaluate(() => {
-      window.refresh =
-        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refreshCredentials();
+      window.refresh = window.startupFixtureFlowResult(
+        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refreshCredentials(),
+      );
     });
     await pages[0].waitForFunction(
       () =>
@@ -299,7 +300,9 @@ test("Sync http connection budget browser", async ({
     await Promise.all(
       pages.map((page, index) =>
         page.evaluate(async (index) => {
-          await window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refreshCredentials();
+          await window.startupFixtureFlowResult(
+            window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refreshCredentials(),
+          );
           const id = "exact-request-" + index;
           const receipt = await window.durableSend({
             id,

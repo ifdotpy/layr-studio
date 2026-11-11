@@ -1,5 +1,11 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { refreshState } from "../../src/sync/client.ts";
 declare global {
   interface Window {
@@ -12,7 +18,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
+import { BackgroundTasksFixture as BackgroundTasks } from "../fixtures/owner-support.tsx";
 // The isolated subtree uses the same singleton bootstrap as App.
 await refreshState();
 createRoot(document.getElementById("root")!).render(
@@ -20,8 +26,8 @@ createRoot(document.getElementById("root")!).render(
     MantineProvider,
     { defaultColorScheme: "dark" },
     React.createElement(
-      ServerViewStoreProvider,
-      null,
+      ServerStoreProvider,
+      { value: fixtureServerStore },
       React.createElement(BackgroundTasks, {
         opened: true,
         close: () => {},

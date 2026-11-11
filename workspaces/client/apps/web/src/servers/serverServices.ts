@@ -32,7 +32,6 @@ import { createApiScope } from "./net/api.ts";
 import { hasNativeClient } from "../native/client.ts";
 import { nativeFetch } from "../native/http.ts";
 import { preferenceStorageForServer } from "../sync/uiPreferenceStore.ts";
-import { createServerActivity } from "./activity.ts";
 import { createMutationJournal } from "./mutationIdentity.ts";
 import type { StudioServer } from "./registry.ts";
 import { createServerTransport } from "./net/serverTransport.ts";
@@ -54,7 +53,6 @@ export function createServerServices(server: StudioServer) {
   const localNativeClient = () =>
     transport.owner.id === "local" && hasNativeClient();
   const sequences = createEntitySequenceScope();
-  const activity = createServerActivity();
   const cacheStorage = indexedDb(
     `studio-subscription-cache:${transport.owner.id}`,
     "subscriptions",
@@ -68,7 +66,6 @@ export function createServerServices(server: StudioServer) {
     localStorage: storage,
     sessionStorage: scopedSessionOutbox(`:server:${transport.owner.id}:`),
     beginMutation: createMutationJournal(transport.owner.id, storage),
-    beginActivity: activity.beginServerActivity,
   });
   // The pending layer of this server ends when its own stream checkpoint reaches the response.
   const stopSequences = sequences.onEntitySequenceAdvance((sequence, reset) => {
@@ -216,7 +213,6 @@ export function createServerServices(server: StudioServer) {
         ...options,
         events: synchronization().resources,
       })) satisfies typeof watchResourceReads,
-    activity,
     sequences,
     transcripts,
     outbox,

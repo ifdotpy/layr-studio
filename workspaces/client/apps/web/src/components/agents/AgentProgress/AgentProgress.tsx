@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
+import { now } from "../../../clock.ts";
 import { busy, type Agent } from "../../../types.ts";
 import { useVisualActivity } from "../../../hooks/useVisualActivity.ts";
 import { observer } from "mobx-react-lite";
-
-/** Renderer clock refresh interval, in milliseconds, for managed-command elapsed time. */
-const PROGRESS_CLOCK_INTERVAL_MS = 1000;
 
 export function progressElapsed(startedAt: number, nowSeconds: number) {
   const seconds = Math.max(0, Math.floor(nowSeconds - startedAt));
@@ -22,16 +19,6 @@ export const AgentProgress = observer(function AgentProgress({
 }: {
   agent: Pick<Agent, "commandProgress" | "stall">;
 }) {
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  const active = Boolean(agent.commandProgress?.length);
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setInterval(
-      () => setNow(Date.now() / 1000),
-      PROGRESS_CLOCK_INTERVAL_MS,
-    );
-    return () => window.clearInterval(timer);
-  }, [active]);
   return (
     <>
       {agent.stall && (
@@ -52,7 +39,7 @@ export const AgentProgress = observer(function AgentProgress({
           <span className="agent-command-stage" title={command.stage}>
             {command.stage} ·{" "}
             <span aria-label="Elapsed time">
-              {progressElapsed(command.startedAt, now)}
+              {progressElapsed(command.startedAt, now() / 1000)}
             </span>
           </span>
           {command.lastOutputLine && (
@@ -78,17 +65,7 @@ export const AgentElapsed = observer(function AgentElapsed({
   detail?: Agent | undefined;
 }) {
   const [visualRef, visible] = useVisualActivity<HTMLSpanElement>();
-  const [now, setNow] = useState(() => Date.now() / 1000);
   const active = busy.has(agent.status || "");
-  const ticking = active && visible;
-  useEffect(() => {
-    if (!ticking) return;
-    const timer = window.setInterval(
-      () => setNow(Date.now() / 1000),
-      PROGRESS_CLOCK_INTERVAL_MS,
-    );
-    return () => window.clearInterval(timer);
-  }, [ticking]);
   const started =
     detail.commandProgress?.[0]?.startedAt ||
     detail.activity?.at ||
@@ -101,7 +78,10 @@ export const AgentElapsed = observer(function AgentElapsed({
       aria-label="Elapsed time"
       title="Time since current activity started"
     >
-      {progressElapsed(started, active ? now : agent.updated || now)}
+      {progressElapsed(
+        started,
+        active && visible ? now() / 1000 : agent.updated || Date.now() / 1000,
+      )}
     </span>
   );
 });

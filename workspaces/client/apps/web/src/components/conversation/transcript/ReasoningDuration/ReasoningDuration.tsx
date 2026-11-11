@@ -1,6 +1,7 @@
 import { observer } from "mobx-react-lite";
 import { Brain, Clock3 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { now } from "../../../../clock.ts";
 import type { Message } from "../../../../types.ts";
 import { useVisualActivity } from "../../../../hooks/useVisualActivity.ts";
 
@@ -18,9 +19,6 @@ export default observer(function ReasoningDuration({
   >;
 }) {
   const [visualRef, visualActive] = useVisualActivity<HTMLDivElement>();
-  const [clock, setClock] = useState<{ start: number; elapsed: number } | null>(
-    null,
-  );
   const since =
     typeof item.reasoningSince === "number" ? item.reasoningSince : undefined;
   const observedAt =
@@ -28,16 +26,9 @@ export default observer(function ReasoningDuration({
       ? item.reasoningObservedAt
       : undefined;
   const running = since !== undefined;
-  const start = useMemo(() => performance.now(), [item.id, since, observedAt]);
-  useEffect(() => {
-    if (!running || !visualActive) return;
-    const update = () =>
-      setClock({ start, elapsed: (performance.now() - start) / 1000 });
-    update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [running, start, visualActive]);
-  const elapsed = clock?.start === start ? clock.elapsed : 0;
+  const start = useMemo(() => Date.now(), [item.id, since, observedAt]);
+  const elapsed =
+    running && visualActive ? Math.max(0, now() - start) / 1000 : 0;
   const seconds = Math.max(
     0,
     Math.floor(

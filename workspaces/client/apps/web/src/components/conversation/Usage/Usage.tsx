@@ -1,6 +1,8 @@
+import { whileObserved } from "../../../observed.ts";
 import { useReadView } from "../../ui/support/useReadView.ts";
 import type { AnalyticsSelection } from "../../shell/Analytics/Analytics.tsx";
 import { observer } from "mobx-react-lite";
+import { makeAutoObservable, observable, reaction, flow } from "mobx";
 
 import { LimitColor, RunwayColor } from "../../../generated/api.ts";
 import { PassiveUsage } from "../../shell/PassiveUsage/PassiveUsage.tsx";
@@ -9,7 +11,7 @@ import {
   providerLabel,
 } from "../../../generated/providerKind.ts";
 import { localDateTime, localTime } from "../../../local-time.ts";
-import { lazy, Suspense, useState, useMemo, useEffect, useRef } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Button, Popover, Progress, Tabs, Tooltip } from "@mantine/core";
 import BottomSheet from "../../ui/BottomSheet/BottomSheet.tsx";
 import { useMediaQuery } from "@mantine/hooks";
@@ -24,7 +26,6 @@ import { accountLimits, jsonObject } from "../../../usage/accountUsage.ts";
 import { useLimitRefresh } from "../../../usage/useLimitRefresh.ts";
 import { accountsForRoles } from "./roleAccounts.ts";
 import { errorText } from "../../../api.ts";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { Agent } from "../../../types.ts";
 import {
   ChevronUp,
@@ -70,12 +71,129 @@ const dollarFormatter = new Intl.NumberFormat(undefined, {
 });
 const dollars = (value: unknown) =>
   number(value) ? dollarFormatter.format(value) : "Unavailable";
+export function createUsageView(
+  api: Pick<ReturnType<typeof useServerApi>, "post">,
+  store: Pick<ReturnType<typeof useServerStore>, "state" | "costs">,
+  fallbackKey = () => "default",
+) {
+  let stop: (() => void) | undefined;
+  const state = makeAutoObservable(
+    {
+      active: true,
+      interests: observable.map<string, ReturnType<typeof createCostInterest>>(
+        {},
+        { deep: false },
+      ),
+      resetPending: false,
+      resetApplied: new Set<string>(),
+      feedback: {
+        key: "",
+        confirm: null as string | null,
+        error: "",
+        notice: "",
+      },
+      setPending(value: boolean) {
+        this.resetPending = value;
+      },
+      setFeedback(value: typeof state.feedback) {
+        this.feedback = value;
+      },
+      start() {
+        this.active = true;
+        stop ??= reaction(
+          () => [
+            ...new Set([
+              fallbackKey(),
+              ...(resourceData(store.state().current)
+                ?.accountsSummary.get("current")
+                ?.accounts.map((account) => account.id) ?? []),
+            ]),
+          ],
+          (keys) => {
+            for (const key of keys)
+              if (!this.interests.has(key))
+                this.interests.set(key, createCostInterest(api, store, key));
+            for (const [key, interest] of this.interests)
+              if (!keys.includes(key)) {
+                interest.dispose();
+                this.interests.delete(key);
+              }
+          },
+          { fireImmediately: true },
+        );
+      },
+      dispose() {
+        this.active = false;
+        stop?.();
+        stop = undefined;
+        for (const interest of this.interests.values()) interest.dispose();
+        this.interests.clear();
+      },
+    },
+    {},
+    { autoBind: true },
+  );
+  return state;
+}
+
+export function createCostInterest(
+  api: Pick<ReturnType<typeof useServerApi>, "post">,
+  store: Pick<ReturnType<typeof useServerStore>, "costs">,
+  key: string | null,
+) {
+  let generation = 0;
+  let stop: (() => void) | undefined;
+  const signature = () => {
+    const rows = resourceData(store.costs().current);
+    return rows === undefined
+      ? undefined
+      : JSON.stringify(rows.find((row) => row.accountKey === key) ?? null);
+  };
+  const state = makeAutoObservable(
+    {
+      error: "",
+      *load() {
+        if (!key) return;
+        const attempt = ++generation;
+        let settled = false;
+        this.error = "";
+        let baseline = signature();
+        stop = reaction(signature, (next) => {
+          if (baseline === undefined) baseline = next;
+          else if (next !== undefined && next !== baseline) {
+            settled = true;
+            state.error = "";
+          }
+        });
+        try {
+          yield api.post("/api/costs/interest", { account_key: key });
+        } catch (error) {
+          if (attempt === generation && !settled) this.error = errorText(error);
+        }
+      },
+      dispose() {
+        generation++;
+        stop?.();
+        stop = undefined;
+      },
+    },
+    {},
+    { autoBind: true },
+  );
+  whileObserved(state, "error", () => {
+    void state.load();
+    return () => state.dispose();
+  });
+  return state;
+}
+
 export type UsageProps = {
   agent: Agent;
   opened?: boolean;
   onChange?: (opened: boolean) => void;
   openRequest?: number;
   visible?: boolean;
+  usageStore: ReturnType<typeof createUsageView>;
 };
 function Usage({
   agent,
@@ -83,6 +201,7 @@ function Usage({
   onChange,
   openRequest = 0,
   visible = true,
+  usageStore,
 }: UsageProps) {
   const store = useServerStore(),
     api = useServerApi();
@@ -95,29 +214,8 @@ function Usage({
     key: null as string | null,
     request: openRequest,
   });
-  const [resetPending, setResetPending] = useState(false),
-    [resetApplied, setResetApplied] = useState(new Set<string>());
-  const [feedback, setFeedback] = useState({
-    key: "",
-    confirm: null as string | null,
-    error: "",
-    notice: "",
-  });
-  const [costInterestError, setCostInterestError] = useState("");
-  const lifetime = useMemo(
-    () => ({
-      active: true,
-      resetBusy: false,
-      resetAttempts: new Map<string, string>(),
-    }),
-    [api],
-  );
-  useEffect(() => {
-    lifetime.active = true;
-    return () => {
-      lifetime.active = false;
-    };
-  }, [lifetime]);
+  const lifetime = usageStore;
+  const { resetPending, resetApplied, feedback, setFeedback } = lifetime;
   const { reload, isRefreshing } = useLimitRefresh(api.get);
   const detail = resourceData(store.agentDetail(agentId(agent.id)).current);
   const fallbackKey = agent.accountKey || "default";
@@ -171,51 +269,8 @@ function Usage({
   const rows =
     visible && opened ? resourceData(store.costs().current) : undefined;
   const costs = rows?.find((row) => row.accountKey === selectedAccountKey);
-  const key = visible && opened ? selectedAccountKey : null,
-    ready = rows !== undefined,
-    signature = costs ? JSON.stringify(costs) : null;
-  const interest = useRef<{
-    key: string;
-    baseline: string | null | undefined;
-    phase: "baseline" | "pending" | "settled";
-  } | null>(null);
-  useEffect(() => {
-    if (!key) {
-      interest.current = null;
-      setCostInterestError("");
-      return;
-    }
-    if (interest.current?.key !== key) {
-      interest.current = { key, baseline: undefined, phase: "baseline" };
-      setCostInterestError("");
-    }
-    const attempt = interest.current;
-    if (attempt.phase === "pending" && ready && attempt.baseline === undefined)
-      attempt.baseline = signature;
-    if (
-      attempt.phase === "pending" &&
-      ready &&
-      signature !== attempt.baseline
-    ) {
-      attempt.phase = "settled";
-      setCostInterestError("");
-    }
-    if (attempt.phase !== "baseline") return;
-    attempt.baseline = ready ? signature : undefined;
-    attempt.phase = "pending";
-    void api
-      .post("/api/costs/interest", { account_key: key })
-      .catch((error) => {
-        if (
-          lifetime.active &&
-          interest.current === attempt &&
-          attempt.phase === "pending"
-        )
-          setCostInterestError(errorText(error));
-      });
-  }, [key, ready, signature, api, lifetime]);
-  const currentAccount = useRef(selectedAccountKey);
-  currentAccount.current = selectedAccountKey;
+  const key = visible && opened ? selectedAccountKey : null;
+  const costInterestError = key ? lifetime.interests.get(key)?.error || "" : "";
   const resetAppliedKey = (credit: string, account = selectedAccountKey) =>
     account + ":" + credit;
   const selectAccount = (key: string | null) => {
@@ -230,41 +285,40 @@ function Usage({
       error: "",
       notice: "",
     });
-  const applyReset = async (creditId: string) => {
+  const applyReset = flow(function* (
+    creditId: string,
+  ): Generator<
+    ReturnType<typeof api.post<"/api/limits/reset">>,
+    void,
+    Awaited<ReturnType<typeof api.post<"/api/limits/reset">>>
+  > {
     const account = selectedAccount;
     if (
-      lifetime.resetBusy ||
+      lifetime.resetPending ||
       !account ||
       resetApplied.has(resetAppliedKey(creditId, account.id))
     )
       return;
     const accountKey = account.id;
     const feedbackCurrent = () =>
-      lifetime.active && currentAccount.current === accountKey;
-    lifetime.resetBusy = true;
-    setResetPending(true);
+      lifetime.active && lifetime.feedback.key === accountKey;
+    lifetime.setPending(true);
     setFeedback({ key: accountKey, confirm: creditId, error: "", notice: "" });
     try {
       const accountId = projectionFor(account)?.projection.reset.accountId;
       if (!accountId)
         throw new Error("Refresh limits before using this reset credit.");
-      const key = accountId + ":" + creditId;
-      const requestId = lifetime.resetAttempts.get(key) || randomUUID();
-      lifetime.resetAttempts.set(key, requestId);
-      const result = await api.post("/api/limits/reset", {
+      const key = "usage-reset:" + JSON.stringify([accountId, creditId]);
+      const requestId = api.stableRequestId(key);
+      const result = yield api.post("/api/limits/reset", {
         credit_id: creditId,
         account_id: accountId,
         account_key: accountKey,
         request_id: requestId,
       });
-      if (result.outcome !== "uncertain") lifetime.resetAttempts.delete(key);
-      if (
-        lifetime.active &&
-        (result.outcome === "reset" || result.outcome === "alreadyRedeemed")
-      )
-        setResetApplied((ids) =>
-          new Set(ids).add(resetAppliedKey(creditId, accountKey)),
-        );
+      if (result.outcome !== "uncertain") api.clearStableRequestId(key);
+      if (result.outcome === "reset" || result.outcome === "alreadyRedeemed")
+        lifetime.resetApplied.add(resetAppliedKey(creditId, accountKey));
       if (feedbackCurrent()) {
         const notice = {
           reset: "Reset applied.",
@@ -288,12 +342,11 @@ function Usage({
       if (lifetime.active) void reload(accountKey, true);
     } catch (error) {
       if (feedbackCurrent())
-        setFeedback((previous) => ({ ...previous, error: errorText(error) }));
+        setFeedback({ ...lifetime.feedback, error: errorText(error) });
     } finally {
-      lifetime.resetBusy = false;
-      if (lifetime.active) setResetPending(false);
+      lifetime.setPending(false);
     }
-  };
+  });
   const phone = useMediaQuery(layoutQueries.navigationCompact);
   const percent = contextProgress?.percent ?? null;
   const refreshing = isRefreshing(selectedAccountKey);

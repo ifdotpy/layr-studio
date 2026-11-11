@@ -12,32 +12,35 @@ import type { AccountsState } from "../../accounts/support/Accounts.tsx";
 import { ExecutionSettings } from "../ExecutionSettings/ExecutionSettings.tsx";
 import { ApiError, ApiSchemaMismatchError, errorText } from "../../../api.ts";
 import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
-import type { ResourceVersion } from "../../../sync/subscriptions/contracts.ts";
-import { useEffect, useState, type ComponentProps } from "react";
+import { type ComponentProps } from "react";
+import { flow } from "mobx";
 
 export function UnifiedAgentSettingsView({
   state,
   scope: _scope,
   notify,
-  onAccountModalOpenChange,
   showAccountExclusions,
   showTransferStatus = true,
   ...settings
 }: Omit<
   ComponentProps<typeof ExecutionSettings>,
-  "onAccountChange" | "accountDisabled" | "accounts" | "input" | "leadInput"
+  | "onAccountChange"
+  | "accountDisabled"
+  | "accounts"
+  | "input"
+  | "leadInput"
+  | "agentsUi"
 > & {
   agent: Agent;
   lead?: Agent | undefined;
   state: AccountsState | undefined;
   scope?: string | undefined;
   notify: (message: string) => void;
-  onAccountModalOpenChange?: (opened: boolean) => void;
   showAccountExclusions?: boolean;
   showTransferStatus?: boolean;
 }) {
   const store = useServerStore();
-  const accountsUi = useServerAreas().accountsUi;
+  const { accountsUi, agentsUi } = useServerAreas();
   const detailSlot = store.agentDetail(observableAgentId(settings.agent.id));
   const detail = resourceData(detailSlot.current);
   const appliedVersion = detailSlot.appliedVersion;
@@ -49,32 +52,30 @@ export function UnifiedAgentSettingsView({
   const { post } = useServerApi();
 
   const accountModalOpen = accountsUi.dialogOpen;
-  const [exclusionsSaving, setExclusionsSaving] = useState<
-    Readonly<ResourceVersion> | null | undefined
-  >(null);
-  useEffect(() => {
-    if (exclusionsSaving === null || !appliedVersion) return;
-    if (
-      !exclusionsSaving ||
-      appliedVersion.epoch !== exclusionsSaving.epoch ||
-      appliedVersion.revision > exclusionsSaving.revision
-    ) {
-      setExclusionsSaving(null);
-    }
-  }, [appliedVersion, exclusionsSaving]);
+  const exclusionScope = `exclusions:${settings.agent.id}`;
+  const [pendingVersion, setExclusionsSaving] = agentsUi.cell(
+    exclusionScope,
+    "exclusionsSaving",
+  );
+  const exclusionsSaving = !!(
+    pendingVersion !== null &&
+    (!appliedVersion ||
+      (pendingVersion &&
+        appliedVersion.epoch === pendingVersion.epoch &&
+        appliedVersion.revision <= pendingVersion.revision))
+  );
   const showExclusions = showAccountExclusions ?? settings.agent.isLead;
-  useEffect(() => {
-    onAccountModalOpenChange?.(accountModalOpen);
-  }, [accountModalOpen, onAccountModalOpenChange]);
-  const saveExclusions = (
+  const saveExclusions = flow(function* (
     field: "worker_excluded_account_keys" | "reviewer_excluded_account_keys",
     keys: string[],
-  ) => {
+  ): Generator<ReturnType<typeof post<"/api/conversation">>, void, unknown> {
     setExclusionsSaving(appliedVersion);
-    void post("/api/conversation", {
-      id: settings.agent.id,
-      [field]: keys,
-    }).catch((error) => {
+    try {
+      yield post("/api/conversation", {
+        id: settings.agent.id,
+        [field]: keys,
+      });
+    } catch (error) {
       notify(errorText(error));
       if (
         error instanceof ApiError &&
@@ -85,13 +86,14 @@ export function UnifiedAgentSettingsView({
           pending === appliedVersion ? null : pending,
         );
       }
-    });
-  };
+    }
+  });
   if (!state) return <p role="status">Loading accounts…</p>;
   return (
     <>
       <ExecutionSettings
         {...settings}
+        agentsUi={agentsUi}
         input={{ kind: "agent", summary: settings.agent, detail }}
         leadInput={
           settings.lead
@@ -113,8 +115,7 @@ export function UnifiedAgentSettingsView({
           )
         }
         accountDisabled={
-          !accountsUi.canSelectAccount(settings.agent) ||
-          exclusionsSaving !== null
+          !accountsUi.canSelectAccount(settings.agent) || exclusionsSaving
         }
         accountModalOpen={accountModalOpen}
         onWorkerExcludedAccountKeysChange={

@@ -1,8 +1,9 @@
+import { flowValue } from "../../flowValue.ts";
 import { jsonObject } from "../../usage/accountUsage.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import { outboxRequests } from "../../browserPersistence.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { makeAutoObservable, runInAction } from "mobx";
+import { makeAutoObservable, flow } from "mobx";
 import { ApiError } from "../../api.ts";
 import type { PostBody } from "../../api.ts";
 import type { Agent } from "../../types.ts";
@@ -10,7 +11,6 @@ type Request = Omit<PostBody<"/api/action">, "action"> & {
   action: "compact" | "review";
 };
 type Action = Request["action"];
-
 export function isDefinitivelyNotApplied(error: unknown): boolean {
   if (
     !(error instanceof ApiError) ||
@@ -22,7 +22,6 @@ export function isDefinitivelyNotApplied(error: unknown): boolean {
     "outcome" in error.response && error.response.outcome === "not_applied"
   );
 }
-
 export class NativeActionOwner {
   active = false;
   disposed = false;
@@ -59,7 +58,11 @@ export class NativeActionOwner {
       );
     return request;
   }
-  async submit(agent: Agent, action: Action) {
+  submit = flow(function* (
+    this: NativeActionOwner,
+    agent: Agent,
+    action: Action,
+  ) {
     const workspace = this.areas.startup.creationScope;
     const workspaceId = this.areas.startup.workspaceId;
     const { post } = this.areas.scope.services.api;
@@ -84,24 +87,22 @@ export class NativeActionOwner {
     };
     // Storage must succeed before HTTP. Keep the exact account, thread and epoch on retry.
     outbox.set("nativeAction", key(agent.id), JSON.stringify(request));
-    runInAction(() => {
-      this.revision++;
-    });
+    this.revision++;
     this.active = true;
     const acknowledge = () => {
       if (
         this.readKey(agent.id, key(agent.id))?.request_id === request.request_id
       )
         outbox.remove("nativeAction", key(agent.id));
-      runInAction(() => {
-        this.revision++;
-      });
+      this.revision++;
     };
     try {
-      const response = await post("/api/action", request, {
-        workspaceId,
-        timeoutMs: 15000,
-      });
+      const response = yield* flowValue(
+        post("/api/action", request, {
+          workspaceId,
+          timeoutMs: 15000,
+        }),
+      );
       if (response.receipt?.requestId !== request.request_id)
         throw new Error(
           "The action reply has no matching receipt. Check the saved request.",
@@ -120,11 +121,9 @@ export class NativeActionOwner {
       if (isDefinitivelyNotApplied(error)) acknowledge();
       throw error;
     } finally {
-      runInAction(() => {
-        this.active = false;
-      });
+      this.active = false;
     }
-  }
+  });
   pending(id: string) {
     void this.revision;
     try {

@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { Textarea, type TextareaProps } from "@mantine/core";
 import {
   memo,
@@ -58,7 +59,7 @@ const AutosizeInput = memo(function AutosizeInput({
   );
 });
 
-export default function PromptInput(p: {
+export default observer(function PromptInput(p: {
   value: string;
   draftResetVersion?: number;
   session: string;
@@ -161,7 +162,6 @@ export default function PromptInput(p: {
   );
   const skills = useSkillAutocomplete({
     ...p.skillCatalog,
-    draft: p.value,
     input: p.input,
     insert: insertSkill,
   });
@@ -170,8 +170,6 @@ export default function PromptInput(p: {
       ? p.value.slice(1).toLowerCase()
       : null;
   const [dismissedCommand, setDismissedCommand] = useState<string | null>(null);
-  const commandMatches =
-    commandQuery !== null && "rename".includes(commandQuery);
   const handlers = useRef<InputHandlers>({});
   const keyDown = useCallback<NonNullable<InputHandlers["onKeyDown"]>>(
     (event) => handlers.current.onKeyDown?.(event),
@@ -261,7 +259,7 @@ export default function PromptInput(p: {
       resetKey={commandQuery ?? skills.range?.signature}
       options={
         commandQuery !== null
-          ? commandMatches
+          ? "rename".includes(commandQuery)
             ? [
                 {
                   value: "rename",
@@ -329,4 +327,4 @@ export default function PromptInput(p: {
       />
     </ComposerAutocomplete>
   );
-}
+});

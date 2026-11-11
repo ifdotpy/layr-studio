@@ -1,12 +1,12 @@
+import { flowValue } from "../../flowValue.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { Project } from "./ProjectOrganization.tsx";
-import { makeAutoObservable, runInAction } from "mobx";
+import { makeAutoObservable, flow } from "mobx";
 import { ApiError, errorText } from "../../api.ts";
 import type { paths } from "../../generated/api.ts";
 import type { SidebarBackend } from "../../components/sidebar/support/services.tsx";
 export type PeerTeamRequest =
   paths["/api/peer-teams"]["post"]["requestBody"]["content"]["application/json"];
-
 /** One body and captured server survive uncertain replies. */
 export class PeerTeamMutation {
   request: PeerTeamRequest | null = null;
@@ -31,37 +31,33 @@ export class PeerTeamMutation {
     this.error = "";
     this.rejected = false;
   }
-  async run(reload: boolean) {
+  run = flow(function* (this: PeerTeamMutation, reload: boolean) {
     if (this.pending || (!reload && !this.request)) return;
     this.pending = true;
     if (!reload) this.error = "";
     try {
       if (!reload && !this.committed && this.request) {
         if (!this.backend) throw new Error("The team server is unavailable.");
-        await this.backend.post("/api/peer-teams", this.request, {
-          timeoutMs: 15000,
-        });
-        runInAction(() => {
-          this.committed = true;
-        });
+        yield* flowValue(
+          this.backend.post("/api/peer-teams", this.request, {
+            timeoutMs: 15000,
+          }),
+        );
+        this.committed = true;
       }
-      runInAction(() => this.complete(this.clear, reload));
+      this.complete(this.clear, reload);
     } catch (error) {
-      runInAction(() => {
-        this.error = errorText(error);
-        if (!reload)
-          this.rejected =
-            !this.committed &&
-            error instanceof ApiError &&
-            error.status >= 400 &&
-            error.status < 500;
-      });
+      this.error = errorText(error);
+      if (!reload)
+        this.rejected =
+          !this.committed &&
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500;
     } finally {
-      runInAction(() => {
-        this.pending = false;
-      });
+      this.pending = false;
     }
-  }
+  });
   submit(body?: PeerTeamRequest, owner?: SidebarBackend) {
     if (!this.request && body && owner) {
       this.request = body;
@@ -76,7 +72,6 @@ export class PeerTeamMutation {
     this.error = error;
   }
 }
-
 export class PeerTeamMoveOwner {
   readonly mutation: PeerTeamMutation;
   readonly backend;

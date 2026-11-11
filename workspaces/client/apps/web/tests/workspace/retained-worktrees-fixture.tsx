@@ -1,5 +1,11 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { Agent } from "../../src/types.ts";
 
 import { createRoot } from "react-dom/client";
@@ -32,7 +38,7 @@ const Team = observer(function Team() {
 });
 createRoot(document.getElementById("root")!).render(
   <MantineProvider>
-    <ServerViewStoreProvider>
+    <ServerStoreProvider value={fixtureServerStore}>
       <main
         style={{
           maxWidth: 900,
@@ -45,6 +51,6 @@ createRoot(document.getElementById("root")!).render(
         <h1>Team</h1>
         <Team />
       </main>
-    </ServerViewStoreProvider>
+    </ServerStoreProvider>
   </MantineProvider>,
 );

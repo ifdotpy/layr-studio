@@ -8,7 +8,7 @@ import { AccountRemainingBar } from "../AccountRemainingBar/AccountRemainingBar.
 import { observer } from "mobx-react-lite";
 import { Checkbox, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
 import { accountDisplayName, accountTooltip } from "../../../accountName.ts";
 import type { Account } from "../support/Accounts.tsx";
@@ -16,17 +16,21 @@ import type { SetupRole } from "../../agents/AgentSetupPicker/AgentSetupPicker.t
 
 import { providerLabel } from "../../../generated/providerKind.ts";
 
-export function AccountTiles(p: AccountTilesProps) {
+export const AccountTiles = observer(function AccountTiles(
+  p: AccountTilesProps,
+) {
   const excluded = p.excludedKeys;
   const onExcludedChange = p.onExcludedKeysChange;
   const selected = p.multiple ? p.value[0] : p.value;
   const selectedProvider =
     p.accounts.find((account) => account.id === selected)?.provider || "";
-  const [localProvider, setLocalProvider] = useState<string>(selectedProvider);
-  const provider = p.provider || localProvider;
-  useEffect(() => {
-    setLocalProvider(selectedProvider);
-  }, [selectedProvider]);
+  const selection = JSON.stringify([p.value, selectedProvider]);
+  const [choice, setChoice] = useState<[string, string]>([
+    selection,
+    selectedProvider,
+  ]);
+  if (choice[0] !== selection) setChoice([selection, selectedProvider]);
+  const provider = p.provider || choice[1];
   const providers = p.providers || [
     ...new Set(
       p.accounts
@@ -61,7 +65,7 @@ export function AccountTiles(p: AccountTilesProps) {
           value={provider}
           disabled={!!p.disabled}
           onChange={(value) => {
-            setLocalProvider(value);
+            setChoice([selection, value]);
             p.onProvider?.(value);
           }}
           data={providers.map((value) => ({
@@ -143,7 +147,7 @@ export function AccountTiles(p: AccountTilesProps) {
       </div>
     </div>
   );
-}
+});
 
 export function setupAccountName(account?: Account) {
   return account ? accountDisplayName(account) : "";

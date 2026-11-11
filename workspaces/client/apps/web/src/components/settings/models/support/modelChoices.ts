@@ -1,11 +1,9 @@
 import { ModelChoice, type components } from "../../../../generated/api.ts";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useServerStorage } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { serverLocalStorage } from "../../../../servers/storage.ts";
 import {
   preferenceStorageForServer,
   readPreferenceFields,
-  watchPreferenceWrites,
   writePreferenceValue,
 } from "../../../../sync/uiPreferenceStore.ts";
 import { MODEL_CHOICES_PREFERENCE_KEY } from "../../../../generated/sharedValues.ts";
@@ -32,7 +30,6 @@ export function readModelChoices(scope?: string | Storage): ModelChoices {
     readPreferenceFields("server", storageFor(scope))[fieldName],
   );
 }
-export const subscribeModelChoices = watchPreferenceWrites;
 export function writeModelChoices(
   value: ModelChoices,
   scope?: string | Storage,
@@ -40,20 +37,7 @@ export function writeModelChoices(
   writePreferenceValue(MODEL_CHOICES_PREFERENCE_KEY, value, storageFor(scope));
 }
 export function useModelChoices() {
-  const storage = useServerStorage();
-  const getSnapshot = useCallback(
-    () =>
-      JSON.stringify(
-        readPreferenceFields("server", storage)[fieldName] ?? null,
-      ),
-    [storage],
-  );
-  const serialized = useSyncExternalStore(
-    subscribeModelChoices,
-    getSnapshot,
-    getSnapshot,
-  );
-  return useMemo(() => choicesOf(JSON.parse(serialized)), [serialized]);
+  return readModelChoices(useServerStorage());
 }
 
 /** Provider-qualified resolved identity keeps catalog aliases in one preference. */

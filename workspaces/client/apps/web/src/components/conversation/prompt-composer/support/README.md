@@ -1,7 +1,7 @@
 # Prompt composer
 
-`PromptComposer.tsx` owns the form subtree and subscribes to the active chat's
-draft. `PromptInput.tsx` owns the native textarea, autocomplete, keyboard
+`PromptComposer.tsx` owns the form subtree and reads the active chat's observable
+draft in its observer leaf. `PromptInput.tsx` owns the native textarea, autocomplete, keyboard
 handling, and caret-sensitive skill insertion. The draft hook in
 ["../../../../sync/drafts.ts"](../../sync/drafts.ts) owns draft persistence and
 conflict handling. Send reads the current draft by chat ID so an immediate
@@ -60,3 +60,24 @@ observations, Conversation renders per streaming key fell from 0.68 to 0.36;
 the token-only composer assertion changed from one render to zero. Phase-wide
 render counts include asynchronous background work, so they do not by
 themselves establish what caused each render.
+
+## Effects and integration
+
+The retained DOM effects in these two packages are:
+
+- PromptInput's layout effect applies external textarea values without disturbing
+  IME composition and schedules height measurement.
+- PromptInput's effect observes textarea width and cancels pending resize frames.
+- RequestCard's InlineAnswer effect measures and positions the answer using a
+  ResizeObserver and animation frame.
+- AnswerFields' effect installs the document keyboard input listener for numbered
+  options while focus is inside the answer form.
+
+SelectedConversationOwner creates RequestAreaOwner, starts its membership reaction,
+and disposes it when the conversation closes or switches. RequestArea requires
+that instance; Requests and answer cards read its observable list and views.
+SignInCard reads the shared observable clock directly.
+
+PromptDraft temporarily retains its marked useSyncExternalStore bridge until E6
+makes the real draft reader observable. Its real-createDrafts witness covers
+restored snapshots and programmatic draft changes through the production reader.

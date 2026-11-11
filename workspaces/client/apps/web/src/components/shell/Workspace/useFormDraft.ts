@@ -1,30 +1,23 @@
+import { isRecord } from "../McpInventory/McpInventory.tsx";
 import { useRef, type SetStateAction } from "react";
 import type { Json, JsonValue } from "../../../types.ts";
 import { useUnsentText } from "../../../unsent/useUnsentText.ts";
 
 function isJsonValue(value: unknown): value is JsonValue {
-  if (
+  return (
     value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    typeof value === "number"
-  )
-    return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return typeof value === "object" && Object.values(value).every(isJsonValue);
+    ["string", "boolean", "number"].includes(typeof value) ||
+    (typeof value === "object" && Object.values(value).every(isJsonValue))
+  );
+}
+function isDraft(value: unknown): value is Json {
+  return isRecord(value) && Object.values(value).every(isJsonValue);
 }
 function readDraft(raw: string | null): Json | null {
   if (!raw) return null;
   try {
     const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object" || Array.isArray(value))
-      return null;
-    const result: Json = {};
-    for (const [key, entry] of Object.entries(value)) {
-      if (!isJsonValue(entry)) return null;
-      result[key] = entry;
-    }
-    return result;
+    return isDraft(value) ? value : null;
   } catch {
     return null;
   }

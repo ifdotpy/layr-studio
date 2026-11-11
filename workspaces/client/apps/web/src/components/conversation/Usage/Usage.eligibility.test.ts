@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../shell/integration-support/observableFixture.tsx";
+import * as fixtureApi from "../../../servers/net/api.ts";
+import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 vi.mock("../../agents/support/state.ts", async (original) => ({
   ...(await original<typeof import("../../agents/support/state.ts")>()),
   useAgentDetail: <T>(agent: T) => agent,
@@ -8,7 +9,7 @@ import {
   Overage,
   ProviderKind as GeneratedApiProviderKind,
 } from "../../../generated/api.ts";
-import { createElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, expect, test, vi } from "vitest";
@@ -30,9 +31,17 @@ vi.mock("@mantine/core", async (importOriginal) => {
   };
 });
 vi.mock("../TokenRate/TokenRate.tsx", () => ({ default: () => null }));
-import { UsageFixture } from "../../../app/settings/UsageFixture.tsx";
+import {
+  UsageFixture,
+  createUsageFixture,
+  type UsageFixtureInputs,
+} from "../../../app/settings/UsageFixture.tsx";
 
-afterEach(() => vi.useRealTimers());
+const fixtureCleanups: (() => void)[] = [];
+afterEach(() => {
+  for (const cleanup of fixtureCleanups.splice(0)) cleanup();
+  vi.useRealTimers();
+});
 
 test("account limits omit model eligibility details and retain limits and refresh", () => {
   vi.useFakeTimers();
@@ -52,7 +61,7 @@ test("account limits omit model eligibility details and retain limits and refres
       createElement(
         MantineProvider,
         { env: "test" },
-        createElement(Usage, {
+        usageElement({
           agent,
           stateDir: "fixture",
           limits: null,
@@ -152,9 +161,13 @@ test("account limits omit model eligibility details and retain limits and refres
   }
 });
 
-function Usage(props: ComponentProps<typeof UsageFixture>) {
-  return createElement(AgentModelsFixture, {
-    agents: [props.agent],
-    children: createElement(UsageFixture, props),
+function usageElement(props: UsageFixtureInputs) {
+  const models = observableFixture([props.agent]);
+  const owner = createUsageFixture(models.store, fixtureApi, props);
+  owner.start();
+  fixtureCleanups.push(() => {
+    owner.dispose();
+    models.store.dispose();
   });
+  return createElement(UsageFixture, { ...props, owner });
 }

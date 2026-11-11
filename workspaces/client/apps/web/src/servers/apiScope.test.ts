@@ -45,7 +45,6 @@ function scope(
     localStorage: storage,
     sessionStorage: storage,
     beginMutation: createMutationJournal(id, storage),
-    beginActivity: () => () => {},
   });
 }
 const response = (value: unknown, hash = API_SCHEMA_HASH) =>

@@ -52,7 +52,7 @@ export function useSkillAutocomplete({
   account: string;
   cwd: string;
   provider: string;
-  draft: string;
+  draft?: string;
   input: React.RefObject<HTMLTextAreaElement | null>;
   insert: (text: string, start: number, end: number) => void;
 }) {
@@ -64,14 +64,12 @@ export function useSkillAutocomplete({
     cwd,
     provider,
   });
-  const catalog = resourceData(read.current);
-  const loading = read.current.status === "loading";
-  const loadError = read.current.status === "error";
   const [selection, setSelection] = useState<{
     owner: typeof read;
     range: TokenRange;
   } | null>(null);
   const range = selection?.owner === read ? selection.range : null;
+  const catalog = range ? resourceData(read.current) : undefined;
   const setRange = (range: TokenRange | null) =>
     setSelection(range ? { owner: read, range } : null);
   const dismissed = useRef("");
@@ -136,8 +134,8 @@ export function useSkillAutocomplete({
   return {
     range: range,
     matches: matches,
-    loading: loading,
-    loadError: loadError,
+    loading: !!range && read.current.status === "loading",
+    loadError: !!range && read.current.status === "error",
     hasErrors: !!catalog?.errors.length,
     updateRange,
     dismiss,

@@ -1,3 +1,4 @@
+import { now } from "../../../clock.ts";
 import type { ReactNode } from "react";
 import { observer } from "mobx-react-lite";
 import { Popover } from "@mantine/core";
@@ -15,20 +16,21 @@ export class DictationStore {
   text = "";
   partial = "";
   locale = navigator.language;
-  rows: Recording[] = [];
   deleted: Recording[] = [];
   busy = "";
   progress = "";
   attempt = "";
   cancelledAttempt = "";
-  elapsed = 0;
+  startedAt = 0;
+  get elapsed() {
+    return this.active ? Math.floor((now() - this.startedAt) / 1000) : 0;
+  }
+  set elapsed(seconds: number) {
+    this.startedAt = Date.now() - seconds * 1000;
+  }
   storageFailed = false;
   constructor() {
-    makeAutoObservable(
-      this,
-      { rows: observableRef, deleted: observableRef },
-      { autoBind: true },
-    );
+    makeAutoObservable(this, { deleted: observableRef }, { autoBind: true });
   }
   get canInsert() {
     return !this.active && !!this.text.trim();

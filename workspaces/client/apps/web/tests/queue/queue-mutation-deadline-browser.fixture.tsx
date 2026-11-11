@@ -3,13 +3,16 @@ import { observableFixture } from "../../src/components/shell/integration-suppor
 import type { QueueEntityDto } from "../../src/generated/observableResources.ts";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { useMessageQueue } from "../../src/components/conversation/support/useMessageQueue.ts";
+import { createMessageQueue } from "../../src/servers/net/queue.ts";
+import * as api from "../../src/servers/net/api.ts";
+import { updateQueueRequest } from "../../src/sync/localDraft.ts";
+import { reaction } from "mobx";
 import type { removeSendingMessage } from "../../src/app/conversation/delivery/removeSendingMessages.ts";
 
 declare global {
   interface Window {
     receiveDeadlineQueue(view: QueueEntityDto): void;
-    queue: ReturnType<typeof useMessageQueue>;
+    queue: ReturnType<typeof createMessageQueue>;
     observed: string[][];
     edited: Array<{ id: string; text: string }>;
     advance: number;
@@ -25,27 +28,31 @@ declare global {
   }
 }
 
-function Harness({ workspaceId }: { workspaceId: string }) {
-  window.queue = useMessageQueue({
-    id: "chat",
-    enabled: true,
-    scope: "deadline-fixture",
-    workspaceId,
-    observed: (ids) => window.observed.push(ids),
-    edited: (id, text) => window.edited.push({ id, text }),
-  });
-  return null;
-}
-
 export function mount(workspaceId: string) {
   const models = observableFixture();
+  window.queue = createMessageQueue(
+    {
+      id: "chat",
+      enabled: true,
+      scope: "deadline-fixture",
+      workspaceId,
+      observed: (ids) => window.observed.push(ids),
+      edited: (id, text) => window.edited.push({ id, text }),
+    },
+    models.store,
+    api,
+    localStorage,
+    updateQueueRequest,
+    new Set(),
+  );
+  reaction(
+    () => window.queue.items.map((item) => item.id),
+    (ids) => window.observed.push(ids),
+    { fireImmediately: true },
+  );
   window.receiveDeadlineQueue = (value) =>
     models.apply([{ collection: "queue", id: "chat", value }]);
   const root = createRoot(document.body);
-  root.render(
-    <models.Provider>
-      <Harness workspaceId={workspaceId} />
-    </models.Provider>,
-  );
+  root.render(null);
   return root;
 }

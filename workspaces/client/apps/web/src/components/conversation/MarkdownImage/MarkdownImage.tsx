@@ -1,5 +1,7 @@
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useEffect, useMemo, useState } from "react";
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../../../store/runtime.ts";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useMemo, useState } from "react";
 import PreviewModal from "../PreviewModal/PreviewModal.tsx";
 import { errorText } from "../../../api.ts";
 import FilePreview, {
@@ -11,7 +13,7 @@ import { relativeToDocument, safeSvg } from "../support/filePreviewFormats.ts";
 import { localFileLink } from "../support/fileLinks.ts";
 
 const raster = /^data:image\/(png|jpeg|gif|webp);base64,/i;
-export default function MarkdownImage({
+const MarkdownImageContent = observer(function MarkdownImage({
   src,
   alt,
   agentId,
@@ -24,14 +26,12 @@ export default function MarkdownImage({
   basePath?: string | undefined;
   localPath?: string | undefined;
 }) {
-  const { get } = useServerApi();
+  const net = useServerNet();
 
-  const [loaded, setLoaded] = useState("");
   const [error, setError] = useState("");
   const [remoteAllowed, setRemoteAllowed] = useState(false);
   const [preview, setPreview] = useState(false);
   const [filePreview, openFilePreview] = useFilePreview();
-  const [attempt, setAttempt] = useState(0);
   const target = useMemo((): PreviewTarget | null => {
     try {
       const local =
@@ -59,53 +59,39 @@ export default function MarkdownImage({
     }
   }, [src]);
   const remote = !!remoteHost;
-  useEffect(() => {
-    setError("");
-    setLoaded("");
-    setRemoteAllowed(false);
-    setPreview(false);
-    if (raster.test(src)) {
-      setLoaded(src);
-      return;
-    }
-    if (!target) {
-      if (!remote) setError("This image cannot be opened here.");
-      return;
-    }
-    let active = true;
-    const query = {
-      agent: target.agent!,
-      path: target.path!,
-    };
-    get("/api/file", { query })
-      .then((file) => {
-        if (!active) return;
-        if (file.mime === "image/svg+xml") {
-          const svg = safeSvg(
-            new TextDecoder().decode(
-              Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0)),
-            ),
-          );
-          setLoaded(
-            "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg),
-          );
-          return;
-        }
+  const read =
+    !raster.test(src) && target
+      ? net.reads.file({ agent: target.agent!, path: target.path! })
+      : undefined;
+  const current = read?.current;
+  const file = current && resourceData(current);
+  let loaded = raster.test(src) ? src : "";
+  let loadError = current?.status === "error" ? current.error.message : "";
+  try {
+    if (file) {
+      if (file.mime === "image/svg+xml") {
+        const svg = safeSvg(
+          new TextDecoder().decode(
+            Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0)),
+          ),
+        );
+        loaded = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+      } else {
         if (!/^image\/(png|jpeg|gif|webp|avif|bmp|x-icon)$/.test(file.mime))
           throw new Error("This image type is not supported.");
-        setLoaded(`data:${file.mime};base64,${file.base64}`);
-      })
-      .catch((e) => {
-        if (active) setError(errorText(e));
-      });
-    return () => {
-      active = false;
-    };
-  }, [src, target, remote, attempt]);
+        loaded = `data:${file.mime};base64,${file.base64}`;
+      }
+    } else if (!target && !remote && !loaded) {
+      loadError = "This image cannot be opened here.";
+    }
+  } catch (cause) {
+    loadError = errorText(cause);
+  }
+  const imageError = error || loadError;
   const image = loaded || (remoteAllowed ? src : "");
   return (
     <span className="markdown-image">
-      {image && !error ? (
+      {image && !imageError ? (
         <button
           type="button"
           className="image-preview-button"
@@ -128,15 +114,15 @@ export default function MarkdownImage({
       ) : (
         <span className="markdown-image-placeholder">
           <span>{alt || "Image"}</span>
-          {error ? (
+          {imageError ? (
             <>
-              <span role="alert">{error}</span>
+              <span role="alert">{imageError}</span>
               <button
                 type="button"
                 onClick={() => {
                   setError("");
                   if (remote) setRemoteAllowed(true);
-                  else setAttempt(attempt + 1);
+                  else void read?.read().catch(() => {});
                 }}
               >
                 Retry image
@@ -176,5 +162,21 @@ export default function MarkdownImage({
         </PreviewModal>
       )}
     </span>
+  );
+});
+
+export default function MarkdownImage(
+  props: Parameters<typeof MarkdownImageContent>[0],
+) {
+  return (
+    <MarkdownImageContent
+      key={JSON.stringify([
+        props.src,
+        props.agentId,
+        props.basePath,
+        props.localPath,
+      ])}
+      {...props}
+    />
   );
 }

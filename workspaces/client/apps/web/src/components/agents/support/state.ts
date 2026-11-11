@@ -1,6 +1,6 @@
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import { makeAutoObservable, computed, compareShallow } from "mobx";
 import { resourceData } from "../../../store/runtime.ts";
-import { useMemo } from "react";
-import { makeAutoObservable } from "mobx";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { agentId } from "../../../generated/observableResources.ts";
 import { AgentSource } from "../../../generated/api.ts";
@@ -21,8 +21,7 @@ import {
 
 type Store = ReturnType<typeof useServerStore>;
 function collections(store: Store) {
-  const current = store.state().current;
-  return resourceData(current);
+  return resourceData(store.state().current);
 }
 export function useStateCollections() {
   return collections(useServerStore());
@@ -30,80 +29,74 @@ export function useStateCollections() {
 
 export function useActivityView(agent: SidebarAgent) {
   const store = useServerStore();
-  return useMemo(() => {
-    const view = {
-      get activities() {
-        const state = collections(store);
-        const processes = store.processes(
-          agentId(agent.rootId || agent.id),
-        ).current;
-        if (
-          !state ||
-          (processes.status !== "live" && processes.status !== "stale")
-        )
-          return [];
-        const members = [...state.agents.values()].filter(
-          (a) => a.id === agent.id || a.rootId === (agent.rootId || agent.id),
-        );
-        return (
-          chatActivities(members, processes.data.activities).get(agent.id) || []
-        );
-      },
-      get background() {
-        return backgroundActivities(this.activities);
-      },
-      get commands() {
-        return this.activities.filter(
-          (activity) =>
-            activity.agentId === agent.id &&
-            activity.kind === "task" &&
-            activity.commandTask &&
-            (activity.background || !agent.inFlight),
-        );
-      },
-      get monitors() {
-        return this.activities.filter(
-          (activity) =>
-            activity.agentId === agent.id && activity.kind === "monitor",
-        );
-      },
-    };
-    return makeAutoObservable(view);
-  }, [store, agent]);
+  return {
+    get activities() {
+      const state = collections(store);
+      const processes = store.processes(
+        agentId(agent.rootId || agent.id),
+      ).current;
+      if (
+        !state ||
+        (processes.status !== "live" && processes.status !== "stale")
+      )
+        return [];
+      const members = [...state.agents.values()].filter(
+        (a) => a.id === agent.id || a.rootId === (agent.rootId || agent.id),
+      );
+      return (
+        chatActivities(members, processes.data.activities).get(agent.id) || []
+      );
+    },
+    get background() {
+      return backgroundActivities(this.activities);
+    },
+    get commands() {
+      return this.activities.filter(
+        (activity) =>
+          activity.agentId === agent.id &&
+          activity.kind === "task" &&
+          activity.commandTask &&
+          (activity.background || !agent.inFlight),
+      );
+    },
+    get monitors() {
+      return this.activities.filter(
+        (activity) =>
+          activity.agentId === agent.id && activity.kind === "monitor",
+      );
+    },
+  };
 }
 
 export function useConversationStartView(agent: SidebarAgent) {
   const store = useServerStore();
-  return useMemo(() => {
-    const view = {
-      get name() {
-        return (
-          [...(collections(store)?.projects.values() || [])].find(
-            (project) => project.path === agent.projectPath,
-          )?.name ||
-          agent.projectPath?.split("/").filter(Boolean).at(-1) ||
-          "Your project"
-        );
-      },
-      get recent() {
-        return [...(collections(store)?.agents.values() || [])]
-          .filter(
-            (chat) =>
-              chat.id !== agent.id &&
-              chat.isLead &&
-              !chat.archived &&
-              !chat.empty &&
-              chat.projectPath === agent.projectPath,
-          )
-          .sort(
-            (a, b) =>
-              (b.updated || b.created || 0) - (a.updated || a.created || 0),
-          )
-          .slice(0, 5);
-      },
-    };
-    return makeAutoObservable(view);
-  }, [store, agent]);
+  return {
+    get name() {
+      return (
+        [...(collections(store)?.projects.values() || [])].find(
+          (project) => project.path === agent.projectPath,
+        )?.name ||
+        agent.projectPath?.split("/").filter(Boolean).at(-1) ||
+        "Your project"
+      );
+    },
+    get recent() {
+      return [...(collections(store)?.agents.values() || [])]
+        .filter(
+          (chat) =>
+            chat.id !== agent.id &&
+            chat.isLead &&
+            !chat.archived &&
+            !chat.empty &&
+            chat.projectPath === agent.projectPath,
+        )
+        .sort(
+          (a, b) =>
+            (b.updated || b.created || 0) - (a.updated || a.created || 0),
+        )
+        .slice(0, 5);
+    },
+  };
 }
 
 export function useTeamView(
@@ -113,10 +106,7 @@ export function useTeamView(
   pendingReads?: ReadonlyMap<string, ReadState>,
 ) {
   const store = useServerStore();
-  return useMemo(
-    () => createTeamView(store, leadId, query, filter, pendingReads),
-    [store, leadId, query, filter, pendingReads],
-  );
+  return createTeamView(store, leadId, query, filter, pendingReads);
 }
 export function createTeamView(
   store: Store,
@@ -198,23 +188,19 @@ export function createTeamView(
       return filterTeamWorkers(this.workers, this.indicators, value);
     },
   };
-  return makeAutoObservable(view);
+  return makeAutoObservable(
+    view,
+    {
+      members: computed({ equals: compareShallow }),
+      workers: computed({ equals: compareShallow }),
+    },
+    { autoBind: true },
+  );
 }
 
 /** Membership depends on generated models, never a parallel App snapshot index. */
-export function useAgentCatalog() {
-  const store = useServerStore();
-  return agentCatalog(store);
-}
-const catalogs = new WeakMap<Store, ReturnType<typeof createAgentCatalog>>();
-export function agentCatalog(store: Store) {
-  let view = catalogs.get(store);
-  if (!view) {
-    view = createAgentCatalog(store);
-    catalogs.set(store, view);
-  }
-  return view;
-}
+export const useAgentCatalog = () => useServerAreas().agentsUi.agentCatalog!;
+export const agentCatalog = createAgentCatalog;
 export function createAgentCatalog(store: Store) {
   const view = {
     get agents(): SidebarAgent[] {
@@ -252,5 +238,12 @@ export function createAgentCatalog(store: Store) {
         });
     },
   };
-  return makeAutoObservable(view);
+  return makeAutoObservable(
+    view,
+    {
+      agents: computed({ equals: compareShallow }),
+      leads: computed({ equals: compareShallow }),
+    },
+    { autoBind: true },
+  );
 }

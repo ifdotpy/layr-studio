@@ -1,6 +1,8 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 import { terminalHeight, type TerminalHeightBounds } from "./terminalHeight.ts";
 
+const pixels = (value: string) => Number.parseFloat(value) || 0;
+
 type Geometry = { available: number; viewport: number; rootFont: number };
 
 /** Read unreserved host space; the dock reservation must not feed its own cap. */
@@ -52,23 +54,17 @@ export function useTerminalHeight(
           )
             continue;
           const verticalBorder =
-            (Number.parseFloat(style.borderTopWidth) || 0) +
-            (Number.parseFloat(style.borderBottomWidth) || 0);
-          const height =
-            element.id === "messages"
-              ? (Number.parseFloat(style.paddingTop) || 0) +
-                (Number.parseFloat(style.paddingBottom) || 0) +
-                verticalBorder
-              : element.id === "composer"
-                ? Math.max(
-                    element.getBoundingClientRect().height,
-                    element.scrollHeight + verticalBorder,
-                  )
-                : element.getBoundingClientRect().height;
+            pixels(style.borderTopWidth) + pixels(style.borderBottomWidth);
+          let height = element.getBoundingClientRect().height;
+          if (element.id === "messages")
+            height =
+              pixels(style.paddingTop) +
+              pixels(style.paddingBottom) +
+              verticalBorder;
+          if (element.id === "composer")
+            height = Math.max(height, element.scrollHeight + verticalBorder);
           reserved +=
-            height +
-            (Number.parseFloat(style.marginTop) || 0) +
-            (Number.parseFloat(style.marginBottom) || 0);
+            height + pixels(style.marginTop) + pixels(style.marginBottom);
           targets.add(element);
         }
       }
@@ -81,6 +77,10 @@ export function useTerminalHeight(
       observed = targets;
       // Replaced containers are new children of these; their content is not.
       structure.disconnect();
+      structure.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["style", "class"],
+      });
       for (const node of [parent, workspace, conversation])
         if (node) structure.observe(node, { childList: true });
       const hostTop = Math.max(0, workspace?.getBoundingClientRect().top ?? 0);
@@ -92,9 +92,7 @@ export function useTerminalHeight(
         ),
       };
       setGeometry((old) =>
-        old.available === next.available &&
-        old.viewport === next.viewport &&
-        old.rootFont === next.rootFont
+        Object.values(old).every((value, i) => value === Object.values(next)[i])
           ? old
           : next,
       );
@@ -106,11 +104,6 @@ export function useTerminalHeight(
     // Only the measured containers' children matter: watching the whole app
     // subtree ran this measurement for every streamed token and keystroke.
     const structure = new MutationObserver(schedule);
-    const rootStyles = new MutationObserver(schedule);
-    rootStyles.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["style", "class"],
-    });
     window.addEventListener("resize", schedule);
     window.visualViewport?.addEventListener("resize", schedule);
     window.visualViewport?.addEventListener("scroll", schedule);
@@ -120,7 +113,6 @@ export function useTerminalHeight(
       cancelAnimationFrame(frame);
       observer.disconnect();
       structure.disconnect();
-      rootStyles.disconnect();
       window.removeEventListener("resize", schedule);
       window.visualViewport?.removeEventListener("resize", schedule);
       window.visualViewport?.removeEventListener("scroll", schedule);

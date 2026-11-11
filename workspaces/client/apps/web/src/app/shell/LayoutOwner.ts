@@ -4,7 +4,7 @@ import {
   makeAutoObservable,
   observableRef,
   reaction,
-  runInAction,
+  action,
 } from "mobx";
 import {
   layoutValues,
@@ -127,10 +127,9 @@ export class LayoutOwner {
     this.stopViewport?.();
     if (!this.row) this.stopRow = this.observeRow(document.documentElement);
     const settingsQuery = window.matchMedia(layoutQueries.settingsFullScreen);
-    const measureSettings = () =>
-      runInAction(() => {
-        this.isSettingsFullscreen = settingsQuery.matches;
-      });
+    const measureSettings = action(() => {
+      this.isSettingsFullscreen = settingsQuery.matches;
+    });
     measureSettings();
     settingsQuery.addEventListener("change", measureSettings);
     const stopScope = reaction(
@@ -145,13 +144,7 @@ export class LayoutOwner {
       ([active, mobile]) => {
         detach?.();
         const viewport = active ? attachMobileViewport(mobile) : undefined;
-        const rail = active
-          ? observeEdgeRail((geometry) =>
-              runInAction(() => {
-                this.railGeometry = geometry;
-              }),
-            )
-          : undefined;
+        const rail = active ? observeEdgeRail(this.recordRail) : undefined;
         if (!active) this.railGeometry = null;
         detach = () => {
           viewport?.();
@@ -174,6 +167,9 @@ export class LayoutOwner {
     this.attachRow(null);
     this.slot = null;
   }
+  recordRail(geometry: EdgeRailGeometry | null) {
+    this.railGeometry = geometry;
+  }
   private observeRow(host: HTMLElement) {
     const document = host.ownerDocument;
     const view = document.defaultView!;
@@ -185,24 +181,20 @@ export class LayoutOwner {
     let measured: string | undefined;
     let rootFontPx = Number.NaN;
     let frame = 0;
-    const update = () => {
+    const update = action(() => {
       frame = 0;
       const key = inputs();
       if (key !== measured) {
         measured = key;
         const style = view.getComputedStyle(root);
         rootFontPx = Number.parseFloat(style.fontSize);
-        runInAction(() => {
-          this.mainFontPx = Number.parseFloat(
-            style.getPropertyValue("--studio-main-font-size"),
-          );
-        });
+        this.mainFontPx = Number.parseFloat(
+          style.getPropertyValue("--studio-main-font-size"),
+        );
       }
       const bounds = host.getBoundingClientRect();
-      runInAction(() => {
-        this.workspaceWidth =
-          this.workspace?.getBoundingClientRect().width ?? view.innerWidth;
-      });
+      this.workspaceWidth =
+        this.workspace?.getBoundingClientRect().width ?? view.innerWidth;
       const next = {
         host: {
           x: bounds.x,
@@ -221,7 +213,7 @@ export class LayoutOwner {
         shortTouchLandscape: root.hasAttribute("data-viewport-short-landscape"),
       };
       this.recordResize(next);
-    };
+    });
     // One measurement per frame, after the frame's own changes.
     const schedule = () => {
       if (!frame) frame = view.requestAnimationFrame(update);

@@ -1,4 +1,16 @@
-import { makeAutoObservable, reaction, runInAction } from "mobx";
+import {
+  createServerServices,
+  type ServerServices,
+} from "../../servers/serverServices.ts";
+import {
+  projectLocationOn,
+  type LocationProjectView,
+  type ProjectServerChoice,
+} from "../../servers/projectLocations.ts";
+import { ProjectServerRead } from "../../components/projects/ProjectServerCards/ProjectServerCards.tsx";
+import { NewChatModelStore } from "../../components/settings/NewChatModelSettings/NewChatModelSettings.tsx";
+import { flowValue } from "../../flowValue.ts";
+import { makeAutoObservable, reaction, flow, compareShallow } from "mobx";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
 import {
   errorText,
@@ -10,7 +22,6 @@ import type { Json } from "../../types.ts";
 import type { NewChatSettings } from "./newChatSettings.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { AgentModel, ServerAreas, SelectionIntent } from "../contracts.ts";
-
 type LeadCreateRequest = PostBody<"/api/leads"> &
   Required<Pick<PostBody<"/api/leads">, "previous" | "reuse_empty">> & {
     id: string;
@@ -27,16 +38,33 @@ export function isLeadCreateRequest(value: Json): value is LeadCreateRequest {
     (value.account_key === undefined || typeof value.account_key === "string")
   );
 }
-export type ProjectBinding = { projectId: string; homeServerId: string };
+export type SharedCreation = {
+  body: Extract<
+    PostBody<"/api/peer-teams">,
+    { action: "radio"; radio_action: "create" }
+  >;
+  roomId?: string;
+  rejected?: boolean;
+};
+export const sharedCreationKey = (scope: string) =>
+  `studio-radio-create:${scope}`;
+export type ProjectBinding = {
+  projectId: string;
+  homeServerId: string;
+};
 /** Durable creation identity is settled before any scope-sensitive UI action. */
 export class CreationOwner {
   readonly areas;
-  private receipts: { scope: string; agents: AgentModel[] };
+  private receipts: {
+    scope: string;
+    agents: AgentModel[];
+  };
   private pending: Json[] = [];
   private disposed = false;
   private generation = 0;
   private stop = () => {};
   isCreating = false;
+  sharedAttempt: SharedCreation | null = null;
   sharedCreate: {
     initialPath?: string | undefined;
     intent: SelectionIntent;
@@ -49,7 +77,7 @@ export class CreationOwner {
     });
     makeAutoObservable<this, "stop">(
       this,
-      { areas: false, stop: false },
+      { areas: false, stop: false, ensureConversation: false },
       { autoBind: true, deep: false },
     );
   }
@@ -83,8 +111,14 @@ export class CreationOwner {
       () => ({
         scope: this.areas.startup.creationScope,
         agents: this.unreplicatedCreatedAgents,
+        replicatedRoom:
+          this.sharedCreate &&
+          this.sharedAttempt?.roomId &&
+          this.areas.state?.rooms.has(this.sharedAttempt.roomId)
+            ? this.sharedAttempt.roomId
+            : null,
       }),
-      ({ scope }, previous) => {
+      ({ scope, replicatedRoom }, previous) => {
         if (scope !== previous?.scope) {
           this.generation++;
           this.isCreating = false;
@@ -94,6 +128,10 @@ export class CreationOwner {
             this.openShared();
         }
         this.acknowledgeReplication();
+        if (replicatedRoom) {
+          this.rememberShared(null);
+          this.sharedCreated(replicatedRoom);
+        }
       },
       { fireImmediately: true },
     );
@@ -151,18 +189,18 @@ export class CreationOwner {
     this.persist();
     this.areas.navigation.acceptCreated(receipt, intent, intent.scope);
   }
-  async ensureConversation(settings?: NewChatSettings) {
-    if (this.areas.navigation.selectedId)
-      return this.areas.navigation.selectedId;
-    const created = await this.newChat(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      settings,
+  ensureConversation = flow(function* (
+    this: CreationOwner,
+    settings?: NewChatSettings,
+  ) {
+    return (
+      this.areas.navigation.selectedId ||
+      ((yield* flowValue(
+        this.newChat(undefined, undefined, undefined, undefined, settings),
+      )) ??
+        undefined)
     );
-    return created ?? undefined;
-  }
+  });
   retry(request: LeadCreateRequest) {
     return this.newChat(undefined, undefined, request.id);
   }
@@ -177,7 +215,18 @@ export class CreationOwner {
       );
     }
   }
+  rememberShared(value: SharedCreation | null) {
+    this.areas.scope.services.api.save(
+      sharedCreationKey(this.areas.startup.creationScope),
+      value,
+    );
+    this.sharedAttempt = value;
+  }
   openShared(initialPath?: string) {
+    this.sharedAttempt = this.areas.scope.services.api.saved(
+      sharedCreationKey(this.areas.startup.creationScope),
+      null,
+    );
     this.sharedCreate = {
       initialPath,
       intent: this.areas.navigation.captureIntent(),
@@ -204,22 +253,14 @@ export class CreationOwner {
       );
     }
   }
-  async newChat(
+  newChat = flow(function* (
+    this: CreationOwner,
     cwd?: string,
     folder?: string,
     retryId?: string,
     binding?: ProjectBinding,
     settings?: NewChatSettings,
-  ): Promise<
-    | string
-    | null
-    | {
-        kind: "needs-project";
-        cwd: string | undefined;
-        folder: string | undefined;
-        binding: ProjectBinding | undefined;
-      }
-  > {
+  ) {
     if (this.isCreating || this.disposed) return null;
     if (!retryId && !cwd) {
       cwd = this.suggestedProject?.path;
@@ -278,19 +319,18 @@ export class CreationOwner {
     try {
       chatCreations.saveChatCreation(key, request);
       this.reloadPending();
-      const receipt = await untilAnswered(() =>
-        api.post("/api/leads", request, { timeoutMs: 60000 }),
+      const receipt = yield* flowValue(
+        untilAnswered(() =>
+          api.post("/api/leads", request, { timeoutMs: 60000 }),
+        ),
       );
       if (
         !chatCreations.confirmChatCreationResponse(key, request.id, receipt.id)
       )
         throw new Error("The server returned another chat identity.");
-      runInAction(() => {
-        if (!this.isCurrent(intent, generation)) return;
-        this.reloadPending();
-        this.acceptCreated(receipt, intent, generation);
-      });
       if (!this.isCurrent(intent, generation)) return null;
+      this.reloadPending();
+      this.acceptCreated(receipt, intent, generation);
       return receipt.id;
     } catch (failure) {
       const settled = chatCreations.settleFailedChatCreation(
@@ -299,20 +339,15 @@ export class CreationOwner {
         failure,
         errorText(failure),
       );
-      runInAction(() => {
-        if (!this.isCurrent(intent, generation)) return;
-        if (settled) {
-          this.reloadPending();
-        }
+      if (this.isCurrent(intent, generation)) {
+        if (settled) this.reloadPending();
         this.areas.notices.notify(errorText(failure));
-      });
+      }
       return null;
     } finally {
-      runInAction(() => {
-        if (generation === this.generation) this.isCreating = false;
-      });
+      if (generation === this.generation) this.isCreating = false;
     }
-  }
+  });
   get hasUnreplicatedSelection() {
     return this.unreplicatedCreatedAgents.some(
       (agent) => agent.id === this.areas.navigation.selectedId,
@@ -351,5 +386,109 @@ export class CreationOwner {
   }
   private persist() {
     this.areas.scope.services.api.save("codex-confirmed-chats", this.receipts);
+  }
+}
+
+/** Dialog lifetime owns the immutable connection read and model draft. */
+export class ProjectServerSelection {
+  selected = "";
+  read = new ProjectServerRead();
+  services: ServerServices | undefined;
+  model: NewChatModelStore | undefined;
+  private foreign = false;
+  private stop = () => {};
+  readonly project;
+  readonly choices;
+  readonly servicesFor;
+  readonly create;
+  constructor(
+    project: LocationProjectView,
+    choices: () => ProjectServerChoice[],
+    lastServer: string | undefined,
+    servicesFor: (id: string) => ServerServices | undefined,
+    create = createServerServices,
+  ) {
+    this.project = project;
+    this.choices = choices;
+    this.servicesFor = servicesFor;
+    this.create = create;
+    makeAutoObservable<this, "stop">(
+      this,
+      {
+        project: false,
+        choices: false,
+        servicesFor: false,
+        create: false,
+        stop: false,
+      },
+      { autoBind: true, deep: false },
+    );
+    const available = (row: ProjectServerChoice) =>
+      !row.disabled && !!projectLocationOn(project, row);
+    const previous = choices().find(
+      (row) => row.id === lastServer || row.serverId === lastServer,
+    );
+    this.selected =
+      (previous && available(previous) ? previous : choices().find(available))
+        ?.id || "";
+    this.stop = reaction(
+      () => {
+        const connection = this.choices().find(
+          (row) => row.id === this.selected,
+        )?.connection;
+        return [
+          this.selected,
+          connection?.id,
+          connection?.origin,
+          connection?.credentialId,
+          this.servicesFor(this.selected),
+        ];
+      },
+      this.attach,
+      { fireImmediately: true, equals: compareShallow },
+    );
+  }
+  get key() {
+    const connection = this.choices().find(
+      (row) => row.id === this.selected,
+    )?.connection;
+    return JSON.stringify([
+      this.selected,
+      connection?.id,
+      connection?.origin,
+      connection?.credentialId,
+    ]);
+  }
+  select(id: string) {
+    this.selected = id;
+  }
+  attach() {
+    this.closeServices();
+    const id = this.selected;
+    const server = this.choices().find((row) => row.id === id);
+    this.read = new ProjectServerRead(server?.connection);
+    this.services = this.servicesFor(id);
+    this.foreign = !this.services && !!server?.connection;
+    if (this.foreign) this.services = this.create(server!.connection!);
+    const location = server && projectLocationOn(this.project, server);
+    this.model =
+      this.services && location
+        ? new NewChatModelStore(
+            this.services,
+            this.project.id,
+            location.path,
+            this.services.areas,
+          )
+        : undefined;
+  }
+  dispose() {
+    this.stop();
+    this.closeServices();
+  }
+  closeServices() {
+    if (this.foreign) this.services?.close();
+    this.foreign = false;
+    this.services = undefined;
+    this.model = undefined;
   }
 }

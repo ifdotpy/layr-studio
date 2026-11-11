@@ -2,8 +2,11 @@ import { AgentSource, AgentStatus } from "../../../../generated/api.ts";
 import { approval } from "../../../../approvalFixtures.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import Requests, { RequestArea } from "./Requests.tsx";
-import { RequestFixture } from "../support/requestFixtures.ts";
+import Requests from "./Requests.tsx";
+import {
+  RequestFixture,
+  createRequestFixture,
+} from "../support/requestFixtures.ts";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";
 import type { Approval } from "../../../../approvals.ts";
 import type { Agent } from "../../../../types.ts";
@@ -44,22 +47,29 @@ const question = approval({
   },
 });
 
-function RequestStory({ requests }: { requests: Approval[] }) {
+let requestOwner: ReturnType<typeof createRequestFixture>;
+function RequestStory(_props: { requests: Approval[] }) {
   return (
-    <RequestFixture
-      requests={requests}
-      agents={[agentSummaryFixture(agent.id, agent)]}
-      details={[{ id: agent.id }]}
-    >
-      <RequestArea scope="storybook" notify={() => {}}>
-        <Requests all />
-      </RequestArea>
+    <RequestFixture owner={requestOwner}>
+      <Requests all />
     </RequestFixture>
   );
 }
 const meta = {
   title: "Questions/Requests",
   component: RequestStory,
+  beforeEach: ({ args }: { args: { requests: Approval[] } }) => {
+    const fixture = createRequestFixture({
+      scope: "storybook",
+      notify() {},
+      requests: args.requests,
+      agents: [agentSummaryFixture(agent.id, agent)],
+      details: [{ id: agent.id }],
+    });
+    fixture.start();
+    requestOwner = fixture;
+    return () => fixture.dispose();
+  },
   args: {
     requests: [question],
   },

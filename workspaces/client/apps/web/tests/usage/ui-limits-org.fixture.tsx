@@ -1,4 +1,6 @@
 import "../../src/rendererStyles.ts";
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { Account } from "../../src/components/accounts/support/Accounts.tsx";
@@ -11,9 +13,16 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
 import type { UsageAccount } from "../../src/app/settings/UsageFixture.tsx";
-import { UsageFixture as Usage } from "../../src/app/settings/UsageFixture.tsx";
+import {
+  createUsageFixture,
+  UsageFixture as Usage,
+} from "../../src/app/settings/UsageFixture.tsx";
 import { NativeError } from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
-import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
+import Accounts, {
+  frameAccounts,
+} from "../../src/components/accounts/Accounts/Accounts.tsx";
+import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
+import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
 import ClaudeProfile from "../../src/components/shell/ClaudeProfile/ClaudeProfile.tsx";
 import AccountSignInNotice from "../../src/components/accounts/AccountSignInNotice/AccountSignInNotice.tsx";
 import "../../src/components/accounts/support/accounts.css";
@@ -66,13 +75,49 @@ const agent: Agent = {
     message: "Usage limit reached",
   },
 };
-function Fixture() {
-  const [screen, setScreen] = useState("limits");
-  const [mode, setMode] = useState<"rejected" | "allowed" | "in_use">(
-    "rejected",
-  );
-  const [limitsOpen, setLimitsOpen] = useState(false);
-  window.refreshFixture = (next = mode) => setMode(next);
+const accountModels = observableFixture();
+accountModels.apply([
+  {
+    collection: "accounts",
+    id: "current",
+    value: {
+      accounts: [account],
+      archivedAccounts: [],
+      defaultAccountKey: "claude",
+      defaultAccountGroups: [],
+      supportsDelete: true,
+      supportsDisconnect: true,
+    },
+  },
+]);
+import * as api from "../../src/servers/net/api.ts";
+const accountAreas = browserAreas(accountModels.store);
+const usageOwners = Object.fromEntries(
+  (["rejected", "allowed", "in_use"] as const).map((mode) => {
+    const view = organizationLimits(mode);
+    const owner = createUsageFixture(accountModels.store, api, {
+      agent,
+      accounts: [
+        partialOrganizationUsageAccount({
+          key: "claude",
+          provider: "claude",
+          label: "Research",
+          limits: view.observation,
+          ...view.projection,
+          reload: async () => window.refreshFixture(),
+        }),
+      ],
+    });
+    owner.start();
+    return [mode, owner];
+  }),
+);
+window.addEventListener(
+  "pagehide",
+  () => Object.values(usageOwners).forEach((owner) => owner.dispose()),
+  { once: true },
+);
+function organizationLimits(mode: "rejected" | "allowed" | "in_use") {
   const view: components["schemas"]["RateLimitView"] = projectedLimits(
     "claude",
     now,
@@ -126,8 +171,18 @@ function Fixture() {
       ],
     },
   ];
+  return view;
+}
+function Fixture() {
+  const [screen, setScreen] = useState("limits");
+  const [mode, setMode] = useState<"rejected" | "allowed" | "in_use">(
+    "rejected",
+  );
+  const [limitsOpen, setLimitsOpen] = useState(false);
+  window.refreshFixture = (next = mode) => setMode(next);
+  const view = organizationLimits(mode);
   const limits = view.observation;
-  const recovery = view.projection.agents.worker.recovery;
+  const recovery = view.projection.agents.worker!.recovery;
   return (
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <AgentModelsFixture agents={[agent]}>
@@ -157,6 +212,7 @@ function Fixture() {
                 data-usage
               >
                 <Usage
+                  owner={usageOwners[mode]!}
                   agent={agent}
                   stateDir="fixture"
                   limits={limits}
@@ -184,19 +240,33 @@ function Fixture() {
                 errors={[]}
                 onSignIn={(key) => (window.signedInAccount = key)}
               />
-              <Accounts
-                managerOnly
-                state={{
-                  accounts: [account],
-                  archivedAccounts: [],
-                  defaultAccountKey: "claude",
-                  defaultAccountGroups: [],
-                  supportsDelete: true,
-                  supportsDisconnect: true,
-                }}
-                scope="fixture"
-                onError={() => {}}
-              />
+              <accountModels.Provider>
+                <AreasProvider value={accountAreas}>
+                  <Accounts />
+                  <ServerAccountsPanel
+                    servers={[
+                      {
+                        id: "fixture",
+                        label: "Fixture",
+                        origin: location.origin,
+                      },
+                    ]}
+                    accountsByServer={{
+                      fixture: frameAccounts({
+                        accounts: [account],
+                        defaultAccountKey: "claude",
+                      }),
+                    }}
+                    statuses={{ fixture: "live" }}
+                    startAccount={(_server, command) => {
+                      window.signedInAccount = command.accountKey;
+                    }}
+                    accountAction={(_server, command) =>
+                      accountAreas.accountsUi.receive(command)
+                    }
+                  />
+                </AreasProvider>
+              </accountModels.Provider>
               <ClaudeProfile account={account} onSaved={() => {}} expanded />
             </>
           )}

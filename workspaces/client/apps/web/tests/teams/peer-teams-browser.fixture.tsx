@@ -1,8 +1,14 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { ConversationProvider } from "../../src/components/conversation/support/navigation.ts";
 import {
-  ServerViewStoreProvider,
+  ServerStoreProvider,
   useServerStore,
 } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../src/store/runtime.ts";
@@ -177,7 +183,7 @@ const Fixture = observer(function Fixture() {
   );
 });
 createRoot(document.getElementById("root")!).render(
-  <ServerViewStoreProvider>
+  <ServerStoreProvider value={fixtureServerStore}>
     <Fixture />
-  </ServerViewStoreProvider>,
+  </ServerStoreProvider>,
 );

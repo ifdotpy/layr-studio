@@ -1,3 +1,5 @@
+import { requestApiFixture } from "../support/requestFixtures.ts";
+import { createNet } from "../../../../servers/net/net.ts";
 import { createRequestsView } from "../../support/requestView.ts";
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from "react";
@@ -30,6 +32,7 @@ vi.mock(
       typeof import("../../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
     useServerStore: () => h.store,
+    useServerNet: () => createNet(requestApiFixture(h), () => h.store!),
     useServerApi: () => ({ post: h.post, command: { answer: h.answer } }),
     useServerServices: () => null,
     useServerStorage: () => h.storage,
@@ -68,10 +71,18 @@ async function fixture(onLoading?: () => void) {
   });
   const store = createServerStore(subscriptions);
   h.store = store;
-  const root = requestTestRoot(() => {
-    store.dispose();
-    subscriptions.dispose();
-  });
+  const root = requestTestRoot(
+    () => {
+      store.dispose();
+      subscriptions.dispose();
+    },
+    () => ({
+      api: () => requestApiFixture(h),
+      store,
+      storage: h.storage,
+      server: "local",
+    }),
+  );
   const item = { id: "lead:item", role: "assistant", text: "Continue?" };
   const items = [item];
   const Answer = observer(function Answer({
@@ -378,5 +389,38 @@ it("isolates another chat's existing request state and observes this chat's hist
     expect(renders.get("question-history") || 0).toBe(0);
   } finally {
     await f.close();
+  }
+});
+
+it("keeps the request owner and private draft while membership is unavailable", async () => {
+  const { action, observable } = await import("mobx");
+  const { RequestAreaOwner, answerKey } =
+    await import("../RequestArea/RequestArea.tsx");
+  const { requestFixture } = await import("../support/requestFixtures.ts");
+  const { requestDraftsForStorage } =
+    await import("../support/requestDrafts.ts");
+  const api = await import("../../../../servers/net/api.ts");
+  const fixture = requestFixture([request()]);
+  const current = observable.box(fixture.store.requests().current);
+  const store = {
+    ...fixture.store,
+    requests: () => ({ current: current.get() }),
+  };
+  const owner = new RequestAreaOwner(
+    { api: () => api, store, storage: h.storage, server: "test" },
+    () => ({ scope: "test", notify() {} }),
+  );
+  const drafts = requestDraftsForStorage(h.storage),
+    key = answerKey("test", request());
+  drafts.set(key, { choice: "Private answer" });
+  owner.start();
+  try {
+    const view = owner.views.get("question");
+    action(() => current.set({ status: "loading" }))();
+    expect(owner.views.get("question")).toBe(view);
+    expect(drafts.get(key)).toEqual({ choice: "Private answer" });
+  } finally {
+    owner.dispose();
+    fixture.store.dispose();
   }
 });

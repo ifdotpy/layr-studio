@@ -1,11 +1,12 @@
 import "../../src/rendererStyles.ts";
 import type { QueueItem } from "../../src/components/conversation/MessageQueue/MessageQueue.tsx";
 
-import { useState } from "react";
+import { makeAutoObservable } from "mobx";
+import { createMessageQueueStore } from "../../src/components/conversation/MessageQueue/MessageQueueStore.ts";
 import { createRoot } from "react-dom/client";
 import MessageQueue from "../../src/components/conversation/MessageQueue/MessageQueue.tsx";
-function App() {
-  const [items, setItems] = useState<QueueItem[]>([
+const state = makeAutoObservable({
+  items: [
     {
       id: "q1",
       text: "Original message",
@@ -13,16 +14,23 @@ function App() {
       status: "queued",
       kind: "user",
     },
-  ]);
-  return (
-    <MessageQueue
-      scope="journal-fixture"
-      items={items}
-      canReorder={true}
-      onEdit={async (item, text) => setItems([{ ...item, text }])}
-      onCancel={async () => setItems([])}
-      onReorder={async () => {}}
-    />
-  );
-}
-createRoot(document.getElementById("root")!).render(<App />);
+  ] as QueueItem[],
+});
+const store = createMessageQueueStore(
+  () => ({
+    scope: "journal-fixture",
+    items: state.items,
+    canReorder: true,
+    onEdit: async (item, text) => {
+      state.items = [{ ...item, text }];
+    },
+    onCancel: async () => {
+      state.items = [];
+    },
+    onReorder: async () => {},
+  }),
+  "local",
+);
+createRoot(document.getElementById("root")!).render(
+  <MessageQueue store={store} />,
+);

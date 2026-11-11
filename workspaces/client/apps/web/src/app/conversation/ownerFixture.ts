@@ -1,5 +1,5 @@
+import { observable, action } from "mobx";
 import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
-import { CreationOwner } from "../projects/CreationOwner.ts";
 import { vi } from "vitest";
 import { AgentSource } from "../../generated/api.ts";
 import {
@@ -20,33 +20,23 @@ export function ownerFixture() {
       threadId: "thread",
     },
   ]);
-  const ensureConversation = vi
-    .spyOn(CreationOwner.prototype, "ensureConversation")
-    .mockResolvedValue("created");
   const areas = conversationActionsFixture(() => {}, models.store);
+  const ensureConversation = vi
+    .spyOn(areas.creation, "ensureConversation")
+    .mockResolvedValue("created");
   const services = areas.scope.services;
-  let text: Record<string, string> = {};
-  const listeners = new Map<string, Set<() => void>>();
+  const text = observable.map<string, string>();
   const drafts = {
-    getDraft: (id: string) => text[id] || "",
-    subscribeDraft(id: string, listener: () => void) {
-      const group = listeners.get(id) || new Set<() => void>();
-      group.add(listener);
-      listeners.set(id, group);
-      return () => {
-        group.delete(listener);
-      };
-    },
-    setDrafts(
+    getDraft: (id: string) => text.get(id) || "",
+    setDrafts: action(function (
       value:
         | Record<string, string>
         | ((old: Record<string, string>) => Record<string, string>),
     ) {
-      const old = text;
-      text = typeof value === "function" ? value(old) : value;
-      for (const [id, callbacks] of listeners)
-        if (old[id] !== text[id]) callbacks.forEach((callback) => callback());
-    },
+      text.replace(
+        typeof value === "function" ? value(Object.fromEntries(text)) : value,
+      );
+    }),
     conflicts: [],
     dismissDraft() {},
     error: "",

@@ -3,10 +3,13 @@ import { useServerStore } from "../../../servers/ServerServicesProvider/ServerSe
 import { agentId as resourceAgentId } from "../../../../generated/observableResources.ts";
 import { computed } from "mobx";
 import { createTurnErrorMirror } from "../../../../generated/observableResources.ts";
-import { AgentStatus as GeneratedApiAgentStatus } from "../../../../generated/api.ts";
+import {
+  AnalyticsScope,
+  AgentStatus as GeneratedApiAgentStatus,
+} from "../../../../generated/api.ts";
 import type { DeepReadonly } from "../../../../deepReadonly.ts";
-import { useServerApi } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useServerNet } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useMemo } from "react";
 import "../../../../api.ts";
 import type { Agent, JsonInput, Message } from "../../../../types.ts";
 import { failureMessage } from "../../support/turnFailureReason.ts";
@@ -30,50 +33,21 @@ export function failedTurnsNeedingLookup(
 
 // Old servers saved terminal errors in analytics without transcript notices.
 // The compact view also works with their full analytics response.
-function createEmptyLookup(scope = "") {
-  return {
-    scope,
-    checked: [] as string[],
-    failed: [] as string[],
-    errors: {} as Record<string, DeepReadonly<JsonInput>>,
-    loading: [] as string[],
-  };
-}
-const emptyLookup = createEmptyLookup();
-type Lookup = ReturnType<typeof createEmptyLookup>;
-
 export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
   const store = useServerStore();
   const detail = agent
     ? resourceData(store.agentDetail(resourceAgentId(agent.id)).current)
     : undefined;
-  const { get } = useServerApi();
-  // Historical fallbacks belong to this mounted server owner, even when ids
-  // and workspace names collide with another authenticated server.
-  const { cachedErrors, inFlight } = useMemo(
-    () => ({
-      cachedErrors: new Map<string, Record<string, DeepReadonly<JsonInput>>>(),
-      inFlight: new Map<
-        string,
-        Promise<Record<string, DeepReadonly<JsonInput>>>
-      >(),
-    }),
-    [get],
-  );
-
-  const scope = `${workspace}:${agent?.id}:${agent?.threadId}`;
-  const [lookupAttempt, setLookupAttempt] = useState(0);
-  const [result, setResult] = useState(() => createEmptyLookup(scope));
-  const updateLookup = (update: (old: Lookup) => Lookup) =>
-    setResult((old) =>
-      update(old.scope === scope ? old : createEmptyLookup(scope)),
-    );
-  const current = result.scope === scope ? result : emptyLookup;
-  const cached = cachedErrors.get(scope);
-  const { errors, resolved, existing, turns } = useMemo(
+  const net = useServerNet();
+  const {
+    errors: knownErrors,
+    resolved,
+    existing,
+    turns,
+  } = useMemo(
     () =>
       computed(() => {
-        const errors = { ...cached, ...current.errors };
+        const errors: Record<string, DeepReadonly<JsonInput>> = {};
         const resolved = new Set<string>();
         for (const item of items) {
           if (item.turnErrorResolved && item.turnId) resolved.add(item.turnId);
@@ -100,8 +74,6 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       }),
     [
       items,
-      cached,
-      current.errors,
       detail?.nativeTurnError,
       agent?.status,
       agent?.turnId,
@@ -109,96 +81,39 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       detail?.error,
     ],
   ).get();
-  const pending = turns
-    .filter(
-      (turn) =>
-        !errors[turn] && !resolved.has(turn) && !current.checked.includes(turn),
-    )
-    .slice(-120);
-  const requestKey = pending.join(",");
-  // Historical analytics is a first-load fallback. Live failures carry their
-  // errors in transcript/agent records; only an explicit retry reads again.
-  useEffect(() => {
-    if (!agent?.id || !agent.threadId || !requestKey) return;
-    let active = true;
-    const requested = requestKey.split(",");
-    updateLookup((old) => ({
-      ...old,
-      scope,
-      loading: requested,
-    }));
-    const agentId = agent.id;
-    const threadId = agent.threadId;
-    const key = `${scope}:${requestKey}`;
-    const existingRequest = inFlight.get(key);
-    let request: Promise<Record<string, DeepReadonly<JsonInput>>>;
-    if (existingRequest) request = existingRequest;
-    else {
-      request = get("/api/analytics", {
-        query: {
-          agent: agentId,
-          scope: "agent",
+  const errors = { ...knownErrors };
+  // Only the opening history needs the legacy fallback; live turns carry errors.
+  const requested = useMemo(
+    () =>
+      turns.filter((turn) => !errors[turn] && !resolved.has(turn)).slice(-120),
+    [store, workspace, agent?.id, agent?.threadId],
+  );
+  const read =
+    agent?.id && agent.threadId && requested.length
+      ? net.reads.analytics({
+          agent: agent.id,
+          scope: AnalyticsScope.agent,
           view: "turn-errors",
-          thread: threadId,
-          turns: requestKey,
+          thread: agent.threadId,
+          turns: requested.join(","),
           limit: 1,
-        },
-        timeoutMs: 60000,
-      }).then((data) => {
-        const recovered: Record<string, DeepReadonly<JsonInput>> = {};
-        for (const turn of data.turns || []) {
-          if (
-            turn.agentId === agentId &&
-            turn.threadId === threadId &&
-            turn.turnId &&
-            requested.includes(turn.turnId) &&
-            ["failed", "uncertain"].includes(turn.status || "") &&
-            turn.error
-          ) {
-            const error = createTurnErrorMirror(turn).current.error;
-            if (error) recovered[turn.turnId] = error;
-          }
-        }
-        const previous = cachedErrors.get(scope);
-        cachedErrors.delete(scope);
-        cachedErrors.set(
-          scope,
-          Object.fromEntries(
-            Object.entries({ ...previous, ...recovered }).slice(-120),
-          ),
-        );
-        while (cachedErrors.size > 24)
-          cachedErrors.delete(cachedErrors.keys().next().value!);
-        return recovered;
-      });
-      inFlight.set(key, request);
-      void request.finally(() => inFlight.delete(key)).catch(() => {});
+        })
+      : undefined;
+  const current = read?.current;
+  const analytics = current && resourceData(current);
+  for (const turn of analytics?.turns || []) {
+    if (
+      turn.agentId === agent?.id &&
+      turn.threadId === agent?.threadId &&
+      turn.turnId &&
+      requested.includes(turn.turnId) &&
+      ["failed", "uncertain"].includes(turn.status || "") &&
+      turn.error
+    ) {
+      const recovered = createTurnErrorMirror(turn).current.error;
+      if (recovered && !errors[turn.turnId]) errors[turn.turnId] = recovered;
     }
-    request
-      .then((recovered) => {
-        if (!active) return;
-        updateLookup((old) => ({
-          scope,
-          checked: [...old.checked, ...requested],
-          failed: old.failed.filter((turn) => !requested.includes(turn)),
-          errors: { ...old.errors, ...recovered },
-          loading: [],
-        }));
-      })
-      .catch(() => {
-        if (active)
-          updateLookup((old) => ({
-            scope,
-            checked: [...old.checked, ...requested],
-            failed: [...old.failed, ...requested],
-            errors: old.errors,
-            loading: [],
-          }));
-      });
-    return () => {
-      active = false;
-    };
-  }, [scope, lookupAttempt]);
+  }
   const enriched = useMemo(
     () =>
       computed(() => {
@@ -242,23 +157,15 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       }),
     [items, errors, existing, agent?.id, agent?.threadId],
   ).get();
-  const retry = useCallback(
-    (turn: string) => {
-      updateLookup((old) => ({
-        scope,
-        errors: old.errors,
-        checked: old.checked.filter((id) => id !== turn),
-        failed: old.failed.filter((id) => id !== turn),
-        loading: [],
-      }));
-      setLookupAttempt((value) => value + 1);
-    },
-    [scope],
-  );
   return {
     items: enriched,
-    loading: current.loading,
-    failed: current.failed,
-    retry,
+    loading:
+      current && ["absent", "loading"].includes(current.status)
+        ? requested
+        : [],
+    failed: current?.status === "error" ? requested : [],
+    retry: (_turn: string) => {
+      void read?.read().catch(() => {});
+    },
   };
 }

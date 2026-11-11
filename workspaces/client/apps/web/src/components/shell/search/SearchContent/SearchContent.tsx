@@ -9,7 +9,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { Search } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { errorText, type GetResult } from "../../../../api.ts";
 import { observer } from "mobx-react-lite";
 import { useServerStore } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
@@ -26,12 +26,6 @@ export const SearchContent = observer(function SearchContent({
   const { get } = api;
 
   const sourceRequest = useRef(0);
-  useEffect(
-    () => () => {
-      sourceRequest.current++;
-    },
-    [],
-  );
   type SearchResult = GetResult<"/api/search">["results"][number];
   type SearchItem = GetResult<"/api/search/item">;
   type SearchRecord =

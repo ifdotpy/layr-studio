@@ -79,6 +79,7 @@ function fixture() {
     chatCreations,
     areas,
     confirmed: owner,
+    apply: models.apply,
   };
 }
 
@@ -215,4 +216,38 @@ it("settles an old A to B to A receipt without publishing its stale UI completio
   expect(
     f.chatCreations.pendingChatCreations("codex-pending-creation:workspace-a"),
   ).toEqual([]);
+});
+
+it("opens an acknowledged shared room only after replication, then clears its durable attempt once", () => {
+  const f = fixture();
+  f.owner.start();
+  f.owner.openShared("/project");
+  const open = vi.spyOn(f.areas, "open");
+  const attempt = {
+    body: {
+      action: "radio" as const,
+      radio_action: "create" as const,
+      request_id: "shared-request",
+      path: "/project",
+      name: "Shared",
+      participants: [],
+    },
+    roomId: "shared-room",
+  };
+  f.owner.rememberShared(attempt);
+  expect(open).not.toHaveBeenCalled();
+  f.apply([
+    { collection: "room", id: "shared-room", value: { id: "shared-room" } },
+  ]);
+  expect(open).toHaveBeenCalledExactlyOnceWith("shared-room");
+  expect(f.owner.sharedAttempt).toBeNull();
+  expect(f.owner.sharedCreate).toBeNull();
+  f.apply([
+    {
+      collection: "room",
+      id: "shared-room",
+      value: { id: "shared-room", name: "Renamed" },
+    },
+  ]);
+  expect(open).toHaveBeenCalledTimes(1);
 });

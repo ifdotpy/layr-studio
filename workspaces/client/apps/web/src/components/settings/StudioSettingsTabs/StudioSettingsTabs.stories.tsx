@@ -3,12 +3,11 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import {
   Accordion,
   MantineProvider,
-  useMantineColorScheme,
   NativeSelect,
   Tabs,
   TextInput,
 } from "@mantine/core";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import {
   StudioSettingsLayout,
@@ -25,10 +24,6 @@ import { theme } from "../../../theme.ts";
 import "../../../servers/servers.css";
 
 function SettingsFixture({ light = false }: { light?: boolean }) {
-  const { setColorScheme } = useMantineColorScheme();
-  useEffect(() => {
-    setColorScheme(light ? "light" : "dark");
-  }, [light, setColorScheme]);
   const [value, setValue] = useState<StudioSettingsTab>("accounts");
   return (
     <MantineProvider theme={theme} forceColorScheme={light ? "light" : "dark"}>

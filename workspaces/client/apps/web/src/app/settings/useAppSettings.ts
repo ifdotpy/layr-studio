@@ -1,3 +1,5 @@
+import { createProjectPeersStore } from "../../components/projects/ProjectPeers/ProjectPeers.tsx";
+import type { ServerApi } from "../../api.ts";
 import { makeAutoObservable } from "mobx";
 import type { ServerSettings } from "../../servers/ServerSettingsContext.tsx";
 import { isStudioSettingsTab } from "../../components/settings/StudioSettingsTabs/StudioSettingsTabs.tsx";
@@ -6,6 +8,18 @@ import type { AppScope } from "../contracts.ts";
 import type { ServerCommand } from "../../servers/navigation.ts";
 
 export class SettingsUi {
+  projectPeers: ReturnType<typeof createProjectPeersStore> | null = null;
+  openProjectPeers(
+    projectId: string,
+    api: ServerApi,
+    notify: (message: string) => void,
+  ) {
+    return (this.projectPeers = createProjectPeersStore(
+      projectId,
+      api,
+      notify,
+    ));
+  }
   chatOpen = false;
   accountModalOpen = false;
   externalAccount = false;

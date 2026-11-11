@@ -1,4 +1,4 @@
-import { useBackgroundTaskArea } from "../support/backgroundTaskActions.tsx";
+import { createBackgroundTaskArea } from "../support/backgroundTaskActions.tsx";
 import { initSync } from "../../../../wasm/generated/client";
 // @vitest-environment happy-dom
 import {
@@ -119,7 +119,6 @@ async function fixture() {
       localStorage: storage,
       sessionStorage: storage,
       beginMutation: createMutationJournal(null, storage, journal.store(null)),
-      beginActivity: () => () => {},
     });
   hooks.api = open();
   const task: import("../support/backgroundTaskModel.ts").DisplayProcessTask = {
@@ -161,16 +160,20 @@ async function fixture() {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  let area: BackgroundTaskActions;
   const notify = vi.fn();
-  function Area() {
-    area = useBackgroundTaskArea({
+  const area: BackgroundTaskActions = createBackgroundTaskArea(
+    hooks.api!,
+    store,
+    "local",
+    {
       opened: true,
       leadId: "owner",
       close() {},
       openAgent() {},
       notify,
-    });
+    },
+  );
+  function Area() {
     return createElement(
       BackgroundTaskActionsProvider,
       { value: area },

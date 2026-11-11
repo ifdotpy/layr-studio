@@ -3,7 +3,7 @@ import { perfInstrumentation } from "./scripts/perf-instrumentation.ts";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [perfInstrumentation(true)],
+  plugins: [perfInstrumentation()],
   define: { __STUDIO_PERF_REPORTING__: "false" },
   test: {
     name: "unit",

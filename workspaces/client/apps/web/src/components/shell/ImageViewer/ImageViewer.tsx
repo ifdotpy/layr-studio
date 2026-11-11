@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 
-export default function ImageViewer({
+export default function ImageViewer(props: {
+  src: string;
+  alt: string;
+  onError?: () => void;
+}) {
+  return <ImageCanvas key={props.src} {...props} />;
+}
+
+function ImageCanvas({
   src,
   alt,
   onError,
@@ -13,10 +21,6 @@ export default function ImageViewer({
   const [natural, setNatural] = useState({ width: 0, height: 0 });
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState<number | null>(null);
-  useEffect(() => {
-    setNatural({ width: 0, height: 0 });
-    setZoom(null);
-  }, [src]);
   useEffect(() => {
     const node = viewport.current;
     if (!node) return;

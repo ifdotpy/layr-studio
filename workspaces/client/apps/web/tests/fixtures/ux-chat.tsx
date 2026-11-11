@@ -1,5 +1,5 @@
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { runInAction } from "mobx";
+import { runInAction, observable, action } from "mobx";
 import {
   createServerServices,
   type ServerServices,
@@ -15,13 +15,7 @@ import {
   observableFixture,
   conversationActionsFixture,
 } from "../../src/components/shell/integration-support/observableFixture.tsx";
-import React, {
-  useCallback,
-  useRef,
-  useState,
-  useMemo,
-  useEffect,
-} from "react";
+import React, { useRef, useState, useMemo, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -54,11 +48,10 @@ declare global {
   }
 }
 
+const draftValues = observable.map<string, string>();
 function Fixture() {
   const [id, setId] = useState("lead");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const currentDrafts = useRef(drafts);
-  const draftListeners = useRef(new Map<string, Set<() => void>>());
   const [notice, setNotice] = useState("");
   const [jumpTarget, setJumpTarget] = useState<{
     messageId: string;
@@ -100,23 +93,7 @@ function Fixture() {
       value: { stateDir: data.stateDir },
     },
   ]);
-  const getDraft = useCallback(
-    (session: string) => currentDrafts.current[session] || "",
-    [],
-  );
-  const subscribeDraft = useCallback(
-    (session: string, listener: () => void) => {
-      let listeners = draftListeners.current.get(session);
-      if (!listeners)
-        draftListeners.current.set(session, (listeners = new Set()));
-      listeners.add(listener);
-      return () => {
-        listeners?.delete(listener);
-        if (!listeners?.size) draftListeners.current.delete(session);
-      };
-    },
-    [],
-  );
+  const getDraft = (session: string) => draftValues.get(session) || "";
   window.chatFixture = {
     select: setId,
     jump: (messageId: string) =>
@@ -156,7 +133,6 @@ function Fixture() {
     [store, services],
   );
   area.scope.services.drafts.getDraft = getDraft;
-  area.scope.services.drafts.subscribeDraft = subscribeDraft;
   runInAction(() => {
     setStartupFixture(area, data);
     area.startup.workspaceId =
@@ -170,13 +146,10 @@ function Fixture() {
   useEffect(() => selected.start(), [selected]);
   useEffect(() => area.layout.start(), [area]);
   services.drafts.setDrafts = (update) => {
-    const previous = currentDrafts.current;
+    const previous = Object.fromEntries(draftValues);
     const next = typeof update === "function" ? update(previous) : update;
-    currentDrafts.current = next;
+    action(() => draftValues.replace(next))();
     setDrafts(next);
-    for (const [session, listeners] of draftListeners.current)
-      if (previous[session] !== next[session])
-        listeners.forEach((listener) => listener());
   };
   services.outbox.durableSend = async (body, _attachments, persist) => {
     const failure = window.__uxChatSendFailure;

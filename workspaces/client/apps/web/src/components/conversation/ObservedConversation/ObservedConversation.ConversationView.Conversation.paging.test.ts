@@ -54,8 +54,21 @@ const h = vi.hoisted(() => ({
   consume: vi.fn(),
   follow: vi.fn(),
 }));
-vi.mock("../../../usePendingCommands.ts", () => ({
-  usePendingCommands: () => [],
+vi.mock("../support/useConversationScroll.ts", async (original) => ({
+  ...(await original<typeof import("../support/useConversationScroll.ts")>()),
+  createConversationScroll: () => ({
+    scroll: { current: h.root },
+    content: { current: null },
+    getFollow: () => true,
+    subscribeFollow: () => () => {},
+    setFollow: h.follow,
+    onScroll: () => {},
+    hasRecentScrollInput: () => true,
+    consumeHistoryScrollInput: h.consume,
+    remember: () => {},
+    revealRequest: () => {},
+    getAnchorId: () => null,
+  }),
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -100,10 +113,6 @@ vi.mock("../../../conversation/liveText.ts", async (original) => ({
   ...(await original<typeof import("../../../conversation/liveText.ts")>()),
   useLiveText: () => new Map(),
 }));
-vi.mock("../../../servers/activity.ts", async (original) => ({
-  ...(await original<typeof import("../../../servers/activity.ts")>()),
-  useServerActivity: () => {},
-}));
 vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
   useMediaQuery: () => false,
@@ -114,36 +123,11 @@ vi.mock("../support/useQuestionCards.ts", () => ({
 vi.mock("../support/usePromptRecall.ts", () => ({
   usePromptRecall: () => ({}),
 }));
-vi.mock("../support/useConversationScroll.ts", () => ({
-  useConversationScroll: () => ({
-    scroll: { current: h.root },
-    content: { current: null },
-    onScroll: vi.fn(),
-    setFollow: h.follow,
-    getAnchorId: () => "visible",
-    consumeHistoryScrollInput: h.consume,
-  }),
-}));
-vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
-}));
-vi.mock("../support/useUploadRecovery.ts", () => ({
-  useUploadRecovery: () => ({ pending: [] }),
-}));
 vi.mock("../support/useChatReadState.ts", () => ({
   useVisibleChatResult: () => {},
 }));
-vi.mock("../support/useDisplayPhase.ts", () => ({
-  useDisplayPhase: () => "error",
-}));
 vi.mock("../../agents/support/WorkerModelPicker.tsx", () => ({
   useWorkerModels: () => ({ models: [] }),
-}));
-vi.mock("../support/useMessageQueue.ts", () => ({
-  useMessageQueue: () => ({ items: [] }),
-}));
-vi.mock("../support/useSendingMessageRemoval.ts", () => ({
-  useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../../../wasm/client.ts", () => ({}));
 import { renderConversationViewFixture as Conversation } from "../ConversationView/ConversationView.fixture.tsx";
@@ -304,11 +288,23 @@ it("does not block another chat while the previous page is pending", async () =>
 it("does not follow after a latest request completes for a different chat", async () => {
   const pending = Promise.withResolvers<void>();
   h.showLatest.mockImplementationOnce(() => pending.promise);
-  const first = elements(renderConversation(propsFixture)).find(
-    (node) =>
-      typeof node.type === "function" && node.type.name === "FollowLatest",
-  )!;
-  (first.props as typeof first.props & { onClick: () => void }).onClick();
+  const first = elements(renderConversation(propsFixture)).find((node) => {
+    const type: unknown = node.type;
+    return (
+      typeof type === "object" &&
+      type !== null &&
+      "type" in type &&
+      typeof type.type === "function" &&
+      type.type.name === "FollowLatest"
+    );
+  });
+  if (
+    !first ||
+    !("onClick" in first.props) ||
+    typeof first.props.onClick !== "function"
+  )
+    throw new Error("Expected the observed FollowLatest action");
+  first.props.onClick();
   renderConversation({ ...propsFixture, id: "other" });
   pending.resolve();
   await pending.promise;

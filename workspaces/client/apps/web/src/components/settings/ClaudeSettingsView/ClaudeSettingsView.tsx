@@ -1,17 +1,19 @@
+import type { ClaudeFileBackupsStore } from "../../conversation/ClaudeFileBackups/ClaudeFileBackups.tsx";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../../store/runtime.ts";
 import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
-import {
-  clearSettingsRequest,
-  settingsRequestId,
-} from "../../../app/settings/settingsRequestId.ts";
 import ClaudeFileBackups from "../../conversation/ClaudeFileBackups/ClaudeFileBackups.tsx";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerServices } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  ClaudeSettingsStore,
+  unloadedClaudeSettings,
+  permissionMode,
+} from "./ClaudeSettingsStore.ts";
 import { accountCanStart } from "../../../accountName.ts";
 import { createPortal } from "react-dom";
 import { SettingsSection } from "../../ui/PanelHeader/PanelHeader.tsx";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   Button,
   NativeSelect,
@@ -20,12 +22,6 @@ import {
   SegmentedControl,
   Accordion,
 } from "@mantine/core";
-import {
-  ApiError,
-  errorText,
-  type PostBody,
-  type PostResult,
-} from "../../../api.ts";
 import { busy, type Agent } from "../../../types.ts";
 import { useWorkerModels } from "../../agents/support/WorkerModelPicker.tsx";
 import AccountSignInNotice from "../../accounts/AccountSignInNotice/AccountSignInNotice.tsx";
@@ -39,21 +35,25 @@ export const ClaudeSettingsView = function ClaudeSettings({
   account,
   onSignIn,
   permissionsTargetId,
-  onPermissionModeChange,
+  fileBackups,
+  model: suppliedModel,
 }: {
+  model?: ClaudeSettingsStore;
   permissionsTargetId?: string;
   agent: Agent;
   account?: Account | undefined;
   onSignIn?: (accountKey: string) => void;
-  onPermissionModeChange?: (
-    mode: ClaudeValues["permissionMode"] | null,
-  ) => void;
+  fileBackups?: ClaudeFileBackupsStore | undefined;
 }) {
   const store = useServerStore();
   const detail = resourceData(
     store.agentDetail(observableAgentId(agent.id)).current,
   );
-  const { post, saved, save } = useServerApi();
+  const services = useServerServices();
+  const model =
+    suppliedModel ??
+    services?.areas.settingsModels.claude ??
+    unloadedClaudeSettings;
 
   const permissionsTarget = permissionsTargetId
     ? document.getElementById(permissionsTargetId)
@@ -63,178 +63,14 @@ export const ClaudeSettingsView = function ClaudeSettings({
     !account || accountCanStart(account),
   );
   const thinkingRequired = requiresThinking(agent.model || "", catalog.models);
-  const [state, setState] = useState<ClaudeSessionState>({
-    settings: {},
-    turns: [],
-    tasks: [],
-  });
-  const [stateLoaded, setStateLoaded] = useState(false);
-  const [stateLoading, setStateLoading] = useState(true);
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  const [commands, setCommands] = useState<ClaudeCommandsResponse>([]);
-  const [values, setValues] = useState<ClaudeValues>(() =>
-    valuesFrom({}, detail || {}),
-  );
-  const valuesRef = useRef(values);
-  const savedRef = useRef(values);
-  const [window, setWindow] = useState("");
-  const [command, setCommand] = useState("");
-  const [error, setError] = useState("");
-  const [busyAction, setBusyAction] = useState(false);
-  const [savingField, setSavingField] = useState("");
-  const [savedLabel, setSavedLabel] = useState("");
-  const [savedField, setSavedField] = useState("");
-  useEffect(() => {
-    onPermissionModeChange?.(
-      stateLoaded && !savingField ? values.permissionMode : null,
-    );
-  }, [stateLoaded, savingField, values.permissionMode, onPermissionModeChange]);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const windowSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const call = (body: ClaudeSessionRequest) =>
-    post("/api/claude/session", body, { timeoutMs: 15000 });
-  const mutate = async (body: ClaudeSessionMutation) => {
-    const storageKey = `claude-control:${agent.accountKey}:${agent.id}`;
-    const requestId = settingsRequestId(
-      { saved, save },
-      storageKey,
-      JSON.stringify(body),
-    );
-    try {
-      const result = await call({ ...body, request_id: requestId });
-      clearSettingsRequest({ saved, save }, storageKey, requestId);
-      return result;
-    } catch (error) {
-      if (
-        error instanceof ApiError &&
-        error.status === 400 &&
-        error.outcome !== "outcome_unknown"
-      )
-        clearSettingsRequest({ saved, save }, storageKey, requestId);
-      throw error;
-    }
-  };
-  const load = async () => {
-    const result = await call({ id: agent.id, action: "state" });
-    if (!isClaudeSessionState(result))
-      throw new Error("Claude session state response is invalid.");
-    const value = result;
-    const next = valuesFrom(value, detail || {});
-    setState(value);
-    valuesRef.current = next;
-    savedRef.current = next;
-    setValues(next);
-    setWindow(next.autoCompactWindow ? String(next.autoCompactWindow) : "");
-  };
-  // Account events must not reload the session or overwrite local edits.
-  useEffect(() => {
-    let active = true;
-    setStateLoaded(false);
-    setStateLoading(true);
-    setError("");
-    call({ id: agent.id, action: "state" })
-      .then((result) => {
-        if (!active) return;
-        if (!isClaudeSessionState(result))
-          throw new Error("Claude session state response is invalid.");
-        const value = result;
-        const next = valuesFrom(value, detail || {});
-        setState(value);
-        valuesRef.current = next;
-        savedRef.current = next;
-        setValues(next);
-        setWindow(next.autoCompactWindow ? String(next.autoCompactWindow) : "");
-        setStateLoaded(true);
-      })
-      .catch((failure) => {
-        if (!active) return;
-        const message = errorText(failure);
-        setError(
-          message === "Sign in with claude auth login first"
-            ? "Sign in to Claude to load these settings."
-            : message,
-        );
-      })
-      .finally(() => active && setStateLoading(false));
-    return () => {
-      active = false;
-      if (timer.current) clearTimeout(timer.current);
-      if (windowSaveTimer.current) clearTimeout(windowSaveTimer.current);
-    };
-  }, [agent.id, loadAttempt]);
-
-  const saveSetting = async (field: string, patch: Partial<ClaudeValues>) => {
-    if (busyAction || savingField) return;
-    const previous = savedRef.current;
-    const next = { ...valuesRef.current, ...patch };
-    valuesRef.current = next;
-    setValues(next);
-    setSavingField(field);
-    setSavedLabel("");
-    setError("");
-    try {
-      await mutate({ id: agent.id, action: "settings", settings: next });
-      savedRef.current = next;
-      setSavedField(field);
-      setSavedLabel("Saved");
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setSavedLabel(""), 2200);
-    } catch (failure) {
-      valuesRef.current = previous;
-      savedRef.current = previous;
-      setValues(previous);
-      setWindow(
-        previous.autoCompactWindow ? String(previous.autoCompactWindow) : "",
-      );
-      setError(errorText(failure));
-    } finally {
-      setSavingField("");
-    }
-  };
-  const run = async (work: () => Promise<unknown>, reload = false) => {
-    setBusyAction(true);
-    setError("");
-    try {
-      await work();
-      if (reload) await load();
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      setBusyAction(false);
-    }
-  };
-  const saveWindow = (input = window) => {
-    if (windowSaveTimer.current) clearTimeout(windowSaveTimer.current);
-    if (
-      input ===
-      (values.autoCompactWindow ? String(values.autoCompactWindow) : "")
-    )
-      return;
-    if (!input.trim()) {
-      void saveSetting("Auto-compact limit", { autoCompactWindow: undefined });
-      return;
-    }
-    const limit = Number(input);
-    if (!Number.isInteger(limit) || limit < 100000 || limit > 1000000) {
-      setWindow(
-        values.autoCompactWindow ? String(values.autoCompactWindow) : "",
-      );
-      setError("Enter a limit from 100,000 to 1,000,000, or leave it blank.");
-      return;
-    }
-    void saveSetting("Auto-compact limit", { autoCompactWindow: limit });
-  };
   const permissionsLocked =
-    !stateLoaded ||
+    !model.stateLoaded ||
     (!!account && !accountCanStart(account)) ||
-    busyAction ||
-    !!savingField;
+    model.busyAction ||
+    !!model.savingField;
   const locked =
-    !stateLoaded ||
-    (!!account && !accountCanStart(account)) ||
-    (typeof agent.status === "string" && busy.has(agent.status)) ||
-    busyAction ||
-    !!savingField;
+    permissionsLocked ||
+    (typeof agent.status === "string" && busy.has(agent.status));
   const nativeStatus = detail?.nativeStatus;
   const nativeStatusError =
     nativeStatus &&
@@ -246,84 +82,73 @@ export const ClaudeSettingsView = function ClaudeSettings({
 
   const fieldStatus = (field: string) => (
     <div className="claude-save-status" aria-live="polite">
-      {savingField === field
+      {model.savingField === field
         ? "Saving…"
-        : savedField === field
-          ? savedLabel
+        : model.savedField === field
+          ? model.savedLabel
           : ""}
     </div>
+  );
+  const changePermission = (value: string) => {
+    const selected = permissionMode(value);
+    if (selected)
+      void model.saveSetting("Permission mode", { permissionMode: selected });
+  };
+  const permissionSelect = (
+    <NativeSelect
+      label="Permission mode"
+      value={model.values.permissionMode}
+      disabled={permissionsLocked}
+      onChange={(event) => changePermission(event.currentTarget.value)}
+      data={[
+        {
+          value: "default",
+          label: permissionsTarget ? "Ask" : "Ask for permission",
+        },
+        {
+          value: "acceptEdits",
+          label: permissionsTarget ? "Edits" : "Allow file edits",
+        },
+        { value: "auto", label: "Automatic" },
+        { value: "plan", label: "Plan only" },
+        {
+          value: "bypassPermissions",
+          label: permissionsTarget ? "Full" : "Full access",
+        },
+      ]}
+    />
   );
   return (
     <section
       className="settings-group claude-settings"
       aria-label="Claude settings"
-      aria-busy={stateLoading}
+      aria-busy={model.stateLoading}
     >
       {permissionsTarget &&
         createPortal(
           <SettingsRow label="Permissions">
             <SegmentedControl
               aria-label="Permission mode"
-              value={values.permissionMode}
+              value={model.values.permissionMode}
               disabled={permissionsLocked}
               data={[
                 { value: "default", label: "Ask" },
                 { value: "acceptEdits", label: "Edits" },
                 { value: "bypassPermissions", label: "Full" },
               ]}
-              onChange={(value) => {
-                const selected = permissionMode(value);
-                if (selected)
-                  void saveSetting("Permission mode", {
-                    permissionMode: selected,
-                  });
-              }}
+              onChange={changePermission}
             />
             {fieldStatus("Permission mode")}
-            {error && <span role="alert">{error}</span>}
+            {model.error && <span role="alert">{model.error}</span>}
           </SettingsRow>,
           permissionsTarget,
         )}
       {permissionsTarget ? (
-        <NativeSelect
-          label="Permission mode"
-          value={values.permissionMode}
-          disabled={permissionsLocked}
-          onChange={(event) => {
-            const selected = permissionMode(event.currentTarget.value);
-            if (selected)
-              void saveSetting("Permission mode", { permissionMode: selected });
-          }}
-          data={[
-            { value: "default", label: "Ask" },
-            { value: "acceptEdits", label: "Edits" },
-            { value: "auto", label: "Automatic" },
-            { value: "plan", label: "Plan only" },
-            { value: "bypassPermissions", label: "Full" },
-          ]}
-        />
+        permissionSelect
       ) : (
         <SettingsSection title="Permissions">
-          {stateLoading && <p role="status">Loading Claude settings…</p>}
-          <NativeSelect
-            label="Permission mode"
-            value={values.permissionMode}
-            disabled={permissionsLocked}
-            onChange={(event) => {
-              const selected = permissionMode(event.currentTarget.value);
-              if (selected)
-                void saveSetting("Permission mode", {
-                  permissionMode: selected,
-                });
-            }}
-            data={[
-              { value: "default", label: "Ask for permission" },
-              { value: "acceptEdits", label: "Allow file edits" },
-              { value: "auto", label: "Automatic" },
-              { value: "plan", label: "Plan only" },
-              { value: "bypassPermissions", label: "Full access" },
-            ]}
-          />
+          {model.stateLoading && <p role="status">Loading Claude settings…</p>}
+          {permissionSelect}
           {fieldStatus("Permission mode")}
         </SettingsSection>
       )}
@@ -336,10 +161,10 @@ export const ClaudeSettingsView = function ClaudeSettings({
           <Switch
             label="Extended thinking"
             description="Controls how much reasoning the model uses."
-            checked={values.thinking}
+            checked={model.values.thinking}
             disabled={locked || catalog.loading || !!catalog.error}
             onChange={(event) =>
-              void saveSetting("Extended thinking", {
+              void model.saveSetting("Extended thinking", {
                 thinking: event.currentTarget.checked,
               })
             }
@@ -356,10 +181,10 @@ export const ClaudeSettingsView = function ClaudeSettings({
           <Switch
             label="Move slow MCP calls to the background"
             description={`Eligible Model Context Protocol (MCP) calls continue in the background after ${CLAUDE_MCP_AUTO_BACKGROUND_MS / 1000} seconds.`}
-            checked={values.mcpAutoBackground}
+            checked={model.values.mcpAutoBackground}
             disabled={locked}
             onChange={(event) =>
-              void saveSetting("MCP background", {
+              void model.saveSetting("MCP background", {
                 mcpAutoBackground: event.currentTarget.checked,
               })
             }
@@ -369,46 +194,24 @@ export const ClaudeSettingsView = function ClaudeSettings({
             label="Auto-compact token limit"
             description="Blank uses the Claude default."
             placeholder="Claude default"
-            value={window}
+            value={model.window}
             disabled={locked}
-            onChange={(event) => {
-              const input = event.currentTarget.value;
-              setWindow(input);
-              if (windowSaveTimer.current)
-                clearTimeout(windowSaveTimer.current);
-              windowSaveTimer.current = setTimeout(
-                () => saveWindow(input),
-                500,
-              );
-            }}
-            onBlur={() => saveWindow()}
-            onKeyDown={(event) => event.key === "Enter" && saveWindow()}
+            onChange={(event) => model.editWindow(event.currentTarget.value)}
+            onBlur={() => model.saveWindow()}
+            onKeyDown={(event) => event.key === "Enter" && model.saveWindow()}
           />
           {fieldStatus("Auto-compact limit")}
           <ClaudeDisclosure title="Commands and skills">
-            <Button
-              disabled={busyAction}
-              onClick={() =>
-                void run(async () => {
-                  const result = await call({
-                    id: agent.id,
-                    action: "commands",
-                  });
-                  if (!isClaudeCommandsResponse(result))
-                    throw new Error("Claude commands response is invalid.");
-                  setCommands(result);
-                })
-              }
-            >
+            <Button disabled={model.busyAction} onClick={model.readCommands}>
               Load commands
             </Button>
             <NativeSelect
               label="Command"
-              value={command}
-              onChange={(event) => setCommand(event.currentTarget.value)}
+              value={model.command}
+              onChange={(event) => model.setCommand(event.currentTarget.value)}
               data={[
                 { value: "", label: "Select a command" },
-                ...commands.map((item) => ({
+                ...model.commands.map((item) => ({
                   value: "/" + item.name,
                   label: "/" + item.name + " " + (item.description || ""),
                 })),
@@ -416,55 +219,31 @@ export const ClaudeSettingsView = function ClaudeSettings({
             />
             <TextInput
               label="Command and arguments"
-              value={command}
-              onChange={(event) => setCommand(event.currentTarget.value)}
+              value={model.command}
+              onChange={(event) => model.setCommand(event.currentTarget.value)}
             />
             <Button
-              disabled={busyAction || !command}
-              onClick={() =>
-                void run(() =>
-                  mutate({ id: agent.id, action: "command", command }),
-                )
-              }
+              disabled={model.busyAction || !model.command}
+              onClick={() => void model.sendCommand(model.command)}
             >
               Send command
             </Button>
             <Button
               disabled={locked}
-              onClick={() =>
-                void run(
-                  () =>
-                    mutate({
-                      id: agent.id,
-                      action: "command",
-                      command: "/compact",
-                    }),
-                  true,
-                )
-              }
+              onClick={() => void model.sendCommand("/compact", true)}
             >
               Compact conversation
             </Button>
           </ClaudeDisclosure>
           <p className="claude-version">
-            Claude Code {state.version || "version unavailable"}
+            Claude Code {model.state.version || "version unavailable"}
           </p>
-          {(state.tasks || []).map((item) => (
+          {(model.state.tasks || []).map((item) => (
             <div key={item.task_id} className="claude-task">
               <span>{item.description || item.task_id}</span>
               <Button
-                disabled={busyAction}
-                onClick={() =>
-                  void run(
-                    () =>
-                      mutate({
-                        id: agent.id,
-                        action: "stop_task",
-                        task_id: item.task_id,
-                      }),
-                    true,
-                  )
-                }
+                disabled={model.busyAction}
+                onClick={() => void model.stopTask(item.task_id)}
               >
                 Stop task
               </Button>
@@ -472,29 +251,30 @@ export const ClaudeSettingsView = function ClaudeSettings({
           ))}
         </div>
       </ClaudeDisclosure>
-      {error && (
+      {model.error && (
         <p role="alert" className="claude-setting-error">
-          {error}
+          {model.error}
         </p>
       )}
-      {error.includes("backup limit") && (
-        <ClaudeFileBackups agentId={agent.id} onReleased={() => setError("")} />
+      {fileBackups && model.error.includes("backup limit") && (
+        <ClaudeFileBackups
+          store={fileBackups}
+          onReleased={() => model.setError("")}
+        />
       )}
       {onSignIn && (
         <AccountSignInNotice
           account={account}
           errors={[
-            error,
+            model.error,
             typeof detail?.error === "string" ? detail?.error : undefined,
             nativeStatusError,
           ]}
           onSignIn={onSignIn}
         />
       )}
-      {!stateLoaded && error && (
-        <Button onClick={() => setLoadAttempt((value) => value + 1)}>
-          Retry Claude settings
-        </Button>
+      {!model.stateLoaded && model.error && (
+        <Button onClick={model.load}>Retry Claude settings</Button>
       )}
     </section>
   );
@@ -524,66 +304,4 @@ function ClaudeDisclosure({
   );
 }
 
-type ClaudeValues = {
-  permissionMode: NonNullable<
-    NonNullable<ClaudeSessionState["settings"]>["permissionMode"]
-  >;
-  thinking: boolean;
-  autoCompactWindow?: number | undefined;
-  mcpAutoBackground: boolean;
-};
-
-function permissionMode(value: string): ClaudeValues["permissionMode"] | null {
-  switch (value) {
-    case "default":
-    case "acceptEdits":
-    case "auto":
-    case "plan":
-    case "bypassPermissions":
-      return value;
-    default:
-      return null;
-  }
-}
-
-type ClaudeSessionRequest = PostBody<"/api/claude/session">;
-
-type ClaudeSessionResponse = PostResult<"/api/claude/session">;
-
-type ClaudeSessionState = Extract<ClaudeSessionResponse, { turns: unknown[] }>;
-
-type ClaudeCommandsResponse = Extract<ClaudeSessionResponse, unknown[]>;
-
-type ClaudeSessionMutation = ClaudeSessionRequest extends infer Request
-  ? Request extends {
-      action: "settings" | "command" | "stop_task";
-    }
-    ? Omit<Request, "request_id">
-    : never
-  : never;
-
-function isClaudeSessionState(
-  value: ClaudeSessionResponse,
-): value is ClaudeSessionState {
-  return "turns" in value && Array.isArray(value.turns);
-}
-
-function isClaudeCommandsResponse(
-  value: ClaudeSessionResponse,
-): value is ClaudeCommandsResponse {
-  return Array.isArray(value);
-}
-
-const valuesFrom = (
-  value: Pick<ClaudeSessionState, "settings">,
-  agent: Pick<Agent, "permissionMode">,
-): ClaudeValues => ({
-  permissionMode:
-    value.settings?.permissionMode ||
-    (agent.permissionMode ?? "bypassPermissions"),
-  thinking: value.settings?.thinking !== false,
-  mcpAutoBackground: value.settings?.mcpAutoBackground !== false,
-  ...(value.settings?.autoCompactWindow
-    ? { autoCompactWindow: Number(value.settings.autoCompactWindow) }
-    : {}),
-});
+export { ClaudeSettingsStore } from "./ClaudeSettingsStore.ts";

@@ -1,8 +1,14 @@
+import * as usageApi from "../../../servers/net/api.ts";
+import { NewChatModelStore } from "../../settings/NewChatModelSettings/NewChatModelStore.ts";
+import { createProjectPeersStore } from "../../projects/ProjectPeers/ProjectPeersStore.ts";
+import { RequestAreaOwner } from "../../conversation/questions/RequestArea/RequestArea.tsx";
+import * as requestApi from "../../../servers/net/api.ts";
+import { serverLocalStorage } from "../../../servers/storage.ts";
 import { createRequestsMirror } from "../../../generated/observableResources.ts";
+import CodeBlock from "../CodeBlock/CodeBlock.tsx";
 import { createServerServices } from "../../../servers/serverServices.ts";
 import NewChatModelSettings from "../../settings/NewChatModelSettings/NewChatModelSettings.tsx";
-import type { NewChatSettings } from "../../../app/projects/newChatSettings.ts";
-import { observable, runInAction } from "mobx";
+import { observable, runInAction, action, flow } from "mobx";
 import {
   ServerAreasContextProvider,
   type ServerAreas,
@@ -32,6 +38,34 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider, Menu } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+it("keeps code expanded when its source changes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  const render = (source: string) =>
+    act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          {},
+          createElement(CodeBlock, { source }),
+        ),
+      ),
+    );
+  try {
+    await render("first");
+    await act(async () =>
+      [...host.querySelectorAll("button")]
+        .find((button) => button.textContent === "Expand code")
+        ?.click(),
+    );
+    await render("second");
+    expect(host.querySelector("pre")?.dataset.expanded).toBe("true");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
 import {
   AgentMode,
   AccountStatus,
@@ -48,14 +82,49 @@ import { required } from "../../conversation/ComposerAttachments/componentTestFi
 import { ChatSettingsFixture as ChatSettingsDialog } from "../../../app/settings/ChatSettingsFixture.tsx";
 import { UnifiedAgentSettings } from "../../agents/UnifiedAgentSettings/UnifiedAgentSettings.tsx";
 import { LiveAgentPhase } from "../../agents/AgentPhase/AgentPhase.tsx";
-import { UsageFixture as Usage } from "../../../app/settings/UsageFixture.tsx";
+import {
+  UsageFixture as Usage,
+  createUsageFixture,
+  type UsageFixtureInputs,
+} from "../../../app/settings/UsageFixture.tsx";
 import Requests, {
   RequestArea,
 } from "../../conversation/questions/Requests/Requests.tsx";
 import { approval } from "../../../approvalFixtures.ts";
 import type { AgentSetupPickerProps } from "../../agents/AgentSetupPicker/AgentSetupPicker.tsx";
 
+const ownedUsageFixtures: ReturnType<typeof createUsageFixture>[] = [];
+function usageElement(
+  parent: ReturnType<typeof useServerStore>,
+  props: UsageFixtureInputs,
+) {
+  const owner = createUsageFixture(parent, usageApi, props);
+  owner.start();
+  ownedUsageFixtures.push(owner);
+  return createElement(Usage, { ...props, owner });
+}
 const ownedAreas: ServerAreas[] = [];
+const applyFixtureCatalogs = action((areas: ServerAreas) => {
+  for (const [key, fallback] of areas.agentsUi.workerCatalogs)
+    areas.agentsUi.workerCatalogs.set(key, {
+      ...fallback,
+      get models() {
+        return h.catalog
+          ? h.catalog.models.map((row) => ({ ...row, serviceTiers: [] }))
+          : fallback.models;
+      },
+      get loading() {
+        return (h.catalog || fallback).loading;
+      },
+      get error() {
+        return (h.catalog || fallback).error;
+      },
+      retry: flow(function* () {
+        yield (h.catalog || fallback).retry();
+      }),
+      dispose: () => fallback.dispose(),
+    });
+});
 function OwnedUnifiedAgentSettings(
   props: ComponentProps<typeof UnifiedAgentSettings>,
 ) {
@@ -72,6 +141,7 @@ function OwnedUnifiedAgentSettings(
   );
 }
 afterEach(() => {
+  for (const owner of ownedUsageFixtures.splice(0)) owner.dispose();
   for (const areas of ownedAreas.splice(0)) {
     areas.dispose();
     areas.scope.services.close();
@@ -152,6 +222,35 @@ vi.mock("../../agents/support/WorkerModelPicker.tsx", async (original) => {
     >();
   return {
     ...actual,
+    createWorkerCatalog: (
+      ...args: Parameters<typeof actual.createWorkerCatalog>
+    ) => {
+      const fallback = actual.createWorkerCatalog(...args);
+      return {
+        get active() {
+          return fallback.active;
+        },
+        get pending() {
+          return fallback.pending;
+        },
+        get retryError() {
+          return fallback.retryError;
+        },
+        dispose: () => fallback.dispose(),
+        get models() {
+          return (h.catalog || fallback).models;
+        },
+        get loading() {
+          return (h.catalog || fallback).loading;
+        },
+        get error() {
+          return (h.catalog || fallback).error;
+        },
+        retry: () => (h.catalog || fallback).retry(),
+      };
+    },
+    workerCatalog: (...args: Parameters<typeof actual.workerCatalog>) =>
+      h.catalog || actual.workerCatalog(...args),
     useWorkerModels: (...args: Parameters<typeof actual.useWorkerModels>) => {
       const catalog = actual.useWorkerModels(...args);
       return (args[1] && h.catalog) || catalog;
@@ -208,11 +307,17 @@ function render(
   fixture: ReturnType<typeof observableFixture>,
   view: ReactNode,
 ) {
+  const areas = conversationActionsFixture(undefined, fixture.store);
+  ownedAreas.push(areas);
   return renderToStaticMarkup(
     createElement(
       MantineProvider,
       { env: "test" },
-      createElement(fixture.Provider, null, view),
+      createElement(
+        fixture.Provider,
+        null,
+        createElement(ServerAreasContextProvider, { value: areas }, view),
+      ),
     ),
   );
 }
@@ -338,25 +443,35 @@ it("keeps generated request owners blocked for the same native thread", () => {
   });
   const requests = createRequestsMirror();
   requests.apply([{ collection: "request", id: request.id, value: request }]);
+  const store = {
+    ...f.store,
+    requests: () => ({
+      current: { status: "live" as const, data: requests.current },
+    }),
+  };
+  const requestOwner = new RequestAreaOwner(
+    {
+      api: () => requestApi,
+      store,
+      storage: serverLocalStorage,
+      server: "local",
+    },
+    () => ({ scope: "owner", notify() {} }),
+  );
+  requestOwner.start();
   const html = render(
     f,
     createElement(
       ServerStoreProvider,
-      {
-        value: {
-          ...f.store,
-          requests: () => ({
-            current: { status: "live" as const, data: requests.current },
-          }),
-        },
-      },
+      { value: store },
       createElement(
         RequestArea,
-        { scope: "owner", notify() {} },
+        { owner: requestOwner },
         createElement(Requests, { all: true }),
       ),
     ),
   );
+  requestOwner.dispose();
   expect(html).toContain("This chat stopped as a precaution");
   f.store.dispose();
 });
@@ -365,7 +480,7 @@ it("reads generated context usage and compactions through Usage", () => {
   const f = observableFixture([record]);
   const html = render(
     f,
-    createElement(Usage, {
+    usageElement(f.store, {
       agent: required(f.mirror.current.agents.get("lead")),
       stateDir: "owner",
       limits: null,
@@ -609,7 +724,7 @@ it("updates settings, context usage and native actions when the owning detail sl
               notify: () => {},
               catalog,
             }),
-            createElement(Usage, {
+            usageElement(store, {
               agent,
               stateDir: "loading-owner",
               limits: null,
@@ -697,6 +812,16 @@ it("keeps request approval disabled until its native-thread detail is known", ()
     }),
     agentDetail: () => ({ current: { status: "loading" as const } }),
   };
+  const requestOwner = new RequestAreaOwner(
+    {
+      api: () => requestApi,
+      store,
+      storage: serverLocalStorage,
+      server: "local",
+    },
+    () => ({ scope: "owner", notify() {} }),
+  );
+  requestOwner.start();
   const html = render(
     f,
     createElement(
@@ -704,7 +829,7 @@ it("keeps request approval disabled until its native-thread detail is known", ()
       { value: store },
       createElement(
         RequestArea,
-        { scope: "owner", notify() {} },
+        { owner: requestOwner },
         createElement(Requests, { all: true }),
       ),
     ),
@@ -718,6 +843,7 @@ it("keeps request approval disabled until its native-thread detail is known", ()
       ),
     ).disabled,
   ).toBe(true);
+  requestOwner.dispose();
   expect(html).not.toContain("This chat stopped as a precaution");
   f.store.dispose();
 });
@@ -730,12 +856,18 @@ async function mountCaller(
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  const areas = conversationActionsFixture(undefined, f.store);
+  ownedAreas.push(areas);
   await act(async () =>
     root.render(
       createElement(
         MantineProvider,
         { env: "test" },
-        createElement(f.Provider, null, view),
+        createElement(
+          f.Provider,
+          null,
+          createElement(ServerAreasContextProvider, { value: areas }, view),
+        ),
       ),
     ),
   );
@@ -823,30 +955,39 @@ it("edits a new chat draft model, effort and role defaults without a detail subs
     origin: "https://selected.test",
   });
   Object.defineProperty(selected, "store", { value: f.store });
-  let draft: Omit<NewChatSettings, "workspaceMode"> | null = null;
+  const selectedAreas = conversationActionsFixture(
+    undefined,
+    f.store,
+    selected,
+  );
+  ownedAreas.push(selectedAreas);
+  applyFixtureCatalogs(selectedAreas);
+  const model = new NewChatModelStore(
+    selected,
+    "project",
+    "/project",
+    selectedAreas,
+  );
   const screen = await mountCaller(
     inherited,
     createElement(NewChatModelSettings, {
-      serverServices: selected,
-      projectId: "project",
-      path: "/project",
-      onChange: (value) => {
-        draft = value;
-      },
+      model,
     }),
   );
   try {
     expect(required(h.pickers.at(-1)).disabled).toBe(false);
     await act(async () => required(h.pickers.at(-1)).onModel("gpt-6-luna"));
     await act(async () => required(h.pickers.at(-1)).onEffort("high"));
-    expect(draft).toMatchObject({
+    expect(model.selection).toMatchObject({
       account_key: "chosen",
       model: "gpt-6-luna",
       effort: "high",
     });
     await act(async () => required(h.pickers.at(-1)).onRole("worker"));
     await act(async () => required(h.pickers.at(-1)).onModel("gpt-6-astra"));
-    expect(draft).toMatchObject({ worker_defaults: { model: "gpt-6-astra" } });
+    expect(model.selection).toMatchObject({
+      worker_defaults: { model: "gpt-6-astra" },
+    });
     expect(reads).not.toHaveBeenCalled();
     expect(h.api.get).not.toHaveBeenCalled();
   } finally {
@@ -963,7 +1104,9 @@ it("observes peer project choices without a projects GET and preserves the grant
   h.api.post.mockResolvedValue({ grants: [] });
   const screen = await mountCaller(
     f,
-    createElement(ProjectPeers, { projectId: "one", notify: vi.fn() }),
+    createElement(ProjectPeers, {
+      form: createProjectPeersStore("one", h.api, vi.fn()),
+    }),
   );
   try {
     const input = screen.host.querySelector("textarea");
@@ -1042,6 +1185,13 @@ it.each(["loading", "error"] as const)(
       origin: "https://recovery.test",
     });
     Object.defineProperty(selected, "store", { value: f.store });
+    const selectedAreas = conversationActionsFixture(
+      undefined,
+      f.store,
+      selected,
+    );
+    ownedAreas.push(selectedAreas);
+    applyFixtureCatalogs(selectedAreas);
     const refresh = vi.spyOn(selected.sync, "refreshState").mockResolvedValue();
     const retryModels = vi.fn();
     h.catalog = {
@@ -1056,18 +1206,20 @@ it.each(["loading", "error"] as const)(
       error: "",
       retry: retryModels,
     };
-    const onChange = vi.fn();
+    const model = new NewChatModelStore(
+      selected,
+      "project",
+      "/project",
+      selectedAreas,
+    );
     const screen = await mountCaller(
       inherited,
       createElement(NewChatModelSettings, {
-        serverServices: selected,
-        projectId: "project",
-        path: "/project",
-        onChange,
+        model,
       }),
     );
     try {
-      expect(onChange).toHaveBeenLastCalledWith(null);
+      expect(model.selection).toBe(null);
       expect(refresh).not.toHaveBeenCalled();
       if (status === "error") {
         const retry = [...screen.host.querySelectorAll("button")].find(
@@ -1119,8 +1271,9 @@ it.each(["loading", "error"] as const)(
         runInAction(() =>
           current.set({ status: "live", data: f.mirror.current }),
         );
+        applyFixtureCatalogs(selectedAreas);
       });
-      expect(onChange).toHaveBeenLastCalledWith(
+      expect(model.selection).toEqual(
         expect.objectContaining({
           account_key: "project-account",
           model: "gpt-6-astra",

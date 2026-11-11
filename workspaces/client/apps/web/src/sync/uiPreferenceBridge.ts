@@ -1,3 +1,4 @@
+import { reaction, flow } from "mobx";
 import { errorText } from "../api.ts";
 import {
   registerPreferenceRetry,
@@ -8,7 +9,6 @@ import {
   acknowledgePreferenceFields,
   readPreferenceFields,
   receivePreferenceFields,
-  watchPreferenceWrites,
 } from "./uiPreferenceStore.ts";
 import {
   canonicalPreferenceJson,
@@ -29,7 +29,7 @@ export function createUiPreferenceBridge(
   let retryGeneration = 0;
   const confirmed: Partial<Record<PreferenceScope, string>> = {};
 
-  const send = async (explicitRetry = false) => {
+  const send = flow(function* (explicitRetry = false) {
     if (explicitRetry) retryGeneration++;
     if (!active) return;
     if (!ready) {
@@ -69,10 +69,13 @@ export function createUiPreferenceBridge(
             continue;
           try {
             setPreferenceWriteStatus(storage, scope, { state: "saving" });
-            const result = await post("/api/sync/preferences", {
-              scope,
-              fields,
-            });
+            const result: Awaited<ReturnType<typeof post>> = yield post(
+              "/api/sync/preferences",
+              {
+                scope,
+                fields,
+              },
+            );
             if (!active) return;
             confirmed[scope] = canonicalPreferenceJson(result.fields);
             acknowledgePreferenceFields(
@@ -106,7 +109,7 @@ export function createUiPreferenceBridge(
     } finally {
       sending = false;
     }
-  };
+  });
 
   const receiveProjection = (preferences: UiPreferenceProjection) => {
     if (!active) return;
@@ -132,7 +135,13 @@ export function createUiPreferenceBridge(
       if (active) return () => {};
       active = true;
       const stopRetry = registerPreferenceRetry(storage, () => void send(true));
-      const stopWrites = watchPreferenceWrites(() => void send());
+      const stopWrites = reaction(
+        () =>
+          (["user", "server"] as const).map((scope) =>
+            canonicalPreferenceJson(readPreferenceFields(scope, storage)),
+          ),
+        () => void send(),
+      );
       return () => {
         active = false;
         stopWrites();

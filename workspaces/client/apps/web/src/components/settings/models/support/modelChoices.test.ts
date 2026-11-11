@@ -6,7 +6,6 @@ import {
   isModelEnabled,
   modelChoiceKey,
   readModelChoices,
-  subscribeModelChoices,
   enabledModelOptions,
   writeModelChoices,
 } from "./modelChoices.ts";
@@ -115,15 +114,11 @@ describe("model choices", () => {
       }),
     ).toEqual([inherited]);
   });
-  it("notifies every mounted picker when settings change and unsubscribes", () => {
-    let calls = 0;
-    const unsubscribe = subscribeModelChoices(() => calls++);
+  it("reads the latest selection after each write", () => {
     writeModelChoices({ "codex:gpt-6-astra": "whitelisted" });
     expect(readModelChoices()).toEqual({ "codex:gpt-6-astra": "whitelisted" });
-    expect(calls).toBe(1);
-    unsubscribe();
     writeModelChoices({});
-    expect(calls).toBe(1);
+    expect(readModelChoices()).toEqual({});
   });
 });
 

@@ -24,6 +24,20 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import Control from "../../src/components/agents/SubagentConcurrencyControl/SubagentConcurrencyControl.tsx";
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { fixtureServerStore } from "../fixtures/PublishedAgentFixture.tsx";
+import { autorun } from "mobx";
+const areas = browserAreas(fixtureServerStore);
+const stop = autorun(() => {
+  const lead = areas.state?.agents.get(initialConfirmedLead.id);
+  if (lead)
+    areas.agentsUi.control(
+      lead,
+      JSON.stringify(["fixture-state", confirmedWorkspaceId, lead.id]),
+      confirmedWorkspaceId,
+    );
+});
+window.addEventListener("pagehide", stop, { once: true });
 window.refreshCount = 0;
 window.refreshHold = true;
 window.refreshFailure = false;
@@ -33,6 +47,7 @@ const Fixture = observer(function Fixture() {
   return (
     <MantineProvider>
       <Control
+        agentsUi={areas.agentsUi}
         compact
         lead={lead}
         stateDir="fixture-state"

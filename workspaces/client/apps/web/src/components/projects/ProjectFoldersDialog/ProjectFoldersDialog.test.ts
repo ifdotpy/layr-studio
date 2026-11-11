@@ -1,3 +1,5 @@
+import { createProjectPeersStore } from "../ProjectPeers/ProjectPeersStore.ts";
+import * as projectApi from "../../../servers/net/api.ts";
 // @vitest-environment happy-dom
 import { createNet } from "../../../servers/net/net.ts";
 import * as api from "../../../servers/net/api.ts";
@@ -108,6 +110,7 @@ it("project folders updates the real store and location leaves from one stable g
           null,
           createElement(ProjectFoldersDialog, {
             project: selected,
+            peers: createProjectPeersStore(selected.id, projectApi, vi.fn()),
           }),
         ),
       ),

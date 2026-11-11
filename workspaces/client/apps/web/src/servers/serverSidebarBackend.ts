@@ -10,7 +10,6 @@ import {
   receivePreferenceFields,
   writePreferenceEdit,
 } from "../sync/uiPreferenceStore.ts";
-import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
 import type { ServerServices } from "./serverServices.ts";
 
 export function serverSidebarBackend(
@@ -50,20 +49,5 @@ export function serverSidebarBackend(
     preferenceFields: () => readPreferenceFields("server", storage),
     adoptPreferenceFields: (fields) =>
       receivePreferenceFields("server", fields, storage),
-    subscribePreference(key, update) {
-      let value = storage.getItem(key);
-      const receive = () => {
-        const next = storage.getItem(key);
-        if (next === value) return;
-        value = next;
-        update();
-      };
-      window.addEventListener(preferenceEvent, receive);
-      window.addEventListener("storage", receive);
-      return () => {
-        window.removeEventListener(preferenceEvent, receive);
-        window.removeEventListener("storage", receive);
-      };
-    },
   };
 }

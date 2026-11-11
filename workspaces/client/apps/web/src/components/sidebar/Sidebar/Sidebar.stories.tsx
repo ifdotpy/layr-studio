@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import {
   SidebarCommandsProvider,
   type SidebarCommands,
@@ -86,7 +87,7 @@ function storyCollections(
   ]);
   return mirror.current;
 }
-const values = new Map<string, string>();
+const values = observable.map<string, string>();
 const backend: SidebarBackend = {
   ownerId: "local",
   post: async () => {
@@ -105,11 +106,10 @@ const backend: SidebarBackend = {
       values.delete(key);
     },
   },
-  editPreference: (key, _before, after) => {
+  editPreference: action((key, _before, after) => {
     values.set(key, JSON.stringify(after));
     return after;
-  },
-  subscribePreference: () => () => {},
+  }),
 };
 const services = createSidebarServices(
   backend,

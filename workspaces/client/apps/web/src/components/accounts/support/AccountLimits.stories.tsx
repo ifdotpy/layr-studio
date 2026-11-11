@@ -5,9 +5,11 @@ import {
 } from "../../../generated/api.ts";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useEffect, useMemo } from "react";
 import { Accordion, MantineProvider } from "@mantine/core";
-import { UsageFixture as Usage } from "../../../app/settings/UsageFixture.tsx";
+import {
+  UsageFixture as Usage,
+  createUsageFixture,
+} from "../../../app/settings/UsageFixture.tsx";
 import { AccountCapacityView } from "../AccountCapacityView/AccountCapacityView.tsx";
 import { accountLimitView } from "./AccountTiles.tsx";
 import { ProviderMark } from "../ProviderMark/ProviderMark.tsx";
@@ -26,6 +28,25 @@ const usageAgent = {
   contextUsage: { tokens: 12000, window: 128000 },
 } as Agent;
 
+let services: ReturnType<typeof createServerServices>;
+let usageFixture: ReturnType<typeof createUsageFixture>;
+function createFixtureServices() {
+  const value = createServerServices({
+    id: "local",
+    label: "Fixture",
+    origin: globalThis.window.location.origin,
+  });
+  value.watchResourceReads = (_refs, read) => {
+    void read();
+    return Object.assign(() => {}, {
+      refresh: () => {
+        void read();
+      },
+    });
+  };
+  return value;
+}
+
 function AccountLimitsFixture({
   settings = false,
   light = false,
@@ -35,23 +56,6 @@ function AccountLimitsFixture({
 }) {
   const [firstAccountFixture] = accountLimitFixtures;
   if (!firstAccountFixture) throw new Error("Missing account limit fixture");
-  const services = useMemo(() => {
-    const value = createServerServices({
-      id: "local",
-      label: "Fixture",
-      origin: globalThis.window.location.origin,
-    });
-    value.watchResourceReads = (_refs, read) => {
-      void read();
-      return Object.assign(() => {}, {
-        refresh: () => {
-          void read();
-        },
-      });
-    };
-    return value;
-  }, []);
-  useEffect(() => () => services.close(), [services]);
   return (
     <MantineProvider theme={theme} forceColorScheme={light ? "light" : "dark"}>
       <ServerServicesProvider services={services}>
@@ -125,6 +129,7 @@ function AccountLimitsFixture({
               }}
             >
               <Usage
+                owner={usageFixture}
                 agent={usageAgent}
                 stateDir="limits-fixture"
                 limits={firstAccountFixture.limits}
@@ -163,7 +168,15 @@ const meta = {
         );
       return original(input, init);
     };
+    services = createFixtureServices();
+    usageFixture = createUsageFixture(services.store, services.api, {
+      agent: usageAgent,
+      accounts: accountLimitFixtures,
+    });
+    usageFixture.start();
     return () => {
+      usageFixture.dispose();
+      services.close();
       globalThis.window.fetch = original;
     };
   },

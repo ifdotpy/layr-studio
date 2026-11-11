@@ -2,6 +2,8 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
+import { SidebarListOwner } from "../../../app/shell/SidebarOwner.ts";
+import * as frameBridge from "../../../servers/frameBridge.ts";
 import { expect, test, vi } from "vitest";
 import Accounts from "./Accounts.tsx";
 import { ProviderKind } from "../../../generated/api.ts";
@@ -9,28 +11,13 @@ import { accountsFixture } from "./Accounts.fixture.ts";
 import { Provider } from "../../../app/ServerAreasProvider.tsx";
 import { ServerServicesProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
-test("changing the callback while an account modal is open does not report a close", async () => {
+test("keeps an account modal open across renders and closes its report with the owner", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  const first = vi.fn(),
-    second = vi.fn();
-  const state = {
-    data: {
-      accounts: [],
-      archivedAccounts: [],
-      logins: [],
-      defaultAccountKey: "default",
-      defaultAccountGroups: [],
-      supportsDelete: true,
-      supportsDisconnect: true,
-    },
-    scope: "fixture",
-    error: "",
-    setData() {},
-    refresh: async () => null,
-  };
+  vi.spyOn(SidebarListOwner.prototype, "start").mockReturnValue(() => {});
+  vi.spyOn(frameBridge, "startAppFrame").mockReturnValue(() => {});
   const command = {
     action: "account-sign-in" as const,
     forceAdd: true as const,
@@ -40,7 +27,9 @@ test("changing the callback while an account modal is open does not report a clo
     serverLabel: "Fixture",
   };
   const fixture = accountsFixture();
-  const render = (report: (open: boolean) => void) =>
+  const stop = fixture.areas.ui.start();
+  fixture.areas.settings.setCommand(command);
+  const render = () =>
     root.render(
       createElement(
         ServerServicesProvider,
@@ -51,30 +40,23 @@ test("changing the callback while an account modal is open does not report a clo
           createElement(
             MantineProvider,
             { env: "test" },
-            createElement(Accounts, {
-              managerOnly: true,
-              state: state.data,
-              scope: state.scope,
-              onError() {},
-              externalCommand: command,
-              onModalOpenChange: report,
-            }),
+            createElement(Accounts),
           ),
         ),
       ),
     );
   try {
-    await act(async () => render(first));
-    expect(first).toHaveBeenLastCalledWith(true);
-    first.mockClear();
-    await act(async () => render(second));
-    expect(first).not.toHaveBeenCalled();
-    expect(second).toHaveBeenLastCalledWith(true);
+    await act(async () => render());
+    expect(fixture.areas.settings.accountModalOpen).toBe(true);
+    await act(async () => render());
+    expect(fixture.areas.settings.accountModalOpen).toBe(true);
   } finally {
     await act(async () => root.unmount());
+    stop();
+    expect(fixture.areas.settings.accountModalOpen).toBe(false);
     fixture.close();
+    vi.restoreAllMocks();
     host.remove();
     vi.unstubAllGlobals();
   }
-  expect(second).toHaveBeenLastCalledWith(false);
 });

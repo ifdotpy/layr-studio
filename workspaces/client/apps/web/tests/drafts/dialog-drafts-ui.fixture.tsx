@@ -1,5 +1,8 @@
 import "../../src/rendererStyles.ts";
-import { RequestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
+import {
+  RequestFixture,
+  createRequestFixture,
+} from "../../src/components/conversation/questions/support/requestFixtures.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { Agent, Complaint } from "../../src/types.ts";
 import { approval } from "../../src/approvalFixtures.ts";
@@ -19,9 +22,7 @@ import "@mantine/core/styles.css";
 import Picker from "../../src/components/projects/ProjectDirectoryPicker/ProjectDirectoryPicker.tsx";
 import UserMessages from "../../src/components/shell/messages/UserMessages/UserMessages.tsx";
 import MessageDate from "../../src/components/conversation/transcript/MessageDate/MessageDate.tsx";
-import Requests, {
-  RequestArea,
-} from "../../src/components/conversation/questions/Requests/Requests.tsx";
+import Requests from "../../src/components/conversation/questions/Requests/Requests.tsx";
 const lead = {
   id: "lead",
   rootId: "lead",
@@ -67,6 +68,24 @@ const request = approval({
     ],
   },
 });
+const requestOwners = new Map(
+  ["workspace-a", "workspace-b"].map((scope) => {
+    const fixture = createRequestFixture({
+      scope,
+      notify: (message) => window.notices.push(message),
+      requests: [request],
+      agents: [agentSummaryFixture(lead.id, lead)],
+      details: [{ id: lead.id }],
+    });
+    fixture.start();
+    return [scope, fixture] as const;
+  }),
+);
+window.addEventListener(
+  "pagehide",
+  () => requestOwners.forEach((owner) => owner.dispose()),
+  { once: true },
+);
 function Fixture() {
   const [show, setShow] = useState(false),
     [workspace, setWorkspace] = useState("workspace-a");
@@ -94,18 +113,8 @@ function Fixture() {
       <div data-missing-date>
         <MessageDate at={0} />
       </div>
-      <RequestFixture
-        requests={[request]}
-        agents={[agentSummaryFixture(lead.id, lead)]}
-        details={[{ id: lead.id }]}
-      >
-        <RequestArea
-          scope={workspace}
-
-          notify={(message) => window.notices.push(message)}
-        >
-          <Requests all />
-        </RequestArea>
+      <RequestFixture owner={requestOwners.get(workspace)!}>
+        <Requests all />
       </RequestFixture>
       <Picker initialPath="/project" onSelect={async () => {}} />
       {show && (

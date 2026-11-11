@@ -4,6 +4,7 @@ import type { Agent } from "../../src/types.ts";
 import type { WorkerModelInfo } from "../../src/components/agents/support/WorkerModelPicker.tsx";
 import {
   ModelCatalogFixture,
+  createModelCatalogFixture,
   type ModelCatalogFixtureSource,
 } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 import type { PostBody } from "../../src/apiTypes.ts";
@@ -155,27 +156,7 @@ window.fetch = async (input, options) => {
     headers: fixtureSchemaHeaders,
   });
 };
-function Fixture() {
-  const [agent, setAgent] = useState<Agent>(initial),
-    [models, setModels] = useState(initialModels),
-    [mount, setMount] = useState(0),
-    [defaults, setDefaults] = useState(false);
-  window.models = models;
-  window.agent = agent;
-  window.setAgent = (value) => flushSync(() => setAgent(value));
-  window.setModels = (value) => flushSync(() => setModels(value));
-  window.reset = (options) =>
-    flushSync(() => {
-      setAgent({ ...initial, ...options?.agent });
-      setModels(options?.models || initialModels);
-      setDefaults(!!options?.defaults);
-      setMount((value) => value + 1);
-      window.settingsCalls = [];
-      window.daybreakFail = null;
-      window.reply = null;
-      window.hold = false;
-      window.retries = 0;
-    });
+function createCatalog(models: typeof initialModels) {
   const reader: ModelCatalogFixtureSource = {
     scope: "daybreak-settings",
     read: async () => {
@@ -205,10 +186,45 @@ function Fixture() {
       return () => {};
     },
   };
+  return createModelCatalogFixture(reader);
+}
+let catalog = createCatalog(initialModels);
+const replaceCatalog = (models: typeof initialModels) => {
+  catalog.dispose();
+  catalog = createCatalog(models);
+};
+window.addEventListener("pagehide", () => catalog.dispose(), { once: true });
+function Fixture() {
+  const [agent, setAgent] = useState<Agent>(initial),
+    [models, setModels] = useState(initialModels),
+    [mount, setMount] = useState(0),
+    [defaults, setDefaults] = useState(false);
+  window.models = models;
+  window.agent = agent;
+  window.setAgent = (value) => flushSync(() => setAgent(value));
+  window.setModels = (value) =>
+    flushSync(() => {
+      replaceCatalog(value);
+      setModels(value);
+    });
+  window.reset = (options) =>
+    flushSync(() => {
+      setAgent({ ...initial, ...options?.agent });
+      replaceCatalog(options?.models || initialModels);
+      setModels(options?.models || initialModels);
+      setDefaults(!!options?.defaults);
+      setMount((value) => value + 1);
+      window.settingsCalls = [];
+      window.daybreakFail = null;
+      window.reply = null;
+      window.hold = false;
+      window.retries = 0;
+    });
+
   return (
     <MantineProvider>
       <AgentModelsFixture agents={[agent]}>
-        <ModelCatalogFixture value={reader}>
+        <ModelCatalogFixture value={catalog}>
           <ExecutionSettings
             key={mount}
             agent={agent}

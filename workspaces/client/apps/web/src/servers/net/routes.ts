@@ -7,6 +7,7 @@
  * (docs/sync-protocol.md).
  */
 
+import { makeAutoObservable, reaction, flowResult } from "mobx";
 import { newIdentityNonce, verifyIdentityProof } from "../pairing.ts";
 
 /** Longest wait for one identity answer, in milliseconds. */
@@ -19,6 +20,8 @@ export const ROUTE_RETURN_INTERVAL_MS = 60_000;
 /** The public identity of a server; it needs no key. */
 const IDENTITY_PATH = "/api/multi-server/v1/identity";
 const STORAGE_PREFIX = "studio-routes-v1:";
+
+type RouteAnswer = "ok" | "mismatch" | "down";
 
 type RouteStore = {
   read(): string[];
@@ -54,7 +57,6 @@ export class ServerRoutes {
   private active: string | undefined;
   private pending: Promise<string> | undefined;
   private readonly cooldowns = new Map<string, number>();
-  private readonly listeners = new Set<(origin: string) => void>();
   readonly paired: string;
   private readonly serverId: string;
   private readonly store: RouteStore;
@@ -72,6 +74,7 @@ export class ServerRoutes {
     this.store = store;
     this.request = request;
     this.learned = store.read();
+    makeAutoObservable(this, {}, { autoBind: true });
   }
 
   /** The routes in order of preference. A key paired over HTTPS never goes over HTTP. */
@@ -97,8 +100,10 @@ export class ServerRoutes {
 
   /** Called when the route in use changes; the open stream must be replaced. */
   onChange(listener: (origin: string) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return reaction(
+      () => this.active,
+      (origin, previous) => origin && previous && listener(origin),
+    );
   }
 
   /** The origins an authenticated server reports now. Missing ones are dropped. */
@@ -127,23 +132,28 @@ export class ServerRoutes {
   /** The verified route to use. Checks routes in order until one answers. */
   resolve(): Promise<string> {
     if (this.active) return Promise.resolve(this.active);
-    return (this.pending ??= this.select().finally(() => {
-      this.pending = undefined;
-    }));
+    return (this.pending ??= flowResult(this.select()).finally(
+      this.clearPending,
+    ));
+  }
+
+  private clearPending() {
+    this.pending = undefined;
   }
 
   /**
    * While a later route is in use, check the earlier ones and move back to the
    * first that answers. Called on network change, foreground and every minute.
    */
-  async returnToFaster(): Promise<void> {
+  *returnToFaster() {
     if (!this.active) return;
     const routes = this.routes();
     const index = routes.indexOf(this.active);
     for (const origin of routes.slice(0, Math.max(index, 0))) {
       if (!this.ready(origin)) continue;
-      if ((await this.check(origin)) === "ok") {
-        this.setActive(origin);
+      const result: RouteAnswer = yield flowResult(this.check(origin));
+      if (result === "ok") {
+        this.active = origin;
         return;
       }
     }
@@ -153,19 +163,19 @@ export class ServerRoutes {
     return (this.cooldowns.get(origin) ?? 0) <= Date.now();
   }
 
-  private async select(): Promise<string> {
+  private *select() {
     let mismatch = false;
     // When every route waits, the retry loop still needs an answer: try them all.
     const all = this.routes();
     if (all.length === 1) {
-      this.setActive(all[0]!);
+      this.active = all[0]!;
       return all[0]!;
     }
     const open = all.filter((origin) => this.ready(origin));
     for (const origin of open.length ? open : all) {
-      const result = await this.check(origin);
+      const result: RouteAnswer = yield flowResult(this.check(origin));
       if (result === "ok") {
-        this.setActive(origin);
+        this.active = origin;
         return origin;
       }
       mismatch ||= result === "mismatch";
@@ -175,17 +185,11 @@ export class ServerRoutes {
       : new TypeError("No server route answers.");
   }
 
-  private setActive(origin: string) {
-    const changed = this.active !== undefined && this.active !== origin;
-    this.active = origin;
-    if (changed) for (const listener of this.listeners) listener(origin);
-  }
-
   /** Asks a route to prove the server identity before any key or session reaches it. */
-  private async check(origin: string): Promise<"ok" | "mismatch" | "down"> {
+  private *check(origin: string) {
     const nonce = newIdentityNonce();
     try {
-      const response = await this.request(
+      const response: Response = yield this.request(
         `${origin}${IDENTITY_PATH}?nonce=${nonce}`,
         {
           cache: "no-store",
@@ -194,19 +198,19 @@ export class ServerRoutes {
           signal: AbortSignal.timeout(ROUTE_IDENTITY_TIMEOUT_MS),
         },
       );
-      const body: unknown = response.ok ? await response.json() : undefined;
+      const body: unknown = response.ok ? yield response.json() : undefined;
       const field = (name: string) =>
         body && typeof body === "object" && name in body
           ? (body as Record<string, unknown>)[name]
           : undefined;
       if (typeof field("serverId") !== "string")
         throw new TypeError("No identity.");
-      const proved =
+      const proved: boolean =
         origin === this.paired && origin.startsWith("https:")
           ? true
           : typeof field("proof") === "string" &&
             this.publicKey !== undefined &&
-            (await verifyIdentityProof(
+            (yield verifyIdentityProof(
               this.publicKey,
               this.serverId,
               nonce,

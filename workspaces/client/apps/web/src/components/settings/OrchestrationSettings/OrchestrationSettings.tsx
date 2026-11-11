@@ -1,17 +1,13 @@
-import type {
-  Configuration,
-  OrchestrationSettingSpec,
-} from "../support/OrchestrationSettings.tsx";
+import type { OrchestrationSettingSpec } from "../support/OrchestrationSettings.tsx";
 import { OrchestrationNumberSetting } from "../OrchestrationNumberSetting/OrchestrationNumberSetting.tsx";
 import {
   IdleCompactionSettings,
   idleCompactionDefaults,
 } from "../IdleCompactionSettings/IdleCompactionSettings.tsx";
 import { BackgroundShellSettings } from "../BackgroundShellSettings/BackgroundShellSettings.tsx";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useEffect, useState } from "react";
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import { observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
-import { errorText } from "../../../api.ts";
 import {
   CHILD_RESULT_COALESCE_MAX_SECONDS,
   CHILD_RESULT_COALESCE_MIN_SECONDS,
@@ -19,32 +15,14 @@ import {
   IDLE_SESSION_UNLOAD_MIN_MINUTES,
 } from "../../../generated/sharedValues.ts";
 
-export function OrchestrationSettings({ active }: { active: boolean }) {
-  const { get, post } = useServerApi();
-  const [configuration, setConfiguration] = useState<Configuration | null>(
-    null,
-  );
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    void get("/api/orchestration/settings").then(
-      (value) => {
-        if (!cancelled) {
-          setConfiguration(value);
-          setError("");
-        }
-      },
-      (failure) => {
-        if (!cancelled) setError(errorText(failure));
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [active]);
+export const OrchestrationSettings = observer(function OrchestrationSettings({
+  active,
+}: {
+  active: boolean;
+}) {
+  const model = useServerAreas().settingsModels.orchestration;
   if (!active) return null;
+  const { configuration, error, busy, setConfiguration } = model;
   return (
     <section className="settings-group" aria-label="Agent orchestration">
       <h2>Agent orchestration</h2>
@@ -56,12 +34,7 @@ export function OrchestrationSettings({ active }: { active: boolean }) {
               spec={spec}
               value={configuration.settings[spec.field]}
               disabled={busy}
-              onChange={(value) =>
-                setConfiguration({
-                  ...configuration,
-                  settings: { ...configuration.settings, [spec.field]: value },
-                })
-              }
+              onChange={(value) => model.patch({ [spec.field]: value })}
             />
           ))}
           <BackgroundShellSettings
@@ -81,19 +54,7 @@ export function OrchestrationSettings({ active }: { active: boolean }) {
               })
             }
           />
-          <Button
-            mt="md"
-            loading={busy}
-            onClick={() => {
-              setBusy(true);
-              setError("");
-              void post("/api/orchestration/settings", configuration.settings)
-                .then(setConfiguration, (failure) =>
-                  setError(errorText(failure)),
-                )
-                .finally(() => setBusy(false));
-            }}
-          >
+          <Button mt="md" loading={busy} onClick={model.save}>
             Save orchestration settings
           </Button>
         </>
@@ -101,7 +62,7 @@ export function OrchestrationSettings({ active }: { active: boolean }) {
       {error && <p role="alert">{error}</p>}
     </section>
   );
-}
+});
 
 export const childResultHoldSpec: OrchestrationSettingSpec = {
   field: "childResultCoalesceSeconds",

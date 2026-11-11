@@ -1,22 +1,13 @@
-import {
-  createElement,
-  memo,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createElement, memo, type ReactNode } from "react";
+import { observer } from "mobx-react-lite";
+import { markdownRead } from "./markdownRead.ts";
 import CodeBlock from "../../../shell/CodeBlock/CodeBlock.tsx";
 import MarkdownImage from "../../MarkdownImage/MarkdownImage.tsx";
 import RichPreview from "../../RichPreview/RichPreview.tsx";
-import { hasNativeClient, nativeRequest } from "../../../../native/client.ts";
-import { parseMarkdown } from "../../../../wasm/client.ts";
-import { completedMarkdown } from "../../../../native/markdownCache.ts";
 
 import type {
   MarkdownNode,
   MarkdownTree as Tree,
-  MarkdownBlock as Block,
 } from "../../../../generated/rustOwned.ts";
 type Context = { agentId?: string | undefined; basePath?: string | undefined };
 const textContent = (node: MarkdownNode): string =>
@@ -69,7 +60,7 @@ export const NativeMarkdownBlock = memo(function NativeMarkdownBlock({
   );
 });
 
-export default function NativeMarkdown({
+export default observer(function NativeMarkdown({
   text,
   streaming,
   agentId,
@@ -78,57 +69,14 @@ export default function NativeMarkdown({
   text: string;
   streaming: boolean;
 } & Context) {
-  const [parsed, setParsed] = useState<
-    { text: string; blocks: Block[] } | undefined
-  >(() => {
-    const blocks = !streaming
-      ? (completedMarkdown.get(text) as Block[] | undefined)
-      : undefined;
-    return blocks ? { text, blocks } : undefined;
-  });
-  const parsedRef = useRef(parsed);
-  parsedRef.current = parsed;
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (streaming) return;
-    let current = true;
-    setError("");
-    if (parsedRef.current?.text === text) return;
-    const cached = completedMarkdown.get(text) as Block[] | undefined;
-    if (cached) {
-      setParsed({ text, blocks: cached });
-      return;
-    }
-    const controller = new AbortController();
-    const request = hasNativeClient()
-      ? nativeRequest<Block[]>(
-          "markdown.parse",
-          { text, streaming: false },
-          undefined,
-          controller.signal,
-        )
-      : parseMarkdown(text);
-    void request.then(
-      (blocks) => {
-        completedMarkdown.set(text, blocks);
-        if (current) setParsed({ text, blocks });
-      },
-      (reason: unknown) => {
-        if (current)
-          setError(reason instanceof Error ? reason.message : String(reason));
-      },
-    );
-    return () => {
-      current = false;
-      controller.abort();
-    };
-  }, [text, streaming]);
-  const usable = !streaming && parsed?.text === text;
+  const read = streaming ? undefined : markdownRead(text);
+  const blocks = read?.blocks;
+  const error = read?.error;
   return (
     <>
       {!streaming && error && <p role="alert">{error}</p>}
-      {usable ? (
-        parsed.blocks.map((block, index) =>
+      {blocks ? (
+        blocks.map((block, index) =>
           "kind" in block ? (
             <RichPreview key={index} kind={block.kind} source={block.source} />
           ) : (
@@ -147,4 +95,4 @@ export default function NativeMarkdown({
       )}
     </>
   );
-}
+});

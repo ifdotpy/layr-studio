@@ -6,10 +6,7 @@ import { observer } from "mobx-react-lite";
 import { observable, observableRef, runInAction } from "mobx";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { settingsAreasFixture } from "./SettingsAreasFixture.ts";
-import {
-  loadStudioPreferences,
-  useAppPreferences,
-} from "./useAppPreferences.ts";
+import { loadStudioPreferences, AppPreferences } from "./useAppPreferences.ts";
 import { createUiPreferenceBridge } from "../../sync/uiPreferenceBridge.ts";
 import { preferenceMemory } from "../../servers/storage.ts";
 import {
@@ -43,6 +40,7 @@ async function fixture() {
   let connection: (status: string) => void = () => {};
   const stopConnection = vi.fn();
   const areas = settingsAreasFixture({
+    frame: { publish: vi.fn() },
     preferences,
     scope: {
       screen,
@@ -57,9 +55,9 @@ async function fixture() {
       },
     },
   });
-  let current!: ReturnType<typeof useAppPreferences>;
+  const current = new AppPreferences({ ...areas, preferenceBridge: bridge });
+  const stopPreferences = current.start();
   const Probe = observer(function Probe() {
-    current = useAppPreferences(areas, bridge, () => {});
     return null;
   });
   const host = document.createElement("div"),
@@ -73,6 +71,7 @@ async function fixture() {
   const dispose = () => {
     root.unmount();
     host.remove();
+    stopPreferences();
     stopBridge();
   };
   stops.push(dispose);

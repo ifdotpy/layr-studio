@@ -1,16 +1,22 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { theme } from "../../src/theme.ts";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { backgroundDisplay } from "./background.ts";
 import React, { useEffect, useState } from "react";
-import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/studio-theme.css";
 import "../../src/appearance.css";
+import { FixtureAreas } from "./owner-support.tsx";
 import TerminalDock from "../../src/components/shell/TerminalDock/TerminalDock.tsx";
-import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
+import { BackgroundTasksFixture as BackgroundTasks } from "../fixtures/owner-support.tsx";
 import DraftVersions from "../../src/components/shell/DraftVersions/DraftVersions.tsx";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent } from "../../src/types.ts";
@@ -116,15 +122,14 @@ function Fixture() {
         }
         dismiss={() => {}}
       />
-      <TerminalDock
-        agent={agentSummaryFixture(agent.id, agent)}
-        notify={() => {}}
-      />
+      <FixtureAreas selectedId={agent.id}>
+        <TerminalDock />
+      </FixtureAreas>
     </MantineProvider>
   );
 }
 createRoot(document.getElementById("root")!).render(
-  <ServerViewStoreProvider>
+  <ServerStoreProvider value={fixtureServerStore}>
     <Fixture />
-  </ServerViewStoreProvider>,
+  </ServerStoreProvider>,
 );

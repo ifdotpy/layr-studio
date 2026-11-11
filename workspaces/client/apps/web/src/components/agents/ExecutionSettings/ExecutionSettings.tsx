@@ -1,3 +1,8 @@
+import { flow } from "mobx";
+import { type AgentsUi } from "../support/AgentsUi.ts";
+import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { agentId } from "../../../generated/observableResources.ts";
+import { resourceData } from "../../../store/runtime.ts";
 import { observer } from "mobx-react-lite";
 import BottomSheet from "../../ui/BottomSheet/BottomSheet.tsx";
 import { AgentPermissionMode } from "../../../generated/api.ts";
@@ -93,6 +98,9 @@ type SettingsAgent = Pick<
   | "fastMode"
   | "daybreakEnabled"
 >;
+function* resolved<T>(promise: Promise<T>): Generator<Promise<T>, T, T> {
+  return yield promise;
+}
 const title = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 const infoFor = (catalog: Catalog, model: string) =>
   modelForValue(catalog.models, model);
@@ -128,6 +136,7 @@ const detailOf = (input: ExecutionSettingsInput) =>
   input.kind === "agent" ? input.detail : input.draft;
 
 type SettingsProps = {
+  agentsUi: AgentsUi;
   presentation?: "menu" | "panel" | undefined;
   renderTrigger?: (props: {
     agent: Agent;
@@ -147,8 +156,6 @@ type SettingsProps = {
   settingsRow?: boolean;
   showAccountSummary?: boolean;
   extrasTargetId?: string;
-  onOpenChange?: (opened: boolean) => void;
-  openRequest?: number;
   inline?: boolean;
   permissionsTargetId?: string;
   onAccountChange?: (key: string) => void;
@@ -208,67 +215,55 @@ const reviewSettingsFor = (
     ? { fast_mode: agent.reviewDefaults.fastMode }
     : {}),
 });
-const sameSettings = (left: SettingsValue, right: SettingsValue) =>
-  left.model === right.model &&
-  left.effort === right.effort &&
-  left.fast_mode === right.fast_mode &&
-  !!left.daybreak_enabled === !!right.daybreak_enabled &&
-  left.delegation_depth === right.delegation_depth;
 export function ExecutionSettings(props: SettingsProps) {
-  return <ExecutionSettingsController {...props} />;
+  const agentsUi = props.agentsUi;
+  return <ExecutionSettingsController {...props} agentsUi={agentsUi} />;
 }
 
 // These fields belong to the Team section, outside the complete model picker.
 export function DelegationSettings(props: SettingsProps) {
+  const agentsUi = props.agentsUi;
   return (
     <ExecutionSettingsController
       {...props}
+      agentsUi={agentsUi}
       initialRole="worker"
       section="delegation"
     />
   );
 }
 export function ExecutionPermissions(props: SettingsProps) {
-  return <ExecutionSettingsController {...props} section="permissions" />;
+  const agentsUi = props.agentsUi;
+  return (
+    <ExecutionSettingsController
+      {...props}
+      agentsUi={agentsUi}
+      section="permissions"
+    />
+  );
 }
 type ControllerProps = SettingsProps & {
+  agentsUi: AgentsUi;
   section?: "delegation" | "permissions";
 };
-type SettingsReceipt = { version: object; value: Agent };
 const ExecutionSettingsController = observer(
   function ExecutionSettingsController(props: ControllerProps) {
     const subject = summaryOf(props.input);
     const detail = detailOf(props.input);
-    const [changeStatus, setChangeStatus] = useState<SettingsChange | null>(
-      null,
-    );
-    const [statusOpen, setStatusOpen] = useState(false);
-    useEffect(() => {
-      setChangeStatus((current) =>
-        current ? observeSettingsChange(current, subject, detail || {}) : null,
-      );
-    }, [
+    const ui = props.agentsUi;
+    const store = useServerStore();
+    const settingsScope = JSON.stringify([
       subject.id,
-      subject.accountKey,
-      detail?.pendingSettingsAccountKey,
-      changeStatus?.phase,
+      props.section || "model",
     ]);
-    const loggedFailure = useRef<SettingsChange | null>(null);
-    useEffect(() => {
-      if (
-        changeStatus?.phase === "failed" &&
-        !changeStatus.errorLogged &&
-        loggedFailure.current !== changeStatus
-      ) {
-        loggedFailure.current = changeStatus;
-        appendAppLog({
-          at: Date.now(),
-          level: "error",
-          title: "Execution settings change failed",
-          reason: changeStatus.error || "The settings change failed.",
-        });
-      }
-    }, [changeStatus]);
+    const [storedChange, setChangeStatus] = ui.cell(
+      settingsScope,
+      "changeStatus",
+    );
+    const changeStatus = storedChange
+      ? observeSettingsChange(storedChange, subject, detail || {})
+      : null;
+    const [statusOpen, setStatusOpen] = useState(false);
     const statusModal = changeStatus && (
       <Modal
         opened={statusOpen}
@@ -318,61 +313,28 @@ const ExecutionSettingsController = observer(
         </Stack>
       </Modal>
     );
-    const [confirmed, setConfirmed] = useState<
-      Partial<Record<SetupRole, SettingsReceipt>>
-    >({});
-    const signatures = {
-      orchestrator: JSON.stringify(settingsFor(subject, false, detail || {})),
-      worker: JSON.stringify(settingsFor(subject, true, detail || {})),
-      review: JSON.stringify(reviewSettingsFor(detail || {})),
+    const [confirmed] = ui.cell(settingsScope, "confirmed");
+    const signature = (role: SetupRole, value: Agent = detail || subject) =>
+      JSON.stringify(
+        role === "review"
+          ? reviewSettingsFor(value)
+          : settingsFor(subject, role === "worker", value),
+      );
+    const readSignature = (role: SetupRole) => {
+      const current = resourceData(
+        store.agentDetail(agentId(subject.id)).current,
+      );
+      return JSON.stringify([
+        subject.id,
+        accountOf(subject),
+        signature(role, current || detail || subject),
+      ]);
     };
-    const settingsScope = JSON.stringify([subject.id, accountOf(subject)]);
-    const projected = useRef({
-      agent: subject,
-      scope: settingsScope,
-      signatures,
-      versions: { orchestrator: {}, worker: {}, review: {} },
-      requests: {} as Partial<Record<SetupRole, object>>,
-    });
-    for (const role of ["orchestrator", "worker", "review"] as const)
-      if (
-        projected.current.scope !== settingsScope ||
-        projected.current.signatures[role] !== signatures[role]
-      ) {
-        projected.current.versions[role] = {};
-        delete projected.current.requests[role];
-      }
-    projected.current.agent = subject;
-    projected.current.scope = settingsScope;
-    projected.current.signatures = signatures;
-    const mounted = useRef(true);
-    useEffect(() => {
-      mounted.current = true;
-      return () => {
-        mounted.current = false;
-      };
-    }, []);
-    const beginSettingsSave = (role: SetupRole) => {
-      const version = projected.current.versions[role];
-      const request = {};
-      projected.current.requests[role] = request;
-      return (value: Agent) => {
-        const latest = projected.current;
-        if (
-          !mounted.current ||
-          latest.versions[role] !== version ||
-          latest.requests[role] !== request ||
-          value.id !== latest.agent.id ||
-          accountOf(value) !== accountOf(latest.agent)
-        )
-          return false;
-        setConfirmed((old) => ({ ...old, [role]: { version, value } }));
-        return true;
-      };
-    };
+    const beginSettingsSave = (role: SetupRole) =>
+      ui.begin(settingsScope, role, () => readSignature(role));
     const receipt = (role: SetupRole) => {
       const saved = confirmed[role];
-      return saved?.version === projected.current.versions[role]
+      return saved?.value.id && saved.baseline === readSignature(role)
         ? saved.value
         : undefined;
     };
@@ -381,9 +343,11 @@ const ExecutionSettingsController = observer(
     const review = receipt("review");
     // Only execution fields bridge the response-to-SSE interval. Status and
     // other agent fields continue to come from the workspace projection.
-    const [selectedRole, setRole] = useState<SetupRole>(
-      props.initialRole || (subject.isLead ? "orchestrator" : "worker"),
-    );
+    const [storedRole, setRole] = ui.cell(settingsScope, "role");
+    const selectedRole =
+      storedRole ||
+      props.initialRole ||
+      (subject.isLead ? "orchestrator" : "worker");
     // With subagents off, the composer picker of a lead has no Workers role; the
     // settings rows still set the defaults for later subagents.
     const workersHidden =
@@ -392,16 +356,9 @@ const ExecutionSettingsController = observer(
       workersHidden && selectedRole === "worker"
         ? "orchestrator"
         : selectedRole;
-    const [opened, setOpened] = useState(false);
+    const [opened, setOpened] = ui.cell(settingsScope, "opened");
     const [transferOpen, setTransferOpen] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
-    useEffect(() => {
-      if ((props.openRequest || 0) > 0) {
-        triggerRef.current?.focus({ preventScroll: true });
-        setRole(subject.isLead ? "orchestrator" : "worker");
-        setOpened(true);
-      }
-    }, [props.openRequest]);
     const changeOpened = useCallback(
       (value: boolean) => {
         setOpened(value);
@@ -435,51 +392,45 @@ const ExecutionSettingsController = observer(
         focusRole.current = false;
       }
     }, [role, roleSwitchId, opened]);
+    const updateChange = (key: string, patch: Partial<SettingsChange>) =>
+      setChangeStatus((current) =>
+        current &&
+        current.phase !== "failed" &&
+        current.requestKey === key &&
+        subject.id === current.agentId &&
+        accountOf(subject) === current.accountKey
+          ? { ...current, ...patch }
+          : current,
+      );
     const scope = JSON.stringify([agent.id, accountOf(agent), role]);
     const controls = (
       <ScopedExecutionSettings
         key={scope}
         {...props}
         beginSettingsSave={beginSettingsSave}
+        acknowledged={receipt(role)}
         transferOpen={transferOpen}
         setTransferOpen={setTransferOpen}
         onSettingsChange={(change) => {
           setChangeStatus(change);
           setStatusOpen(true);
         }}
-        onSettingsFailure={(key, message, uncertain) =>
-          setChangeStatus((current) =>
-            current &&
-            current.requestKey === key &&
-            projected.current.agent.id === current.agentId &&
-            accountOf(projected.current.agent) === current.accountKey
-              ? {
-                  ...current,
-                  phase: uncertain ? "saving" : "failed",
-                  error: message,
-                  errorLogged: true,
-                }
-              : current,
-          )
+        onSettingsFailure={(key, error, uncertain) =>
+          updateChange(key, {
+            phase: uncertain ? "saving" : "failed",
+            error,
+            errorLogged: true,
+          })
         }
         onSettingsConfirmed={(key, nextTurn, canonical) =>
-          setChangeStatus((current) =>
-            current &&
-            current.phase !== "failed" &&
-            current.requestKey === key &&
-            projected.current.agent.id === current.agentId &&
-            accountOf(projected.current.agent) === current.accountKey
-              ? {
-                  ...current,
-                  phase: nextTurn ? "queued" : "saved",
-                  requested: {
-                    model: settingsFor(canonical, false).model,
-                    effort: settingsFor(canonical, false).effort,
-                    fastMode: settingsFor(canonical, false).fast_mode,
-                  },
-                }
-              : current,
-          )
+          updateChange(key, {
+            phase: nextTurn ? "queued" : "saved",
+            requested: {
+              model: settingsFor(canonical, false).model,
+              effort: settingsFor(canonical, false).effort,
+              fastMode: settingsFor(canonical, false).fast_mode,
+            },
+          })
         }
         presentation={props.renderTrigger ? "panel" : props.presentation}
         input={input}
@@ -537,6 +488,7 @@ const ExecutionSettingsController = observer(
 
 const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   input,
+  agentsUi: ui,
   presentation = "menu",
   renderTrigger,
   section,
@@ -547,7 +499,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   catalog: parentCatalog,
   accounts = [],
   teamDefaults = false,
-  onOpenChange,
   initialRole = "orchestrator",
   settingsRow = false,
   showAccountSummary = false,
@@ -567,12 +518,14 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   triggerRef,
   setOpened,
   beginSettingsSave,
+  acknowledged,
   transferOpen,
   setTransferOpen,
   onSettingsChange,
   onSettingsFailure,
   onSettingsConfirmed,
 }: ControllerProps & {
+  acknowledged: Agent | undefined;
   transferOpen: boolean;
   setTransferOpen: (value: boolean) => void;
   beginSettingsSave: (role: SetupRole) => (agent: Agent) => boolean;
@@ -603,32 +556,19 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
     ? (detail?.reviewerExcludedAccountKeys ?? undefined)
     : undefined;
   const { post, save, saved } = useServerApi();
+  const store = useServerStore();
 
-  const [permissionsTarget, setPermissionsTarget] =
-    useState<HTMLElement | null>(null);
+  const [[permissionsTarget, extrasTarget], setTargets] = useState<
+    Array<HTMLElement | null>
+  >([]);
   useLayoutEffect(() => {
-    setPermissionsTarget(
-      permissionsTargetId ? document.getElementById(permissionsTargetId) : null,
+    setTargets(
+      [permissionsTargetId, extrasTargetId].map((id) =>
+        id ? document.getElementById(id) : null,
+      ),
     );
-  }, [permissionsTargetId]);
-  const [extrasTarget, setExtrasTarget] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    setExtrasTarget(
-      extrasTargetId ? document.getElementById(extrasTargetId) : null,
-    );
-  }, [extrasTargetId]);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  }, [permissionsTargetId, extrasTargetId]);
   const canQueueSettings = detail?.nextTurnSettingsSupported === true;
-  useEffect(() => {
-    onOpenChange?.(opened);
-    return () => onOpenChange?.(false);
-  }, [opened, onOpenChange]);
   useEffect(() => {
     if (!opened) return;
     const close = (event: KeyboardEvent) => {
@@ -656,44 +596,28 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
     document.addEventListener("keydown", close, true);
     return () => document.removeEventListener("keydown", close, true);
   }, [accountModalOpen, transferOpen, opened]);
-  const [saving, setSaving] = useState(false);
-  const saveLock = useRef(false);
+  const formScope = JSON.stringify([
+    agent.id,
+    accountOf(agent),
+    role,
+    section || "model",
+  ]);
+  const [saving, setSaving] = ui.cell(formScope, "saving");
   const receiptKey = `next-turn-settings:${JSON.stringify([agent.id, accountOf(agent)])}`;
-  const [unconfirmed, setUnconfirmed] = useState<ConversationBody | null>(
-    () => {
-      if (teamDefaults || onDraftChange) return null;
-      const value = saved<ConversationBody | null>(receiptKey, null);
-      return value?.id === agent.id && value?.next_turn === true ? value : null;
-    },
+  const savedRequest =
+    teamDefaults || onDraftChange
+      ? null
+      : saved<ConversationBody | null>(receiptKey, null);
+  const [unconfirmed, setUnconfirmed] = ui.cell(
+    formScope,
+    "unconfirmed",
+    savedRequest?.id === agent.id && savedRequest.next_turn === true
+      ? savedRequest
+      : null,
   );
-  const [pendingYolo, setPendingYolo] = useState<{
-    value: boolean;
-    baseline: boolean;
-  } | null>(null);
-  useEffect(() => {
-    if (
-      !saving &&
-      pendingYolo &&
-      (pendingYolo.value ===
-        (detail?.permissionMode === AgentPermissionMode["bypassPermissions"]) ||
-        pendingYolo.baseline !==
-          (detail?.permissionMode === AgentPermissionMode["bypassPermissions"]))
-    )
-      setPendingYolo(null);
-  }, [saving, pendingYolo, detail?.permissionMode]);
-  const [pending, setPending] = useState<{
-    values: SettingsValue;
-    baseline: SettingsValue;
-  } | null>(null);
-  const [reviewPending, setReviewPending] = useState<{
-    values: ReviewSettings;
-    baseline: ReviewSettings;
-  } | null>(null);
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState<{
-    kind: "saving" | "saved" | "accepted";
-    text: string;
-  } | null>(null);
+  const [pendingYolo, setPendingYolo] = ui.cell(formScope, "pendingYolo");
+  const [error, setError] = ui.cell(formScope, "error");
+  const [status, setStatus] = ui.cell(formScope, "status");
   const label = settingsLabel(agent, role, teamDefaults);
   const prefix = teamDefaults
     ? "Default subagent"
@@ -703,8 +627,12 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   const queued = queuedFor(agent, detail || {});
   const stored = settingsFor(agent, teamDefaults, detail || {});
   const reviewStored = reviewSettingsFor(detail || {});
-  const reviewCurrent = reviewPending?.values || reviewStored;
-  const current = pending?.values || stored;
+  const reviewCurrent = acknowledged
+    ? reviewSettingsFor(acknowledged)
+    : reviewStored;
+  const current = acknowledged
+    ? settingsFor(acknowledged, teamDefaults)
+    : stored;
   const effectiveAccount = teamDefaults ? null : accountOf(agent);
   const accountCatalog = useWorkerModels(
     effectiveAccount || accountOf(agent),
@@ -760,40 +688,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   };
   const catalogReader = useModelCatalogReader();
 
-  useEffect(() => {
-    // Keep the acknowledged response while replication still has the old values.
-    // A settings change in the snapshot hands ownership back to replication.
-    if (
-      !saving &&
-      pending &&
-      (sameSettings(pending.values, stored) ||
-        !sameSettings(pending.baseline, stored))
-    )
-      setPending(null);
-  }, [
-    saving,
-    pending,
-    stored.model,
-    stored.effort,
-    stored.fast_mode,
-    stored.daybreak_enabled,
-    stored.delegation_depth,
-  ]);
-  useEffect(() => {
-    if (
-      !saving &&
-      reviewPending &&
-      (JSON.stringify(reviewPending.values) === JSON.stringify(reviewStored) ||
-        JSON.stringify(reviewPending.baseline) !== JSON.stringify(reviewStored))
-    )
-      setReviewPending(null);
-  }, [
-    saving,
-    reviewPending,
-    reviewStored.model,
-    reviewStored.effort,
-    reviewStored.fast_mode,
-  ]);
   const selectedModel = current.model || agent.model || "";
   const info = infoFor(catalog, selectedModel);
   const selectedProvider = teamDefaults ? info?.provider : agent.provider;
@@ -865,14 +759,13 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
       badges: [],
       disabledReason: "Unavailable for review.",
     });
-  const submit = async (request: ConversationBody, notice = "") => {
+  const submit = flow(function* (request: ConversationBody, notice = "") {
     if (readOnlyReason) return;
     if (onDraftChange) {
       onDraftChange(request);
       return;
     }
-    if (saveLock.current) return;
-    saveLock.current = true;
+    if (ui.fields.get(formScope)?.saving ?? false) return;
     const acceptCanonical = beginSettingsSave(
       teamDefaults ? "worker" : "orchestrator",
     );
@@ -898,7 +791,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         },
       });
     }
-    const previousPending = pending;
     setSaving(true);
     setError("");
     setStatus({ kind: "saving", text: "" });
@@ -920,12 +812,9 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
       if (defaults && model !== current.model) {
         // Model choices and automatic model repair can change future-worker
         // selection without going through the account tile's preflight.
-        const offered = await readWorkerModels(
-          catalogReader,
-          requestAccountKey,
-          true,
+        const offered = yield* resolved(
+          readWorkerModels(catalogReader, requestAccountKey, true),
         );
-        if (!mounted.current) return;
         const selected = modelForValue(offered, model || agent.model);
         if (!selected || selected.hidden)
           throw new Error(
@@ -933,10 +822,12 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
           );
       }
       // A lost response must not leave the control saving forever.
-      const canonical = await post(
-        "/api/conversation",
-        request,
-        request.next_turn || teamDefaults ? { timeoutMs: 15000 } : {},
+      const canonical = yield* resolved(
+        post(
+          "/api/conversation",
+          request,
+          request.next_turn || teamDefaults ? { timeoutMs: 15000 } : {},
+        ),
       );
       if (
         !canonical ||
@@ -951,25 +842,18 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         onSettingsConfirmed(statusKey, request.next_turn === true, canonical);
       if (request.next_turn) {
         clearReceipt();
-        if (mounted.current) setUnconfirmed(null);
+        setUnconfirmed(null);
       }
-      const accepted = acceptCanonical(canonical);
-      if (!mounted.current) return;
-      if (accepted)
-        setPending({
-          values: settingsFor(canonical, teamDefaults),
-          baseline: stored,
-        });
+      acceptCanonical(canonical);
       setStatus({ kind: "saved", text: notice });
     } catch (failure) {
       const rejected =
         failure instanceof ApiError &&
         [400, 401, 403, 404, 409].includes(failure.status);
       if (!confirmed && (!request.next_turn || rejected)) {
-        if (mounted.current) setPending(previousPending);
         if (request.next_turn) {
           clearReceipt();
-          if (mounted.current) setUnconfirmed(null);
+          setUnconfirmed(null);
         }
       }
       if (!teamDefaults && !confirmed) {
@@ -985,7 +869,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         });
         onSettingsFailure(statusKey, errorText(failure), uncertain);
       }
-      if (!mounted.current) return;
       setStatus(null);
       setError(
         confirmed
@@ -993,46 +876,36 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
           : errorText(failure),
       );
     } finally {
-      saveLock.current = false;
-      if (mounted.current) setSaving(false);
+      setSaving(false);
     }
-  };
+  });
   const shownTransfer = teamDefaults
     ? undefined
     : agent.accountTransferProgress;
   const blockedTransfer = shownTransfer?.kind === "blocked";
-  useEffect(() => {
-    if (shownTransfer?.kind !== "blocked") return;
-    appendAppLog({
-      at: Date.now(),
-      level: "error",
-      title: "Account transfer blocked",
-      dedupeKey: `account-transfer:${shownTransfer.id}:${shownTransfer.reason}`,
-      reason: shownTransfer.reason,
-    });
-  }, [shownTransfer]);
   const shownTransferTarget =
     shownTransfer && "targetAccountKey" in shownTransfer
       ? accounts.find(
           (account) => account.id === shownTransfer.targetAccountKey,
         )
       : undefined;
-  const runTeamTransferAction = async (action: "retry" | "cancel") => {
+  const runTeamTransferAction = flow(function* (action: "retry" | "cancel") {
     if (
-      saveLock.current ||
+      (ui.fields.get(formScope)?.saving ?? false) ||
       !shownTransfer ||
       !("actions" in shownTransfer) ||
       !shownTransfer.actions.includes(action)
     )
       return;
-    saveLock.current = true;
     setSaving(true);
     setError("");
     try {
-      await post("/api/agents/account-transfer", {
-        action,
-        request_id: shownTransfer.id,
-      });
+      yield* resolved(
+        post("/api/agents/account-transfer", {
+          action,
+          request_id: shownTransfer.id,
+        }),
+      );
     } catch (failure) {
       appendAppLog({
         at: Date.now(),
@@ -1040,13 +913,12 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         title: `Account transfer ${action} failed`,
         reason: errorText(failure),
       });
-      if (mounted.current) setError(errorText(failure));
+      setError(errorText(failure));
     } finally {
-      saveLock.current = false;
-      if (mounted.current) setSaving(false);
+      setSaving(false);
     }
-  };
-  const change = async (patch: Partial<SettingsValue>) => {
+  });
+  const change = flow(function* (patch: Partial<SettingsValue>) {
     if (
       disabled ||
       ("daybreak_enabled" in patch && selectedProvider !== ProviderKind.Codex)
@@ -1126,13 +998,13 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
             ? { next_turn: true, request_id: randomUUID() }
             : {}),
         };
-    await submit(request, adjustments.join(" "));
-  };
-  const changeReview = async (
+    yield* resolved(submit(request, adjustments.join(" ")));
+  });
+  const changeReview = flow(function* (
     patch: Partial<ReviewSettings>,
     prepared = false,
-  ) => {
-    if (disabled || saveLock.current) return;
+  ) {
+    if (disabled || (ui.fields.get(formScope)?.saving ?? false)) return;
     const next = { ...reviewCurrent, ...patch };
     if (!next.model) {
       setError("Select a review model");
@@ -1148,21 +1020,21 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
       onDraftChange({ review_defaults: next });
       return;
     }
-    saveLock.current = true;
-    const previousPending = reviewPending;
     const acceptCanonical = beginSettingsSave("review");
     setSaving(true);
     setError("");
     setStatus({ kind: "saving", text: "" });
     try {
-      const canonical = await post(
-        "/api/conversation",
-        {
-          id: agent.id,
-          expected_account_key: accountOf(agent),
-          review_defaults: next,
-        },
-        { timeoutMs: 15000 },
+      const canonical = yield* resolved(
+        post(
+          "/api/conversation",
+          {
+            id: agent.id,
+            expected_account_key: accountOf(agent),
+            review_defaults: next,
+          },
+          { timeoutMs: 15000 },
+        ),
       );
       if (
         !canonical ||
@@ -1172,32 +1044,22 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         throw new Error(
           "The settings account changed. Check the current settings.",
         );
-      const accepted = acceptCanonical(canonical);
-      if (!mounted.current) return;
-      if (accepted)
-        setReviewPending({
-          values: reviewSettingsFor(canonical),
-          baseline: reviewStored,
-        });
+      acceptCanonical(canonical);
       setStatus({ kind: "saved", text: "" });
     } catch (failure) {
-      if (!mounted.current) return;
-      setReviewPending(previousPending);
       setStatus(null);
       setError(errorText(failure));
     } finally {
-      saveLock.current = false;
-      if (mounted.current) setSaving(false);
+      setSaving(false);
     }
-  };
-  const changeYolo = async (enabled: boolean) => {
+  });
+  const changeYolo = flow(function* (enabled: boolean) {
     if (
-      saveLock.current ||
+      (ui.fields.get(formScope)?.saving ?? false) ||
       !agent.isLead ||
       agent.provider !== ProviderKind.Codex
     )
       return;
-    saveLock.current = true;
     const previousPending = pendingYolo;
     setSaving(true);
     setError("");
@@ -1205,12 +1067,14 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
     try {
       const storageKey = `permissions:${agent.id}:${accountOf(agent)}`;
       const requestId = settingsRequestId({ saved, save }, storageKey, enabled);
-      const canonical = await post("/api/conversation", {
-        id: agent.id,
-        request_id: requestId,
-        yolo_mode: enabled,
-        expected_account_key: accountOf(agent),
-      });
+      const canonical = yield* resolved(
+        post("/api/conversation", {
+          id: agent.id,
+          request_id: requestId,
+          yolo_mode: enabled,
+          expected_account_key: accountOf(agent),
+        }),
+      );
       if (
         !canonical ||
         canonical.id !== agent.id ||
@@ -1221,14 +1085,15 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         );
       clearSettingsRequest({ saved, save }, storageKey, requestId);
       confirmed = true;
-      if (!mounted.current) return;
       setPendingYolo({
+        read: () =>
+          resourceData(store.agentDetail(agentId(agent.id)).current)
+            ?.permissionMode === AgentPermissionMode["bypassPermissions"],
         value: canonical.permissionMode === "bypassPermissions",
         baseline:
           detail?.permissionMode === AgentPermissionMode["bypassPermissions"],
       });
     } catch (failure) {
-      if (!mounted.current) return;
       if (!confirmed) setPendingYolo(previousPending);
       setError(
         confirmed
@@ -1236,10 +1101,9 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
           : errorText(failure),
       );
     } finally {
-      saveLock.current = false;
-      if (mounted.current) setSaving(false);
+      setSaving(false);
     }
-  };
+  });
   const selectedOptions = role === "review" ? reviewOptions : modelOptions;
   const storedPickerModel =
     role === "review" ? reviewCurrent.model || "" : current.model || DEFAULT;
@@ -1470,9 +1334,7 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         <p role="status" className="notice execution-status">
           {status.kind === "saving"
             ? "Saving…"
-            : status.kind === "accepted"
-              ? status.text
-              : `Saved${status.text ? ` · ${status.text}` : ""}`}
+            : `Saved${status.text ? ` · ${status.text}` : ""}`}
         </p>
       )}
       {((!teamDefaults && queued) || (active && canQueueSettings)) && (
@@ -1884,3 +1746,8 @@ function ExecutionMenu({
     </>
   );
 }
+
+export {
+  observeSettingsChange,
+  type SettingsChange,
+} from "./liveSettingsStatus.ts";

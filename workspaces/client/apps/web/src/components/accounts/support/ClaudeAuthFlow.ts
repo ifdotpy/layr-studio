@@ -1,3 +1,4 @@
+import { reached } from "../../../clock.ts";
 import { makeAutoObservable, reaction } from "mobx";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { requestId as resourceRequestId } from "../../../generated/observableResources.ts";
@@ -46,27 +47,25 @@ export class ClaudeAuthFlow {
   error = "";
   busy = "";
   expectedEmail: string;
-  now = Date.now();
   private reported = "";
   private stop: (() => void) | undefined;
-  private timer: ReturnType<typeof setTimeout> | undefined;
-  private readonly api: ServerServices["api"];
-  private readonly store: ServerServices["store"];
-  private readonly resources: Pick<
+  readonly #api: ServerServices["api"];
+  readonly #store: ServerServices["store"];
+  readonly #resources: Pick<
     ServerServices["resources"],
     "publish" | "retryNow"
   >;
-  private readonly options: Options;
+  readonly #options: Options;
   constructor(
     api: ServerServices["api"],
     store: ServerServices["store"],
     resources: Pick<ServerServices["resources"], "publish" | "retryNow">,
     options: Options,
   ) {
-    this.api = api;
-    this.store = store;
-    this.resources = resources;
-    this.options = options;
+    this.#api = api;
+    this.#store = store;
+    this.#resources = resources;
+    this.#options = options;
     this.expectedEmail = options.email;
     const id = api.saved<string>(this.storageKey, "");
     this.flow =
@@ -89,31 +88,66 @@ export class ClaudeAuthFlow {
         : id
           ? api.saved<Attempt | null>(`${this.storageKey}:${id}`, null)
           : null;
-    makeAutoObservable<this, "api" | "store" | "resources" | "options">(
-      this,
-      { api: false, store: false, resources: false, options: false },
-      { autoBind: true },
+    makeAutoObservable(this, {}, { autoBind: true });
+    this.stop = reaction(
+      () => [this.observed, this.receipt] as const,
+      ([observed, receipt]) => {
+        if (observed?.status === "error") {
+          if (
+            !this.#options.accountKey &&
+            unknownRequest(observed.error) &&
+            this.flow &&
+            !this.flow.unknownSince
+          ) {
+            this.persist({ ...this.flow, unknownSince: Date.now() });
+          } else if (
+            !unknownRequest(observed.error) ||
+            this.#options.accountKey
+          )
+            this.error = errorText(observed.error);
+        }
+        if (
+          receipt &&
+          this.flow &&
+          codeSubmissionResolved(receipt) &&
+          this.codeSubmissionUncertain
+        )
+          this.persist({
+            ...this.flow,
+            codeSubmissionUncertain: false,
+            codeRequestId: undefined,
+          });
+        if (this.terminal) this.clearSaved();
+        if (
+          receipt?.status === "ready" &&
+          this.reported !== receipt.requestId
+        ) {
+          this.reported = receipt.requestId;
+          void Promise.resolve(this.#options.onReady?.()).catch(this.fail);
+        }
+      },
+      { fireImmediately: true },
     );
   }
   get storageKey() {
-    return this.options.accountKey
-      ? `claude-sign-in:${this.options.scope}:${this.options.accountKey}`
-      : `claude-add-sign-in:${this.options.scope}`;
+    return this.#options.accountKey
+      ? `claude-sign-in:${this.#options.scope}:${this.#options.accountKey}`
+      : `claude-add-sign-in:${this.#options.scope}`;
   }
   get requestId() {
     return this.flow?.requestId || "";
   }
   get observed() {
     return this.requestId
-      ? this.store.authProgress(resourceRequestId(this.requestId)).current
+      ? this.#store.authProgress(resourceRequestId(this.requestId)).current
       : undefined;
   }
   get receipt() {
     const observed = this.observed;
     const value = observed ? resourceData(observed) : undefined;
     return value?.requestId === this.requestId &&
-      (!this.options.accountKey ||
-        value.accountKey === this.options.accountKey) &&
+      (!this.#options.accountKey ||
+        value.accountKey === this.#options.accountKey) &&
       value.status !== "duplicate" &&
       value.status !== "uncertain"
       ? value
@@ -144,7 +178,7 @@ export class ClaudeAuthFlow {
       return "Studio could not confirm whether Claude received the authorization response. Check sign-in status or cancel this request; do not submit it again.";
     if (this.verificationPending)
       return "The full authorization response was submitted. Waiting for Claude to verify it; do not submit it again.";
-    return this.options.accountKey
+    return this.#options.accountKey
       ? this.receipt?.status === "pending"
         ? "Complete sign-in in your browser."
         : "Waiting for the sign-in request."
@@ -156,11 +190,11 @@ export class ClaudeAuthFlow {
     return (
       !!this.flow?.unknownSince &&
       !this.receipt &&
-      this.now - this.flow.unknownSince >= UNKNOWN_REQUEST_GRACE_MS
+      reached(this.flow.unknownSince + UNKNOWN_REQUEST_GRACE_MS)
     );
   }
   get displayLabel() {
-    return this.flow?.label || this.options.label;
+    return this.flow?.label || this.#options.label;
   }
   get displayEmail() {
     return this.flow?.email || this.expectedEmail;
@@ -170,9 +204,9 @@ export class ClaudeAuthFlow {
   }
   get displayError() {
     const receipt = this.receipt;
-    if (!this.options.accountKey && this.wrong)
-      return `You signed in as ${receipt?.email || "another account"}. This account expects ${this.options.email || "a different account"}. Studio did not save the sign-in.`;
-    if (!this.options.accountKey && receipt?.error?.includes("expired"))
+    if (!this.#options.accountKey && this.wrong)
+      return `You signed in as ${receipt?.email || "another account"}. This account expects ${this.#options.email || "a different account"}. Studio did not save the sign-in.`;
+    if (!this.#options.accountKey && receipt?.error?.includes("expired"))
       return "The sign-in expired. Start a new sign-in to get a new link.";
     return this.error || receipt?.error || "";
   }
@@ -183,7 +217,7 @@ export class ClaudeAuthFlow {
         !url.username &&
         !url.password &&
         !url.port &&
-        (this.options.accountKey
+        (this.#options.accountKey
           ? ["claude.ai", "claude.com"].includes(url.hostname) &&
             ["/oauth/authorize", "/cai/oauth/authorize"].includes(url.pathname)
           : url.hostname === "claude.com" &&
@@ -202,88 +236,31 @@ export class ClaudeAuthFlow {
   }
   persist(next: Attempt) {
     this.flow = next;
-    if (this.options.accountKey) {
-      this.api.save(this.storageKey, next.requestId);
-      this.api.save(
+    this.#api.save(this.storageKey, next.requestId);
+    if (this.#options.accountKey) {
+      this.#api.save(
         `${this.storageKey}:${next.requestId}:cancel-request-id`,
         next.cancelRequestId || "",
       );
-      this.api.save(
+      this.#api.save(
         `${this.storageKey}:code-submission-uncertain`,
         !!next.codeSubmissionUncertain,
       );
-    } else {
-      this.api.save(`${this.storageKey}:${next.requestId}`, next);
-      this.api.save(this.storageKey, next.requestId);
-    }
+    } else this.#api.save(`${this.storageKey}:${next.requestId}`, next);
   }
   clearSaved() {
-    if (!this.options.accountKey && this.flow) {
-      this.api.save(`${this.storageKey}:${this.requestId}`, null);
-      if (this.api.saved<string>(this.storageKey, "") === this.requestId)
-        this.api.save(this.storageKey, null);
+    if (!this.#options.accountKey && this.flow) {
+      this.#api.save(`${this.storageKey}:${this.requestId}`, null);
+      if (this.#api.saved<string>(this.storageKey, "") === this.requestId)
+        this.#api.save(this.storageKey, null);
     }
-  }
-  startWatching() {
-    this.stop?.();
-    clearTimeout(this.timer);
-    this.stop = reaction(
-      () => [this.observed, this.receipt] as const,
-      ([observed, receipt]) => {
-        if (observed?.status === "error") {
-          if (
-            !this.options.accountKey &&
-            unknownRequest(observed.error) &&
-            this.flow &&
-            !this.flow.unknownSince
-          ) {
-            this.persist({ ...this.flow, unknownSince: Date.now() });
-            this.timer = setTimeout(this.tick, UNKNOWN_REQUEST_GRACE_MS);
-          } else if (!unknownRequest(observed.error) || this.options.accountKey)
-            this.error = errorText(observed.error);
-        }
-        if (
-          receipt &&
-          this.flow &&
-          codeSubmissionResolved(receipt) &&
-          this.codeSubmissionUncertain
-        )
-          this.persist({
-            ...this.flow,
-            codeSubmissionUncertain: false,
-            codeRequestId: undefined,
-          });
-        if (this.terminal) this.clearSaved();
-        if (
-          receipt?.status === "ready" &&
-          this.reported !== receipt.requestId
-        ) {
-          this.reported = receipt.requestId;
-          void Promise.resolve(this.options.onReady?.()).catch(this.fail);
-        }
-      },
-      { fireImmediately: true },
-    );
-    if (this.flow?.unknownSince && !this.receipt)
-      this.timer = setTimeout(
-        this.tick,
-        Math.max(
-          0,
-          UNKNOWN_REQUEST_GRACE_MS - (Date.now() - this.flow.unknownSince),
-        ),
-      );
-    return this.dispose;
   }
   dispose() {
     this.stop?.();
     this.stop = undefined;
-    clearTimeout(this.timer);
   }
   check() {
-    this.resources.retryNow();
-  }
-  tick() {
-    this.now = Date.now();
+    this.#resources.retryNow();
   }
   fail(failure: unknown) {
     this.error = errorText(failure);
@@ -312,7 +289,7 @@ export class ClaudeAuthFlow {
         : {
             requestId: randomUUID(),
             startRequestId: randomUUID(),
-            label: this.options.label.trim() || "Claude Code",
+            label: this.#options.label.trim() || "Claude Code",
             email: email.trim(),
             createdAt: Date.now(),
           };
@@ -320,16 +297,16 @@ export class ClaudeAuthFlow {
       if (next.requestId !== previous?.requestId) this.clearSaved();
       this.persist(next);
       const mutationKey = `${this.storageKey}:${next.requestId}:start`;
-      const result = this.options.accountKey
-        ? yield this.api.post(
+      const result = this.#options.accountKey
+        ? yield this.#api.post(
             "/api/accounts/claude/login",
-            { login_id: next.requestId, account_key: this.options.accountKey },
+            { login_id: next.requestId, account_key: this.#options.accountKey },
             {
               timeoutMs: 30000,
-              requestId: this.api.stableRequestId(mutationKey),
+              requestId: this.#api.stableRequestId(mutationKey),
             },
           )
-        : yield this.api.post(
+        : yield this.#api.post(
             "/api/accounts/claude/add",
             {
               login_id: next.requestId,
@@ -339,7 +316,7 @@ export class ClaudeAuthFlow {
             { requestId: next.startRequestId },
           );
       this.accept(result);
-      this.api.clearStableRequestId(mutationKey);
+      this.#api.clearStableRequestId(mutationKey);
       this.expectedEmail = next.email;
     } catch (failure) {
       this.error = errorText(failure);
@@ -350,12 +327,13 @@ export class ClaudeAuthFlow {
   accept(result: Receipt) {
     if (
       result.requestId !== this.requestId ||
-      (this.options.accountKey && result.accountKey !== this.options.accountKey)
+      (this.#options.accountKey &&
+        result.accountKey !== this.#options.accountKey)
     )
       throw new Error(
         "The sign-in response belongs to another account or request.",
       );
-    this.resources.publish(
+    this.#resources.publish(
       { kind: "auth-progress", requestId: result.requestId },
       result,
     );
@@ -374,18 +352,16 @@ export class ClaudeAuthFlow {
     };
     try {
       this.persist(next);
-      const result =
+      const result = yield this.#api.post(
         action === "code"
-          ? yield this.api.post(
-              "/api/accounts/claude/login/code",
-              { login_id: next.requestId, code: this.code.trim() },
-              { timeoutMs: 30000, requestId: mutationId },
-            )
-          : yield this.api.post(
-              "/api/accounts/claude/login/cancel",
-              { login_id: next.requestId },
-              { timeoutMs: 30000, requestId: mutationId },
-            );
+          ? "/api/accounts/claude/login/code"
+          : "/api/accounts/claude/login/cancel",
+        {
+          login_id: next.requestId,
+          ...(action === "code" ? { code: this.code.trim() } : {}),
+        },
+        { timeoutMs: 30000, requestId: mutationId },
+      );
       if (action === "code") this.code = "";
       this.persist({
         ...next,
@@ -405,7 +381,7 @@ export class ClaudeAuthFlow {
           codeRequestId: rejected ? undefined : next.codeRequestId,
         });
         if (!rejected) this.code = "";
-      } else if (!this.options.accountKey && unknownRequest(failure)) {
+      } else if (!this.#options.accountKey && unknownRequest(failure)) {
         this.clearSaved();
         this.flow = null;
         this.error = "";

@@ -1,6 +1,8 @@
 import { Button, Loader } from "@mantine/core";
 import { Check, Code, Copy, Download, Eye } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { makeAutoObservable, onBecomeObserved, onBecomeUnobserved } from "mobx";
+import { observer } from "mobx-react-lite";
 
 import { copyText } from "../../../clipboard/clipboard.ts";
 
@@ -93,41 +95,86 @@ function mermaidApi() {
   }));
 }
 
-export default memo(function RichPreview({
-  kind,
-  source,
-}: {
+export function createRichPreview(
+  kind: "mermaid" | "html",
+  source: string,
+  release = () => {},
+) {
+  let observed = false;
+  let loading = false;
+  let started = false;
+  const state = makeAutoObservable(
+    {
+      svg: "",
+      error: "",
+      copied: false,
+      copyError: "",
+      *copy() {
+        try {
+          yield copyText(source);
+          this.copied = true;
+          this.copyError = "";
+        } catch {
+          this.copyError =
+            "Cannot copy. Open Source and select the text to copy it.";
+        }
+      },
+      *load() {
+        if (kind !== "mermaid" || started) return;
+        started = loading = true;
+        const id = `chat-diagram-${++serial}`;
+        try {
+          const api = yield* toGenerator(mermaidApi());
+          const result = yield* toGenerator(api.render(id, source));
+          this.svg = result.svg;
+        } catch (e) {
+          this.error = e instanceof Error ? e.message : String(e);
+        } finally {
+          document.getElementById(`d${id}`)?.remove();
+          loading = false;
+          if (!observed) release();
+        }
+      },
+    },
+    {},
+    { autoBind: true },
+  );
+  onBecomeObserved(state, "svg", () => {
+    observed = true;
+    void state.load();
+  });
+  onBecomeUnobserved(state, "svg", () => {
+    observed = false;
+    if (!loading) release();
+  });
+  return state;
+}
+
+const previews = new Map<string, ReturnType<typeof createRichPreview>>();
+
+/** A source retains one render until its last observer and pending render finish. */
+export function richPreviewRead(kind: "mermaid" | "html", source: string) {
+  const key = JSON.stringify([kind, source]);
+  let read = previews.get(key);
+  if (!read) {
+    read = createRichPreview(kind, source, () => previews.delete(key));
+    previews.set(key, read);
+  }
+  return read;
+}
+
+function* toGenerator<T>(promise: Promise<T>): Generator<Promise<T>, T, T> {
+  return yield promise;
+}
+
+type PreviewProps = {
   kind: "mermaid" | "html";
   source: string;
-}) {
+};
+export default observer(function RichPreview({ kind, source }: PreviewProps) {
   const [mode, setMode] = useState<"preview" | "source">("preview");
-  const [svg, setSvg] = useState("");
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState("");
-  useEffect(() => {
-    setCopied(false);
-    setCopyError("");
-  }, [source]);
-  useEffect(() => {
-    if (kind !== "mermaid") return;
-    let active = true;
-    setSvg("");
-    setError("");
-    const id = `chat-diagram-${++serial}`;
-    mermaidApi()
-      .then((api) => api.render(id, source))
-      .then((result) => {
-        if (active) setSvg(result.svg);
-      })
-      .catch((e: unknown) => {
-        if (active) setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => document.getElementById(`d${id}`)?.remove());
-    return () => {
-      active = false;
-    };
-  }, [kind, source]);
+  const state = useMemo(() => richPreviewRead(kind, source), [kind, source]);
+  const { svg, error, copied, copyError } = state;
   const framedDocument = useMemo(
     () => isolatedDocument(kind === "html" ? source : svg),
     [kind, source, svg],
@@ -143,21 +190,13 @@ export default memo(function RichPreview({
       ? Math.max(120, Math.min(560, height + 40))
       : 310;
   }, [svg]);
-  const [url, setUrl] = useState("");
   const downloadSvg = kind === "mermaid" && mode === "preview" && !!svg;
-  useEffect(() => {
-    const value = URL.createObjectURL(
-      new Blob([downloadSvg ? svg : source], {
-        type: downloadSvg
-          ? "image/svg+xml"
-          : kind === "html"
-            ? "text/html"
-            : "text/plain",
-      }),
-    );
-    setUrl(value);
-    return () => URL.revokeObjectURL(value);
-  }, [source, svg, kind, downloadSvg]);
+  const mime = downloadSvg
+    ? "image/svg+xml"
+    : kind === "html"
+      ? "text/html"
+      : "text/plain";
+  const url = `data:${mime};charset=utf-8,${encodeURIComponent(downloadSvg ? svg : source)}`;
   return (
     <section
       className="rich-preview"
@@ -197,17 +236,7 @@ export default memo(function RichPreview({
           variant="subtle"
           aria-label="Copy source"
           title="Copy source"
-          onClick={async () => {
-            try {
-              await copyText(source);
-              setCopied(true);
-              setCopyError("");
-            } catch {
-              setCopyError(
-                "Cannot copy. Open Source and select the text to copy it.",
-              );
-            }
-          }}
+          onClick={() => void state.copy()}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </Button>

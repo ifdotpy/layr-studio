@@ -1,5 +1,8 @@
 import "../../src/rendererStyles.ts";
-import { RequestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
+import {
+  RequestFixture,
+  createRequestFixture,
+} from "../../src/components/conversation/questions/support/requestFixtures.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 declare global {
   interface Window {
@@ -15,9 +18,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/studio-theme.css";
-import Requests, {
-  RequestArea,
-} from "../../src/components/conversation/questions/Requests/Requests.tsx";
+import Requests from "../../src/components/conversation/questions/Requests/Requests.tsx";
 const agent = {
   id: "worker",
   rootId: "lead",
@@ -48,6 +49,17 @@ let requests = [
 ];
 
 window.__notes = [];
+const requestOwner = createRequestFixture({
+  scope: "fixture",
+  notify: (s: string) => window.__notes.push(s),
+  requests,
+  agents: [agentSummaryFixture(agent.id, agent)],
+  details: [{ id: agent.id }],
+});
+requestOwner.start();
+window.addEventListener("pagehide", () => requestOwner.dispose(), {
+  once: true,
+});
 const rootNode = createRoot(document.getElementById("root")!);
 const render = () =>
   rootNode.render(
@@ -59,19 +71,8 @@ const render = () =>
         { style: { padding: "0 16px" } },
         React.createElement(
           RequestFixture,
-          {
-            requests,
-            agents: [agentSummaryFixture(agent.id, agent)],
-            details: [{ id: agent.id }],
-          },
-          React.createElement(
-            RequestArea,
-            {
-              scope: "fixture",
-              notify: (s: string) => window.__notes.push(s),
-            },
-            React.createElement(Requests, { all: true }),
-          ),
+          { owner: requestOwner },
+          React.createElement(Requests, { all: true }),
         ),
       ),
     ),
@@ -89,6 +90,7 @@ window.__waiting = () => {
         }
       : r,
   );
+  requestOwner.updateRequests(requests);
   render();
 };
 render();

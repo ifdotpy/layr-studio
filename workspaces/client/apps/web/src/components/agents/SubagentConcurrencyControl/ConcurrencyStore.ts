@@ -10,8 +10,8 @@ import { AgentMode } from "../../../generated/api.ts";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import {
   DEFAULT_SUBAGENT_CONCURRENCY,
-  MAX_SUBAGENT_CONCURRENCY,
-  MIN_SUBAGENT_CONCURRENCY,
+  MAX_SUBAGENT_CONCURRENCY as MAX_CONCURRENCY,
+  MIN_SUBAGENT_CONCURRENCY as MIN_CONCURRENCY,
 } from "../../../generated/apiSchema.ts";
 import { agentId } from "../../../generated/observableResources.ts";
 import { resourceData } from "../../../store/runtime.ts";
@@ -20,8 +20,6 @@ import type {
   useServerApi,
   useServerStore,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-const MIN_CONCURRENCY = MIN_SUBAGENT_CONCURRENCY;
-const MAX_CONCURRENCY = MAX_SUBAGENT_CONCURRENCY;
 type PendingRequest = PostBody<"/api/conversation">;
 type Stored = { pending?: PendingRequest | undefined };
 export const subagentsOff = (lead: Pick<Agent, "concurrency">) =>
@@ -34,15 +32,13 @@ const validRevision = (value: unknown): value is number =>
   Number.isSafeInteger(value) && Number(value) >= 0;
 const pendingTarget = (
   request: PendingRequest | undefined,
-): number | undefined => {
-  if (!request) return undefined;
-  return (
-    request.subagent_concurrency ??
-    (request.agent_mode === AgentMode["single"]
-      ? MIN_CONCURRENCY
-      : DEFAULT_SUBAGENT_CONCURRENCY)
-  );
-};
+): number | undefined =>
+  request
+    ? (request.subagent_concurrency ??
+      (request.agent_mode === AgentMode["single"]
+        ? MIN_CONCURRENCY
+        : DEFAULT_SUBAGENT_CONCURRENCY))
+    : undefined;
 const validPending = (
   value: unknown,
   leadId: string,

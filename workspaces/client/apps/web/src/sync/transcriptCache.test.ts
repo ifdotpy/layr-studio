@@ -223,3 +223,35 @@ it.each(["append", "replace", "remove", "reorder"] as const)(
       expect(current.payload!.items[index]).toBe(item);
   },
 );
+
+it("starts each subscriber from the current cache before the publication frame", async () => {
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const cache = createTranscriptCache();
+  cache.cacheTranscriptValue("workspace", "chat", { items: [] }, 1);
+  const a = vi.fn();
+  const stopA = cache.subscribeTranscript("workspace", "chat", a);
+  cache.cacheTranscriptValue("workspace", "chat", { items: [] }, 2);
+  const b = vi.fn();
+  const stopB = cache.subscribeTranscript("workspace", "chat", b);
+  expect(a.mock.calls.map(([entry]) => entry.seq)).toEqual([1]);
+  expect(b.mock.calls.map(([entry]) => entry.seq)).toEqual([2]);
+  vi.advanceTimersByTime(50);
+  expect(a.mock.calls.map(([entry]) => entry.seq)).toEqual([1, 2]);
+  expect(b.mock.calls.map(([entry]) => entry.seq)).toEqual([2, 2]);
+  stopB();
+  stopA();
+});
+
+it("does not replay a removed cache snapshot to a new subscriber", async () => {
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const cache = createTranscriptCache();
+  cache.cacheTranscriptValue("workspace", "chat", { items: [] }, 1);
+  const stopA = cache.subscribeTranscript("workspace", "chat", vi.fn());
+  cache.clearTranscript("workspace", "chat");
+  const b = vi.fn();
+  const stopB = cache.subscribeTranscript("workspace", "chat", b);
+  vi.advanceTimersByTime(50);
+  expect(b).not.toHaveBeenCalled();
+  stopB();
+  stopA();
+});

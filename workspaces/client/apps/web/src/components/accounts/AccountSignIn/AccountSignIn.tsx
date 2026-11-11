@@ -1,23 +1,12 @@
 import { observer } from "mobx-react-lite";
-import { requestId as resourceRequestId } from "../../../generated/observableResources.ts";
-import { resourceData } from "../../../store/runtime.ts";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import {
-  useServerApi,
-  useServerResources,
-  useServerStore,
-} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import { now } from "../../../clock.ts";
 import ErrorDescription from "../../shell/ErrorDescription/ErrorDescription.tsx";
 import { Button } from "@mantine/core";
 import { Check, Copy, ExternalLink, Plus, RefreshCw, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { errorText, type PostResult } from "../../../api.ts";
 import type { Account } from "../support/Accounts.tsx";
-import { copyText } from "../../../clipboard/clipboard.ts";
-
+import type { PostResult } from "../../../api.ts";
 export type LoginReceipt = PostResult<"/api/accounts/login">;
-const active = (status?: string) =>
-  ["starting", "pending", "uncertain"].includes(status || "");
 export function deviceCodeCountdownSeconds(
   expiresAt: unknown,
   now: number,
@@ -33,11 +22,7 @@ export function deviceCodeCountdownSeconds(
 }
 
 export default observer(function AccountSignIn({
-  scope,
   targetAccount,
-  emailHint,
-  label,
-  onConnected,
 }: {
   scope?: string | undefined;
   targetAccount?: Account;
@@ -45,160 +30,14 @@ export default observer(function AccountSignIn({
   label?: string;
   onConnected?: (account: Account) => void;
 }) {
-  const { clearStableRequestId, post, save, saved, stableRequestId } =
-    useServerApi();
-  const resources = useServerResources();
-  const storeView = useServerStore();
-
-  const storageKey = `account-sign-in:${scope || "local"}${targetAccount ? `:${targetAccount.id}` : ""}`;
-  const [requestId, setRequestId] = useState(() =>
-    saved<string>(storageKey, ""),
-  );
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  const [expectedEmail, setExpectedEmail] = useState(emailHint || "");
-  const lock = useRef(false);
-  const reported = useRef("");
-  const liveReceipt = (
-    requestId
-      ? resourceData(
-          storeView.authProgress(resourceRequestId(requestId)).current,
-        )
-      : undefined
-  ) as
-    | import("../../../deepReadonly.ts").DeepReadonly<LoginReceipt>
-    | undefined;
-  const receipt =
-    liveReceipt?.requestId === requestId &&
-    (!targetAccount || liveReceipt.accountKey === targetAccount.id)
-      ? liveReceipt
-      : undefined;
-  const account = resourceData(storeView.state().current)
-    ?.accountsSummary.get("current")
-    ?.accounts.find((a) => a.id === receipt?.resolvedAccountKey);
-  useEffect(() => {
-    if (
-      account &&
-      receipt &&
-      ["ready", "duplicate"].includes(receipt.status) &&
-      reported.current !== receipt.requestId
-    ) {
-      reported.current = receipt.requestId;
-      onConnected?.(account);
-    }
-  }, [account, onConnected, receipt]);
-  const remember = (id: string) => {
-    save(storageKey, id);
-    setRequestId(id);
-  };
-  const store = (result: LoginReceipt) => {
-    remember(result.requestId);
-    resources.publish(
-      { kind: "auth-progress", requestId: result.requestId },
-      result,
-    );
-  };
-  const run = async (name: string, action: () => Promise<void>) => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(name);
-    setError("");
-    try {
-      await action();
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      lock.current = false;
-      setBusy("");
-    }
-  };
-  const start = (emailOverride?: string) =>
-    run("start", async () => {
-      // Keep the identity when the HTTP reply is lost, including across reloads.
-      const id =
-        receipt?.status === "uncertain"
-          ? receipt.requestId
-          : !receipt && requestId
-            ? requestId
-            : randomUUID();
-      remember(id);
-      const mutationKey = `${storageKey}:${id}:start`;
-      const result = await post(
-        "/api/accounts/login",
-        {
-          login_id: id,
-          ...(targetAccount ? { account_key: targetAccount.id } : {}),
-          ...(!targetAccount && (emailOverride || expectedEmail)
-            ? { email: emailOverride || expectedEmail }
-            : {}),
-          ...(!targetAccount && label ? { label } : {}),
-        },
-        { timeoutMs: 30000, requestId: stableRequestId(mutationKey) },
-      );
-      clearStableRequestId(mutationKey);
-      store({ ...result, requestId: id });
-      setCopied(false);
-    });
-  const cancel = () =>
-    run("cancel", async () => {
-      if (!receipt) return;
-      const mutationKey = `${storageKey}:${receipt.requestId}:cancel`;
-      store(
-        await post(
-          "/api/accounts/login/cancel",
-          { login_id: receipt.requestId },
-          {
-            timeoutMs: 15000,
-            requestId: stableRequestId(mutationKey),
-          },
-        ),
-      );
-      clearStableRequestId(mutationKey);
-    });
-  // A replay of the same sign-in request starts nothing. The server settles a
-  // lost completion from the account credentials, or expires the request.
-  const check = () =>
-    run("check", async () => {
-      if (targetAccount && receipt) {
-        const mutationKey = `${storageKey}:${receipt.requestId}:check`;
-        const result = await post(
-          "/api/accounts/login",
-          { login_id: receipt.requestId, account_key: targetAccount.id },
-          { timeoutMs: 30000, requestId: stableRequestId(mutationKey) },
-        );
-        clearStableRequestId(mutationKey);
-        store({ ...result, requestId: receipt.requestId });
-      }
-    });
-  let url: string | null = null;
-  try {
-    const value = new URL(receipt?.verificationUrl || "");
-    if (
-      value.protocol === "https:" &&
-      !value.username &&
-      !value.password &&
-      (value.hostname === "openai.com" ||
-        value.hostname.endsWith(".openai.com"))
-    )
-      url = value.href;
-  } catch {
-    /* A pending native response may have no URL yet. */
-  }
+  const flow = useServerAreas().accountsUi.codexFlow;
+  if (!flow) return null;
+  const { receipt, busy, error, copied, expectedEmail, account, url } = flow;
   const connected = ["ready", "duplicate"].includes(receipt?.status || "");
-  useEffect(() => {
-    if (
-      !receipt ||
-      deviceCodeCountdownSeconds(receipt?.expiresAt, Date.now() / 1000) ===
-        null ||
-      !active(receipt.status)
-    )
-      return;
-    const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(timer);
-  }, [receipt?.expiresAt, receipt?.status]);
-  const expirySeconds = deviceCodeCountdownSeconds(receipt?.expiresAt, now);
+  const expirySeconds = deviceCodeCountdownSeconds(
+    receipt?.expiresAt,
+    now() / 1000,
+  );
   return (
     <section
       className="account-add"
@@ -222,7 +61,7 @@ export default observer(function AccountSignIn({
           disabled={
             !!busy || ["starting", "pending"].includes(receipt?.status || "")
           }
-          onClick={() => void start()}
+          onClick={() => void flow.run("start")}
         >
           {targetAccount ? "Start sign-in" : "Sign in"}
         </Button>
@@ -263,12 +102,7 @@ export default observer(function AccountSignIn({
                       size="compact-xs"
                       variant="subtle"
                       leftSection={<Copy size={13} />}
-                      onClick={() =>
-                        void run("copy", async () => {
-                          await copyText(receipt.userCode!);
-                          setCopied(true);
-                        })
-                      }
+                      onClick={() => void flow.run("copy")}
                     >
                       {copied ? "Copied" : "Copy code"}
                     </Button>
@@ -309,7 +143,7 @@ export default observer(function AccountSignIn({
                   variant="subtle"
                   leftSection={<RefreshCw size={13} />}
                   disabled={!!busy}
-                  onClick={() => void check()}
+                  onClick={() => void flow.run("check")}
                 >
                   Check status
                 </Button>
@@ -320,7 +154,7 @@ export default observer(function AccountSignIn({
                     leftSection={<X size={13} />}
                     loading={busy === "cancel"}
                     disabled={!!busy}
-                    onClick={() => void cancel()}
+                    onClick={() => void flow.run("cancel")}
                   >
                     Cancel sign-in
                   </Button>
@@ -347,10 +181,7 @@ export default observer(function AccountSignIn({
             <Button
               variant="default"
               disabled={!!busy}
-              onClick={() => {
-                setExpectedEmail(receipt.email!);
-                void start(receipt.email!);
-              }}
+              onClick={() => void flow.run("start", receipt.email!)}
             >
               Keep {receipt.email}
             </Button>

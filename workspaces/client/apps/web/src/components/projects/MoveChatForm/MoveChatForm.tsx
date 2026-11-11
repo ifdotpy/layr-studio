@@ -5,22 +5,21 @@ import {
 import { observer } from "mobx-react-lite";
 import { Button, NativeSelect } from "@mantine/core";
 import { useId, useRef, useState } from "react";
-import { useProjectSave } from "../support/useProjectSave.ts";
+import type { ProjectSave } from "../../../app/projects/ProjectSave.ts";
 import type { Agent } from "../../../types.ts";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
 export const MoveChatForm = observer(function MoveChatForm({
   project,
   agent,
-  saved,
+  save,
 }: {
   project: Project;
   agent: Pick<Agent, "id" | "projectFolder" | "projectFolderRevision">;
-  saved: () => Promise<void>;
+  save: ProjectSave<"/api/organization">;
 }) {
   const [folder, setFolder] = useState(agent.projectFolder || "");
   const folderId = useId();
-  const save = useProjectSave("/api/organization", saved);
   const expected = useRef({
     folder: agent.projectFolder || null,
     revision: agent.projectFolderRevision || 0,

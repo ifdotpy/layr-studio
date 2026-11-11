@@ -1,3 +1,5 @@
+import { autorun } from "mobx";
+import { RoomHistory } from "../../../../conversation/roomHistory.ts";
 // @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
 import { observableFixture } from "../../integration-support/observableFixture.tsx";
@@ -77,7 +79,8 @@ it("keeps selection, search, paging and read acknowledgements with their scope",
     expect(save).toHaveBeenCalledTimes(1);
     chats.back();
     expect(chats.detail).toBe(false);
-    expect(chats.selected).toBe("12");
+    expect(chats.selected).toBe("you");
+    expect(chats.room).toBeUndefined();
     const other = createTeamChatsStore(fixture.store, storage, "other", "lead");
     expect(other.selected).toBe("you");
     expect(other.query).toBe("");
@@ -159,6 +162,71 @@ it("reads generated updates and keeps session reads when the storage adapter swa
     ]);
     expect(chats.rooms).toHaveLength(0);
   } finally {
+    fixture.store.dispose();
+  }
+});
+
+it("selection owns one history and releases it on deselect, replacement and teardown", async () => {
+  const fixture = observableFixture();
+  vi.spyOn(fixture.store, "room").mockReturnValue({
+    current: { status: "absent" },
+  });
+  fixture.apply(
+    ["a", "b"].map((id) => ({
+      collection: "room",
+      id,
+      value: { id, name: id, kind: "broadcast", rootId: "lead" },
+    })),
+  );
+  const chats = createTeamChatsStore(
+    fixture.store,
+    {
+      ...createApiStorage(memoryStorage()),
+      syncGet: vi.fn(),
+    },
+    "history-owner",
+    "lead",
+  );
+  const releases: ReturnType<typeof vi.fn>[] = [];
+  const selectedIds: (string | null)[] = [];
+  const start = RoomHistory.prototype.start;
+  const starts = vi
+    .spyOn(RoomHistory.prototype, "start")
+    .mockImplementation(function (this: RoomHistory) {
+      selectedIds.push(this.id);
+      const stop = vi.fn(start.call(this));
+      releases.push(stop);
+      return stop;
+    });
+  const stopOwner = autorun(() => chats.current);
+  await Promise.resolve();
+  try {
+    chats.choose("a");
+    expect(starts).toHaveBeenCalledOnce();
+    const first = chats.messages;
+    const stopRead = autorun(() => first?.loaded);
+    expect(starts).toHaveBeenCalledOnce();
+    stopRead();
+    expect(releases[0]).not.toHaveBeenCalled();
+    chats.choose("b");
+    expect(releases[0]).toHaveBeenCalledOnce();
+    expect(starts).toHaveBeenCalledTimes(2);
+    chats.back();
+    expect(releases[1]).toHaveBeenCalledOnce();
+    chats.choose("a");
+    expect(chats.messages).toBe(first);
+    expect(starts).toHaveBeenCalledTimes(3);
+    chats.choose("pending");
+    expect(releases[2]).toHaveBeenCalledOnce();
+    expect(selectedIds).toEqual(["a", "b", "a", "pending"]);
+    stopOwner();
+    expect(releases[3]).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(releases[3]).toHaveBeenCalledOnce();
+  } finally {
+    stopOwner();
+    await Promise.resolve();
+    starts.mockRestore();
     fixture.store.dispose();
   }
 });

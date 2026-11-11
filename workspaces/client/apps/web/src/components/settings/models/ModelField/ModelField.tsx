@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { Check } from "lucide-react";
 import { providerLabel } from "../../../../generated/providerKind.ts";
 import { Button, NativeSelect, Text } from "@mantine/core";
@@ -24,7 +25,7 @@ type Props = {
   retainCurrent?: boolean | undefined;
 };
 
-export function ModelField({
+export const ModelField = observer(function ModelField({
   label,
   options: allOptions,
   value,
@@ -151,4 +152,4 @@ export function ModelField({
       ))}
     </div>
   );
-}
+});

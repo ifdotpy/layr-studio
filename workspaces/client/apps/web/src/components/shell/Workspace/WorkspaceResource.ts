@@ -1,4 +1,5 @@
-import { makeAutoObservable, observableRef } from "mobx";
+import { whileObserved } from "../../../observed.ts";
+import * as mobx from "mobx";
 import { errorText, type ApiReadMetadata } from "../../../api.ts";
 
 // Changes, checkpoints, profiles, rules and capabilities lack an SSE resource
@@ -17,20 +18,31 @@ export class WorkspaceResource<T> {
     etag: string | undefined,
     metadata: ApiReadMetadata,
   ) => Promise<T | undefined>;
-  constructor(read: WorkspaceResource<T>["read"]) {
+  readonly receive: (data: T) => void;
+  constructor(
+    read: WorkspaceResource<T>["read"],
+    receive: (data: T) => void = () => {},
+  ) {
+    this.receive = receive;
     this.read = read;
-    makeAutoObservable(
+    mobx.makeAutoObservable(
       this,
-      { data: observableRef, read: false },
+      { data: mobx.observableRef, read: false, receive: false },
       { autoBind: true },
     );
+    whileObserved(this, "data", () => {
+      this.start();
+      void this.load();
+      return this.dispose;
+    });
+  }
+  dispose() {
+    this.active = false;
+    this.controller?.abort();
   }
   start() {
     this.active = true;
-    return () => {
-      this.active = false;
-      this.controller?.abort();
-    };
+    return this.dispose;
   }
   *load(): Generator<Promise<T | undefined>, void, T | undefined> {
     if (!this.active) return;
@@ -47,7 +59,10 @@ export class WorkspaceResource<T> {
       const data = yield this.read(controller.signal, this.etag, metadata);
       if (!this.active || controller.signal.aborted) return;
       this.etag = metadata.etag;
-      if (!metadata.notModified && data !== undefined) this.data = data;
+      if (!metadata.notModified && data !== undefined) {
+        this.data = data;
+        this.receive(data);
+      }
       this.error = "";
     } catch (error) {
       if (this.active && !controller.signal.aborted)

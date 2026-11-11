@@ -1,102 +1,18 @@
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useEffect, useState } from "react";
+import { observer } from "mobx-react-lite";
+import { useServerServices } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import * as localApi from "../../../servers/net/api.ts";
+import { SignInPush } from "./SignInPush.ts";
 import { Button } from "@mantine/core";
-import { errorText, type GetResult } from "../../../api.ts";
-import {
-  endpointFingerprint,
-  enableSignInPush,
-  pushSupported,
-  stopSignInPush,
-} from "../../../push/signInPush.ts";
-
-type PushState = GetResult<"/api/web-push">;
-
-/** Sign-in alerts on the phone through Web Push (docs/web-push.md). */
-export function SignInPushSettings({ active }: { active: boolean }) {
-  const { get, post } = useServerApi();
-  const [state, setState] = useState<PushState | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [fingerprint, setFingerprint] = useState<string | null>();
-  const load = () =>
-    get("/api/web-push").then(
-      (value) => {
-        setState(value);
-        setError("");
-      },
-      (failure) => setError(errorText(failure)),
-    );
-  useEffect(() => {
-    if (active) void load();
-  }, [active]);
-  useEffect(() => {
-    if (!active || !pushSupported()) return;
-    setFingerprint(undefined);
-    let mounted = true;
-    void navigator.serviceWorker
-      .getRegistration("/")
-      .then(async (registration) => {
-        const subscription = await registration?.pushManager.getSubscription();
-        const value = subscription
-          ? await endpointFingerprint(subscription.endpoint)
-          : null;
-        if (mounted) setFingerprint(value);
-      })
-      .catch((failure: unknown) => {
-        if (mounted) setError(errorText(failure));
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [active]);
+import { pushSupported } from "../../../push/signInPush.ts";
+const localPush = new SignInPush(localApi);
+export const SignInPushSettings = observer(function SignInPushSettings({
+  active,
+}: {
+  active: boolean;
+}) {
+  const flow = useServerServices()?.areas.signInPush ?? localPush;
   if (!active) return null;
-  const thisDevice = state?.subscriptions.find(
-    (device) => device.endpointFingerprint === fingerprint,
-  )?.id;
-  const subscribed =
-    !!thisDevice &&
-    !!state?.subscriptions.some((device) => device.id === thisDevice);
-  const run = (work: () => Promise<unknown>) => {
-    setBusy(true);
-    setError("");
-    void work()
-      .then(load, (failure) => setError(errorText(failure)))
-      .finally(() => setBusy(false));
-  };
-  const enable = (publicKey: string) =>
-    run(async () => {
-      const registration = await navigator.serviceWorker.ready;
-      const old = thisDevice;
-      if (old) {
-        await stopSignInPush(
-          await registration.pushManager.getSubscription(),
-          () => post("/api/web-push/remove", { id: old }),
-        );
-      }
-      await enableSignInPush({
-        registration,
-        requestPermission: () => Notification.requestPermission(),
-        publicKey,
-        userAgent: navigator.userAgent,
-        save: (body) => post("/api/web-push/subscriptions", body),
-      });
-      const subscription = await registration.pushManager.getSubscription();
-      setFingerprint(
-        subscription ? await endpointFingerprint(subscription.endpoint) : null,
-      );
-    });
-  const stop = (id: string) =>
-    run(async () => {
-      const registration =
-        id === thisDevice
-          ? await navigator.serviceWorker.getRegistration("/")
-          : undefined;
-      await stopSignInPush(
-        (await registration?.pushManager.getSubscription()) ?? null,
-        () => post("/api/web-push/remove", { id }),
-      );
-      if (id === thisDevice) setFingerprint(null);
-    });
+  const { state, error, busy, fingerprint, thisDevice } = flow;
   return (
     <section className="settings-group" aria-label="Phone sign-in alerts">
       <h2>Sign-in alerts on the phone</h2>
@@ -120,10 +36,10 @@ export function SignInPushSettings({ active }: { active: boolean }) {
         <Button
           mt="md"
           loading={busy}
-          disabled={!state.ready || subscribed || fingerprint === undefined}
-          onClick={() => enable(state.publicKey)}
+          disabled={!state.ready || !!thisDevice || fingerprint === undefined}
+          onClick={() => void flow.enable(state.publicKey)}
         >
-          {subscribed
+          {thisDevice
             ? "This device gets alerts"
             : "Send alerts to this device"}
         </Button>
@@ -142,7 +58,7 @@ export function SignInPushSettings({ active }: { active: boolean }) {
                 disabled={
                   busy || (pushSupported() && fingerprint === undefined)
                 }
-                onClick={() => stop(device.id)}
+                onClick={() => void flow.stop(device.id)}
               >
                 Stop alerts
               </Button>
@@ -153,4 +69,6 @@ export function SignInPushSettings({ active }: { active: boolean }) {
       {error && <p role="alert">{error}</p>}
     </section>
   );
-}
+});
+
+export { SignInPush } from "./SignInPush.ts";

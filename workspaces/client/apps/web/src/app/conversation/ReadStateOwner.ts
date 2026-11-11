@@ -1,18 +1,22 @@
+import { flowValue } from "../../flowValue.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import {
   makeAutoObservable,
   observable,
   observableRef,
   reaction,
-  runInAction,
+  flow,
 } from "mobx";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
 import { ApiError, errorText, type PostResult } from "../../api.ts";
 import { resourceData } from "../../store/runtime.ts";
 import type { Agent } from "../../types.ts";
-
 export type ChatReadState = NonNullable<Agent["readState"]>;
-export type ChatReadProof = { id: string; threadId: string; turnId: string };
+export type ChatReadProof = {
+  id: string;
+  threadId: string;
+  turnId: string;
+};
 export const completed = (
   agent: Pick<Agent, "id" | "markRead">,
 ): ChatReadProof | null =>
@@ -127,20 +131,26 @@ export class ReadStateOwner {
       selection();
     };
   }
-  async write(
+  write: (
     proof: ChatReadProof,
     read: boolean,
     target?: ChatReadState,
-  ): Promise<void> {
+  ) => Promise<void> = flow(function* (
+    this: ReadStateOwner,
+    proof: ChatReadProof,
+    read: boolean,
+    target?: ChatReadState,
+  ) {
     const { navigation } = this.areas;
     const current = this.scope;
     const valid = () => this.mounted && this.scope === current;
     const pending = current.requests.get(proof.id);
     if (pending) {
       if (read) return;
-      await pending;
+      yield* flowValue(pending);
       if (!valid()) return;
-      return this.write(proof, read, target);
+      yield* flowValue(this.write(proof, read, target));
+      return;
     }
     const agent = this.summary(proof.id);
     const result = agent && completed(agent);
@@ -186,7 +196,7 @@ export class ReadStateOwner {
       read,
       revision: saved?.revision || 0,
     };
-    const request = (async () => {
+    const request = flow(function* (this: ReadStateOwner) {
       try {
         const body = {
           id: proof.id,
@@ -201,13 +211,11 @@ export class ReadStateOwner {
         let response: PostResult<"/api/organization">;
         for (let retry = 0; ; retry++) {
           try {
-            response = await this.areas.scope.services.api.post(
-              "/api/organization",
-              body,
-              {
+            response = yield* flowValue(
+              this.areas.scope.services.api.post("/api/organization", body, {
                 workspaceId: requestWorkspace,
                 timeoutMs: 15000,
-              },
+              }),
             );
             break;
           } catch (error) {
@@ -216,9 +224,9 @@ export class ReadStateOwner {
               (error instanceof ApiError &&
                 (error.status >= 500 || [408, 429].includes(error.status)));
             if (!read || !transient || retry >= 2) throw error;
-            runInAction(() => current.uncertain.set(proof.id, expected));
-            await new Promise((resolve) =>
-              setTimeout(resolve, 1000 * (retry + 1)),
+            current.uncertain.set(proof.id, expected);
+            yield* flowValue(
+              new Promise((resolve) => setTimeout(resolve, 1000 * (retry + 1))),
             );
             // Retry the exact compare-and-set body; a queued Unread follows it.
             if (!valid()) return;
@@ -238,51 +246,52 @@ export class ReadStateOwner {
           throw new Error("The server did not confirm the read status.");
         const known = current.states.get(proof.id);
         if (!known || state.revision >= known.revision)
-          runInAction(() => current.states.set(proof.id, state));
-        runInAction(() => current.uncertain.delete(proof.id));
-        // The mutation response confirms the CAS; the agent stream carries it to other views.
+          current.states.set(proof.id, state);
+        current.uncertain.delete(proof.id);
       } catch (error) {
         if (valid()) {
           current.attempted.delete(attempt);
-          runInAction(() => current.uncertain.set(proof.id, expected));
+          current.uncertain.set(proof.id, expected);
           const state = this.confirmedState(proof.id, expected);
           if (state) {
-            runInAction(() => current.states.set(proof.id, state));
-            runInAction(() => current.uncertain.delete(proof.id));
+            current.states.set(proof.id, state);
+            current.uncertain.delete(proof.id);
           } else this.areas.notices.notify(errorText(error));
         }
       }
-    })();
+    }).call(this);
     current.requests.set(proof.id, request);
     try {
-      await request;
+      yield* flowValue(request);
     } finally {
-      runInAction(() => {
-        if (current.requests.get(proof.id) === request)
-          current.requests.delete(proof.id);
-        current.pendingReadTargets.delete(proof.id);
-      });
+      if (current.requests.get(proof.id) === request)
+        current.requests.delete(proof.id);
+      current.pendingReadTargets.delete(proof.id);
     }
-  }
-  async markUnread(agent: Agent) {
+  });
+  markUnread = flow(function* (this: ReadStateOwner, agent: Agent) {
     const model = this.summary(agent.id);
     const proof = model && completed(model);
     if (!proof || model?.markUnread !== MarkUnreadEligibility["allowed"])
       return;
     if (this.areas.navigation.selectedId === agent.id)
       this.scope.suppressed.add(agent.id);
-    await this.write(proof, false);
-  }
-  async markSidebarUnread(id: string, target: ChatReadState) {
-    // Generated nested models update in place; a queued CAS keeps the click's proof.
-    const captured = { ...target };
-    if (this.areas.navigation.selectedId === id) this.scope.suppressed.add(id);
-    await this.write(
-      { id, threadId: captured.threadId, turnId: captured.turnId },
-      false,
-      captured,
-    );
-  }
+    yield* flowValue(this.write(proof, false));
+  });
+  markSidebarUnread: (id: string, target: ChatReadState) => Promise<void> =
+    flow(function* (this: ReadStateOwner, id: string, target: ChatReadState) {
+      // Generated nested models update in place; a queued CAS keeps the click's proof.
+      const captured = { ...target };
+      if (this.areas.navigation.selectedId === id)
+        this.scope.suppressed.add(id);
+      yield* flowValue(
+        this.write(
+          { id, threadId: captured.threadId, turnId: captured.turnId },
+          false,
+          captured,
+        ),
+      );
+    });
   observeRead(proof: ChatReadProof) {
     if (this.selected !== proof.id) return;
     this.selected = null;

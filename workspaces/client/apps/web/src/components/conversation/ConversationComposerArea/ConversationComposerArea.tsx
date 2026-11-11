@@ -47,11 +47,7 @@ export function renderConversationComposerArea() {
   if (room) return null;
   const canStopAgent = !!agent && busy.has(agent.status || "");
   const executionControls = managed && agent && (
-    <ConversationSettings
-      agent={agent}
-      lead={lead}
-      openRequest={control.modelCommandRequest}
-    />
+    <ConversationSettings agent={agent} lead={lead} />
   );
   const attachTool = managed && (
     <ComposerAttachments
@@ -68,11 +64,7 @@ export function renderConversationComposerArea() {
     agent?.provider === ProviderKind.Codex &&
     opened &&
     !threadBlock && (
-      <RealtimeVoice
-        key={`voice:${opened}`}
-        agentId={opened}
-        notify={notices.notify}
-      />
+      <RealtimeVoice key={`voice:${opened}`} voiceStore={control.voice} />
     );
   const transferChip = managed && agent?.isLead && (
     <ObservedAccountTransferChip transfer={agent.accountTransferProgress} />
@@ -158,7 +150,6 @@ export function renderConversationComposerArea() {
     <PromptComposer
       session={opened || "new"}
       getDraft={drafts.getDraft}
-      subscribeDraft={drafts.subscribeDraft}
       className={control.dragging ? "attachment-drop" : ""}
       onDragOver={action((event) => {
         if (managed) {

@@ -1,5 +1,7 @@
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
 import "../../src/rendererStyles.ts";
-import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { components } from "../../src/generated/api.ts";
 const rootElement = document.getElementById("root")!;
@@ -18,6 +20,7 @@ import { ExecutionSummaryTrigger } from "../../src/components/agents/ExecutionSu
 import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import {
   ModelCatalogFixture,
+  createModelCatalogFixture,
   type ModelCatalogFixtureSource,
 } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 const query = new URLSearchParams(location.search);
@@ -70,6 +73,8 @@ const reader: ModelCatalogFixtureSource = {
     return () => {};
   },
 };
+const catalog = createModelCatalogFixture(reader);
+window.addEventListener("pagehide", catalog.dispose, { once: true });
 type ComposerLead = Omit<Agent, "workerDefaults"> & {
   workerDefaults: Omit<NonNullable<Agent["workerDefaults"]>, "fastMode">;
 };
@@ -92,87 +97,97 @@ const lead = partialComposerLead({
 const agent = query.has("worker")
   ? { ...lead, id: "worker", isLead: false, rootId: "lead" }
   : lead;
+const modelsOwner = observableFixture(
+  agent.id === lead.id ? [lead] : [lead, agent],
+);
+modelsOwner.store.models = () => ({
+  get current() {
+    return { status: "live" as const, data: catalog.models.current };
+  },
+});
+const areas = browserAreas(modelsOwner.store);
+window.addEventListener("pagehide", modelsOwner.store.dispose, { once: true });
 function Fixture() {
   return (
     <MantineProvider
       theme={theme}
       forceColorScheme={(query.get("theme") || "dark") as "light" | "dark"}
     >
-      <AgentModelsFixture
-        agents={agent.id === lead.id ? [lead] : [lead, agent]}
-      >
-        <ModelCatalogFixture value={reader}>
-          <main
-            style={{
-              padding: 8,
-              width: "100%",
-              maxWidth: 1200,
-              margin: "auto",
-              alignSelf: "end",
-            }}
-          >
-            <form id="composer" onSubmit={(e) => e.preventDefault()}>
-              <Textarea
-                id="message"
-                aria-label="Message"
-                placeholder="What should we work on?"
-              />
-              <div className="composer-bar">
-                <div className="composer-tools">
-                  <ActionIcon aria-label="Attach files">
-                    <Paperclip />
-                  </ActionIcon>
-                  <div
-                    className="empty-chat-settings composer-context-row"
-                    aria-label="Agent settings"
-                  >
-                    <ExecutionSettings
-                      agent={agent}
-                      lead={lead}
-                      catalog={{
-                        models,
-                        loading: false,
-                        error: "",
-                        retry: () => {},
-                      }}
+      <modelsOwner.Provider>
+        <AreasProvider value={areas}>
+          <ModelCatalogFixture value={catalog}>
+            <main
+              style={{
+                padding: 8,
+                width: "100%",
+                maxWidth: 1200,
+                margin: "auto",
+                alignSelf: "end",
+              }}
+            >
+              <form id="composer" onSubmit={(e) => e.preventDefault()}>
+                <Textarea
+                  id="message"
+                  aria-label="Message"
+                  placeholder="What should we work on?"
+                />
+                <div className="composer-bar">
+                  <div className="composer-tools">
+                    <ActionIcon aria-label="Attach files">
+                      <Paperclip />
+                    </ActionIcon>
+                    <div
+                      className="empty-chat-settings composer-context-row"
+                      aria-label="Agent settings"
+                    >
+                      <ExecutionSettings
+                        agent={agent}
+                        lead={lead}
+                        catalog={{
+                          models,
+                          loading: false,
+                          error: "",
+                          retry: () => {},
+                        }}
 
-                      renderTrigger={({ agent, opened, ref, onClick }) => (
-                        <ExecutionSummaryTrigger
-                          agent={agent}
-                          lead={lead}
-                          team={[lead, agent]}
-                          ref={ref}
-                          aria-expanded={opened}
-                          onOpen={onClick}
-                        />
-                      )}
-                    />
+                        renderTrigger={({ agent, opened, ref, onClick }) => (
+                          <ExecutionSummaryTrigger
+                            agent={agent}
+                            lead={lead}
+                            team={[lead, agent]}
+                            ref={ref}
+                            aria-expanded={opened}
+                            onOpen={onClick}
+                          />
+                        )}
+                      />
+                    </div>
+                  </div>
+                  <div className="composer-submit-actions">
+                    <ActionIcon aria-label="Dictate">
+                      <Mic />
+                    </ActionIcon>
+                    <ActionIcon
+                      className="composer-queue-primary"
+                      aria-label="Queue for next turn"
+                    >
+                      <ListEnd />
+                    </ActionIcon>
+                    {query.has("active") && (
+                      <ActionIcon id="stop" aria-label="Stop">
+                        <Square />
+                      </ActionIcon>
+                    )}
+                    <ActionIcon id="send" aria-label="Send message">
+                      <ArrowUp />
+                    </ActionIcon>
                   </div>
                 </div>
-                <div className="composer-submit-actions">
-                  <ActionIcon aria-label="Dictate">
-                    <Mic />
-                  </ActionIcon>
-                  <ActionIcon
-                    className="composer-queue-primary"
-                    aria-label="Queue for next turn"
-                  >
-                    <ListEnd />
-                  </ActionIcon>
-                  {query.has("active") && (
-                    <ActionIcon id="stop" aria-label="Stop">
-                      <Square />
-                    </ActionIcon>
-                  )}
-                  <ActionIcon id="send" aria-label="Send message">
-                    <ArrowUp />
-                  </ActionIcon>
-                </div>
-              </div>
-            </form>
-          </main>
-        </ModelCatalogFixture>
-      </AgentModelsFixture>
+              </form>
+            </main>
+          </ModelCatalogFixture>
+        </AreasProvider>
+      </modelsOwner.Provider>
     </MantineProvider>
   );
 }

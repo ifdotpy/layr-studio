@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import {
   createProjectStatusView,
   type SidebarChatView,
@@ -13,10 +12,7 @@ export default observer(function ProjectStateCounts({
   rows: readonly SidebarChatView[];
   archived: boolean;
 }) {
-  const view = useMemo(
-    () => createProjectStatusView(rows, archived),
-    [rows, archived],
-  );
+  const view = createProjectStatusView(rows, archived);
   const counts = view.counts;
   const label = projectStateLabel(counts);
   if (!label) return null;

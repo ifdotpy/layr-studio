@@ -6,10 +6,9 @@ import {
 } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useServerSettings } from "../../../../servers/ServerSettingsContext.tsx";
 import { Button, Checkbox, Group, Stack, Text } from "@mantine/core";
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import {
   readPreferenceWriteStatus,
-  subscribePreferenceWriteStatus,
   retryPreferenceWrites,
 } from "../../../../sync/uiPreferenceStatus.ts";
 import "./model-whitelist-settings.css";
@@ -32,15 +31,7 @@ export const ModelWhitelistSettings = observer(
     const catalog = useWorkerModels("default", true, true);
     const choices = useModelChoices();
     const storage = useServerStorage();
-    const readStatus = useCallback(
-      () => readPreferenceWriteStatus(storage, "server"),
-      [storage],
-    );
-    const status = useSyncExternalStore(
-      subscribePreferenceWriteStatus,
-      readStatus,
-      readStatus,
-    );
+    const status = readPreferenceWriteStatus(storage, "server");
     const [error, setError] = useState("");
     const models = [
       ...new Map(

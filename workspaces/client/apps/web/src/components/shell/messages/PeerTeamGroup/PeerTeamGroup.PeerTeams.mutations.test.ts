@@ -1,3 +1,4 @@
+import { beforeEach, afterEach } from "vitest";
 import { PeerTeamMoveOwner } from "../../../../app/projects/peerTeamMutation.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Fragment } from "react";
@@ -125,3 +126,17 @@ it.each(
     await f.close();
   },
 );
+
+let renderErrors: ReturnType<typeof vi.spyOn>;
+beforeEach(() => {
+  renderErrors = vi.spyOn(console, "error");
+});
+afterEach(() => {
+  const warnings = renderErrors.mock.calls.filter((args: unknown[]) =>
+    args.some((arg: unknown) =>
+      String(arg).includes("Cannot update a component"),
+    ),
+  );
+  renderErrors.mockRestore();
+  expect(warnings).toEqual([]);
+});

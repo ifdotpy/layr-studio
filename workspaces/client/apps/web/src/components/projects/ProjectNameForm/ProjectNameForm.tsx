@@ -7,26 +7,25 @@ import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { observer } from "mobx-react-lite";
 import { Button, TextInput } from "@mantine/core";
 import { useId, useRef, useState } from "react";
-import { useProjectSave } from "../support/useProjectSave.ts";
+import type { ProjectSave } from "../../../app/projects/ProjectSave.ts";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
 export const ProjectNameForm = observer(function ProjectNameForm({
   project,
   folder,
   parentId,
-  saved,
+  save,
   displayPath,
 }: {
   project: Project;
   folder?: ProjectFolder | "new" | undefined;
   parentId?: string | undefined;
-  saved: () => Promise<void>;
+  save: ProjectSave<"/api/projects">;
   displayPath?: string | undefined;
 }) {
   const [name, setName] = useState(
     folder === "new" ? "" : folder?.name || project.name || "",
   );
-  const save = useProjectSave("/api/projects", saved);
   const id = useRef(folder === "new" ? randomUUID() : folder?.id);
   const revision = useRef(project.organizationRevision || 0);
   const nameId = useId();

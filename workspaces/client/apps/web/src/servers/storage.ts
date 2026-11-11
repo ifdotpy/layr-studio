@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import {
   storageKeys,
   storageKeySnapshot,
@@ -9,7 +10,7 @@ import {
   preferenceScope,
 } from "../sync/uiPreferenceMerge.ts";
 
-const preferenceValues = new Map<string, string>();
+const preferenceValues = observable.map<string, string>();
 let preferenceKeys: readonly string[] = Object.freeze([]);
 export const preferenceMemory: IndexedStorage = {
   [storageKeySnapshot]: () => preferenceKeys,
@@ -18,19 +19,19 @@ export const preferenceMemory: IndexedStorage = {
   },
   key: (index) => preferenceKeys[index] ?? null,
   getItem: (key) => preferenceValues.get(key) ?? null,
-  setItem(key, value) {
+  setItem: action((key: string, value: string) => {
     const added = !preferenceValues.has(key);
     preferenceValues.set(key, value);
     if (added) preferenceKeys = Object.freeze([...preferenceValues.keys()]);
-  },
-  removeItem(key) {
+  }),
+  removeItem: action((key: string) => {
     if (preferenceValues.delete(key))
       preferenceKeys = Object.freeze([...preferenceValues.keys()]);
-  },
-  clear() {
+  }),
+  clear: action(() => {
     preferenceValues.clear();
     preferenceKeys = Object.freeze([]);
-  },
+  }),
 };
 
 function isPreferenceKey(key: string) {

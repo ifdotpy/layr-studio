@@ -1,14 +1,12 @@
-import { useSidebarBackend } from "../../sidebar/support/services.tsx";
-import type { SidebarBackend } from "../../sidebar/support/services.tsx";
-import { useState } from "react";
+import type { SidebarBackend } from "../../components/sidebar/support/services.tsx";
 import { makeAutoObservable, observableRef } from "mobx";
-import { outboxRequests } from "../../../browserPersistence.ts";
+import { outboxRequests } from "../../browserPersistence.ts";
 import {
   ApiError,
   errorText,
   type ApiPostPath,
   type PostBody,
-} from "../../../api.ts";
+} from "../../api.ts";
 
 /** One form's immutable request, including an uncertain or acknowledged retry. */
 export class ProjectSave<Path extends ApiPostPath> {
@@ -99,13 +97,4 @@ export class ProjectSave<Path extends ApiPostPath> {
       this.pending = false;
     }
   }
-}
-
-export function useProjectSave<Path extends ApiPostPath>(
-  path: Path,
-  onSaved: () => Promise<void>,
-  storageKey?: string,
-) {
-  const backend = useSidebarBackend();
-  return useState(() => new ProjectSave(backend, path, onSaved, storageKey))[0];
 }

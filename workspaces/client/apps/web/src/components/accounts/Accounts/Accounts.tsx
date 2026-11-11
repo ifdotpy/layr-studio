@@ -10,41 +10,11 @@ import { layerZIndex } from "../../../theme.ts";
 
 import type { AccountsState } from "../support/Accounts.tsx";
 import { observer } from "mobx-react-lite";
-import { useEffect, useLayoutEffect, useRef } from "react";
-import type {
-  ServerAccount,
-  ServerCommand,
-} from "../../../servers/navigation.ts";
+import type { ServerAccount } from "../../../servers/navigation.ts";
 import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 
-const Accounts = observer(function Accounts({
-  externalCommand,
-  onExternalCommandHandled,
-  onModalOpenChange,
-}: {
-  state: AccountsState | undefined;
-  scope?: string | undefined;
-  onError: (message: string) => void;
-  onModalOpenChange?: (opened: boolean) => void;
-  managerOnly?: boolean;
-  externalCommand?: Extract<
-    ServerCommand,
-    { action: "account-sign-in" | "account-action" }
-  > | null;
-  onExternalCommandHandled?: () => void;
-}) {
+const Accounts = observer(function Accounts() {
   const ui = useServerAreas().accountsUi;
-  useEffect(() => {
-    ui.receive(externalCommand);
-    if (externalCommand && ui.summary && !ui.pending)
-      onExternalCommandHandled?.();
-  }, [ui, externalCommand, ui.summary, ui.pending]);
-  const reporter = useRef(onModalOpenChange);
-  useLayoutEffect(() => {
-    reporter.current = onModalOpenChange;
-    onModalOpenChange?.(ui.dialogOpen);
-  }, [onModalOpenChange, ui.dialogOpen]);
-  useLayoutEffect(() => () => reporter.current?.(false), []);
   if (!ui.summary) return <p role="status">Loading accounts…</p>;
   return (
     <>
@@ -231,13 +201,6 @@ const ActiveAccountDialog = observer(function ActiveAccountDialog() {
             scope={scope}
             onClose={ui.close}
             serverLabel={ui.serverLabel}
-            onReady={async () => {
-              if (account.disconnected)
-                await ui.areas.scope.services.api.post(
-                  "/api/accounts/reconnect",
-                  { account_key: account.id },
-                );
-            }}
           />
         ))}
     </>

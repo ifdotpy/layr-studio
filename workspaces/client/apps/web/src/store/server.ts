@@ -17,7 +17,7 @@ export function createServerStore(
   const read = <P extends ApiGetPath>(path: P) => {
     const keyed = runtime.keyed<GetResult<P>>({
       read: true,
-      releaseOnUnobserved: path === "/api/file",
+      releaseOnUnobserved: true,
     });
     return (
       api: Pick<ServerApi, "get" | "getStreamSession">,
@@ -50,6 +50,7 @@ export function createServerStore(
     projectLocations: read("/api/project-locations"),
     skills: read("/api/skills"),
     transcriptPage: read("/api/transcript/page"),
+    transcriptSearch: read("/api/transcript/search"),
   };
   return {
     ...createObservableResources(runtime),

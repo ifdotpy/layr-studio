@@ -1,6 +1,8 @@
+import { mountConversationFixture } from "../../components/conversation/ConversationView/ConversationView.fixture.tsx";
 import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import { AgentSource } from "../../generated/api.ts";
 import { runInAction } from "mobx";
+import { enableStaticRendering } from "mobx-react-lite";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { createElement } from "react";
@@ -13,7 +15,8 @@ import { observableFixture } from "../../components/shell/integration-support/ob
 import { conversationActionsFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 
 afterEach(() => vi.useRealTimers());
-it("the app retains offline diagnostics until delivery settles and suppresses only their duplicate toast", () => {
+it("the app retains offline diagnostics until delivery settles and suppresses only their duplicate toast", async () => {
+  vi.useFakeTimers();
   const models = observableFixture([
     { id: "lead", source: AgentSource.managed, isLead: true },
   ]);
@@ -41,6 +44,7 @@ it("the app retains offline diagnostics until delivery settles and suppresses on
   areas.delivery.online = false;
   areas.delivery.retainDiagnostics();
   areas.startup.startupError = "Failed to fetch";
+  mountConversationFixture(areas);
   const markup = () =>
     renderToStaticMarkup(
       createElement(
@@ -56,6 +60,7 @@ it("the app retains offline diagnostics until delivery settles and suppresses on
         ),
       ),
     );
+  enableStaticRendering(true);
   try {
     areas.notices.notify("Failed to fetch");
     expect(markup()).not.toContain('id="toast"');
@@ -73,10 +78,15 @@ it("the app retains offline diagnostics until delivery settles and suppresses on
     areas.delivery.retainDiagnostics();
     expect(areas.delivery.offlinePending).toBe(false);
   } finally {
+    enableStaticRendering(false);
     areas.dispose();
     areas.scope.services.close();
     models.store.dispose();
   }
+  // Flush deferred observer registration while the fixture clock still owns it.
+  await Promise.resolve();
+  vi.runAllTicks();
+  expect(vi.getTimerCount()).toBe(0);
 });
 it("the disposed composition ignores late command notifications", async () => {
   vi.useFakeTimers();

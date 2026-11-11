@@ -2,14 +2,50 @@
 import { act, createElement, type ReactNode, type ComponentProps } from "react";
 import { MantineProvider } from "@mantine/core";
 import { createRoot } from "react-dom/client";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
+import { WorkspaceResources } from "./WorkspaceResources.ts";
 import Workspace from "./Workspace.tsx";
-import { observableFixture } from "../integration-support/observableFixture.tsx";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../integration-support/observableFixture.tsx";
+import { Provider as AreaProvider } from "../../../app/ServerAreasProvider.tsx";
+
+function workspaceFixture(...args: Parameters<typeof observableFixture>) {
+  const fixture = observableFixture(...args);
+  const areas = conversationActionsFixture(undefined, fixture.store);
+  return {
+    ...fixture,
+    Provider: ({ children }: { children?: ReactNode }) =>
+      createElement(
+        AreaProvider,
+        { value: areas },
+        createElement(fixture.Provider, {}, children),
+      ),
+    store: {
+      ...fixture.store,
+      dispose() {
+        areas.dispose();
+        areas.scope.services.close();
+        fixture.store.dispose();
+      },
+    },
+  };
+}
 
 const api = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   replaceStream: vi.fn(),
+}));
+let workspace: WorkspaceResources;
+beforeEach(() => {
+  workspace?.dispose();
+  workspace = new WorkspaceResources(api);
+});
+vi.mock("../../../app/ServerAreasProvider.tsx", async (original) => ({
+  ...(await original<typeof import("../../../app/ServerAreasProvider.tsx")>()),
+  useServerAreas: () => ({ workspace }),
 }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
@@ -84,7 +120,7 @@ it("deleting a profile reloads the local list without replacing the stream", asy
     profiles = [];
     return {};
   });
-  const f = observableFixture([]);
+  const f = workspaceFixture([]);
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
   try {
@@ -144,7 +180,7 @@ import type { ApiReadMetadata, GetResult } from "../../../api.ts";
 
 async function mountPanel(section: string, agent?: Agent) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const fixture = observableFixture(agent ? [agent] : []);
+  const fixture = workspaceFixture(agent ? [agent] : []);
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
   await act(async () =>

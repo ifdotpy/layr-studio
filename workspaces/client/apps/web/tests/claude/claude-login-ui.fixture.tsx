@@ -20,7 +20,8 @@ import { observer } from "mobx-react-lite";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { createServerStore } from "../../src/store/server.ts";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import type { ServerCommand } from "../../src/servers/navigation.ts";
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { Provider } from "../../src/app/ServerAreasProvider.tsx";
 import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
 import { frameAccounts } from "../../src/components/accounts/Accounts/Accounts.tsx";
 import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
@@ -48,6 +49,7 @@ const fixture = observableFixture();
 fixture.apply([{ collection: "accounts", id: "current", value: state }]);
 const transient = createServerStore(defaultSubscriptions);
 const store = { ...transient, state: fixture.store.state };
+const areas = browserAreas(store);
 window.publishClaudeReceipt = (value) =>
   defaultSubscriptions.publish(
     { kind: "auth-progress", requestId: value.requestId },
@@ -55,21 +57,10 @@ window.publishClaudeReceipt = (value) =>
   );
 const Fixture = observer(function Fixture() {
   const [opened, setOpened] = useState(false);
-  const [command, setCommand] = useState<Extract<
-    ServerCommand,
-    { action: "account-sign-in" | "account-action" }
-  > | null>(null);
   const server = { id: "fixture", origin: location.origin, label: "Fixture" };
   return (
     <MantineProvider>
-      <Accounts
-        managerOnly
-        state={state}
-        scope="fixture"
-        externalCommand={command}
-        onExternalCommandHandled={() => setCommand(null)}
-        onError={() => {}}
-      />
+      <Accounts />
       <AccountSignInNotice
         account={account}
         errors={[{ message: "An unrelated earlier error" }]}
@@ -81,8 +72,8 @@ const Fixture = observer(function Fixture() {
           servers={[server]}
           accountsByServer={{ fixture: frameAccounts(state) }}
           statuses={{ fixture: "live" }}
-          startAccount={(_id, value) => setCommand(value)}
-          accountAction={(_id, value) => setCommand(value)}
+          startAccount={(_id, value) => areas.accountsUi.receive(value)}
+          accountAction={(_id, value) => areas.accountsUi.receive(value)}
         />
       </Modal>
     </MantineProvider>
@@ -90,6 +81,8 @@ const Fixture = observer(function Fixture() {
 });
 createRoot(document.getElementById("root")!).render(
   <ServerStoreProvider value={store}>
-    <Fixture />
+    <Provider value={areas}>
+      <Fixture />
+    </Provider>
   </ServerStoreProvider>,
 );

@@ -3,7 +3,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import Requests, { RequestArea } from "./Requests.tsx";
-import { requestFixture } from "../support/requestFixtures.ts";
+import { RequestAreaOwner } from "../RequestArea/RequestArea.tsx";
+import { serverLocalStorage } from "../../../../servers/storage.ts";
+import {
+  requestFixture,
+  requestApiFixture,
+} from "../support/requestFixtures.ts";
 import type { RequestView } from "../RequestArea/RequestArea.tsx";
 import type { Approval } from "../../../../approvals.ts";
 import { required } from "../../ComposerAttachments/componentTestFixtures.ts";
@@ -31,11 +36,6 @@ vi.mock(
     useServerStorage: () => controls.storage,
   }),
 );
-vi.mock("../../../../servers/net/api.ts", () => ({
-  ApiError: class extends Error {},
-  errorText: (error: unknown) =>
-    String(error instanceof Error ? error.message : error),
-}));
 vi.mock("../SignInCard/SignInCard.tsx", () => ({
   default: ({ view }: { view: RequestView }) => {
     controls.cards.push(view);
@@ -55,6 +55,7 @@ const forward = {
   token: "fixture-only",
 };
 
+let owner: RequestAreaOwner;
 function card() {
   const notify = vi.fn();
   const request: Approval = approval({
@@ -69,10 +70,20 @@ function card() {
     }),
   });
   controls.store = requestFixture([request]).store;
+  owner = new RequestAreaOwner(
+    {
+      api: () => requestApiFixture(controls),
+      store: controls.store,
+      storage: serverLocalStorage,
+      server: "remote",
+    },
+    () => ({ scope: "remote", notify }),
+  );
+  owner.start();
   renderToStaticMarkup(
     createElement(
       RequestArea,
-      { scope: "remote", notify },
+      { owner },
       createElement(Requests, { all: true }),
     ),
   );
@@ -88,6 +99,7 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
 });
 afterEach(() => {
+  owner?.dispose();
   controls.store?.dispose();
   vi.unstubAllGlobals();
 });

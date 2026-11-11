@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@mantine/core";
 
 import { copyText } from "../../../clipboard/clipboard.ts";
@@ -11,12 +11,12 @@ export default function CodeBlock({
   language?: string | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    setCopied(false);
-    setError("");
-  }, [source]);
+  const [result, setResult] = useState<{
+    source: string;
+    error: string;
+  } | null>(null);
+  const copied = result?.source === source && !result.error;
+  const error = result?.source === source ? result.error : "";
   return (
     <section className="code-block" aria-label={`${language} code`}>
       <div className="rich-preview-toolbar">
@@ -27,10 +27,12 @@ export default function CodeBlock({
           onClick={async () => {
             try {
               await copyText(source);
-              setCopied(true);
-              setError("");
+              setResult({ source, error: "" });
             } catch {
-              setError("Cannot copy. Select the code to copy it.");
+              setResult({
+                source,
+                error: "Cannot copy. Select the code to copy it.",
+              });
             }
           }}
         >

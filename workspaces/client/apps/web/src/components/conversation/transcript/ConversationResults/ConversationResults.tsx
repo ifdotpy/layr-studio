@@ -9,7 +9,7 @@ import {
   Image,
   Shapes,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { Message } from "../../../../types.ts";
 import FilePreview, { useFilePreview } from "../../FilePreview/FilePreview.tsx";
 import RichPreview from "../../RichPreview/RichPreview.tsx";
@@ -39,12 +39,6 @@ export default observer(function ConversationResults({
   const [preview, setPreview] = useFilePreview();
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
-  const [dialogMounted, setDialogMounted] = useState(false);
-  const [dialogReady, setDialogReady] = useState(false);
-  // Mount closed once so Mantine records the trigger before the first opening.
-  useEffect(() => {
-    if (dialogMounted) setDialogReady(true);
-  }, [dialogMounted]);
   const [selection, setSelection] = useState<{
     id: string;
     agent?: string | undefined;
@@ -105,8 +99,6 @@ export default observer(function ConversationResults({
               }
               disabled={result.kind === "file" && !agentId}
               onClick={() => {
-                if (result.kind !== "file" && result.kind !== "asset")
-                  setDialogMounted(true);
                 if (result.kind === "asset")
                   setPreview({ asset: result.asset });
                 else if (result.kind === "file")
@@ -143,56 +135,54 @@ export default observer(function ConversationResults({
           }}
         />
       )}
-      {dialogMounted && (
-        <Modal
-          opened={!!selected && !file && dialogReady}
-          onClose={() => setSelection(undefined)}
-          title={selected?.label}
-          size="xl"
-          className="conversation-result-modal"
-        >
-          {selected && !file && (
-            <>
-              {selected.kind === "patch" ? (
-                <>
-                  <p className="conversation-results-note">
-                    Recorded patch from this message.
-                    {selected.truncated ? " The saved content is clipped." : ""}
-                  </p>
-                  <FileDiff
-                    files={
-                      selected.change
-                        ? fileChanges([selected.change])
-                        : unifiedDiff(selected.source, selected.paths[0])
-                    }
-                    showCounts={!selected.truncated}
-                  />
-                  <details className="file-change-source">
-                    <summary>Original patch</summary>
-                    <pre className="file-diff-raw">{selected.source}</pre>
-                  </details>
-                </>
-              ) : (
-                (selected.kind === "html" || selected.kind === "mermaid") && (
-                  <RichPreview kind={selected.kind} source={selected.source} />
-                )
-              )}
-              {onJump && (
-                <Button
-                  size="compact-sm"
-                  variant="subtle"
-                  onClick={() => {
-                    onJump(selected.messageId);
-                    setSelection(undefined);
-                  }}
-                >
-                  Show message
-                </Button>
-              )}
-            </>
-          )}
-        </Modal>
-      )}
+      <Modal
+        opened={!!selected && !file}
+        onClose={() => setSelection(undefined)}
+        title={selected?.label}
+        size="xl"
+        className="conversation-result-modal"
+      >
+        {selected && !file && (
+          <>
+            {selected.kind === "patch" ? (
+              <>
+                <p className="conversation-results-note">
+                  Recorded patch from this message.
+                  {selected.truncated ? " The saved content is clipped." : ""}
+                </p>
+                <FileDiff
+                  files={
+                    selected.change
+                      ? fileChanges([selected.change])
+                      : unifiedDiff(selected.source, selected.paths[0])
+                  }
+                  showCounts={!selected.truncated}
+                />
+                <details className="file-change-source">
+                  <summary>Original patch</summary>
+                  <pre className="file-diff-raw">{selected.source}</pre>
+                </details>
+              </>
+            ) : (
+              (selected.kind === "html" || selected.kind === "mermaid") && (
+                <RichPreview kind={selected.kind} source={selected.source} />
+              )
+            )}
+            {onJump && (
+              <Button
+                size="compact-sm"
+                variant="subtle"
+                onClick={() => {
+                  onJump(selected.messageId);
+                  setSelection(undefined);
+                }}
+              >
+                Show message
+              </Button>
+            )}
+          </>
+        )}
+      </Modal>
     </section>
   );
 });

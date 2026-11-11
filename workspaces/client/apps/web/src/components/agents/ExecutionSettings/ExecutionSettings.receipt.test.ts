@@ -1,6 +1,13 @@
+import { unloadedClaudeSettings } from "../../settings/ClaudeSettingsView/ClaudeSettingsStore.ts";
+import { autorun } from "mobx";
+import * as settingsApi from "../../../servers/net/api.ts";
+import { ClaudeSettingsStore } from "../../settings/ClaudeSettingsView/ClaudeSettingsStore.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import { settingsAreasFixture } from "../../../app/settings/SettingsAreasFixture.ts";
-import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../../shell/integration-support/observableFixture.tsx";
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
@@ -61,8 +68,15 @@ type SelectFixtureProps = Omit<
     >;
   }): void;
 };
+let areas: ReturnType<typeof conversationActionsFixture> | undefined;
+let selectedChat = "";
+let nextId = 0;
 const generatedAgents = new Map<string, ReturnType<typeof observableFixture>>();
 function settingsInput(agent: Agent) {
+  // The selected-conversation owner invalidates receipts when selection changes.
+  if (selectedChat && selectedChat !== agent.id)
+    areas?.agentsUi.clearReceipts();
+  selectedChat = agent.id;
   let f = generatedAgents.get(agent.id);
   if (!f) {
     f = observableFixture([agent]);
@@ -104,6 +118,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock("react", async (load) => ({
   ...(await load<typeof import("react")>()),
+  useContext: () => areas,
   useState: (initial: unknown) => {
     const cells = h.cells.get(h.scope)!;
     const index = h.cursor++;
@@ -150,13 +165,17 @@ vi.mock("react", async (load) => ({
     }
   },
   useLayoutEffect: () => {},
-  useId: () => "settings-role",
+  useId: () => {
+    const cells = h.cells.get(h.scope)!;
+    return (cells[h.cursor++] ??= { value: `settings-${++nextId}` }).value;
+  },
   useCallback: (callback: unknown) => callback,
 }));
 vi.mock("../../../appLog.ts", () => ({ appendAppLog: h.report }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
+    useServerServices: () => undefined,
     useServerStore: () => ({
       state: () => ({
         current: { status: "live", data: observableFixture().mirror.current },
@@ -226,12 +245,49 @@ function children(
   return [node, ...children(node.props.children)];
 }
 function invoke(element: ReactElement<unknown>) {
+  areas ??= conversationActionsFixture(
+    undefined,
+    generatedAgents.values().next().value?.store,
+  );
   const component = element.type as (
     props: typeof element.props,
   ) => ReactElement<PropsWithChildren<Record<string, unknown>>>;
   h.scope = component.name + (element.key || "");
   h.cursor = 0;
   if (!h.cells.has(h.scope)) h.cells.set(h.scope, []);
+  if (element.type === ClaudeSettings) {
+    const cells = h.cells.get(h.scope)!;
+    let cell = cells[h.cursor++];
+    if (!cell) {
+      const agent = (element.props as ComponentProps<typeof ClaudeSettings>)
+        .agent;
+      const model = new ClaudeSettingsStore(
+        {
+          ...settingsApi,
+          post: h.post,
+          saved: <T>(key: string, fallback: T): T =>
+            (h.storage.get(key) as T | undefined) ?? fallback,
+          save: (key: string, value: unknown) => {
+            h.storage.set(key, value);
+          },
+        },
+        () => agent,
+      );
+      const stop = autorun(() => model.state);
+      cell = {
+        value: model,
+        cleanup: () => {
+          stop();
+          model.dispose();
+        },
+      };
+      cells[0] = cell;
+    }
+    return component({
+      ...(element.props as ComponentProps<typeof ClaudeSettings>),
+      model: cell.value,
+    } as typeof element.props);
+  }
   return component(element.props);
 }
 const initial: Agent = {
@@ -279,11 +335,17 @@ function render(
   triggerAgent: Agent;
   statusModal: ReactNode;
 } {
+  const input = onDraftChange
+    ? { kind: "draft" as const, draft: agent }
+    : settingsInput(agent);
+  areas ??= conversationActionsFixture(
+    undefined,
+    generatedAgents.get(agent.id)?.store,
+  );
   const controller = invoke(
     createElement(permissions ? ExecutionPermissions : ExecutionSettings, {
-      input: onDraftChange
-        ? { kind: "draft", draft: agent }
-        : settingsInput(agent),
+      input,
+      agentsUi: areas.agentsUi,
       catalog: {
         models: ["gpt-6-astra", "gpt-6-luna"].map((model) => ({
           model,
@@ -361,6 +423,9 @@ function render(
   };
 }
 afterEach(() => {
+  areas?.dispose();
+  areas = undefined;
+  selectedChat = "";
   for (const fixture of generatedAgents.values()) fixture.store.dispose();
   generatedAgents.clear();
   for (const cells of h.cells.values())
@@ -551,9 +616,15 @@ function chatSettings(agent: Agent) {
     },
   ]);
   const store = f.store;
+  areas ??= conversationActionsFixture(undefined, store);
   return invoke(
     createElement(ChatSettingsDialog, {
       areas: settingsAreasFixture({
+        agentsUi: areas.agentsUi,
+        settingsModels: {
+          claude: unloadedClaudeSettings,
+          fileBackups: undefined,
+        },
         scope: {
           store,
           services: {
@@ -1282,7 +1353,7 @@ test("unchanged settings retain the trigger agent identity", async () => {
   expect(render().triggerAgent).toBe(first);
 });
 
-test("an older same-domain request cannot replace the latest acknowledgment", async () => {
+test("role remounts keep an unresolved save locked before the next settings intent", async () => {
   const finish: Array<(agent: Agent) => void> = [];
   h.post.mockImplementation(
     () =>
@@ -1294,10 +1365,12 @@ test("an older same-domain request cannot replace the latest acknowledgment", as
   render().picker.onRole("worker");
   render().picker.onRole("orchestrator");
   render().picker.onModel("gpt-6-astra");
+  expect(finish).toHaveLength(1);
+  required(finish[0])({ ...initial, model: "gpt-6-luna" });
+  await Promise.resolve();
+  render().picker.onModel("gpt-6-astra");
   expect(finish).toHaveLength(2);
   required(finish[1])({ ...initial, model: "gpt-6-astra" });
-  await Promise.resolve();
-  required(finish[0])({ ...initial, model: "gpt-6-luna" });
   await Promise.resolve();
   expect(render().model).toBe("Astra 6");
 });
@@ -1570,4 +1643,48 @@ test("a canonical effort response reconciles both the picker and saved change de
   expect(result.label).toContain("Medium");
   expect(JSON.stringify(result.statusModal)).not.toContain('"high"');
   expect(JSON.stringify(result.statusModal)).toContain('"medium"');
+});
+
+function permissionControl(agent: Agent) {
+  return required(
+    children(render(agent, true).controls).find(
+      (node): node is ReactElement<SwitchFixtureProps> =>
+        node.props["aria-label"] === "Full access without approval",
+    ),
+  ).props;
+}
+function remountSettingsForm() {
+  for (const cell of h.cells.get(h.scoped) || []) cell.cleanup?.();
+  h.cells.delete(h.scoped);
+  h.scoped = "";
+}
+test("a Full receipt retires after streamed Full and never overrides a later Ask", async () => {
+  const ask = { ...initial, permissionMode: "default" as const };
+  const full = { ...initial, permissionMode: "bypassPermissions" as const };
+  h.post.mockResolvedValueOnce(full);
+  permissionControl(ask).onChange({ currentTarget: { checked: true } });
+  await vi.waitFor(() => expect(permissionControl(ask).disabled).toBe(false));
+  expect(permissionControl(ask).checked).toBe(true);
+  expect(permissionControl(full).checked).toBe(true);
+  expect(permissionControl(ask).checked).toBe(false);
+});
+test("remounts reuse bounded owner form state and retain an unresolved request", async () => {
+  const ask = { ...initial, permissionMode: "default" as const };
+  const full = { ...initial, permissionMode: "bypassPermissions" as const };
+  for (let index = 0; index < 8; index++) {
+    h.post.mockResolvedValueOnce(full);
+    permissionControl(ask).onChange({ currentTarget: { checked: true } });
+    await vi.waitFor(() =>
+      expect(permissionControl(full).disabled).toBe(false),
+    );
+    remountSettingsForm();
+  }
+  expect(required(areas).agentsUi.fields.size).toBeLessThanOrEqual(2);
+  h.post.mockReturnValueOnce(new Promise(() => {}));
+  permissionControl(full).onChange({ currentTarget: { checked: false } });
+  const calls = h.post.mock.calls.length;
+  remountSettingsForm();
+  expect(permissionControl(full).disabled).toBe(true);
+  permissionControl(full).onChange({ currentTarget: { checked: false } });
+  expect(h.post).toHaveBeenCalledTimes(calls);
 });

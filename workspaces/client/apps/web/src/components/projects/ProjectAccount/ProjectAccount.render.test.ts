@@ -1,3 +1,5 @@
+import { ProjectSave } from "../../../app/projects/ProjectSave.ts";
+import { localSidebarBackend } from "../../sidebar/support/services.tsx";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -5,15 +7,6 @@ import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
 import { createStateMirror } from "../../../generated/observableResources.ts";
 import ProjectAccount from "./ProjectAccount.tsx";
-
-vi.mock("../support/useProjectSave.ts", () => ({
-  useProjectSave: () => ({
-    pending: false,
-    frozen: false,
-    error: "",
-    submit: vi.fn(),
-  }),
-}));
 
 it("updates project change indicators from the mounted model without a parent render", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -64,7 +57,28 @@ it("updates project change indicators from the mounted model without a parent re
               supportsDisconnect: true,
             },
             defaultAccountKey: "default",
-            saved: async () => {},
+            saves: {
+              account: new ProjectSave(
+                localSidebarBackend,
+                "/api/projects",
+                async () => {},
+              ),
+              worker: new ProjectSave(
+                localSidebarBackend,
+                "/api/projects",
+                async () => {},
+              ),
+              order: new ProjectSave(
+                localSidebarBackend,
+                "/api/projects",
+                async () => {},
+              ),
+              defaultOrder: new ProjectSave(
+                localSidebarBackend,
+                "/api/accounts/default-groups",
+                async () => {},
+              ),
+            },
           }),
         ),
       ),

@@ -14,7 +14,7 @@ function replace(
   return source.replace(anchor, replacement);
 }
 
-export function perfInstrumentation(apiOnly = false): Plugin {
+export function perfInstrumentation(): Plugin {
   return {
     name: "studio-perf-instrumentation",
     enforce: "pre",
@@ -43,31 +43,6 @@ export function perfInstrumentation(apiOnly = false): Plugin {
           source,
           "  fetchApiRequest,\n  client,",
           "  fetchApiRequest,\n  fetchAuthenticatedRequest,\n  client,",
-          id,
-        );
-      }
-      if (apiOnly) return;
-      if (id.endsWith("/src/mount.tsx")) {
-        source =
-          'import { PerformanceReporting } from "./components/performance/PerformanceReporting/PerformanceReporting.tsx";\nimport * as serverViewApi from "./servers/net/api.ts";\n' +
-          source;
-        return replace(
-          source,
-          "<ServerServicesProvider services={services}>",
-          "<ServerServicesProvider services={services}><PerformanceReporting api={serverViewApi} />",
-          id,
-        );
-      }
-      if (
-        id.endsWith("/src/components/servers/MultiServerApp/MultiServerApp.tsx")
-      ) {
-        source =
-          'import { PerformanceReporting } from "../../performance/PerformanceReporting/PerformanceReporting.tsx";\n' +
-          source;
-        return replace(
-          source,
-          "      {shell}\n    </ServerServicesProvider>",
-          "      <PerformanceReporting api={localServices.api} />\n      {shell}\n    </ServerServicesProvider>",
           id,
         );
       }

@@ -1,6 +1,7 @@
+import { ProjectSave } from "../../../app/projects/ProjectSave.ts";
+import { localSidebarBackend } from "../../sidebar/support/services.tsx";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { MantineProvider, useMantineColorScheme } from "@mantine/core";
-import { useEffect } from "react";
+import { MantineProvider } from "@mantine/core";
 import { expect, userEvent, within } from "storybook/test";
 import { MoveChatForm } from "../MoveChatForm/MoveChatForm.tsx";
 import { ProjectNameForm } from "../ProjectNameForm/ProjectNameForm.tsx";
@@ -10,6 +11,16 @@ import { SettingsSection } from "../../ui/PanelHeader/PanelHeader.tsx";
 import { theme } from "../../../theme.ts";
 import "../ProjectAccount/project-settings.css";
 
+const nameSave = new ProjectSave(
+  localSidebarBackend,
+  "/api/projects",
+  async () => {},
+);
+const moveSave = new ProjectSave(
+  localSidebarBackend,
+  "/api/organization",
+  async () => {},
+);
 const project = {
   id: "atlas",
   name: "Atlas API",
@@ -30,10 +41,6 @@ const project = {
 } satisfies Project;
 
 function ProjectFixture({ light = false }: { light?: boolean }) {
-  const { setColorScheme } = useMantineColorScheme();
-  useEffect(() => {
-    setColorScheme(light ? "light" : "dark");
-  }, [light, setColorScheme]);
   return (
     <MantineProvider theme={theme} forceColorScheme={light ? "light" : "dark"}>
       <div
@@ -45,11 +52,11 @@ function ProjectFixture({ light = false }: { light?: boolean }) {
         }}
       >
         <SettingsSection title="Project organization">
-          <ProjectNameForm project={project} saved={async () => {}} />
+          <ProjectNameForm project={project} save={nameSave} />
           <MoveChatForm
             project={project}
             agent={{ id: "lead" }}
-            saved={async () => {}}
+            save={moveSave}
           />
         </SettingsSection>
         <SettingsSection

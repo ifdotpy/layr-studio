@@ -1,3 +1,8 @@
+import { ProjectServerSelection } from "../../../app/projects/CreationOwner.ts";
+// @vitest-environment happy-dom
+import { NewChatModelStore } from "./NewChatModelStore.ts";
+import { createServerServices } from "../../../servers/serverServices.ts";
+import { localServer } from "../../../servers/registry.ts";
 import { createElement } from "react";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -31,12 +36,14 @@ vi.mock("../../agents/support/WorkerModelPicker.tsx", async (load) => ({
 }));
 vi.mock("../models/support/modelChoices.ts", () => ({
   useModelChoices: () => ({}),
+  readModelChoices: () => ({}),
   isModelEnabled: () => true,
 }));
 
 test("new chat renders the shared chooser with lead and exclusion handlers", () => {
   const fixture = observableFixture();
   try {
+    const services = createServerServices(localServer());
     renderToStaticMarkup(
       createElement(
         fixture.Provider,
@@ -45,13 +52,17 @@ test("new chat renders the shared chooser with lead and exclusion handlers", () 
           MantineProvider,
           null,
           createElement(NewChatModelSettings, {
-            projectId: "p",
-            path: "/project",
-            onChange: () => {},
+            model: new NewChatModelStore(
+              services,
+              "p",
+              "/project",
+              services.areas,
+            ),
           }),
         ),
       ),
     );
+    services.close();
     expect(chooser).toHaveBeenCalledWith(
       expect.objectContaining({
         workerExcludedAccountKeys: [],
@@ -63,5 +74,43 @@ test("new chat renders the shared chooser with lead and exclusion handlers", () 
     );
   } finally {
     fixture.store.dispose();
+  }
+});
+
+test("foreign selection prepares its owners before rendering settings", () => {
+  const connection = {
+    id: "foreign",
+    label: "Foreign",
+    origin: "https://foreign.test",
+  };
+  const services = createServerServices(connection);
+  const areas = vi.spyOn(services, "areas", "get");
+  const owner = new ProjectServerSelection(
+    {
+      id: "p",
+      name: "P",
+      path: "/project",
+      locations: [{ serverId: "foreign", projectId: "p", path: "/project" }],
+    },
+    () => [{ id: "foreign", label: "Foreign", connection }],
+    "foreign",
+    () => undefined,
+    () => services,
+  );
+  try {
+    const beforeRender = areas.mock.calls.length;
+    const model = owner.model;
+    if (!model) throw new Error("Missing foreign draft");
+    renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(NewChatModelSettings, { model }),
+      ),
+    );
+    expect(areas).toHaveBeenCalledTimes(beforeRender);
+    expect(beforeRender).toBe(1);
+  } finally {
+    owner.dispose();
   }
 });

@@ -1,6 +1,8 @@
+import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { describe, expect, it, vi } from "vitest";
 import {
   readWorkerModels,
+  createWorkerCatalog,
   supportsDaybreakMode,
   type WorkerModelInfo,
 } from "./WorkerModelPicker.tsx";
@@ -81,4 +83,40 @@ describe("supportsDaybreakMode", () => {
     expect(invalidProvider.provider).toBe("future-provider");
     expect(invalidEffort.supportedReasoningEfforts[0]?.reasoningEffort).toBe(1);
   });
+});
+
+it("replacement stores never inherit catalog retry errors or pending completions", async () => {
+  const old = observableFixture(),
+    replacement = observableFixture();
+  const pending =
+    Promise.withResolvers<
+      Awaited<
+        ReturnType<import("./WorkerModelPicker.tsx").ModelCatalogSource["read"]>
+      >
+    >();
+  const reader = {
+    scope: "same-catalog-owner",
+    read: vi
+      .fn()
+      .mockRejectedValueOnce(new Error("old failure"))
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValue({ data: [] }),
+  };
+  const oldCatalog = createWorkerCatalog(old.store, reader, "default");
+  const current = createWorkerCatalog(replacement.store, reader, "default");
+  try {
+    await oldCatalog.retry();
+    expect(oldCatalog.error).toBe("old failure");
+    expect(current.error).toBe("");
+    const oldRequest = oldCatalog.retry();
+    await current.retry();
+    expect(reader.read).toHaveBeenCalledTimes(3);
+    pending.reject(new Error("late old failure"));
+    await oldRequest;
+    expect(oldCatalog.error).toBe("late old failure");
+    expect(current.error).toBe("");
+  } finally {
+    old.store.dispose();
+    replacement.store.dispose();
+  }
 });

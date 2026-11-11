@@ -1,10 +1,9 @@
 import { Drawer, Badge, Button, NativeSelect } from "@mantine/core";
 import { Activity, Terminal } from "lucide-react";
-import { useEffect } from "react";
 import { observer, Observer } from "mobx-react-lite";
 import {
-  useBackgroundTaskArea,
   type BackgroundTaskProps,
+  type BackgroundTaskActions,
   BackgroundTaskActionsProvider,
   useBackgroundTaskActions,
 } from "../support/backgroundTaskActions.tsx";
@@ -40,7 +39,6 @@ const ActivityFilters = observer(function ActivityFilters() {
 const ActivityBody = observer(function ActivityBody() {
   const actions = useBackgroundTaskActions();
   const task = actions.selectedEntry?.value;
-  useEffect(() => actions.retainSelection(task), [actions, task]);
   return (
     <div
       className={
@@ -71,25 +69,11 @@ const ActivityBody = observer(function ActivityBody() {
     </div>
   );
 });
-export default function BackgroundTasks(props: BackgroundTaskProps) {
-  const actions = useBackgroundTaskArea(props);
-  useEffect(() => {
-    actions.disposed = false;
-    return () => {
-      actions.disposed = true;
-    };
-  }, [actions]);
-  useEffect(() => {
-    if (!props.opened) actions.back();
-  }, [actions, props.opened]);
-  useEffect(() => {
-    if (
-      props.opened &&
-      props.initialFocus &&
-      props.initialFocus.leadId === props.leadId
-    )
-      actions.focus(props.initialFocus.id);
-  }, [actions, props.opened, props.initialFocus?.requestId]);
+export default observer(function BackgroundTasks(
+  props: BackgroundTaskProps & { actions: BackgroundTaskActions | undefined },
+) {
+  const { actions } = props;
+  if (!actions) return null;
   return (
     <BackgroundTaskActionsProvider value={actions}>
       <Drawer
@@ -131,4 +115,9 @@ export default function BackgroundTasks(props: BackgroundTaskProps) {
       </Drawer>
     </BackgroundTaskActionsProvider>
   );
-}
+});
+
+export {
+  createBackgroundTaskArea,
+  type BackgroundTaskActions,
+} from "../support/backgroundTaskActions.tsx";

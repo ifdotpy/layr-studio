@@ -26,9 +26,7 @@ export const ChatActionsMenu = observer(function ChatActionsMenu() {
   const { selected, layout } = area;
   return (
     <>
-      {layout.usesMenuHeaderTools && (
-        <ConversationMenuTools source={selected.railTools} />
-      )}
+      {layout.usesMenuHeaderTools && <ConversationMenuTools />}
       {selected.canReturnToLead && (
         <Menu.Item
           aria-label="Back to main agent"

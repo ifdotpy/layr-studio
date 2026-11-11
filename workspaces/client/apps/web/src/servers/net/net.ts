@@ -19,6 +19,9 @@ export function createNet(
 ) {
   return {
     reads: {
+      transcriptSearch: (
+        query: Parameters<Store["reads"]["transcriptSearch"]>[1],
+      ) => store().reads.transcriptSearch(api, query),
       file: (query: Parameters<Store["reads"]["file"]>[1]) =>
         store().reads.file(api, query),
       analytics: (query: Parameters<Store["reads"]["analytics"]>[1]) =>

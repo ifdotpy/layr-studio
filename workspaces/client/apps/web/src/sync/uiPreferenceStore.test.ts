@@ -1,3 +1,8 @@
+import { autorun } from "mobx";
+import {
+  readPreferenceWriteStatus,
+  setPreferenceWriteStatus,
+} from "./uiPreferenceStatus.ts";
 import {
   defaultStudioPreferences,
   normalizeStudioPreferences,
@@ -237,4 +242,46 @@ it("normalizes an invalid stored object before merging a control edit", () => {
   );
   expect(value.mainFontSize).toBe(previous.mainFontSize);
   expect(value.theme).toBe("dark");
+});
+
+it("tracks preference write status directly in observers", () => {
+  const storage = memoryStorage();
+  const seen: string[] = [];
+  const stop = autorun(() =>
+    seen.push(readPreferenceWriteStatus(storage, "server").state),
+  );
+  setPreferenceWriteStatus(storage, "server", { state: "saving" });
+  setPreferenceWriteStatus(storage, "server", {
+    state: "error",
+    error: "failed",
+  });
+  expect(seen).toEqual(["saved", "saving", "error"]);
+  stop();
+});
+
+it("does not retain storage adapters after preference status updates", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const moduleUrl = new URL("./uiPreferenceStatus.ts", import.meta.url).href;
+  const output = execFileSync(
+    process.execPath,
+    [
+      "--expose-gc",
+      "--input-type=module",
+      "-e",
+      `
+    import { setPreferenceWriteStatus } from ${JSON.stringify(moduleUrl)};
+    let adapter = {};
+    const weak = new WeakRef(adapter);
+    setPreferenceWriteStatus(adapter, 'server', { state: 'saving' });
+    adapter = undefined;
+    for (let i = 0; i < 5; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+      globalThis.gc();
+    }
+    console.log(weak.deref() === undefined ? 'released' : 'retained');
+  `,
+    ],
+    { encoding: "utf8" },
+  );
+  expect(output.trim()).toBe("released");
 });

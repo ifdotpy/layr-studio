@@ -1,10 +1,14 @@
+import { whileObserved } from "../../../observed.ts";
+import { observer } from "mobx-react-lite";
+import { makeAutoObservable, flowResult } from "mobx";
+import type { ServerApi } from "../../../api.ts";
 import {
   PeerStatus as GeneratedApiPeerStatus,
   WhoisStatus as GeneratedApiWhoisStatus,
   RoomStatus as GeneratedApiRoomStatus,
 } from "../../../generated/api.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useEffect, useMemo, useState } from "react";
+import { useServerServices } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useMemo, useState } from "react";
 import { Button, Checkbox, Switch, Textarea, TextInput } from "@mantine/core";
 import { type PostBody, type PostResult } from "../../../api.ts";
 import type { Agent } from "../../../types.ts";
@@ -31,63 +35,112 @@ function isFederationInvitation(value: unknown): value is FederationInvitation {
   );
 }
 
-export function FederationSettings({
+export class FederationSettingsStore {
+  state: FederationSnapshot | null = null;
+  busy = false;
+  private generation = 0;
+  readonly api;
+  readonly notify;
+  private readonly stops;
+  constructor(
+    api: Pick<ServerApi, "post"> | null,
+    notify: (message: string) => void,
+  ) {
+    this.api = api;
+    this.notify = notify;
+    makeAutoObservable(
+      this,
+      { api: false, notify: false },
+      { autoBind: true, deep: false },
+    );
+    this.stops = [
+      whileObserved(this, "state", () => {
+        void this.load();
+        return this.cancel;
+      }),
+    ];
+  }
+  cancel() {
+    this.generation++;
+  }
+  load() {
+    if (this.api) void this.run({ action: "status" });
+  }
+  *run(
+    body: PostBody<"/api/federation">,
+  ): Generator<
+    Promise<FederationResponse>,
+    FederationResponse | null,
+    FederationResponse
+  > {
+    if (!this.api) return null;
+    const generation = this.generation;
+    this.busy = true;
+    try {
+      const result = yield this.api.post("/api/federation", body);
+      if (generation !== this.generation) return null;
+      if ("peers" in result) this.state = result;
+      return result;
+    } catch (error) {
+      if (generation === this.generation)
+        this.notify(error instanceof Error ? error.message : String(error));
+      return null;
+    } finally {
+      if (generation === this.generation) this.busy = false;
+    }
+  }
+  dispose() {
+    this.cancel();
+    this.stops.forEach((stop) => stop());
+  }
+}
+const unloadedFederation = new FederationSettingsStore(null, () => {});
+
+export const FederationSettings = observer(function FederationSettings({
   active,
   leadId,
   agents,
   notify,
+  model: suppliedModel,
 }: {
+  model?: FederationSettingsStore;
   active: boolean;
   leadId: string;
   agents: Agent[];
   notify: (message: string) => void;
 }) {
-  const { post } = useServerApi();
+  const services = useServerServices();
+  const model =
+    suppliedModel ??
+    services?.areas.settingsModels.federation ??
+    unloadedFederation;
 
-  const [state, setState] = useState<FederationSnapshot | null>(null);
   const [inviteText, setInviteText] = useState("");
   const [serverLabel, setServerLabel] = useState("Studio server");
   const [expectedUser, setExpectedUser] = useState("");
-  const [localMembers, setLocalMembers] = useState<string[]>([leadId]);
+  const [membersByLead, setMembersByLead] = useState<Record<string, string[]>>(
+    {},
+  );
+  const localMembers = membersByLead[leadId] ?? [leadId];
   const [shareNames, setShareNames] = useState(false);
   const [shareStatus, setShareStatus] = useState(false);
-  const [busy, setBusy] = useState(false);
+
   const team = useMemo(
     () =>
       agents.filter((agent) => agent.id === leadId || agent.rootId === leadId),
     [agents, leadId],
   );
-  useEffect(() => setLocalMembers([leadId]), [leadId]);
-
-  const run = async (
-    body: PostBody<"/api/federation">,
-  ): Promise<FederationResponse | null> => {
-    setBusy(true);
-    try {
-      const result = await post("/api/federation", body);
-      if ("peers" in result) setState(result);
-      return result;
-    } catch (error) {
-      notify(error instanceof Error ? error.message : String(error));
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  };
-  useEffect(() => {
-    if (!active) return;
-    void run({ action: "status" });
-    // Settings refresh only when the settings panel opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
-
   if (!active) return null;
+  const { state, busy } = model;
+  const run = (body: PostBody<"/api/federation">) =>
+    flowResult(model.run(body));
   const toggleMember = (id: string, checked: boolean) =>
-    setLocalMembers((current) =>
-      checked
-        ? [...new Set([...current, id])]
-        : current.filter((item) => item !== id),
-    );
+    setMembersByLead((current) => ({
+      ...current,
+      [leadId]: checked
+        ? [...new Set([...localMembers, id])]
+        : localMembers.filter((item) => item !== id),
+    }));
   const pair = async () => {
     try {
       const invitation: unknown = JSON.parse(inviteText);
@@ -323,4 +376,4 @@ export function FederationSettings({
       )}
     </section>
   );
-}
+});

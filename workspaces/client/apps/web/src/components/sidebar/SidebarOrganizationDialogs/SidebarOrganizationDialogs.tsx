@@ -46,7 +46,7 @@ export const SidebarOrganizationDialogs = observer(
                   <MoveChatForm
                     project={sidebar.ownedProject(dialogProject, target)}
                     agent={dialogAgent}
-                    saved={sidebar.savedProject}
+                    save={sidebar.moveChatSave!}
                   />
                 ) : (
                   <ProjectNameForm
@@ -57,7 +57,7 @@ export const SidebarOrganizationDialogs = observer(
                     )}
                     folder={dialog.folder === "new" ? "new" : dialogFolder}
                     parentId={dialog.parentId}
-                    saved={sidebar.savedProject}
+                    save={sidebar.projectNameSave!}
                   />
                 )}
               </SidebarBackendProvider>

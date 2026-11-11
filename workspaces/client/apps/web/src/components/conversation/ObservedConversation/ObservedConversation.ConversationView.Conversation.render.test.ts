@@ -13,10 +13,12 @@ import { ServerStoreProvider } from "../../servers/ServerServicesProvider/Server
 import { requestFixture } from "../questions/support/requestFixtures.ts";
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
 import Conversation from "./ObservedConversation.tsx";
+import { mountConversationFixture } from "../ConversationView/ConversationView.fixture.tsx";
 import { approval, question } from "../../../approvalFixtures.ts";
 import {
   RequestArea,
-  useRequestScope,
+  useRequestOwner,
+  RequestAreaOwner,
 } from "../questions/RequestArea/RequestArea.tsx";
 import { ConversationProvider } from "../support/navigation.ts";
 import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
@@ -57,40 +59,27 @@ vi.mock("../../../conversation/liveText.ts", async (original) => ({
   ...(await original<typeof import("../../../conversation/liveText.ts")>()),
   useLiveText: () => h.liveText,
 }));
-vi.mock("../../../servers/activity.ts", async (original) => ({
-  ...(await original<typeof import("../../../servers/activity.ts")>()),
-  useServerActivity: () => {},
-}));
 vi.mock("../support/usePromptRecall.ts", () => ({
   usePromptRecall: () => ({}),
-}));
-vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
-}));
-vi.mock("../support/useUploadRecovery.ts", () => ({
-  useUploadRecovery: () => ({ pending: h.empty }),
 }));
 vi.mock("../support/useChatReadState.ts", () => ({
   useVisibleChatResult() {},
 }));
-vi.mock("../support/useDisplayPhase.ts", () => ({
-  useDisplayPhase: () => "thinking",
-}));
 vi.mock("../../agents/support/WorkerModelPicker.tsx", () => ({
   useWorkerModels: () => ({ models: h.empty }),
-}));
-vi.mock("../support/useMessageQueue.ts", () => ({
-  useMessageQueue: () => h.queue,
-}));
-vi.mock("../support/useSendingMessageRemoval.ts", () => ({
-  useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../../../hooks/conversationData", () => ({
   useChatWait: () => undefined,
 }));
-vi.mock("../Usage/Usage.tsx", () => ({ default: () => null }));
+vi.mock("../Usage/Usage.tsx", async (original) => ({
+  ...(await original<typeof import("../Usage/Usage.tsx")>()),
+  default: () => null,
+}));
 vi.mock("../Dictation/Dictation.tsx", () => ({ Dictation: () => null }));
-vi.mock("../RealtimeVoice/RealtimeVoice.tsx", () => ({ default: () => null }));
+vi.mock("../RealtimeVoice/RealtimeVoice.tsx", async (original) => ({
+  ...(await original<typeof import("../RealtimeVoice/RealtimeVoice.tsx")>()),
+  default: () => null,
+}));
 vi.mock("../prompt-composer/PromptInput/PromptInput.tsx", () => ({
   default: () => null,
 }));
@@ -149,6 +138,7 @@ it.each(["scroll", "resize"] as const)(
     );
     const actions = conversationActionsFixture(() => {}, f.store);
     actions.navigation.selectedId = "lead";
+    mountConversationFixture(actions);
     actions.selected.history.items = h.items;
     const host = document.body.appendChild(document.createElement("div"));
     const root = createRoot(host);
@@ -209,14 +199,24 @@ it.each(["scroll", "resize"] as const)(
 it("RequestArea preserves its command context on an unchanged parent render", async () => {
   const commits: string[] = [];
   const Consumer = memo(function Consumer() {
-    useRequestScope();
+    useRequestOwner();
     return createElement(Profiler, {
       id: "request-consumer",
       onRender: (_id, phase) => commits.push(phase),
       children: createElement("span", null, "Request"),
     });
   });
+  const owner = new RequestAreaOwner(
+    {
+      api: () => defaultApi,
+      store: requestFixture([]).store,
+      storage: h.storage,
+      server: "local",
+    },
+    () => ({ scope: "fixture", notify() {} }),
+  );
   const commands = {
+    owner,
     scope: "fixture",
     refresh: async () => {},
     notify: () => {},
@@ -295,6 +295,7 @@ it("an account identity readback with the same plan leaves Conversation idle", a
   apply("native");
   const actions = conversationActionsFixture(() => {}, f.store);
   actions.navigation.selectedId = "lead";
+  mountConversationFixture(actions);
   let renders = 0;
   window.__studioPromptComposerRenderProbe = (component) => {
     if (component === "conversation") renders++;
@@ -353,6 +354,7 @@ it("updates an existing transcript notice when SSE changes its fields in place",
   );
   const actions = conversationActionsFixture(() => {}, f.store);
   actions.navigation.selectedId = "lead";
+  mountConversationFixture(actions);
   actions.selected.history.items = h.items;
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
@@ -397,5 +399,63 @@ it("updates an existing transcript notice when SSE changes its fields in place",
     f.store.dispose();
     actions.scope.services.close();
     h.items = previous;
+  }
+});
+
+it("renders transcript requests and opens the selected owner's answer editor", async () => {
+  const f = requestFixture(
+    [
+      approval({
+        id: "owner-question",
+        agent: "lead",
+        request: {
+          kind: "agent_question",
+          questions: [question("choice", "Owned answer?")],
+        },
+      }),
+    ],
+    [agentSummaryFixture("lead", { rootId: "lead", isLead: true })],
+    [{ id: "lead", canSend: true }],
+  );
+  const actions = conversationActionsFixture(() => {}, f.store);
+  actions.navigation.selectedId = "lead";
+  mountConversationFixture(actions);
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            ServerStoreProvider,
+            { value: f.store },
+            createElement(
+              ConversationProvider,
+              { value: actions },
+              createElement(Conversation),
+            ),
+          ),
+        ),
+      ),
+    );
+    const view = actions.selected.requestOwner.views.get("owner-question")!;
+    const card = host.querySelector('[data-request="owner-question"]');
+    expect(card).not.toBeNull();
+    await act(async () =>
+      card!.querySelector<HTMLButtonElement>("[data-answer]")!.click(),
+    );
+    expect(view.open).toBe(true);
+    expect(
+      host.querySelector('textarea[aria-label="Owned answer?"]'),
+    ).not.toBeNull();
+    await act(async () => view.close());
+    expect(host.querySelector(".request-answer-form")).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    actions.selected.closeConversation();
+    actions.scope.services.close();
+    f.store.dispose();
   }
 });

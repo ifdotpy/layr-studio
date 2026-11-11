@@ -23,7 +23,7 @@ vi.mock(
     useServerStorageEventKey: () => () => undefined,
   }),
 );
-import { useAttachmentDrafts } from "./useAttachmentDrafts.ts";
+import { AttachmentDrafts } from "./useAttachmentDrafts.ts";
 import { createUploads } from "../../../sync/uploads.ts";
 
 afterEach(() => {
@@ -33,7 +33,8 @@ afterEach(() => {
 });
 
 it("keeps attachment selections in memory", async () => {
-  const [initial, set] = useAttachmentDrafts("chat", vi.fn());
+  const store = new AttachmentDrafts(mocks.attachmentCancelled, vi.fn());
+  const { current: initial, set } = store;
   expect(initial).toEqual({});
   expect(await set({ chat: [] })).toBe(true);
   expect(mocks.saved).not.toHaveBeenCalled();
@@ -66,10 +67,11 @@ it("retains a confirmed upload for the send after finishing it", async () => {
     name: "notes.txt",
     size: 1,
   };
-  const [, set] = useAttachmentDrafts("chat", vi.fn());
+  const store = new AttachmentDrafts(mocks.attachmentCancelled, vi.fn());
+  const { set } = store;
   await set({ agent: [asset] });
   await uploads.finishUpload(asset.id);
 
-  const [attachments] = useAttachmentDrafts("chat", vi.fn());
+  const attachments = store.current;
   expect(attachments.agent?.map((item) => item.id)).toEqual([asset.id]);
 });

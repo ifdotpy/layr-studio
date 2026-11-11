@@ -9,21 +9,27 @@ declare global {
 window.uploadRecoveryBrowserRaceMount = mount;
 
 import React from "react";
+import { observer } from "mobx-react-lite";
 import { createRoot } from "react-dom/client";
-import { useAttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
+import { AttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
 export function mount() {
+  const drafts = new AttachmentDrafts(
+    () => false,
+    () => {},
+    { key: "codex-agent-attachments:fixture", storage: localStorage },
+  );
   createRoot(document.body).render(
-    React.createElement(function Writer() {
-      const [attachments, setAttachments] = useAttachmentDrafts(
-        "codex-agent-attachments:fixture",
-        () => {},
-      );
-      // Base writer exposes only attachment state, omitting recovery/form members.
-      window.uploadRecoveryBrowserFixture = {
-        attachments,
-        setAttachments,
-      } as RecoveryHarness;
-      return null;
-    }),
+    React.createElement(
+      observer(function Writer() {
+        const attachments = drafts.current,
+          setAttachments = drafts.set;
+        // Base writer exposes only attachment state, omitting recovery/form members.
+        window.uploadRecoveryBrowserFixture = {
+          attachments,
+          setAttachments,
+        } as RecoveryHarness;
+        return null;
+      }),
+    ),
   );
 }

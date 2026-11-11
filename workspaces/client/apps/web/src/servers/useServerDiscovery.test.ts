@@ -8,29 +8,6 @@ const mocks = vi.hoisted(() => ({
   setLocal: vi.fn(),
   fields: {} as Record<string, unknown>,
 }));
-vi.mock("react", () => ({
-  useEffect: (effect: () => void | (() => void)) => {
-    mocks.effects.push(effect);
-  },
-  useMemo: (read: () => unknown) => read(),
-  useRef: (current: unknown) => ({ current }),
-  useState: (current: unknown) => [current, vi.fn()],
-}));
-vi.mock(
-  "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
-    useServerApi: () => ({ serverAccess: mocks.access }),
-    useServerServices: () => ({
-      store: {
-        multiServer: () => ({
-          current: mocks.snapshot
-            ? { status: "live", data: mocks.snapshot }
-            : { status: "loading" },
-        }),
-      },
-    }),
-  }),
-);
 vi.mock("../sync/uiPreferenceStore.ts", () => ({
   readPreferenceFields: () => mocks.fields,
   capturePreferenceWrite: vi.fn(),
@@ -51,7 +28,7 @@ vi.mock("./managementRequests.ts", () => ({
     }
   },
 }));
-import { useServerDiscovery } from "./useServerDiscovery.ts";
+import { ServerDiscovery } from "./useServerDiscovery.ts";
 let cleanups: (() => void)[] = [];
 afterEach(() => {
   cleanups.forEach((stop) => stop());
@@ -66,7 +43,17 @@ it("reads discovery from the shared facade and applies local registry details wi
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("location", { origin: "https://owner.test" });
   vi.stubGlobal("localStorage", {});
-  const empty = useServerDiscovery(true);
+  const services = {
+    api: { serverAccess: mocks.access, refreshSession: vi.fn() },
+    store: {
+      multiServer: () => ({
+        current: mocks.snapshot
+          ? { status: "live" as const, data: mocks.snapshot }
+          : { status: "loading" as const },
+      }),
+    },
+  };
+  const empty = new ServerDiscovery(services, true, true, () => ({}));
   expect(empty.snapshot).toBeNull();
   mocks.snapshot = {
     protocol: 1,
@@ -82,12 +69,9 @@ it("reads discovery from the shared facade and applies local registry details wi
     invites: [],
     settings: { autoPair: true, aliases: { local: "OWN" } },
   };
-  const view = useServerDiscovery(true);
+  const view = new ServerDiscovery(services, true, true, () => ({}));
   expect(view.snapshot?.localLabel).toBe("Owner");
-  cleanups = mocks.effects.flatMap((effect) => {
-    const stop = effect();
-    return stop ? [stop] : [];
-  });
+  cleanups.push(view.start());
   await Promise.resolve();
   expect(mocks.access).not.toHaveBeenCalled();
   expect(mocks.adopt).toHaveBeenCalledWith(
@@ -95,6 +79,8 @@ it("reads discovery from the shared facade and applies local registry details wi
   );
   expect(mocks.setLocal).toHaveBeenCalledWith({ label: "Owner", alias: "OWN" });
   mocks.fields = { '["server-alias:workspace"]': { value: "NEW" } };
-  const updated = useServerDiscovery(true, true, { local: "workspace" });
+  const updated = new ServerDiscovery(services, true, true, () => ({
+    local: "workspace",
+  }));
   expect(updated.snapshot?.aliases?.local).toBe("NEW");
 });

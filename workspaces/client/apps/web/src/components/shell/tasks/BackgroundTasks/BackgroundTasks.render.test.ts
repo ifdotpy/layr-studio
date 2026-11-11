@@ -1,3 +1,5 @@
+import type { ApiPostPath, PostInput, PostOptions } from "../../../../api.ts";
+import { fixturePostResult } from "../../../../../tests/misc-fixture.ts";
 import { resourceData } from "../../../../store/runtime.ts";
 import { autorun } from "mobx";
 import { approval } from "../../../../approvalFixtures.ts";
@@ -14,13 +16,24 @@ import { createServerStore } from "../../../../store/server.ts";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";
 import type { components } from "../../../../generated/api.ts";
 import BackgroundTasks from "./BackgroundTasks.tsx";
+import {
+  createBackgroundTaskArea,
+  type BackgroundTaskActions,
+} from "../support/backgroundTaskActions.tsx";
 import { backgroundDisplay } from "../../../conversation/ComposerAttachments/componentTestFixtures.ts";
 
 const h = vi.hoisted(() => ({
   store: null as ReturnType<typeof createServerStore> | null,
-  post: vi.fn(async () => ({ status: "completed", processes: [] })),
-  get: vi.fn(async () => ({})),
-  answer: vi.fn(async () => ({})),
+  post: vi.fn(async (_path: string, _body: unknown, _options?: unknown) => ({
+    status: "completed",
+    processes: [],
+  })),
+  get: vi.fn<typeof defaultApi.get>(async () => {
+    throw new Error("Unexpected fixture GET");
+  }),
+  answer: vi.fn<typeof defaultApi.command.answer>(async () =>
+    fixturePostResult<"/api/commands">({ status: "applied" }),
+  ),
 }));
 vi.mock(
   "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
@@ -108,13 +121,35 @@ async function fixture(records = [process()]) {
   document.body.append(host);
   const root = createRoot(host);
   const notify = vi.fn();
-  const render = async (leadId = "lead", opened = true) =>
-    act(async () =>
+  let actions: BackgroundTaskActions | undefined;
+  let stop: (() => void) | undefined;
+  const render = async (leadId = "lead", opened = true) => {
+    if (actions?.leadId !== leadId || actions.disposed) {
+      stop?.();
+      actions = createBackgroundTaskArea(
+        {
+          ...defaultApi,
+          post: async <Path extends ApiPostPath>(
+            path: Path,
+            body: PostInput<Path>,
+            options?: PostOptions,
+          ) => fixturePostResult<Path>(await h.post(path, body, options)),
+          command: { ...defaultApi.command, answer: h.answer },
+        },
+        store,
+        "local",
+        { opened, leadId, close() {}, openAgent() {}, notify },
+      );
+      stop = actions.start();
+    }
+    if (!opened) stop?.();
+    return act(async () =>
       root.render(
         createElement(
           MantineProvider,
           { env: "test" },
           createElement(BackgroundTasks, {
+            actions,
             opened,
             close() {},
             leadId,
@@ -124,6 +159,7 @@ async function fixture(records = [process()]) {
         ),
       ),
     );
+  };
   await render();
   await act(async () => vi.advanceTimersByTimeAsync(100));
   const publish = async (
@@ -176,6 +212,7 @@ async function fixture(records = [process()]) {
     notify,
     close: async () => {
       await act(async () => root.unmount());
+      stop?.();
       store.dispose();
       subscriptions.dispose();
     },

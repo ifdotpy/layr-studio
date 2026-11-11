@@ -1,5 +1,24 @@
+import { ConversationStore } from "../support/ConversationStore.ts";
+import { createConversationContext } from "../support/conversationContext.ts";
+import { useConversationActions } from "../support/navigation.ts";
+import type { ServerAreas } from "../../../app/ServerAreasProvider.tsx";
+export function mountConversationFixture(areas: ServerAreas) {
+  const { selected, navigation, startup } = areas;
+  if (
+    selected.conversation?.context.opened !== navigation.selectedId ||
+    selected.conversation?.context.stateDir !== startup.creationScope ||
+    selected.conversation.context.kind !== selected.kind
+  ) {
+    selected.closeConversation();
+    selected.requestOwner = selected.createRequestOwner();
+    selected.requestOwner.start();
+    selected.conversation = new ConversationStore(
+      createConversationContext(areas, selected.attachmentDrafts),
+    );
+  }
+}
 import { cloneElement, isValidElement, type ReactNode } from "react";
-import { ConversationView } from "./ConversationView.tsx";
+import { renderConversationView } from "./ConversationView.tsx";
 import {
   ConversationHeaderTools,
   renderConversationHeaderTools,
@@ -34,6 +53,7 @@ const leaves = new Map<unknown, () => ReactNode>([
 ]);
 /** Fake-hook callers still traverse the real owner-bound leaf implementations. */
 export function renderConversationViewFixture() {
+  mountConversationFixture(useConversationActions());
   const expand = (node: ReactNode): ReactNode => {
     if (Array.isArray(node)) return node.map(expand);
     if (!isValidElement<{ children?: ReactNode }>(node)) return node;
@@ -42,5 +62,5 @@ export function renderConversationViewFixture() {
       ? expand(leaf())
       : cloneElement(node, {}, expand(node.props.children));
   };
-  return expand(ConversationView());
+  return expand(renderConversationView());
 }

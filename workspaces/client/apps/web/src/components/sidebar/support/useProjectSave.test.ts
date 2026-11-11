@@ -8,10 +8,7 @@ import { ApiError, type PostBody } from "../../../api.ts";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import { preferenceMemory } from "../../../servers/storage.ts";
 import { localSidebarBackend, SidebarBackendProvider } from "./services.tsx";
-import {
-  ProjectSave,
-  useProjectSave,
-} from "../../projects/support/useProjectSave.ts";
+import { ProjectSave } from "../../../app/projects/ProjectSave.ts";
 
 const body: PostBody<"/api/peer-teams"> = {
   action: "move",
@@ -138,9 +135,8 @@ describe("ProjectSave", () => {
   it("updates observer callers and keeps the connection chosen when the form opened", async () => {
     const f = fixture(),
       other = fixture();
-    let current!: ReturnType<typeof useProjectSave<"/api/peer-teams">>;
+    const current = new ProjectSave(f.backend, "/api/peer-teams", f.saved);
     const Probe = observer(function Probe() {
-      current = useProjectSave("/api/peer-teams", f.saved);
       return createElement(
         "output",
         null,

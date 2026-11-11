@@ -1,3 +1,4 @@
+import { action } from "mobx";
 import { setStartupFixture } from "../../../shell/integration-support/observableFixture.tsx";
 import { conversationActionsFixture } from "../../../shell/integration-support/observableFixture.tsx";
 import { defaultSyncClient } from "../../../../sync/client.ts";
@@ -81,7 +82,9 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
     } satisfies ServerServices["sync"],
   });
   setStartupFixture(area, data);
-  area.navigation.selectedId = "lead";
+  action(() => {
+    area.navigation.selectedId = "lead";
+  })();
   area.notices.notify = notify;
   const read = area.read;
   const stop = read.start();

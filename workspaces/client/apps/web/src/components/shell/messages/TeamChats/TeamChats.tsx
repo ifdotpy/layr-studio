@@ -1,9 +1,5 @@
 import { useMessageRenderProbe } from "../../../../perf/messageRenderProbe.ts";
 import { RoomKind as GeneratedApiRoomKind } from "../../../../generated/api.ts";
-import {
-  useServerApi,
-  useServerStore,
-} from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import MessageDate from "../../../conversation/transcript/MessageDate/MessageDate.tsx";
 import { localDateTime, localTime } from "../../../../local-time.ts";
 import AgentAvatar from "../../../agents/AgentAvatar/AgentAvatar.tsx";
@@ -14,15 +10,13 @@ import {
   TextInput,
   UnstyledButton,
 } from "@mantine/core";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, Inbox, Megaphone, Search, Users } from "lucide-react";
 import "../../../../api.ts";
-import { useRoomHistory } from "../../../../conversation/roomHistory.ts";
 
 import { observer } from "mobx-react-lite";
-import { resourceData } from "../../../../store/runtime.ts";
 import {
-  createTeamChatsStore,
+  type TeamChatsOwner,
   TeamChatsProvider,
   useTeamChats,
   preview,
@@ -34,10 +28,7 @@ import Requests, {
   RequestArea,
 } from "../../../conversation/questions/Requests/Requests.tsx";
 import UserMessages from "../UserMessages/UserMessages.tsx";
-import {
-  useConversationScroll,
-  useFollowState,
-} from "../../../conversation/support/useConversationScroll.ts";
+import { useConversationScroll } from "../../../conversation/support/useConversationScroll.ts";
 
 /** A compact room clock; its native tooltip retains the full local date. */
 function RoomDate({ at }: { at?: number | null | undefined }) {
@@ -57,6 +48,7 @@ function RoomDate({ at }: { at?: number | null | undefined }) {
 }
 
 type Props = {
+  owner?: TeamChatsOwner;
   leadId?: string | undefined;
   focusRequestId?: string | undefined;
   focusItemId?: string | undefined;
@@ -64,19 +56,10 @@ type Props = {
 };
 export default observer(function TeamChats(props: Props) {
   useMessageRenderProbe("team-chats");
-  const store = useServerStore();
-  const state = resourceData(store.state().current);
-  const stateDir = state?.workspaces.values().next().value?.stateDir || "";
-  const api = useServerApi();
-  const chats = useMemo(
-    () => createTeamChatsStore(store, api, stateDir, props.leadId),
-    [store, api, stateDir, props.leadId],
-  );
-  useEffect(
-    () =>
-      chats.focus(props.focusRoomId, props.focusItemId, props.focusRequestId),
-    [chats, props.focusRoomId, props.focusItemId, props.focusRequestId],
-  );
+  const area = useConversationActions();
+  const owner = props.owner ?? area.ui.chats;
+  const chats = owner.current;
+  if (!chats.messages) return null;
   return (
     <TeamChatsProvider value={chats}>
       <div className="team-chats-container">
@@ -87,7 +70,7 @@ export default observer(function TeamChats(props: Props) {
           aria-label="Messages"
         >
           <RoomList />
-          <TeamDetail {...props} />
+          <TeamDetail {...props} owner={owner} />
         </section>
       </div>
     </TeamChatsProvider>
@@ -98,10 +81,10 @@ const TeamDetail = observer(function TeamDetail({
   focusItemId,
   focusRequestId,
   focusRoomId,
-}: Props) {
+  owner,
+}: Props & { owner: TeamChatsOwner }) {
   const chats = useTeamChats();
   const {
-    stateDir,
     room,
     selected,
     scope,
@@ -114,14 +97,16 @@ const TeamDetail = observer(function TeamDetail({
   } = useConversationActions();
   useMessageRenderProbe("team-detail", room?.id || "you");
   const showYou = selected === "you" || !room;
-  const messages = useRoomHistory(!showYou && room ? room.id : null, stateDir);
+  const messages = owner.messages;
+  if (!messages)
+    throw new Error("Room session must be active inside TeamChats");
   const detailHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (detailOpen) detailHeading.current?.focus({ preventScroll: true });
   }, [detailOpen, selected]);
-  const { scroll, content, getFollow, subscribeFollow, setFollow, onScroll } =
+  const { scroll, content, getFollow, setFollow, onScroll } =
     useConversationScroll(scope + ":messages:" + selected, messages.loaded);
-  const follow = useFollowState(subscribeFollow, getFollow);
+  const follow = getFollow();
   const heights = useRef(new Map<string, number>());
   const [virtualRange, setVirtualRange] = useState({
     start: 0,
@@ -467,11 +452,10 @@ const PersonalFeed = observer(function PersonalFeed({
   focusRequestId: string | undefined;
 }) {
   const area = useConversationActions();
-  const { notify } = area.notices;
   useMessageRenderProbe("personal-feed");
-  const { stateDir, feed: items } = useTeamChats();
+  const { feed: items } = useTeamChats();
   return (
-    <RequestArea scope={stateDir} notify={notify}>
+    <RequestArea owner={area.selected.requestOwner}>
       {items.map((item) => {
         const request = "request" in item;
         const id = (request ? "request:" : "complaint:") + item.id;
@@ -495,3 +479,5 @@ const PersonalFeed = observer(function PersonalFeed({
     </RequestArea>
   );
 });
+
+export { createTeamChatsStore, type TeamChatsOwner } from "./TeamChatsStore.ts";

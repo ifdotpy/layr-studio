@@ -44,12 +44,8 @@
     "callee": "localStorage"
   },
   {
-    "file": "components/conversation/PromptNavigator/PromptNavigator.tsx",
-    "callee": "syncGet"
-  },
-  {
-    "file": "components/shell/TerminalDock/TerminalDock.tsx",
-    "callee": "syncPost"
+    "file": "components/shell/TerminalDock/ShellTerminalStore.ts",
+    "callee": "api.syncPost"
   },
   {
     "file": "app/projects/newChatSettings.ts",
@@ -126,14 +122,6 @@
   {
     "file": "servers/net/queue.ts",
     "callee": "syncPost"
-  },
-  {
-    "file": "components/conversation/support/useSendingMessageRemoval.ts",
-    "callee": "localStorage"
-  },
-  {
-    "file": "components/conversation/support/useSendingMessageRemoval.ts",
-    "callee": "localStorage"
   },
   {
     "file": "indexedDb.ts",

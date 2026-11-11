@@ -1,3 +1,12 @@
+// @vitest-environment happy-dom
+import type { ComponentProps } from "react";
+import { afterEach } from "vitest";
+import { ProjectServerSelection } from "../../../app/projects/CreationOwner.ts";
+import {
+  createServerServices,
+  type ServerServices,
+} from "../../../servers/serverServices.ts";
+import { localServer } from "../../../servers/registry.ts";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { describe, expect, it } from "vitest";
@@ -17,7 +26,7 @@ describe("new chat actions", () => {
         createElement(
           MantineProvider,
           { theme },
-          createElement(ProjectServerCards, {
+          cards({
             project: {
               id: "logical",
               path: "logical",
@@ -64,7 +73,7 @@ it("allows a store override when the default store is unavailable", () => {
       createElement(
         MantineProvider,
         { theme },
-        createElement(ProjectServerCards, {
+        cards({
           project: {
             id: "linux",
             name: "Linux",
@@ -113,7 +122,7 @@ it("shows the server's install message on the disabled Layr option", () => {
       createElement(
         MantineProvider,
         { theme },
-        createElement(ProjectServerCards, {
+        cards({
           project: { id: "p", name: "P", path: "/p" },
           servers: [
             {
@@ -146,7 +155,7 @@ it("selects the server's default when Layr is ready", () => {
       createElement(
         MantineProvider,
         { theme },
-        createElement(ProjectServerCards, {
+        cards({
           project: { id: "p", name: "P", path: "/p" },
           servers: [
             {
@@ -169,3 +178,19 @@ it("selects the server's default when Layr is ready", () => {
   expect(option).not.toContain('disabled=""');
   expect(markup).not.toContain("Store directory (optional)");
 });
+
+const services: ServerServices[] = [];
+afterEach(() => services.splice(0).forEach((service) => service.close()));
+function cards(
+  props: Omit<ComponentProps<typeof ProjectServerCards>, "owner">,
+) {
+  const service = createServerServices(localServer());
+  services.push(service);
+  const owner = new ProjectServerSelection(
+    props.project,
+    () => props.servers,
+    undefined,
+    () => service,
+  );
+  return createElement(ProjectServerCards, { ...props, owner });
+}

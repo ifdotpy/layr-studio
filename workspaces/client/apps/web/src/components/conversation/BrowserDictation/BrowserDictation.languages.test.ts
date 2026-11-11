@@ -32,8 +32,15 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { BrowserDictation, type Recognition } from "./BrowserDictation.tsx";
-vi.mock("../../../servers/activity.ts", () => ({
-  useServerActivity: () => {},
+import { createBrowserDictation } from "./BrowserDictationStore.ts";
+import { DictationStore } from "../DictationPanel/DictationPanel.tsx";
+const fixture = vi.hoisted(() => ({
+  owner: undefined as ReturnType<typeof createBrowserDictation> | undefined,
+}));
+vi.mock("../support/ConversationStore.ts", () => ({
+  useConversationStore: () => ({
+    context: { browserDictation: fixture.owner },
+  }),
 }));
 
 it("retains review text after uncertain final words and tears down speech on chat switch", async () => {
@@ -80,16 +87,22 @@ it("retains review text after uncertain final words and tears down speech on cha
   document.body.append(host);
   const root = createRoot(host);
   const insert = vi.fn();
+  let previous = "";
   const render = async (chatId: string) =>
-    act(async () =>
+    act(async () => {
+      if (previous !== chatId) {
+        fixture.owner?.dispose();
+        fixture.owner = createBrowserDictation(new DictationStore());
+        previous = chatId;
+      }
       root.render(
         createElement(
           MantineProvider,
           null,
           createElement(BrowserDictation, { chatId, onInsert: insert }),
         ),
-      ),
-    );
+      );
+    });
   const button = (text: string) => {
     const found = [
       ...document.querySelectorAll<HTMLButtonElement>("button"),
@@ -138,7 +151,11 @@ it("retains review text after uncertain final words and tears down speech on cha
     await act(async () => button("Stop dictation").click());
     await render("second");
     expect(aborts).toHaveBeenCalledTimes(2);
-    expect(speech.current?.onresult).toBeNull();
+    await act(async () =>
+      oldRecognition.onresult?.({
+        results: [{ isFinal: true, 0: { transcript: "late words" } }],
+      }),
+    );
     expect(button("Record").disabled).toBe(false);
     expect(review?.disabled).toBe(false);
     await act(async () => button("Record").click());
@@ -147,7 +164,10 @@ it("retains review text after uncertain final words and tears down speech on cha
     expect(aborts).toHaveBeenCalledTimes(2);
     expect(review?.value).toBe("");
   } finally {
-    await act(async () => root.unmount());
+    await act(async () => {
+      fixture.owner?.dispose();
+      root.unmount();
+    });
     host.remove();
     vi.useRealTimers();
     vi.unstubAllGlobals();

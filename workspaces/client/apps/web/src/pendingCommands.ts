@@ -1,3 +1,4 @@
+import { makeAutoObservable, observableRef } from "mobx";
 // The pending layer of the one command path (latency rule 1).
 // Tracking: https://github.com/ifdotpy/layr-studio/issues/630
 //
@@ -44,20 +45,23 @@ export function createPendingCommands(
   const clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
   const entries = new Map<string, PendingEntry>();
   const timers = new Map<string, Timer>();
-  const listeners = new Set<() => void>();
   let clientSeq = -1;
-  let snapshot: readonly PendingEntry[] = [];
-
-  function publish() {
-    snapshot = [...entries.values()];
-    for (const listener of listeners) listener();
-  }
+  const journal = makeAutoObservable(
+    {
+      snapshot: [] as readonly PendingEntry[],
+      publish() {
+        this.snapshot = [...entries.values()];
+      },
+    },
+    { snapshot: observableRef },
+    { autoBind: true },
+  );
 
   function remove(id: string) {
     const timer = timers.get(id);
     if (timer !== undefined) clearTimer(timer);
     timers.delete(id);
-    if (entries.delete(id)) publish();
+    if (entries.delete(id)) journal.publish();
   }
 
   return {
@@ -68,7 +72,7 @@ export function createPendingCommands(
         entry.id,
         setTimer(() => remove(entry.id), PENDING_COMMAND_MAX_MS),
       );
-      publish();
+      journal.publish();
     },
     /** The response arrived. Keep the entry until the client holds a row at `seq`. */
     settle(id: string, seq: number) {
@@ -76,7 +80,7 @@ export function createPendingCommands(
       if (!entry) return;
       if (seq <= clientSeq) return remove(id);
       entries.set(id, { ...entry, responseSeq: seq });
-      publish();
+      journal.publish();
     },
     /** The command failed. The real state shows through the stream. */
     fail(id: string) {
@@ -93,11 +97,7 @@ export function createPendingCommands(
     resetClientSeq() {
       clientSeq = -1;
     },
-    list: () => snapshot,
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
+    list: () => journal.snapshot,
   };
 }
 

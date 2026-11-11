@@ -9,12 +9,15 @@ import {
   type components,
 } from "../../../generated/api.ts";
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
-import { FederationSettings } from "./FederationSettings.tsx";
+import {
+  FederationSettings,
+  FederationSettingsStore,
+} from "./FederationSettings.tsx";
 
 const api = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({ useServerApi: () => api }),
+  () => ({ useServerServices: () => null }),
 );
 
 it("shares membership controls across room editors, retains opt-in on lead changes, and reads status only on open", async () => {
@@ -74,13 +77,20 @@ it("shares membership controls across room editors, retains opt-in on lead chang
     }),
     agentSummaryFixture("other", { isLead: true, name: "Other" }),
   ];
+  const model = new FederationSettingsStore(api, notify);
   const render = (active: boolean, leadId = "lead") =>
     act(async () =>
       root.render(
         createElement(
           MantineProvider,
           {},
-          createElement(FederationSettings, { active, leadId, agents, notify }),
+          createElement(FederationSettings, {
+            active,
+            leadId,
+            agents,
+            notify,
+            model,
+          }),
         ),
       ),
     );
@@ -127,6 +137,7 @@ it("shares membership controls across room editors, retains opt-in on lead chang
     expect(api.post).toHaveBeenCalledTimes(3);
   } finally {
     await act(async () => root.unmount());
+    model.dispose();
     host.remove();
     Reflect.deleteProperty(document, "fonts");
     vi.unstubAllGlobals();

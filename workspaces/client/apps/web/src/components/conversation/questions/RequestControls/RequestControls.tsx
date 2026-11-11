@@ -1,9 +1,6 @@
 import { observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
-import {
-  QuestionDecision,
-  type components,
-} from "../../../../generated/api.ts";
+import { QuestionDecision } from "../../../../generated/api.ts";
 import { isDeferred } from "../../../../approvals.ts";
 import {
   requestRenderProbe,
@@ -14,15 +11,11 @@ export default observer(function RequestControls({
 }: {
   view: RequestView;
 }) {
-  const r = view.request,
-    question = view.question,
-    approval = !question;
+  const { request: r, question } = view;
   const waiting = r.state.kind === "pending";
-  const trigger = view.trigger;
   requestRenderProbe("controls", r.id);
   return (
     <div className="request-actions">
-      {" "}
       {question && waiting && (
         <Button
           variant="subtle"
@@ -48,45 +41,35 @@ export default observer(function RequestControls({
             </Button>
           )}
           <Button
-            ref={trigger}
+            ref={view.trigger}
             data-answer={r.id}
             variant={view.open ? "subtle" : "filled"}
             {...(view.open ? { color: "gray" } : {})}
             disabled={view.disabled}
             aria-expanded={view.open}
             aria-controls={`answer-${r.id}`}
-            onClick={() => {
-              view.toggle();
-            }}
+            onClick={view.toggle}
           >
             {view.open ? "Hide" : "Answer"}
           </Button>
         </>
-      ) : approval ? (
-        <>
+      ) : (
+        (
+          [
+            [QuestionDecision.decline, "Decline", "Decline input", "light"],
+            [QuestionDecision.accept, "Approve", "Allow input", "filled"],
+          ] as const
+        ).map(([decision, label, inputLabel, variant]) => (
           <Button
+            key={decision}
+            variant={variant}
             disabled={view.disabled}
-            onClick={() =>
-              void view.post({
-                decision: QuestionDecision.decline,
-              } satisfies components["schemas"]["QuestionApproval"])
-            }
+            onClick={() => void view.post({ decision })}
           >
-            {view.stdinApproval ? "Decline input" : "Decline"}
+            {view.stdinApproval ? inputLabel : label}
           </Button>
-          <Button
-            variant="filled"
-            disabled={view.disabled}
-            onClick={() =>
-              void view.post({
-                decision: QuestionDecision.accept,
-              } satisfies components["schemas"]["QuestionApproval"])
-            }
-          >
-            {view.stdinApproval ? "Allow input" : "Approve"}
-          </Button>
-        </>
-      ) : null}
+        ))
+      )}
     </div>
   );
 });

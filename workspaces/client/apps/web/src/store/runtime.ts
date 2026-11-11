@@ -1,4 +1,10 @@
-import { createAtom, runInAction } from "mobx";
+import {
+  action,
+  createAtom,
+  flow,
+  onBecomeObserved,
+  onBecomeUnobserved,
+} from "mobx";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import type {
   ResourceData,
@@ -108,11 +114,13 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
     const scheduled = pending.size > 0;
     pending.add(apply);
     if (scheduled) return;
-    queueMicrotask(() => {
-      const batch = [...pending];
-      pending.clear();
-      if (!disposed) runInAction(() => batch.forEach((apply) => apply()));
-    });
+    queueMicrotask(
+      action(() => {
+        const batch = [...pending];
+        pending.clear();
+        if (!disposed) batch.forEach((apply) => apply());
+      }),
+    );
   };
 
   function slot<R extends ResourceRef, TData>(
@@ -190,7 +198,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       current = next;
       atom.reportChanged();
     };
-    const inactive = () => {
+    const inactive = action(() => {
       entry.observed = false;
       if (!ref && releaseOnUnobserved) {
         if (request) releaseAfterRead = true;
@@ -199,32 +207,32 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
             if (entries.get(key) === entry && !entry.observed && !request)
               entry.evict();
           });
-      } else {
-        runInAction(() => {
+      } else
+        schedule(() => {
+          if (entry.observed) return;
           if (ref && current.status === "live") {
             current = { status: "stale", data: current.data };
             atom.reportChanged();
           }
+          trim();
         });
-        trim();
-      }
-    };
+    });
     const interest = observeInterest(() => {
       if (!ref) return () => {};
       const stop = subscriptions.subscribe(ref, () => schedule(update));
       schedule(update);
       return stop;
     }, inactive);
-    const atom = createAtom(
-      key,
-      () => {
-        entry.observed = true;
-        releaseAfterRead = false;
-        touch(key);
-        if (ref) interest.observed();
-      },
-      ref ? interest.unobserved : inactive,
-    );
+    const atom = createAtom(key);
+    onBecomeObserved(atom, () => {
+      if (disposed) return;
+      entry.observed = true;
+      releaseAfterRead = false;
+      touch(key);
+      if (ref) interest.observed();
+      else if (current.status !== "live") void read().catch(() => {});
+    });
+    onBecomeUnobserved(atom, ref ? interest.unobserved : inactive);
     // Metadata has separate observers so identical data publications stay cheap.
     const versionAtom = createAtom(`${key}:applied-version`);
     const entry: Entry = {
@@ -235,65 +243,65 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       dispose() {
         if (ref) interest.dispose();
       },
-      evict() {
+      evict: action(() => {
         generation++;
         request = undefined;
         pending.delete(update);
-        runInAction(() => {
-          data = undefined;
-          appliedVersion = undefined;
-          versionAtom.reportChanged();
-          current = { status: "loading" };
-          atom.reportChanged();
-        });
+        data = undefined;
+        appliedVersion = undefined;
+        versionAtom.reportChanged();
+        current = { status: "loading" };
+        atom.reportChanged();
         if (remove && !entry.observed) {
           entries.delete(key);
           remove();
           if (ref) interest.dispose();
         }
-      },
+      }),
     };
+    function read(): Promise<TData> {
+      if (!("read" in definition))
+        throw new Error("This resource requires observation");
+      releaseAfterRead = false;
+      if (request) return request;
+      const load = definition.read.bind(definition);
+      const attempt = ++generation;
+      request = flow(function* () {
+        try {
+          // Defer IO so an explicit read can join the observation's in-flight request.
+          yield Promise.resolve();
+          if (!disposed && generation === attempt) {
+            current = { status: "loading" };
+            atom.reportChanged();
+          }
+          const value: TData = yield load();
+          if (!disposed && generation === attempt) {
+            current = { status: "live", data: value };
+            atom.reportChanged();
+          }
+          return value;
+        } catch (error) {
+          if (!disposed && generation === attempt) {
+            current = {
+              status: "error",
+              error: error instanceof Error ? error : new Error(String(error)),
+            };
+            atom.reportChanged();
+          }
+          throw error;
+        } finally {
+          if (generation === attempt) {
+            request = undefined;
+            if (releaseAfterRead) entry.evict();
+            else trim();
+          }
+        }
+      })();
+      return request;
+    }
     entries.set(key, entry);
     return {
-      read() {
-        if (!("read" in definition))
-          throw new Error("This resource requires observation");
-        releaseAfterRead = false;
-        if (request) return request;
-        const attempt = ++generation;
-        const publish = (next: typeof current) =>
-          runInAction(() => {
-            if (!disposed && generation === attempt) {
-              current = next;
-              atom.reportChanged();
-            }
-          });
-        request = Promise.resolve()
-          .then(() => definition.read())
-          .then(
-            (value) => {
-              publish({ status: "live", data: value });
-              return value;
-            },
-            (error: unknown) => {
-              publish({
-                status: "error",
-                error:
-                  error instanceof Error ? error : new Error(String(error)),
-              });
-              throw error;
-            },
-          )
-          .finally(() => {
-            if (generation === attempt) {
-              request = undefined;
-              if (releaseAfterRead) entry.evict();
-              else trim();
-            }
-          });
-        publish({ status: "loading" });
-        return request;
-      },
+      read,
       get current() {
         atom.reportObserved();
         return current;

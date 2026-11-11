@@ -1,6 +1,6 @@
 import { RecoveryStatus as GeneratedApiRecoveryStatus } from "../../../generated/api.ts";
 import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { errorText } from "../../../api.ts";
 
@@ -11,13 +11,6 @@ export default function ConnectionRecovery({ agentId }: { agentId: string }) {
   const [message, setMessage] = useState("");
   const [details, setDetails] = useState("");
   const lock = useRef(false);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
   const check = async () => {
     if (lock.current) return;
     lock.current = true;
@@ -30,7 +23,6 @@ export default function ConnectionRecovery({ agentId }: { agentId: string }) {
         { id: agentId },
         { timeoutMs: 100000 },
       );
-      if (!mounted.current) return;
       if (
         result.status === GeneratedApiRecoveryStatus.reconciled &&
         ["completed", "failed", "interrupted"].includes(result.outcome || "")
@@ -49,13 +41,11 @@ export default function ConnectionRecovery({ agentId }: { agentId: string }) {
         );
       }
     } catch (error) {
-      if (mounted.current) {
-        setMessage("Could not finish the connection check.");
-        setDetails(errorText(error));
-      }
+      setMessage("Could not finish the connection check.");
+      setDetails(errorText(error));
     } finally {
       lock.current = false;
-      if (mounted.current) setPending(false);
+      setPending(false);
     }
   };
   return (

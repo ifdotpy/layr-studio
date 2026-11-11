@@ -1,17 +1,9 @@
-import { useEffect } from "react";
-import { autorun } from "mobx";
 import { observer } from "mobx-react-lite";
-import { useServerStorage } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { isDeferred } from "../../../../approvals.ts";
-import { requestDraftsForStorage } from "../support/requestDrafts.ts";
+import type { RequestScope } from "../../support/requestView.ts";
 import {
-  useRequestsView,
-  type RequestScope,
-} from "../../support/requestView.ts";
-import {
-  answerKey,
   requestRenderProbe,
-  useRequestScope,
+  useRequestOwner,
 } from "../RequestArea/RequestArea.tsx";
 import { RequestCard } from "../RequestCard/RequestCard.tsx";
 
@@ -23,7 +15,7 @@ const RequestGroup = observer(function RequestGroup({
   requests,
   showDates,
 }: {
-  requests: ReturnType<typeof useRequestsView>["requests"];
+  requests: readonly import("../RequestArea/RequestArea.tsx").RequestModel[];
   showDates?: boolean | undefined;
 }) {
   const deferred = requests.filter(isDeferred);
@@ -55,30 +47,20 @@ export default observer(function Requests({
   excludeIds?: ReadonlySet<string>;
   requestIds?: readonly string[];
 }) {
-  const view = useRequestsView(scope),
-    commands = useRequestScope();
-  const drafts = requestDraftsForStorage(useServerStorage());
-  useEffect(
-    () =>
-      autorun(() => {
-        if (view.current.status !== "live" && view.current.status !== "stale")
-          return;
-        const active = new Set(
-          view.allRequests.map((request) => answerKey(commands.scope, request)),
-        );
-        for (const key of drafts.keys())
-          if (JSON.parse(key)[0] === commands.scope && !active.has(key))
-            drafts.delete(key);
-      }),
-    [view, drafts, commands.scope],
-  );
-  const requests = view.requests.filter(
+  const view = useRequestOwner().list;
+  const requests = (
+    Object.keys(scope).length ? view.select(scope) : view.requests
+  ).filter(
     (request) =>
       (!excludeIds || !excludeIds.has(request.id)) &&
       (!requestIds || requestIds.includes(request.id)),
   );
-  const mainAgentId =
-    view.owner?.isLead === false ? view.owner.rootId : undefined;
+  const owner = Object.keys(scope).length
+    ? scope.agentId
+      ? view.agents?.get(scope.agentId)
+      : undefined
+    : view.owner;
+  const mainAgentId = owner?.isLead === false ? owner.rootId : undefined;
   const mainRequests = mainAgentId
     ? requests.filter((request) => request.agent === mainAgentId)
     : [];

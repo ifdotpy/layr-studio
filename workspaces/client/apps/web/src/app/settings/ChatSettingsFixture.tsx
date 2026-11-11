@@ -1,3 +1,4 @@
+import { AgentsUi } from "../../components/agents/support/AgentsUi.ts";
 import type { ComponentSnapshot as Snapshot } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { settingsAreasFixture } from "./SettingsAreasFixture.ts";
 import { useEffect, useState } from "react";
@@ -42,7 +43,9 @@ export function ChatSettingsFixture({
       label: "Fixture",
     });
     const scope = { store, services, screen: { active: true, channel: null } };
+    const agentsUi = new AgentsUi(scope, () => "fixture");
     const areas = settingsAreasFixture({
+      agentsUi,
       scope,
       navigation: {
         get selectedAgent() {
@@ -58,7 +61,13 @@ export function ChatSettingsFixture({
       creation: { isCreating: false, newChat() {} },
       dialogs: { changeProjectFolder() {} },
     });
-    return { areas, close: services.close };
+    return {
+      areas,
+      close: () => {
+        agentsUi.dispose();
+        services.close();
+      },
+    };
   });
   useEffect(() => () => fixture.close(), [fixture]);
   return (

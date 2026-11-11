@@ -1,3 +1,9 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import { defaultSyncClient, syncDatabase } from "../../src/sync/client.ts";
 import { when } from "mobx";
@@ -11,7 +17,7 @@ import { SidebarCommandsProvider } from "../../src/components/sidebar/support/co
 import { resourceData } from "../../src/store/runtime.ts";
 import { observer } from "mobx-react-lite";
 import { useServerStore } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 declare global {
   interface Window {
     // fixture stores scroll handlers in tests/performance/scroll-restart.fixture.tsx.
@@ -26,7 +32,7 @@ declare global {
 const rootElement = document.getElementById("root")!;
 import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 
-import React, { useState } from "react";
+import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -99,14 +105,45 @@ window.radioOpened = null;
 window.reopen = () => {};
 window.failRefresh = false;
 window.ordinary = false;
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { makeAutoObservable, reaction } from "mobx";
+const areas = browserAreas(fixtureServerStore);
+const ui = makeAutoObservable({
+  show: { path: "/p" } as { path?: string | undefined } | null,
+  opened: null as string | null,
+});
+areas.open = (id) => {
+  ui.opened = id;
+  ui.show = null;
+};
+const stopCreation = areas.creation.start();
+const stopShow = reaction(
+  () => [ui.show, areas.startup.creationScope] as const,
+  ([show]) => {
+    if (show) areas.creation.openShared(show.path);
+    else areas.creation.closeShared();
+  },
+  { fireImmediately: true },
+);
+window.addEventListener(
+  "pagehide",
+  () => {
+    stopShow();
+    stopCreation();
+  },
+  { once: true },
+);
 const Fixture = observer(function Fixture() {
   const store = useServerStore();
   const collections = resourceData(store.state().current);
   const data = initial;
-  const [show, setShow] = useState<{ path?: string | undefined } | null>({
-    path: "/p",
-  });
-  const [opened, open] = useState<string | null>(null);
+  const { show, opened } = ui;
+  const setShow = (value: { path?: string | undefined } | null) => {
+    ui.show = value;
+  };
+  const open = (id: string) => {
+    ui.opened = id;
+  };
   window.radioCreateSnapshot = data;
   window.radioOpened = opened;
   window.reopen = () => setShow({ path: "/p" });
@@ -147,15 +184,12 @@ const Fixture = observer(function Fixture() {
         {show && (
           <SharedChatCreate
             source={{
+              creation: areas.creation,
               startup: { creationScope: data.stateDir },
               state: collections,
             }}
             accounts={accounts}
             initialPath={show.path}
-            created={(id) => {
-              open(id);
-              setShow(null);
-            }}
           />
         )}
       </Modal>
@@ -163,7 +197,7 @@ const Fixture = observer(function Fixture() {
   );
 });
 createRoot(rootElement).render(
-  <ServerViewStoreProvider>
+  <ServerStoreProvider value={fixtureServerStore}>
     <Fixture />
-  </ServerViewStoreProvider>,
+  </ServerStoreProvider>,
 );

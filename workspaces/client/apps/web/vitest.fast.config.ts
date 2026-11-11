@@ -7,6 +7,26 @@ export default {
     ...base.test,
     name: "fast",
     include: [
+      "src/observed.test.ts",
+      "src/observedNetwork.test.ts",
+      "src/observedSites.test.ts",
+      "src/servers/net/status.render.test.ts",
+      "src/components/agents/ExecutionSettings/ExecutionSettings.catalogRetry.test.ts",
+      "src/components/agents/ChatSettingsDialog/ChatSettingsDialog.catalogs.test.ts",
+      "src/components/conversation/prompt-composer/ConversationSettings/ConversationSettings.catalogs.test.ts",
+      "src/components/conversation/questions/support/requestFixtures.test.ts",
+      "src/components/conversation/questions/Requests/Requests.fixtureOwners.test.ts",
+      "src/components/settings/models/support/preferences.render.test.ts",
+      "src/components/projects/ProjectServerCards/ProjectServerCards.render.test.ts",
+      "src/components/projects/ProjectServerCards/ProjectServerCards.ProjectServerRead.test.ts",
+      "src/app/conversation/SelectedConversationOwner.attach.test.ts",
+      "src/components/conversation/Usage/Usage.owner.test.ts",
+      "src/components/conversation/Usage/Usage.fixtureLifetime.test.ts",
+      "src/components/conversation/MarkdownImage/MarkdownImage.read.test.ts",
+      "src/components/conversation/ComposerAttachments/ComposerAttachments.read.test.ts",
+      "src/components/conversation/RichPreview/RichPreview.read.test.ts",
+      "src/components/conversation/transcript/TurnHistory/TurnHistory.useTurnErrors.read.test.ts",
+      "src/clock.test.ts",
       "src/browserPersistence.test.ts",
       "src/useNativeAction.test.ts",
       // S6 stores
@@ -311,6 +331,17 @@ export default {
       // S10 stores
       "src/components/sidebar/support/useProjectSave.test.ts",
       "src/unsent/useUnsentText.test.ts",
+      // E2 effects
+      "src/components/conversation/TokenRate/TokenRate.test.ts",
+      "src/components/conversation/support/useDisplayPhase.test.ts",
+      // E2b effects
+      "src/components/conversation/markdown/NativeMarkdown/NativeMarkdown.test.ts",
+      "src/components/conversation/message-delivery/SettledDelivery/SettledDelivery.test.ts",
+      "src/components/conversation/transcript/FullOutput/FullOutput.render.test.ts",
+      // E2c effects
+      "src/components/conversation/Usage/Usage.resetLifetime.test.ts",
+      "src/components/conversation/Usage/Usage.observation.test.ts",
+      "src/components/conversation/RealtimeVoice/RealtimeVoice.observed.test.ts",
     ],
   },
 };

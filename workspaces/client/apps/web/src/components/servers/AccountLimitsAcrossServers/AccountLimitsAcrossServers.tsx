@@ -4,7 +4,8 @@ import {
   readingAge,
 } from "../../../servers/ServerAccountLimits.tsx";
 import { observer } from "mobx-react-lite";
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { now as clockNow } from "../../../clock.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import { accountLimits } from "../../../usage/accountUsage.ts";
 import { accountLimitView } from "../../accounts/support/AccountTiles.tsx";
@@ -24,11 +25,7 @@ export const AccountLimitsAcrossServers = observer(
     facts?: ReactNode;
   }) {
     const store = useServerStore();
-    const [now, setNow] = useState(() => Date.now() / 1000);
-    useEffect(() => {
-      const timer = setInterval(() => setNow(Date.now() / 1000), 30_000);
-      return () => clearInterval(timer);
-    }, []);
+    const now = clockNow() / 1000;
     const shown = newestReading(
       sources.map((source) => {
         const projection =

@@ -17,7 +17,7 @@ import { createPendingCommands } from "../../pendingCommands.ts";
 import { onEntitySequenceAdvance } from "../../sync/entitySequence.ts";
 import { hasNativeClient } from "../../native/client.ts";
 
-import { beginServerActivity } from "../activity.ts";
+import { makeAutoObservable } from "mobx";
 
 import {
   beginServerMutation,
@@ -235,7 +235,6 @@ export type ApiScopeOptions = {
   localStorage: Storage;
   sessionStorage: Storage;
   beginMutation: typeof beginServerMutation;
-  beginActivity: typeof beginServerActivity;
   requestStatus?: { begin(): (error?: unknown) => void } | undefined;
 };
 export function createApiScope(options: ApiScopeOptions) {
@@ -243,7 +242,19 @@ export function createApiScope(options: ApiScopeOptions) {
   const apiOrigin = () => options.origin;
   const serverFetch = options.fetch;
   const beginServerMutation = options.beginMutation;
-  const beginServerActivity = options.beginActivity;
+  const posting = makeAutoObservable(
+    {
+      count: 0,
+      begin() {
+        this.count++;
+      },
+      end() {
+        this.count--;
+      },
+    },
+    {},
+    { autoBind: true },
+  );
 
   let token = "";
 
@@ -666,7 +677,7 @@ export function createApiScope(options: ApiScopeOptions) {
     const timeoutMs = options.timeoutMs ?? (mutation ? 15000 : undefined);
     const controller = requestController(options, timeoutMs);
     let responseRejected = false;
-    const stopActivity = beginServerActivity();
+    posting.begin();
     const finishRequest = requestStatus?.begin();
     let failure: unknown;
     try {
@@ -721,7 +732,7 @@ export function createApiScope(options: ApiScopeOptions) {
       }
       throw failure;
     } finally {
-      stopActivity();
+      posting.end();
       controller.finish();
       finishRequest?.(failure);
     }
@@ -922,6 +933,7 @@ export function createApiScope(options: ApiScopeOptions) {
     syncPost,
     command,
     pending,
+    posting,
     refreshSession,
     saved,
     save,
@@ -936,10 +948,10 @@ const defaultApi = createApiScope({
   localStorage: defaultStorage,
   sessionStorage,
   beginMutation: beginServerMutation,
-  beginActivity: beginServerActivity,
   requestStatus: defaultNetStatus,
 });
 export const {
+  posting,
   pendingMonitorInput,
   checkMonitorInputReceipt,
   isApiSchemaMismatch,

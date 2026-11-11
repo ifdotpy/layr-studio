@@ -1,3 +1,7 @@
+import type {
+  CreationOwner,
+  SharedCreation as Creation,
+} from "../../../app/projects/CreationOwner.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   isModelEnabled,
@@ -8,10 +12,11 @@ import { accountCanStart } from "../../../accountName.ts";
 import { ProviderMark } from "../../accounts/ProviderMark/ProviderMark.tsx";
 import { setupAccountName } from "../../accounts/AccountTiles/AccountTiles.tsx";
 import { Button, NativeSelect, Popover, TextInput } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ApiError, errorText, type PostBody } from "../../../api.ts";
 import type { StateCollections } from "../../../generated/observableResources.ts";
 export type SharedCreationSource = {
+  readonly creation: Pick<CreationOwner, "sharedAttempt" | "rememberShared">;
   readonly startup: { readonly creationScope: string };
   readonly state:
     | Pick<StateCollections, "projects" | "agents" | "rooms">
@@ -41,13 +46,6 @@ type SharedCreateRequest = Extract<
   PostBody<"/api/peer-teams">,
   { action: "radio"; radio_action: "create" }
 >;
-type Creation = {
-  body: SharedCreateRequest;
-  roomId?: string;
-  rejected?: boolean;
-};
-export const sharedCreationKey = (scope: string) =>
-  `studio-radio-create:${scope}`;
 
 const ParticipantFields = observer(function ParticipantFields({
   index,
@@ -57,7 +55,7 @@ const ParticipantFields = observer(function ParticipantFields({
   frozen,
   opened,
   onOpenedChange,
-  valid,
+  catalog,
 }: {
   index: number;
   value: Participant;
@@ -66,14 +64,13 @@ const ParticipantFields = observer(function ParticipantFields({
   frozen: boolean;
   opened: boolean;
   onOpenedChange: (opened: boolean) => void;
-  valid: (ready: boolean) => void;
+  catalog: ReturnType<typeof useWorkerModels>;
 }) {
   const [role, setRole] = useState<SetupRole>("orchestrator");
   const readOnlyReason =
     role === "orchestrator"
       ? undefined
       : "Shared chat participants manage their own worker and review defaults. These settings are inherited and cannot be changed here.";
-  const catalog = useWorkerModels(value.account_key, !!value.account_key);
   const readyAccounts = accounts.accounts.filter((account) =>
     accountCanStart(account),
   );
@@ -81,39 +78,15 @@ const ParticipantFields = observer(function ParticipantFields({
     (item) => item.id === value.account_key,
   );
   const provider = account?.provider || "";
-  const [browsedProvider, setBrowsedProvider] = useState<string>(provider);
-  useEffect(() => setBrowsedProvider(provider), [provider]);
+  const [browsedProvider, setBrowsedProvider] = useState(provider);
   const providers = [...new Set(readyAccounts.map((item) => item.provider))];
   const chooseAccount = (account_key: string | null) => {
     if (account_key && account_key !== value.account_key)
       change({ account_key, model: "" });
   };
-  const allowed = useModelChoices();
-  const availableModels = catalog.models.filter((row) =>
-    isModelEnabled({ ...row, provider: row.provider || provider }, allowed),
-  );
   const info = modelForValue(catalog.models, value.model);
-  const enabledModel =
-    !!info &&
-    isModelEnabled({ ...info, provider: info.provider || provider }, allowed);
   const reasoningEfforts =
     info?.supportedReasoningEfforts.map((item) => item.reasoningEffort) ?? [];
-  useEffect(() => {
-    valid(enabledModel && !catalog.loading && !catalog.error);
-    if (!frozen && !value.model && availableModels.length) {
-      const preferred =
-        availableModels.find((row) => row.isDefault) || availableModels[0]!;
-      change({ ...value, model: preferred.model });
-    }
-  }, [
-    value.account_key,
-    value.model,
-    catalog.loading,
-    catalog.error,
-    enabledModel,
-    allowed,
-    frozen,
-  ]);
   const effort = value.effort || info?.defaultReasoningEffort || "Default";
   const summary = [
     modelDisplayName(info, value.model) ||
@@ -222,20 +195,15 @@ export default observer(function SharedChatCreate({
   source,
   accounts,
   initialPath,
-  created,
 }: {
   source: SharedCreationSource;
   accounts: AccountsState;
   initialPath?: string | undefined;
-  created: (id: string) => void;
 }) {
-  const { post, save, saved } = useServerApi();
+  const { post } = useServerApi();
 
-  const rooms = [...(source.state?.rooms.values() ?? [])];
-  const key = sharedCreationKey(source.startup.creationScope);
-  const [attempt, setAttempt] = useState<Creation | null>(() =>
-    saved(key, null),
-  );
+  const attempt = source.creation.sharedAttempt;
+  const remember = source.creation.rememberShared;
   const [path, setPath] = useState<string>(
     attempt?.body.path ||
       initialPath ||
@@ -249,41 +217,54 @@ export default observer(function SharedChatCreate({
     readyAccounts[0];
   const second =
     readyAccounts.find((a) => a.provider !== first?.provider) || first;
-  const [participants, setParticipants] = useState<Participant[]>(
+  const [drafts, setParticipants] = useState<Participant[]>(
     attempt?.body.participants || [
       { account_key: first?.id || "", model: "" },
       { account_key: second?.id || "", model: "" },
     ],
   );
-  useEffect(() => {
-    if (attempt || !first) return;
-    setParticipants((old) =>
-      old.map((p, index) =>
-        p.account_key ? p : { ...p, account_key: (index ? second : first)!.id },
-      ),
+  const accountsForParticipants = drafts.map(
+    (p, index) =>
+      p.account_key || (attempt ? "" : (index ? second : first)?.id || ""),
+  );
+  const catalogs = [
+    useWorkerModels(
+      accountsForParticipants[0] || "",
+      !!accountsForParticipants[0],
+    ),
+    useWorkerModels(
+      accountsForParticipants[1] || "",
+      !!accountsForParticipants[1],
+    ),
+  ];
+  const allowed = useModelChoices();
+  const selections = drafts.map((p, index) => {
+    const account_key = accountsForParticipants[index] || "";
+    const provider =
+      readyAccounts.find((a) => a.id === account_key)?.provider || "";
+    const catalog = catalogs[index]!;
+    const models = catalog.models.filter((row) =>
+      isModelEnabled({ ...row, provider: row.provider || provider }, allowed),
     );
-  }, [first?.id, second?.id, !!attempt]);
-  const [valid, setValid] = useState([false, false]);
+    const model =
+      p.model ||
+      (attempt
+        ? ""
+        : (models.find((row) => row.isDefault) || models[0])?.model || "");
+    return {
+      participant: { ...p, account_key, model },
+      ready:
+        !catalog.loading &&
+        !catalog.error &&
+        models.some((row) => row.model === model),
+    };
+  });
+  const participants = selections.map((row) => row.participant);
+  const valid = selections.every((row) => row.ready);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [openParticipant, setOpenParticipant] = useState<number | null>(null);
   const lock = useRef(false);
-  const finished = useRef(false);
-  const remember = (value: Creation | null) => {
-    save(key, value);
-    setAttempt(value);
-  };
-  useEffect(() => {
-    if (
-      !attempt?.roomId ||
-      finished.current ||
-      !rooms.some((room) => room.id === attempt.roomId)
-    )
-      return;
-    finished.current = true;
-    save(key, null);
-    created(attempt.roomId);
-  }, [attempt?.roomId, rooms, created, key]);
   const submit = async () => {
     if (lock.current) return;
     lock.current = true;
@@ -333,30 +314,17 @@ export default observer(function SharedChatCreate({
       setPending(false);
     }
   };
-  const projects = [
-    ...new Map(
-      [
-        ...[...(source.state?.projects.values() ?? [])].flatMap((project) => {
-          const projectPath = project.path;
-          if (typeof projectPath !== "string" || !projectPath) return [];
-          const label = project.name;
-          return [
-            [
-              projectPath,
-              typeof label === "string" && label
-                ? label
-                : projectPath.split("/").filter(Boolean).pop() || projectPath,
-            ] as const,
-          ];
-        }),
-        ...[...(source.state?.agents.values() ?? [])].flatMap((thread) =>
-          typeof thread.projectPath === "string" && thread.projectPath
-            ? [[thread.projectPath, thread.projectPath] as const]
-            : [],
-        ),
-      ].map(([path, label]) => [path, { value: path, label }]),
-    ).values(),
-  ];
+  const projects = new Map<string, { value: string; label: string }>();
+  for (const { path, name } of source.state?.projects.values() || []) {
+    if (path)
+      projects.set(path, {
+        value: path,
+        label: name || path.split("/").filter(Boolean).pop() || path,
+      });
+  }
+  for (const { projectPath: path } of source.state?.agents.values() || []) {
+    if (path) projects.set(path, { value: path, label: path });
+  }
   return (
     <form
       className="shared-chat-create"
@@ -366,14 +334,17 @@ export default observer(function SharedChatCreate({
         void submit();
       }}
     >
-      {(projects.length > 1 || !path) && (
+      {(projects.size > 1 || !path) && (
         <div className="shared-create-row">
           <span>Project</span>
           <NativeSelect
             aria-label="Project"
             value={path}
             disabled={!!attempt}
-            data={[{ value: "", label: "Select a project" }, ...projects]}
+            data={[
+              { value: "", label: "Select a project" },
+              ...projects.values(),
+            ]}
             onChange={(e) => setPath(e.currentTarget.value)}
           />
         </div>
@@ -392,7 +363,7 @@ export default observer(function SharedChatCreate({
       <div className="shared-create-participants">
         {participants.map((value, index) => (
           <ParticipantFields
-            key={index}
+            key={`${index}:${value.account_key}`}
             index={index}
             value={value}
             accounts={accounts}
@@ -408,13 +379,7 @@ export default observer(function SharedChatCreate({
                 old.map((p, i) => (i === index ? next : p)),
               )
             }
-            valid={(ready) =>
-              setValid((old) =>
-                old[index] === ready
-                  ? old
-                  : old.map((v, i) => (i === index ? ready : v)),
-              )
-            }
+            catalog={catalogs[index]!}
           />
         ))}
       </div>
@@ -441,7 +406,7 @@ export default observer(function SharedChatCreate({
             pending ||
             (!attempt &&
               (!path ||
-                !valid.every(Boolean) ||
+                !valid ||
                 participants.some((p) => !p.model) ||
                 participants.some(
                   (p) => !readyAccounts.some((a) => a.id === p.account_key),

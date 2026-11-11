@@ -1,24 +1,27 @@
+import { whileObserved } from "../../../observed.ts";
 import { observer } from "mobx-react-lite";
 import { resourceData } from "../../../store/runtime.ts";
 import { agentId as resourceAgentId } from "../../../generated/observableResources.ts";
-import type { ConnectionHealth } from "../../../sync/connectionState.ts";
 import { VoiceRecordKind as GeneratedApiVoiceRecordKind } from "../../../generated/api.ts";
 import {
   useServerApi,
-  useServerResources,
+  useServerNet,
   useServerStore,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { hasNativeClient } from "../../../native/client.ts";
 import { useServerAudio } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { nativeVoice } from "../../../native/voice.ts";
-import { useEffect, useRef, useState } from "react";
+import { makeAutoObservable, reaction, flow, action } from "mobx";
 import { ActionIcon, Popover } from "@mantine/core";
 import { AudioLines, X } from "lucide-react";
 import { errorText, type PostResult } from "../../../api.ts";
 
-import { watchVoiceTransport } from "./voiceTransport.ts";
 import { decodeVoiceEvent } from "./voiceEvent.ts";
+
+function* toGenerator<T>(promise: Promise<T>): Generator<Promise<T>, T, T> {
+  return yield promise;
+}
 
 type Session = PostResult<"/api/voice/start">;
 type Peer = {
@@ -37,54 +40,62 @@ type Peer = {
   deadline: ReturnType<typeof setTimeout>;
 };
 
-// A chat switch tears down this peer, including a pending microphone permission.
-export default function RealtimeVoice(props: {
+type VoiceOptions = {
   agentId: string;
   notify: (text: string) => void;
-}) {
-  return <NativeVoice key={props.agentId} {...props} />;
-}
-const NativeVoice = observer(function NativeVoice({
+  store: ReturnType<typeof useServerStore>;
+  api: ReturnType<typeof useServerApi>;
+  audio: ReturnType<typeof useServerAudio>;
+  connection: ReturnType<typeof useServerNet>["status"];
+};
+
+export function createRealtimeVoice({
   agentId,
   notify,
-}: {
-  agentId: string;
-  notify: (text: string) => void;
-}) {
-  const { dictationBridge, nativeVoice } = useServerAudio();
-  const store = useServerStore();
-  const { post } = useServerApi();
-  const { watchResourceConnection } = useServerResources();
-
-  const [opened, setOpened] = useState(false);
-  const [active, setActive] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [blockedAudio, setBlockedAudio] = useState(false);
-  const [partial, setPartial] = useState("");
-  const peer = useRef<Peer | null>(null);
-  const generation = useRef(0);
-  const muteWanted = useRef(false);
-  const mounted = useRef(true);
-  const starting = useRef(false);
-  const transportState = useRef<ConnectionHealth>("connecting");
-  const pendingSession = useRef<Session | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
+  store,
+  api,
+  audio,
+  connection,
+}: VoiceOptions) {
+  const { post } = api;
+  const { dictationBridge, nativeVoice } = audio;
+  const state = makeAutoObservable(
+    {
+      opened: false,
+      active: false,
+      muted: false,
+      status: "",
+      error: "",
+      blockedAudio: false,
+      partial: "",
+      get rows() {
+        const current =
+          this.opened || this.active
+            ? store.voice(resourceAgentId(agentId)).current
+            : undefined;
+        return current ? (resourceData(current)?.records ?? []) : [];
+      },
+    },
+    {},
+    { autoBind: true },
   );
+  const update = action((patch: Partial<typeof state>) =>
+    Object.assign(state, patch),
+  );
+  const setOpened = (opened: boolean) => update({ opened });
+  let peer: Peer | null = null;
+  let generation: number = 0;
+  let muteWanted: boolean = false;
+  let mounted: boolean = true;
+  let starting: boolean = false;
+  let pendingSession: Session | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined = undefined;
   const endSession = (session_id: string) =>
     post(
       "/api/voice/end",
       { agent: agentId, session_id },
       { timeoutMs: 15000 },
     );
-  const watchVoice = opened || active;
-  const voice = watchVoice
-    ? store.voice(resourceAgentId(agentId)).current
-    : undefined;
-  const data = voice ? resourceData(voice) : undefined;
-  const rows = data?.records ?? [];
   const end = (p: Peer) => {
     p.closed = true;
     clearTimeout(p.deadline);
@@ -96,34 +107,29 @@ const NativeVoice = observer(function NativeVoice({
     if (p.audio) p.audio.srcObject = null;
     if (p.submitted)
       void endSession(p.id).catch((e) => {
-        if (mounted.current && peer.current === null)
-          setError(
-            (previous) => previous || `Microphone stopped. ${errorText(e)}`,
-          );
+        if (mounted && peer === null)
+          update({
+            error: state.error || `Microphone stopped. ${errorText(e)}`,
+          });
       });
   };
   const close = () => {
-    clearTimeout(reconnectTimer.current);
-    ++generation.current;
-    starting.current = false;
-    muteWanted.current = false;
-    const p = peer.current;
-    peer.current = null;
-    pendingSession.current = null;
+    clearTimeout(reconnectTimer);
+    ++generation;
+    starting = false;
+    muteWanted = false;
+    const p = peer;
+    peer = null;
+    pendingSession = null;
     if (p) end(p);
-    if (mounted.current) {
-      setActive(false);
-      setMuted(false);
-      setPartial("");
-      setStatus("");
-    }
+    update({ active: false, muted: false, partial: "", status: "" });
   };
   const failure = (e: unknown) => {
     close();
-    if (mounted.current) setError(errorText(e));
+    if (mounted) update({ error: errorText(e) });
   };
-  const apply = async (p: Peer, state: Session) => {
-    if (peer.current !== p || p.closed) return;
+  const apply = flow(function* (p: Peer, state: Session) {
+    if (peer !== p || p.closed) return;
     if (state.error || state.ended) {
       if (state.error) failure(new Error(state.error));
       else close();
@@ -131,92 +137,107 @@ const NativeVoice = observer(function NativeVoice({
     }
     if (state.sdp && !p.remoteSet) {
       p.remoteSet = true;
-      if (p.native) await p.native.answer(state.sdp);
+      if (p.native) yield* toGenerator(p.native.answer(state.sdp));
       else
-        await p.connection!.setRemoteDescription({
-          type: "answer",
-          sdp: state.sdp,
-        });
+        yield* toGenerator(
+          p.connection!.setRemoteDescription({
+            type: "answer",
+            sdp: state.sdp,
+          }),
+        );
     }
-  };
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      const hadVoice = !!peer.current;
-      mounted.current = false;
-      close();
-      if (hadVoice) notify("Voice ended because you left the chat.");
-    };
-  }, []);
-  useEffect(() => {
-    if (!watchVoice) return;
-    const stopConnection = watchVoiceTransport(
-      (state) => {
-        transportState.current = state;
-      },
-      () => {
-        if (starting.current || (peer.current && !peer.current.closed)) {
+  });
+  let stopConnection: (() => void) | undefined,
+    stopData: (() => void) | undefined;
+  const start = () => {
+    if (stopData) return;
+    mounted = true;
+    stopConnection = reaction(
+      () => connection.connection,
+      (health) => {
+        if (health !== "live" && (starting || (peer && !peer.closed))) {
           failure(
             new Error(
               "Studio connection lost. The microphone is off. Start voice again after the connection returns.",
             ),
           );
-          setOpened(true);
+          update({ opened: true });
         }
       },
-      watchResourceConnection,
     );
-    return stopConnection;
-  }, [watchVoice, watchResourceConnection]);
-  useEffect(() => {
-    const p = peer.current;
-    const failureError = voice && "error" in voice ? voice.error : undefined;
-    if (failureError) {
-      if (p) {
-        failure(
-          new Error(
-            `Studio connection lost. The microphone is off. Start voice again after the connection returns. ${errorText(failureError)}`,
-          ),
-        );
-        setOpened(true);
-      } else setError((previous) => previous || errorText(failureError));
-      return;
-    }
-    if (p && data?.session?.session_id === p.id) {
-      if (p.registered) void apply(p, data.session).catch(failure);
-      else pendingSession.current = data.session;
-    }
-  }, [data, voice]);
-  const connectionChanged = (current: Peer, state: string) => {
-    current.connectionState = state;
+    stopData = reaction(
+      () =>
+        state.opened || state.active
+          ? store.voice(resourceAgentId(agentId)).current
+          : undefined,
+      (voice) => {
+        const data = voice ? resourceData(voice) : undefined;
+        const p = peer;
+        const failureError =
+          voice && "error" in voice ? voice.error : undefined;
+        if (failureError) {
+          if (p) {
+            failure(
+              new Error(
+                `Studio connection lost. The microphone is off. Start voice again after the connection returns. ${errorText(failureError)}`,
+              ),
+            );
+            update({ opened: true });
+          } else update({ error: state.error || errorText(failureError) });
+          return;
+        }
+        if (p && data?.session?.session_id === p.id) {
+          if (p.registered) void apply(p, data.session).catch(failure);
+          else pendingSession = data.session;
+        }
+      },
+      { fireImmediately: true },
+    );
+  };
+  const dispose = () => {
+    stopData?.();
+    stopData = undefined;
+    stopConnection?.();
+    stopConnection = undefined;
+    const hadVoice = !!peer;
+    mounted = false;
+    close();
+    if (hadVoice) notify("Voice ended because you left the chat.");
+  };
+  whileObserved(state, "rows", () => {
+    start();
+    return dispose;
+  });
+  const connectionChanged = (current: Peer, health: string) => {
+    current.connectionState = health;
     if (current.closed) return;
-    if (state === "failed")
+    if (health === "failed")
       failure(new Error("Voice disconnected. The saved transcript remains."));
-    if (state === "disconnected") {
-      setStatus("Reconnecting. Microphone paused…");
+    if (health === "disconnected") {
+      update({ status: "Reconnecting. Microphone paused…" });
       void current.native?.mute(true).catch(failure);
       current.stream?.getAudioTracks().forEach((t) => {
         t.enabled = false;
       });
-      clearTimeout(reconnectTimer.current);
-      reconnectTimer.current = setTimeout(() => {
-        if (peer.current === current && !current.closed) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        if (peer === current && !current.closed) {
           failure(
             new Error(
               "Voice could not reconnect. The microphone is off. Start voice again.",
             ),
           );
-          setOpened(true);
+          update({ opened: true });
         }
       }, 12000);
     }
-    if (state === "connected") {
-      clearTimeout(reconnectTimer.current);
-      void current.native?.mute(muteWanted.current).catch(failure);
+    if (health === "connected") {
+      clearTimeout(reconnectTimer);
+      void current.native?.mute(muteWanted).catch(failure);
       current.stream?.getAudioTracks().forEach((t) => {
-        t.enabled = !muteWanted.current;
+        t.enabled = !muteWanted;
       });
-      setStatus(current.ready ? "Listening" : "Connecting…");
+      update({ status: current.ready ? "Listening" : "Connecting…" });
     }
   };
   const messageReceived = (current: Peer, data: string) => {
@@ -235,37 +256,35 @@ const NativeVoice = observer(function NativeVoice({
     if (event.type === "session.started") {
       clearTimeout(current.deadline);
       current.ready = true;
-      setStatus("Listening");
+      update({ status: "Listening" });
     }
     if (event.type === "input_transcript.added") {
-      setStatus("Listening");
-      setPartial(event.text);
+      update({ status: "Listening", partial: event.text });
     }
     if (event.type === "output_transcript.added") {
-      setStatus("Speaking");
-      setPartial(event.text);
+      update({ status: "Speaking", partial: event.text });
     }
     if (event.type === "delegation.created") {
-      setStatus("Working");
-      setPartial("");
+      update({ status: "Working", partial: "" });
     }
     if (event.type === "turn.done") {
-      setPartial("");
-      setStatus("Listening");
+      update({ partial: "", status: "Listening" });
     }
     // Native Core owns delegation and transcript persistence. Do not mirror either.
   };
-  const start = async () => {
-    if (peer.current) return;
-    const ticket = ++generation.current;
-    starting.current = true;
-    setError("");
-    setBlockedAudio(false);
-    setStatus("Connecting…");
-    setActive(true);
+  const begin = flow(function* () {
+    if (peer) return;
+    const ticket = ++generation;
+    starting = true;
+    update({
+      error: "",
+      blockedAudio: false,
+      status: "Connecting…",
+      active: true,
+    });
     let p: Peer | null = null;
     try {
-      if (transportState.current !== "live")
+      if (connection.connection !== "live")
         throw new Error(
           "Studio connection is unavailable. Try voice again when connected.",
         );
@@ -278,8 +297,10 @@ const NativeVoice = observer(function NativeVoice({
               (error) => ({ error }),
             )
         : undefined;
-      await post("/api/voice/status", { agent: agentId }, { timeoutMs: 15000 });
-      if (ticket !== generation.current) return;
+      yield* toGenerator(
+        post("/api/voice/status", { agent: agentId }, { timeoutMs: 15000 }),
+      );
+      if (ticket !== generation) return;
       p = {
         id: randomUUID(),
         remoteSet: false,
@@ -288,17 +309,17 @@ const NativeVoice = observer(function NativeVoice({
         submitted: false,
         registered: false,
         deadline: setTimeout(() => {
-          if (ticket === generation.current)
+          if (ticket === generation)
             failure(new Error("Voice did not connect. Start again."));
         }, 90000),
       };
-      peer.current = p;
+      peer = p;
       const current = p;
       let sdp: string;
       if (permission) {
-        const authorization = await permission;
+        const authorization = yield* toGenerator(permission);
         if (authorization.error) throw authorization.error;
-        if (current.closed || ticket !== generation.current) return;
+        if (current.closed || ticket !== generation) return;
         current.native = nativeVoice(current.id, (event) => {
           if (current.closed) return;
           if (event.type === "message" && event.data)
@@ -317,12 +338,12 @@ const NativeVoice = observer(function NativeVoice({
               ),
             );
         });
-        sdp = await current.native.offer();
-        if (current.closed || ticket !== generation.current) {
+        sdp = yield* toGenerator(current.native.offer());
+        if (current.closed || ticket !== generation) {
           void current.native.close();
           return;
         }
-        if (muteWanted.current) await current.native.mute(true);
+        if (muteWanted) yield* toGenerator(current.native.mute(true));
       } else {
         if (!window.isSecureContext || !navigator.mediaDevices)
           throw new Error("Voice needs HTTPS or the desktop app");
@@ -337,7 +358,7 @@ const NativeVoice = observer(function NativeVoice({
           if (current.closed) return;
           audio.srcObject = e.streams[0] || new MediaStream([e.track]);
           void audio.play().catch(() => {
-            if (!current.closed) setBlockedAudio(true);
+            if (!current.closed) update({ blockedAudio: true });
           });
         };
         connection.onconnectionstatechange = () =>
@@ -346,71 +367,109 @@ const NativeVoice = observer(function NativeVoice({
         if (window.codexDesktop && !window.codexDesktop.requestMicrophone)
           throw new Error("Update the desktop app to enable microphone access");
         if (window.codexDesktop?.requestMicrophone)
-          await window.codexDesktop.requestMicrophone();
-        if (current.closed || ticket !== generation.current) return;
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-        });
-        if (current.closed || ticket !== generation.current) {
+          yield* toGenerator(window.codexDesktop.requestMicrophone());
+        if (current.closed || ticket !== generation) return;
+        const stream = yield* toGenerator(
+          navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+          }),
+        );
+        if (current.closed || ticket !== generation) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         current.stream = stream;
         stream.getTracks().forEach((t) => {
-          t.enabled = !muteWanted.current;
+          t.enabled = !muteWanted;
           t.onended = () => {
             if (!current.closed) failure(new Error("Microphone disconnected"));
           };
           connection.addTrack(t, stream);
         });
-        const offer = await connection.createOffer();
-        await connection.setLocalDescription(offer);
+        const offer = yield* toGenerator(connection.createOffer());
+        yield* toGenerator(connection.setLocalDescription(offer));
         if (current.closed) return;
         sdp = offer.sdp || "";
         if (!sdp) throw new Error("Voice offer has no session description.");
       }
       if (!sdp) throw new Error("Voice offer has no session description.");
       current.submitted = true;
-      const result = await post(
-        "/api/voice/start",
-        {
-          agent: agentId,
-          session_id: current.id,
-          sdp,
-        },
-        { timeoutMs: 15000 },
+      const result = yield* toGenerator(
+        post(
+          "/api/voice/start",
+          {
+            agent: agentId,
+            session_id: current.id,
+            sdp,
+          },
+          { timeoutMs: 15000 },
+        ),
       );
       current.registered = true;
       if (current.closed) {
         end(current);
         return;
       }
-      const notifiedSession = pendingSession.current;
-      pendingSession.current = null;
-      await apply(
-        current,
-        notifiedSession?.session_id === current.id ? notifiedSession : result,
+      const notifiedSession = pendingSession;
+      pendingSession = null;
+      yield* toGenerator(
+        apply(
+          current,
+          notifiedSession?.session_id === current.id ? notifiedSession : result,
+        ),
       );
     } catch (e) {
-      if (ticket === generation.current) {
+      if (ticket === generation) {
         failure(e);
         notify(errorText(e));
       } else if (p && !p.closed) end(p);
     } finally {
-      starting.current = false;
+      starting = false;
     }
-  };
+  });
   const toggleMute = () => {
-    const next = !muted;
-    muteWanted.current = next;
-    peer.current?.stream?.getAudioTracks().forEach((t) => {
-      t.enabled = !next && peer.current?.connectionState !== "disconnected";
+    const next = !state.muted;
+    muteWanted = next;
+    peer?.stream?.getAudioTracks().forEach((t) => {
+      t.enabled = !next && peer?.connectionState !== "disconnected";
     });
-    void peer.current?.native
-      ?.mute(next || peer.current.connectionState === "disconnected")
+    void peer?.native
+      ?.mute(next || peer.connectionState === "disconnected")
       .catch(failure);
-    setMuted(next);
+    update({ muted: next });
   };
+  return Object.assign(state, {
+    start,
+    dispose,
+    setOpened,
+    begin,
+    close,
+    toggleMute,
+    resumeAudio() {
+      void peer?.audio
+        ?.play()
+        .then(() => update({ blockedAudio: false }))
+        .catch((e) => update({ error: errorText(e) }));
+    },
+  });
+}
+
+type VoiceProps = { voiceStore: ReturnType<typeof createRealtimeVoice> };
+export default observer(function RealtimeVoice({ voiceStore }: VoiceProps) {
+  const local = voiceStore;
+  const {
+    opened,
+    active,
+    muted,
+    status,
+    error,
+    blockedAudio,
+    partial,
+    rows,
+    setOpened,
+    close,
+    toggleMute,
+  } = local;
   return (
     <>
       <Popover
@@ -455,7 +514,7 @@ const NativeVoice = observer(function NativeVoice({
           )}
           <div className="realtime-voice-actions">
             {!active && (
-              <button type="button" onClick={() => void start()}>
+              <button type="button" onClick={() => void local.begin()}>
                 Start voice
               </button>
             )}
@@ -470,15 +529,7 @@ const NativeVoice = observer(function NativeVoice({
               </>
             )}
             {active && blockedAudio && (
-              <button
-                type="button"
-                onClick={() =>
-                  void peer.current?.audio
-                    ?.play()
-                    .then(() => setBlockedAudio(false))
-                    .catch((e) => setError(errorText(e)))
-                }
-              >
+              <button type="button" onClick={local.resumeAudio}>
                 Resume audio
               </button>
             )}

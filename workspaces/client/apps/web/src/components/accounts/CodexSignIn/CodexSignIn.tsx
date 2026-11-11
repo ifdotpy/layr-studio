@@ -1,8 +1,6 @@
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { Modal } from "@mantine/core";
 import type { Account } from "../support/Accounts.tsx";
 import AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
-import "../../../api.ts";
 
 export default function CodexSignIn({
   account,
@@ -15,8 +13,6 @@ export default function CodexSignIn({
   onClose: () => void;
   serverLabel?: string | undefined;
 }) {
-  const { post } = useServerApi();
-
   return (
     <Modal
       opened
@@ -27,12 +23,6 @@ export default function CodexSignIn({
         key={`${scope}:${account.id}`}
         scope={scope}
         targetAccount={account}
-        onConnected={async (connected) => {
-          if (connected.disconnected)
-            await post("/api/accounts/reconnect", {
-              account_key: connected.id,
-            });
-        }}
       />
     </Modal>
   );

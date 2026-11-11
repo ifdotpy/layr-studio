@@ -1,3 +1,5 @@
+import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { AgentSource, AgentStatus } from "../../../generated/api.ts";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 
@@ -56,21 +58,32 @@ function renderTeam(
   const fixture = observableFixture(
     agents.filter((agent) => !missingSummary || agent.id !== "approval"),
   );
-  return renderToStaticMarkup(
-    createElement(
-      fixture.Provider,
-      {},
+  const areas = conversationActionsFixture(undefined, fixture.store);
+  try {
+    return renderToStaticMarkup(
       createElement(
-        MantineProvider,
+        fixture.Provider,
         {},
-        createElement(TeamPanel, {
-          leadId: "lead",
-          workerFilter,
-          setWorkerQuery: noop,
-        }),
+        createElement(
+          MantineProvider,
+          {},
+          createElement(
+            ServerAreasContextProvider,
+            { value: areas },
+            createElement(TeamPanel, {
+              leadId: "lead",
+              workerFilter,
+              setWorkerQuery: noop,
+            }),
+          ),
+        ),
       ),
-    ),
-  );
+    );
+  } finally {
+    areas.dispose();
+    areas.scope.services.close();
+    fixture.store.dispose();
+  }
 }
 
 it("keeps approval workers in Needs you even before a pending request reaches the renderer", () => {

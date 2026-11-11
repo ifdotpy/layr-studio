@@ -3,7 +3,7 @@ import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import { AnalyticsScope as GeneratedApiAnalyticsScope } from "../../../generated/api.ts";
 import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { localDateTime, localTime } from "../../../local-time.ts";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ActionIcon,
   Button,
@@ -451,7 +451,7 @@ export default observer(function Analytics({
   const busy = currentRead.current.status === "loading";
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<string | null>("overview");
-  const [knownTools, setKnownTools] = useState<string[]>([]);
+  const [previousTools, setKnownTools] = useState<string[]>([]);
   const [details, setDetails] = useState<{
     rateLimits: ReadSlot<AnalyticsResult>[];
     turns: ReadSlot<AnalyticsResult>[];
@@ -470,16 +470,12 @@ export default observer(function Analytics({
     ),
     turns: details.turns.some((slot) => slot.current.status === "loading"),
   };
-  useEffect(() => {
-    setKnownTools((previous) =>
-      [
-        ...new Set([
-          ...previous,
-          ...(data?.tools || []).map((tool) => tool.name),
-        ]),
-      ].sort(),
-    );
-  }, [data]);
+  const knownTools = [
+    ...new Set([
+      ...previousTools,
+      ...(data?.tools || []).map((tool) => tool.name),
+    ]),
+  ].sort();
   const detailError = [...details.turns, ...details.rateLimits]
     .map((slot) => slot.current)
     .find((state) => state.status === "error");
@@ -506,6 +502,7 @@ export default observer(function Analytics({
   const load = (patch: Partial<AnalyticsQuery> = {}) => {
     const next = { ...query, offset: 0, ...patch };
     const read = net.reads.analytics(next);
+    setKnownTools(knownTools);
     setCurrent({ query: next, read });
     setSelected(null);
     setDetails({ rateLimits: [], turns: [] });

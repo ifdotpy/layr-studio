@@ -1,4 +1,4 @@
-import { observable, runInAction } from "mobx";
+import { action, observable } from "mobx";
 import { UNSENT_FAILURE_EVENT, draftStore } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
@@ -35,34 +35,19 @@ export function createDrafts(options: {
     error: "",
     unsentError: "",
   });
-  const setConflicts = (update: (old: DraftVersion[]) => DraftVersion[]) =>
-    runInAction(() => {
-      metadata.conflicts = update(metadata.conflicts);
-    });
-  const setUnsentError = (value: string) =>
-    runInAction(() => {
-      metadata.unsentError = value;
-    });
-  let current: Drafts = {};
-  const listeners = new Map<string, Set<() => void>>();
+  const current = observable.map<string, string>(undefined, { deep: false });
   let versions: DraftVersion[] = [];
   const dismissed = new Set<string>();
 
-  const setError = (next: string | ((previous: string) => string)) =>
-    runInAction(() => {
-      metadata.error = typeof next === "function" ? next(metadata.error) : next;
-    });
+  const setError = action((next: string | ((previous: string) => string)) => {
+    metadata.error = typeof next === "function" ? next(metadata.error) : next;
+  });
 
   let quiet: ReturnType<typeof setTimeout> | undefined;
   let maximum: ReturnType<typeof setTimeout> | undefined;
   const key = (version: DraftVersion) =>
     JSON.stringify([version.id, version.text]);
-  const publish = (previous: Drafts, next: Drafts) => {
-    for (const [session, callbacks] of listeners)
-      if (previous[session] !== next[session])
-        callbacks.forEach((callback) => callback());
-  };
-  const reconcile = () => {
+  const reconcile = action(() => {
     const records = store
       .records()
       .map((row) => decodeDraftVersion(JSON.parse(row.payload)));
@@ -96,9 +81,7 @@ export function createDrafts(options: {
             });
       }
     }
-    const previous = current;
-    current = next;
-    publish(previous, next);
+    current.replace(next);
     const unique = new Set<string>();
     const nextConflicts = alternatives.filter((version) => {
       const id = key(version);
@@ -106,13 +89,14 @@ export function createDrafts(options: {
       unique.add(id);
       return true;
     });
-    setConflicts((previous) =>
-      previous.length === nextConflicts.length &&
-      previous.every((item, index) => key(item) === key(nextConflicts[index]!))
-        ? previous
-        : nextConflicts,
-    );
-  };
+    if (
+      metadata.conflicts.length !== nextConflicts.length ||
+      metadata.conflicts.some(
+        (item, index) => key(item) !== key(nextConflicts[index]!),
+      )
+    )
+      metadata.conflicts = nextConflicts;
+  });
   const store = createDirectDrafts({
     post: (rows) => options.api.syncPost("/api/sync/drafts", { rows }),
     changed: reconcile,
@@ -136,11 +120,10 @@ export function createDrafts(options: {
     quiet = setTimeout(flush, DRAFT_SYNC_TIMING_MS.pushQuietWait);
     maximum ??= setTimeout(flush, DRAFT_SYNC_TIMING_MS.pushMaxWait);
   };
-  const setDrafts = (value: Drafts | ((old: Drafts) => Drafts)) => {
-    const previous = current;
+  const setDrafts = action((value: Drafts | ((old: Drafts) => Drafts)) => {
+    const previous = Object.fromEntries(current);
     const next = typeof value === "function" ? value(previous) : value;
-    current = next;
-    publish(previous, next);
+    current.replace(next);
     const updated = Math.max(
       Date.now(),
       ...versions.map((version) => version.updated + 1),
@@ -177,24 +160,17 @@ export function createDrafts(options: {
       versions = [...versions.filter((item) => item.id !== id), version];
     }
     schedule();
-  };
-  const getDraft = (session: string) => current[session] || "";
-  const subscribeDraft = (session: string, listener: () => void) => {
-    const callbacks = listeners.get(session) ?? new Set<() => void>();
-    callbacks.add(listener);
-    listeners.set(session, callbacks);
-    return () => {
-      callbacks.delete(listener);
-      if (!callbacks.size) listeners.delete(session);
-    };
-  };
+  });
+  const getDraft = (session: string) => current.get(session) || "";
   const dismissDraft = (version: DraftVersion) => {
     dismissed.add(key(version));
     reconcile();
   };
   const start = () => {
-    const fail = () =>
-      setUnsentError("Draft changes could not be saved. Keep this chat open.");
+    const fail = action(() => {
+      metadata.unsentError =
+        "Draft changes could not be saved. Keep this chat open.";
+    });
     if (typeof window !== "undefined")
       window.addEventListener(UNSENT_FAILURE_EVENT, fail);
     void store
@@ -250,7 +226,6 @@ export function createDrafts(options: {
   return {
     setDrafts,
     getDraft,
-    subscribeDraft,
     get conflicts() {
       return metadata.conflicts;
     },

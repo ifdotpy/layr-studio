@@ -217,7 +217,6 @@ export function createMergedSidebarServices(
       saved: (_key, fallback) => fallback,
       save: () => {},
       editPreference: (_key, previous) => previous,
-      subscribePreference: () => () => {},
     };
     if (!backend) {
       wrapped.set(owner, missing);

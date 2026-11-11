@@ -4,6 +4,7 @@ import { MantineProvider, useMantineColorScheme } from "@mantine/core";
 import { useEffect, useMemo } from "react";
 import { expect, userEvent, within } from "storybook/test";
 import TeamChats from "./TeamChats.tsx";
+import { createTeamChatsStore } from "./TeamChatsStore.ts";
 import { theme } from "../../../../theme.ts";
 import {
   observableFixture,
@@ -91,7 +92,21 @@ function MessagesFixture({
     models.store.room = () => ({
       current: { status: "live", data: history.current },
     });
-    return models;
+    return {
+      ...models,
+      chats: createTeamChatsStore(
+        models.store,
+        {
+          saved: (_key, fallback) => fallback,
+          save() {},
+          syncGet: async () => {
+            throw new Error("Unexpected story read");
+          },
+        },
+        "storybook-messages",
+        "lead",
+      ),
+    };
   }, [hasRooms]);
   useEffect(() => () => models.store.dispose(), [models]);
   const { setColorScheme } = useMantineColorScheme();
@@ -110,7 +125,7 @@ function MessagesFixture({
       >
         <models.Provider>
           <ConversationProvider value={conversationActionsFixture()}>
-            <TeamChats leadId="lead" />
+            <TeamChats leadId="lead" owner={models.chats} />
           </ConversationProvider>
         </models.Provider>
       </div>

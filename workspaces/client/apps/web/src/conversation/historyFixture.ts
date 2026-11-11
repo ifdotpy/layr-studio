@@ -5,11 +5,39 @@ import {
   useServerResources,
   useServerStore,
 } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { agentId, transcriptTail } from "../generated/observableResources.ts";
+import {
+  agentId,
+  transcriptTail,
+  roomId,
+  roomLegacy,
+} from "../generated/observableResources.ts";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues.ts";
 import { trimTranscriptPageCache } from "../transcriptPageBounds.ts";
 import { TranscriptHistory } from "./historySession.ts";
-import { useRoomHistory } from "./roomHistory.ts";
+import { RoomHistory } from "./roomHistory.ts";
+function useFixtureRoomHistory(
+  id: string | null,
+  workspace: string,
+  enabled: boolean,
+  legacy: boolean,
+) {
+  const store = useServerStore(),
+    api = useServerApi();
+  const history = useMemo(
+    () =>
+      new RoomHistory(
+        id,
+        id
+          ? store.room(roomId(id), legacy ? roomLegacy(true) : undefined)
+          : undefined,
+        api,
+        legacy,
+      ),
+    [store, api, id, workspace, legacy],
+  );
+  useEffect(() => (enabled ? history.start() : undefined), [history, enabled]);
+  return history;
+}
 /** Standalone legacy history checks; production selection owns its session directly. */
 export function useTranscriptHistory(
   id: string | null,
@@ -78,7 +106,7 @@ export function useConversationHistory(
     syncWorkspaceId,
     enabled && kind === "agent",
   );
-  const room = useRoomHistory(
+  const room = useFixtureRoomHistory(
     kind !== "agent" ? id : null,
     workspace,
     enabled && kind !== "agent",

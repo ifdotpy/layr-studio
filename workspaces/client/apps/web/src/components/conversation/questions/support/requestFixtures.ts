@@ -7,8 +7,16 @@ import {
 import type { components } from "../../../../generated/api.ts";
 import { ServerStoreProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createElement, type ReactNode } from "react";
-import type { RequestModel } from "../RequestArea/RequestArea.tsx";
+import {
+  RequestArea,
+  RequestAreaOwner,
+  type RequestCommands,
+  type RequestModel,
+} from "../RequestArea/RequestArea.tsx";
 import { createServerStore } from "../../../../store/server.ts";
+import * as api from "../../../../servers/net/api.ts";
+import { serverLocalStorage } from "../../../../servers/storage.ts";
+import { fixturePostResult } from "../../../../../tests/misc-fixture.ts";
 import { createSubscriptions } from "../../../../sync/subscriptions/module.ts";
 
 /** Static generated resources for isolated question stories and tests. */
@@ -60,17 +68,78 @@ export function requestFixture(
   };
   return { store, state, live, history };
 }
-export function RequestFixture({
-  requests,
-  children,
-  agents,
-  details,
-}: {
+type FixtureProps = RequestCommands & {
   requests: readonly RequestModel[];
   children?: ReactNode;
   agents?: Parameters<typeof requestFixture>[1];
   details?: Parameters<typeof requestFixture>[2];
+};
+/** Created, started, updated and disposed by the story or test harness. */
+export function createRequestFixture({
+  requests,
+  agents,
+  details,
+  ...commands
+}: Omit<FixtureProps, "children">) {
+  const fixture = requestFixture(requests, agents, details);
+  const owner = new RequestAreaOwner(
+    {
+      api: () => api,
+      store: fixture.store,
+      storage: serverLocalStorage,
+      server: "local",
+    },
+    () => commands,
+  );
+  return {
+    ...fixture,
+    owner,
+    start: owner.start,
+    updateRequests(requests: readonly RequestModel[]) {
+      fixture.live.apply(
+        requests.map((value) => ({
+          collection: "request",
+          id: value.id,
+          value,
+        })),
+      );
+    },
+    dispose() {
+      owner.dispose();
+      fixture.store.dispose();
+    },
+  };
+}
+export function RequestFixture({
+  owner,
+  children,
+}: {
+  owner: ReturnType<typeof createRequestFixture>;
+  children?: ReactNode;
 }) {
-  const { store } = requestFixture(requests, agents, details);
-  return createElement(ServerStoreProvider, { value: store }, children);
+  return createElement(
+    ServerStoreProvider,
+    { value: owner.store },
+    createElement(RequestArea, { owner: owner.owner }, children),
+  );
+}
+
+/** Route response boundary for tests that record request commands. */
+export function requestApiFixture(controls: {
+  post(...args: unknown[]): Promise<unknown>;
+  answer(...args: unknown[]): Promise<unknown>;
+}): import("../../../../api.ts").ServerApi {
+  return {
+    ...api,
+    post: async <Path extends import("../../../../apiTypes.ts").ApiPostPath>(
+      path: Path,
+      body: import("../../../../servers/net/api.ts").PostInput<Path>,
+      options?: import("../../../../api.ts").PostOptions,
+    ) => fixturePostResult<Path>(await controls.post(path, body, options)),
+    command: {
+      ...api.command,
+      answer: async (...args) =>
+        fixturePostResult<"/api/commands">(await controls.answer(...args)),
+    },
+  };
 }

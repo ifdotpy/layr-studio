@@ -28,7 +28,7 @@ import "@mantine/core/styles.css";
 import "../../src/style.css";
 import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createServerServices } from "../../src/servers/serverServices.ts";
-import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
+import { BackgroundTasksFixture as BackgroundTasks } from "../fixtures/owner-support.tsx";
 const services = createServerServices({
   id: "local",
   label: "Fixture",

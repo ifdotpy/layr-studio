@@ -18,7 +18,7 @@ it("keeps reporting opt-in without changing the default production bundle", () =
     const stub = join(directory, "reporting-stub.tsx");
     writeFileSync(
       stub,
-      "export function PerformanceReporting() { return null; }\n",
+      "export function startPerformanceReporting() { return () => {}; }\nexport const collector = {};\nexport function createCollector() { return {}; }\n",
     );
     const referenceConfig = join(directory, "reference.config.mts");
     writeFileSync(
@@ -26,7 +26,7 @@ it("keeps reporting opt-in without changing the default production bundle", () =
       `
       import original from ${JSON.stringify(resolve("vite.config.ts"))};
       export default { ...original, resolve: { ...original.resolve, alias: [
-        { find: new RegExp("PerformanceReporting/PerformanceReporting[.]tsx$"), replacement: ${JSON.stringify(stub)} },
+        { find: new RegExp("^.*perf/collector[.]ts$"), replacement: ${JSON.stringify(stub)} },
         ...(original.resolve.alias ?? []),
       ] } };
     `,

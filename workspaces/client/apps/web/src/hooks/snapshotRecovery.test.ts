@@ -45,7 +45,11 @@ function mountStartup() {
       store: models.store,
       screen: { active: false, channel: null },
     },
-    { canUpdateRenderer: () => false, acceptUiPreferences: () => {} },
+    {
+      rendererBusy: () => false,
+      canUpdateRenderer: () => false,
+      acceptUiPreferences: () => {},
+    },
   );
   h.effects.push(() => {
     const status = reaction(

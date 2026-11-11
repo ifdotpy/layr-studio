@@ -4,7 +4,7 @@ import { useItemText } from "../../../../conversation/liveText.ts";
 import type { Message } from "../../../../types.ts";
 import { reportPromptComposerRender } from "../../../../perf/promptComposerRenderProbe.ts";
 import NativeMarkdown from "../../markdown/NativeMarkdown/NativeMarkdown.tsx";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import PreviewModal from "../../PreviewModal/PreviewModal.tsx";
 import FilePreview, { useFilePreview } from "../../FilePreview/FilePreview.tsx";
 import { localFileLink } from "../../support/fileLinks.ts";
@@ -37,12 +37,6 @@ export default observer(function StreamingText({
   reportPromptComposerRender("message-text", message?.id, text);
   const [preview, setPreview] = useFilePreview();
   const [linkError, setLinkError] = useState("");
-  const [linkDialogMounted, setLinkDialogMounted] = useState(false);
-  const [linkDialogReady, setLinkDialogReady] = useState(false);
-  // Mantine captures the focus target on false -> true, including first open.
-  useEffect(() => {
-    if (linkDialogMounted) setLinkDialogReady(true);
-  }, [linkDialogMounted]);
   return (
     <div
       className="prose"
@@ -71,7 +65,6 @@ export default observer(function StreamingText({
         } catch (error) {
           event.preventDefault();
           event.stopPropagation();
-          setLinkDialogMounted(true);
           setLinkError(
             error instanceof Error
               ? error.message
@@ -89,15 +82,13 @@ export default observer(function StreamingText({
       {preview && (
         <FilePreview target={preview} onClose={() => setPreview(null)} />
       )}
-      {linkDialogMounted && (
-        <PreviewModal
-          opened={!!linkError && linkDialogReady}
-          onClose={() => setLinkError("")}
-          title="Cannot open file"
-        >
-          <p role="alert">{linkError}</p>
-        </PreviewModal>
-      )}
+      <PreviewModal
+        opened={!!linkError}
+        onClose={() => setLinkError("")}
+        title="Cannot open file"
+      >
+        <p role="alert">{linkError}</p>
+      </PreviewModal>
     </div>
   );
 });

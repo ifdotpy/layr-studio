@@ -1,3 +1,4 @@
+import { autorun, reaction } from "mobx";
 import { afterEach, expect, it, vi } from "vitest";
 
 vi.mock("../servers/net/api.ts", () => ({
@@ -82,8 +83,8 @@ it("publishes an entire baseline before notifying either chat", () => {
   });
   const a = vi.fn(() => expect(drafts.getDraft("b")).toBe("complete"));
   const b = vi.fn(() => expect(drafts.getDraft("a")).toBe("complete"));
-  drafts.subscribeDraft("a", a);
-  drafts.subscribeDraft("b", b);
+  const stopA = reaction(() => drafts.getDraft("a"), a);
+  const stopB = reaction(() => drafts.getDraft("b"), b);
   const cleanup = drafts.start();
   const row = (session: string) => ({
     id: `remote:${session}`,
@@ -105,6 +106,8 @@ it("publishes an entire baseline before notifying either chat", () => {
   });
   expect(a).toHaveBeenCalledOnce();
   expect(b).toHaveBeenCalledOnce();
+  stopA();
+  stopB();
   cleanup();
   expect(stop).toHaveBeenCalledOnce();
 });
@@ -167,4 +170,18 @@ it("shows the shared notice when another unsent input cannot be saved", () => {
   );
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("tracks draft text directly without subscribing or bumping a revision", () => {
+  vi.useFakeTimers();
+  const drafts = createDrafts({
+    api: { syncPost: vi.fn(async () => []) },
+    resources: { watchResourceChanges: () => () => {}, replaceStream: vi.fn() },
+  });
+  const seen: string[] = [];
+  const stop = autorun(() => seen.push(drafts.getDraft("chat")));
+  drafts.setDrafts({ chat: "typed" });
+  drafts.setDrafts({ chat: "typed", other: "unrelated" });
+  expect(seen).toEqual(["", "typed"]);
+  stop();
 });

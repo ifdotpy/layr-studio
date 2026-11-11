@@ -1,3 +1,5 @@
+import { CodexAuthFlow } from "./CodexAuthFlow.ts";
+import { ClaudeAuthFlow } from "./ClaudeAuthFlow.ts";
 import { AccountStatus } from "../../../generated/api.ts";
 import { makeAutoObservable } from "mobx";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
@@ -42,6 +44,8 @@ export class AccountsUi {
   renameRequest: PostBody<"/api/accounts/name"> | null = null;
   addDraft = createAccountAddDraft();
   addFlow = false;
+  claudeFlow: ClaudeAuthFlow | null = null;
+  codexFlow: CodexAuthFlow | null = null;
   private handled: Command | null = null;
   readonly areas: ServerAreas;
   constructor(areas: ServerAreas) {
@@ -109,24 +113,65 @@ export class AccountsUi {
       : this.addIntent?.serverLabel;
   }
   close() {
-    if (!this.pending) this.dialog = null;
+    if (!this.pending) this.dispose();
   }
   dispose() {
+    this.codexFlow?.dispose();
+    this.codexFlow = null;
+    this.claudeFlow?.dispose();
+    this.claudeFlow = null;
     this.dialog = null;
+  }
+  show(dialog: Dialog) {
+    this.dispose();
+    this.dialog = dialog;
   }
   setRenameLabel(value: string) {
     if (!this.pending && !this.renameRequest) this.renameLabel = value;
   }
   continueAdd() {
-    if (this.addDraft.provider) this.addFlow = true;
+    if (this.addDraft.provider) {
+      this.addFlow = true;
+      this.prepareSignIn();
+    }
   }
   openAdd(intent: AddAccountIntent) {
     this.addDraft.provider = intent.provider || "";
     this.addDraft.label = intent.label || "";
     this.addDraft.email = intent.email || "";
     this.addFlow = !!intent.provider;
-    this.dialog = { kind: "add", intent };
+    this.show({ kind: "add", intent });
+    this.prepareSignIn();
   }
+  prepareSignIn() {
+    this.codexFlow?.dispose();
+    this.codexFlow = null;
+    this.claudeFlow?.dispose();
+    this.claudeFlow = null;
+    const account =
+      this.dialog?.kind === "signIn" ? this.dialogAccount : undefined;
+    const { api, store, resources, owner } = this.areas.scope.services;
+    if (!account && !this.addFlow) return;
+    const provider = account?.provider ?? this.addDraft.provider;
+    const options = {
+      scope: owner.id,
+      ...(account ? { accountKey: account.id } : {}),
+      label:
+        account?.label ||
+        this.addDraft.label ||
+        (provider === ProviderKind.Claude ? "Claude Code" : ""),
+      email: account?.email || this.addDraft.email,
+      onReady: (connected = account) =>
+        connected?.disconnected
+          ? api.post("/api/accounts/reconnect", { account_key: connected.id })
+          : undefined,
+    };
+    if (provider === ProviderKind.Codex)
+      this.codexFlow = new CodexAuthFlow(this.areas.scope.services, options);
+    else if (provider === ProviderKind.Claude)
+      this.claudeFlow = new ClaudeAuthFlow(api, store, resources, options);
+  }
+
   receive(command: Command | null | undefined) {
     if (!this.summary || !command || this.handled === command) return;
     if (this.pending) {
@@ -146,13 +191,14 @@ export class AccountsUi {
       this.error = "This account is no longer saved on this server.";
       return;
     }
-    if (command.action === "account-sign-in")
-      this.dialog = {
+    if (command.action === "account-sign-in") {
+      this.show({
         kind: "signIn",
         accountKey: account.id,
         serverLabel: command.serverLabel,
-      };
-    else if (command.operation === "default")
+      });
+      this.prepareSignIn();
+    } else if (command.operation === "default")
       void this.action(`default:${account.id}`, () =>
         this.areas.scope.services.api.post("/api/accounts/default", {
           account_key: account.id,
@@ -165,17 +211,17 @@ export class AccountsUi {
           null,
         );
       this.renameLabel = this.renameRequest?.label || account.label;
-      this.dialog = { kind: "rename", accountKey: account.id };
+      this.show({ kind: "rename", accountKey: account.id });
     } else if (command.operation === "configure-profile") {
       if (account.provider === ProviderKind.Claude)
-        this.dialog = { kind: "configureProfile", accountKey: account.id };
+        this.show({ kind: "configureProfile", accountKey: account.id });
       else
         this.error = "This Claude account is no longer saved on this server.";
     } else
-      this.dialog = {
+      this.show({
         kind: command.operation === "remove" ? "delete" : "disconnect",
         accountKey: account.id,
-      };
+      });
   }
   *action(
     key: string,
@@ -225,7 +271,7 @@ export class AccountsUi {
       () => api.post("/api/accounts/name", request),
       () => {
         clear();
-        this.dialog = null;
+        this.dispose();
       },
       clear,
     );
@@ -263,7 +309,7 @@ export class AccountsUi {
         return api.post("/api/accounts/disconnect", { account_key: key });
       },
       () => {
-        this.dialog = null;
+        this.dispose();
       },
     );
   }
@@ -299,14 +345,14 @@ export class AccountsUi {
       const requestId = this.areas.scope.services.api.stableRequestId(
         `account-transfer:${agent.id}:${key}`,
       );
-      this.dialog = {
+      this.show({
         kind: "transfer",
         accountKey: key,
         agentId: agent.id,
         sourceProvider:
           this.selectedAccount(accountKey)?.provider || agent.provider || "",
         requestId,
-      };
+      });
     } else if (agent.accountChange?.kind === "select")
       void this.action(key, () => change?.(key) || Promise.resolve());
   }
@@ -325,7 +371,7 @@ export class AccountsUi {
         this.areas.scope.services.api.clearStableRequestId(
           `account-transfer:${choice.agentId}:${choice.accountKey}`,
         );
-        this.dialog = null;
+        this.dispose();
       },
     );
   }

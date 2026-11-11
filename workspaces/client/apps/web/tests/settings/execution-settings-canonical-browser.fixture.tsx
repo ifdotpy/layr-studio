@@ -108,12 +108,16 @@ const CanonicalSettings = observer(function CanonicalSettings({
 });
 import {
   ModelCatalogFixture,
+  createModelCatalogFixture,
   type ModelCatalogFixtureSource,
 } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 import { get } from "../../src/servers/net/api.ts";
 const fixtureModelRead = (
   options: Pick<GetOptions<"/api/models">, "query" | "signal">,
 ) => get("/api/models", options);
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { fixtureServerStore } from "../fixtures/PublishedAgentFixture.tsx";
+const areas = browserAreas(fixtureServerStore);
 const initial: Agent = {
   id: "first",
   accountKey: "default",
@@ -283,43 +287,10 @@ const team: Agent[] = [
     accountKey: "claude",
   },
 ] satisfies Agent[];
-const Fixture = observer(function Fixture() {
-  const [selectedId, setSelectedId] = useState(initial.id),
-    [mount, setMount] = useState(0),
-    [defaults, setDefaults] = useState(false);
-  const agent = usePublishedAgent(selectedId, initial);
-  window.setAgent = async (value) => {
-    setSelectedId(value.id);
-    await publishFixtureAgent(value);
-  };
-  window.agent = agent;
-  window.canonicalReset = async (options) => {
-    await window.setAgent(partialAgent({ ...initial, ...options?.agent }));
-    flushSync(() => {
-      setDefaults(!!options?.defaults);
-      setMount((value) => value + 1);
-      window.catalogRequests = [];
-      window.settingsCalls = [];
-      window.transfers = [];
-      window.transferFail = false;
-      window.transferHold = false;
-      window.transferReply = null;
-      window.pendingTransferProjection = null;
-      window.catalogHold = false;
-      window.reply = null;
-      window.canonicalFail = null;
-      window.hold = false;
-      window.projectionUnavailable = false;
-      window.projectionHold = false;
-      window.refreshCount = 0;
-      window.canonicalRelease = null;
-      window.canonicalProjectionRelease = null;
-      window.transferRelease = null;
-      window.serverAccount = null;
-    });
-  };
+let catalogMount = 0;
+function createCatalog() {
   const catalogSource: ModelCatalogFixtureSource = {
-    scope: "settings-canonical-" + mount,
+    scope: "settings-canonical-" + catalogMount,
     read: fixtureModelRead,
     subscribeState: (accept) => {
       accept({
@@ -341,10 +312,54 @@ const Fixture = observer(function Fixture() {
       return () => {};
     },
   };
+  return createModelCatalogFixture(catalogSource);
+}
+let catalog = createCatalog();
+window.addEventListener("pagehide", () => catalog.dispose(), { once: true });
+const Fixture = observer(function Fixture() {
+  const [selectedId, setSelectedId] = useState(initial.id),
+    [mount, setMount] = useState(0),
+    [defaults, setDefaults] = useState(false);
+  const agent = usePublishedAgent(selectedId, initial);
+  window.setAgent = async (value) => {
+    setSelectedId(value.id);
+    await publishFixtureAgent(value);
+  };
+  window.agent = agent;
+  window.canonicalReset = async (options) => {
+    await window.setAgent(partialAgent({ ...initial, ...options?.agent }));
+    flushSync(() => {
+      setDefaults(!!options?.defaults);
+      catalog.dispose();
+      catalogMount++;
+      catalog = createCatalog();
+      setMount((value) => value + 1);
+      window.catalogRequests = [];
+      window.settingsCalls = [];
+      window.transfers = [];
+      window.transferFail = false;
+      window.transferHold = false;
+      window.transferReply = null;
+      window.pendingTransferProjection = null;
+      window.catalogHold = false;
+      window.reply = null;
+      window.canonicalFail = null;
+      window.hold = false;
+      window.projectionUnavailable = false;
+      window.projectionHold = false;
+      window.refreshCount = 0;
+      window.canonicalRelease = null;
+      window.canonicalProjectionRelease = null;
+      window.transferRelease = null;
+      window.serverAccount = null;
+    });
+  };
+
   return (
     <MantineProvider>
-      <ModelCatalogFixture value={catalogSource}>
+      <ModelCatalogFixture value={catalog}>
         <CanonicalSettings
+          agentsUi={areas.agentsUi}
           key={mount}
           settingsRow={defaults}
           initialRole={defaults ? "worker" : "orchestrator"}
@@ -379,6 +394,7 @@ const Fixture = observer(function Fixture() {
         />
         {!defaults && (
           <CanonicalSettings
+            agentsUi={areas.agentsUi}
             permissions
             key={"permissions:" + mount}
             agent={agent}

@@ -1,8 +1,14 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../store/server.ts";
+import { defaultSubscriptions } from "../sync/subscriptions/events.ts";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues.ts";
 import "../rendererStyles.ts";
 import {
   useServerResources,
-  ServerViewStoreProvider,
+  ServerStoreProvider,
 } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -97,8 +103,8 @@ const History = observer(function History() {
 window.historyRoot = createRoot(document.querySelector("main")!);
 window.historyRoot.render(
   React.createElement(
-    ServerViewStoreProvider,
-    null,
+    ServerStoreProvider,
+    { value: fixtureServerStore },
     React.createElement(History),
   ),
 );

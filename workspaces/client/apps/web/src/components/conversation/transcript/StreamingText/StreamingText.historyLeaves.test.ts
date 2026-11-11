@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
+import { MantineProvider } from "@mantine/core";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { afterEach, expect, it, vi } from "vitest";
@@ -47,7 +48,13 @@ it("real TurnHistory mounts an empty streaming leaf, shows its first live token 
   const root = createRoot(host);
   try {
     await act(async () =>
-      root.render(createElement(models.Provider, null, createElement(View))),
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(models.Provider, null, createElement(View)),
+        ),
+      ),
     );
     expect(host.querySelector("[data-text-leaf]")).not.toBeNull();
     await act(async () => {
@@ -99,7 +106,13 @@ it("real TurnHistory observes an in-place terminal outcome without replacing its
   const root = createRoot(host);
   try {
     await act(async () =>
-      root.render(createElement(models.Provider, null, createElement(View))),
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(models.Provider, null, createElement(View)),
+        ),
+      ),
     );
     expect(host.querySelector('[data-outcome="active"]')).not.toBeNull();
     await act(async () =>

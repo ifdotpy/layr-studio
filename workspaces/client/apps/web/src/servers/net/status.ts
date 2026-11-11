@@ -1,4 +1,4 @@
-import { makeAutoObservable, runInAction } from "mobx";
+import { makeAutoObservable, action } from "mobx";
 import { errorText } from "../../apiErrors.ts";
 import type { ConnectionHealth } from "../../sync/connectionState.ts";
 export class NetStatus {
@@ -7,7 +7,7 @@ export class NetStatus {
   inFlight = 0;
   lastError: string | null = null;
   constructor() {
-    makeAutoObservable(this);
+    makeAutoObservable(this, {}, { autoBind: true });
   }
   receive(connection: ConnectionHealth) {
     if (this.connection === "schema-mismatch") return;
@@ -21,13 +21,12 @@ export class NetStatus {
   begin() {
     this.inFlight++;
     let finished = false;
-    return (error?: unknown) =>
-      runInAction(() => {
-        if (finished) return;
-        finished = true;
-        if (error !== undefined) this.lastError = errorText(error);
-        this.inFlight--;
-      });
+    return action((error?: unknown) => {
+      if (finished) return;
+      finished = true;
+      if (error !== undefined) this.lastError = errorText(error);
+      this.inFlight--;
+    });
   }
 }
 

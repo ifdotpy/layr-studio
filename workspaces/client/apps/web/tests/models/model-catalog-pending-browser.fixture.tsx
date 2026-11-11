@@ -1,9 +1,13 @@
+let fixtureServerStore: ReturnType<typeof createServerStore> | undefined;
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import {
   ModelCatalogFixture,
+  createModelCatalogFixture,
   type ModelCatalogFixtureSource,
 } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { observer } from "mobx-react-lite";
 import React from "react";
 import { createRoot } from "react-dom/client";
@@ -55,16 +59,20 @@ const Fixture = observer(function Fixture({
   window.catalogResult = result;
   return <pre>{JSON.stringify(result)}</pre>;
 });
+let catalog: ReturnType<typeof createModelCatalogFixture> | undefined;
 window.mountCatalog = (account = "default", workers = false) => {
   const element = document.getElementById("app")!;
   const root = (window.catalogRoot ||= createRoot(element));
+  const currentCatalog = (catalog ??= createModelCatalogFixture(reader));
+  const currentStore = (fixtureServerStore ??=
+    createServerStore(defaultSubscriptions));
   flushSync(() =>
     root.render(
-      <ServerViewStoreProvider>
-        <ModelCatalogFixture value={reader}>
+      <ServerStoreProvider value={currentStore}>
+        <ModelCatalogFixture value={currentCatalog}>
           <Fixture account={account} workers={workers} />
         </ModelCatalogFixture>
-      </ServerViewStoreProvider>,
+      </ServerStoreProvider>,
     ),
   );
 };
@@ -76,4 +84,12 @@ window.publishModelSnapshot = (snapshot) => {
 window.unmountCatalog = () => {
   flushSync(() => window.catalogRoot?.unmount());
   window.catalogRoot = undefined;
+  catalog?.dispose();
+  catalog = undefined;
+  fixtureServerStore?.dispose();
+  fixtureServerStore = undefined;
 };
+
+window.addEventListener("pagehide", () => window.unmountCatalog(), {
+  once: true,
+});

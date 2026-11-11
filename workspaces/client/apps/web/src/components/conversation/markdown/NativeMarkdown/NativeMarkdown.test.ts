@@ -1,12 +1,13 @@
 import { createElement } from "react";
+import { autorun } from "mobx";
+import { markdownRead } from "./markdownRead.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 import NativeMarkdown from "./NativeMarkdown.tsx";
 import { NativeMarkdownBlock } from "./NativeMarkdown.tsx";
 import { completedMarkdown } from "../../../../native/markdownCache.ts";
 
-const { effects, request } = vi.hoisted(() => ({
-  effects: [] as Array<() => void | (() => void)>,
+const { request } = vi.hoisted(() => ({
   request: vi.fn(
     async (
       _method: string,
@@ -21,12 +22,7 @@ vi.mock("../../../../native/client.ts", async (original) => ({
   hasNativeClient: () => true,
   nativeRequest: request,
 }));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useEffect: (effect: () => void | (() => void)) => effects.push(effect),
-}));
 afterEach(() => {
-  effects.length = 0;
   vi.useRealTimers();
   request.mockClear();
   vi.restoreAllMocks();
@@ -38,14 +34,13 @@ it("shows streaming markdown literally without invoking the parser", async () =>
   const html = renderToStaticMarkup(
     createElement(NativeMarkdown, { text, streaming: true }),
   );
-  for (const effect of effects.splice(0)) effect();
   await vi.runAllTimersAsync();
   expect(html).toContain("**Still streaming**");
   expect(html).toContain("white-space:pre-wrap");
   expect(request).not.toHaveBeenCalled();
 });
 
-it("reuses the completed tree hydrated on mount instead of decoding it again in the effect", () => {
+it("reuses the cached completed tree without parsing or repeated decoding", () => {
   const text = "Cached completed paragraph.";
   completedMarkdown.set(text, [
     { length: text.length, nodes: [{ tag: "p", children: [{ text }] }] },
@@ -55,7 +50,6 @@ it("reuses the completed tree hydrated on mount instead of decoding it again in 
     createElement(NativeMarkdown, { text, streaming: false }),
   );
   expect(html).toContain(text);
-  for (const effect of effects.splice(0)) effect();
   expect(read).toHaveBeenCalledTimes(1);
 });
 
@@ -99,25 +93,46 @@ it("renders live text literally even when a completed tree has the same source",
   const html = renderToStaticMarkup(
     createElement(NativeMarkdown, { text, streaming: true }),
   );
-  const cleanups = effects.splice(0).map((effect) => effect());
   await vi.runAllTimersAsync();
   expect(html).toContain(text);
   expect(request).not.toHaveBeenCalled();
-  for (const cleanup of cleanups) cleanup?.();
 });
 
-it("starts completed history parsing immediately and cancels it on cleanup", () => {
+it("starts parsing on observation, cancels and evicts when unobserved", () => {
   vi.useFakeTimers();
-  renderToStaticMarkup(
-    createElement(NativeMarkdown, {
-      text: "Uncached finished history.",
-      streaming: false,
-    }),
-  );
-  const completedCleanups = effects.splice(0).map((effect) => effect());
+  const text = "Uncached finished history.";
+  const read = markdownRead(text);
+  const stop = autorun(() => read.blocks);
   expect(request).toHaveBeenCalledTimes(1);
+  expect(markdownRead(text)).toBe(read);
   expect(vi.getTimerCount()).toBe(0);
   const signal = request.mock.calls[0]?.[3];
-  completedCleanups.forEach((cleanup) => cleanup?.());
+  stop();
   expect(signal?.aborted).toBe(true);
+  expect(markdownRead(text)).not.toBe(read);
+});
+
+it("shares an observed parse and releases it only after the last observer", () => {
+  const text = "Shared observed paragraph.";
+  const read = markdownRead(text);
+  const first = autorun(() => read.blocks);
+  const second = autorun(() => markdownRead(text).blocks);
+  expect(request).toHaveBeenCalledTimes(1);
+  first();
+  expect(request.mock.calls[0]?.[3].aborted).toBe(false);
+  expect(markdownRead(text)).toBe(read);
+  second();
+  expect(request.mock.calls[0]?.[3].aborted).toBe(true);
+  expect(markdownRead(text)).not.toBe(read);
+});
+
+it("publishes the parsed blocks to their observer", async () => {
+  const text = "Observed finished paragraph.";
+  const read = markdownRead(text);
+  const seen: unknown[] = [];
+  const stop = autorun(() => seen.push(read.blocks));
+  await Promise.resolve();
+  expect(seen).toEqual([undefined, []]);
+  expect(completedMarkdown.get(text)).toEqual([]);
+  stop();
 });

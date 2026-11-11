@@ -1,3 +1,6 @@
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
+import { ClaudeAuthFlow } from "../../src/components/accounts/support/ClaudeAuthFlow.ts";
 import "../../src/rendererStyles.ts";
 import { createDataObserver } from "../../src/sync/subscriptions/data.ts";
 import { createSubscriptions } from "../../src/sync/subscriptions/module.ts";
@@ -74,7 +77,9 @@ const account = {
   label: "Claude",
   provider: "claude",
   status: "signedOut",
-} as React.ComponentProps<typeof ClaudeSignIn>["account"];
+  home: "/fixture/claude-one",
+  source: "fixture",
+} satisfies NonNullable<React.ComponentProps<typeof ClaudeSignIn>["account"]>;
 // The spec supplies the correlated resource/value pair at this fixture boundary.
 const progress = (
   resource: ResourceProgress["resource"],
@@ -89,17 +94,35 @@ const progress = (
     accept(version);
 };
 window.progress = progress;
+const areas = browserAreas(store);
+areas.scope.services.api.save("claude-sign-in:fixture:claude-one", "login-one");
+areas.accountsUi.claudeFlow = new ClaudeAuthFlow(
+  { ...areas.scope.services.api, get: api.get },
+  store,
+  { ...subscriptions, retryNow: () => {} },
+  {
+    scope: "fixture",
+    accountKey: account.id,
+    label: account.label,
+    email: "",
+    onReady: () => {
+      window.ready = true;
+    },
+  },
+);
 createRoot(fixtureElement("root")).render(
   <MantineProvider>
     <ServerServicesProvider services={services as ServerServices}>
-      <ClaudeSignIn
-        account={account}
-        scope="fixture"
-        onClose={() => {}}
-        onReady={() => {
-          window.ready = true;
-        }}
-      />
+      <AreasProvider value={areas}>
+        <ClaudeSignIn
+          account={account}
+          scope="fixture"
+          onClose={() => {}}
+          onReady={() => {
+            window.ready = true;
+          }}
+        />
+      </AreasProvider>
     </ServerServicesProvider>
   </MantineProvider>,
 );

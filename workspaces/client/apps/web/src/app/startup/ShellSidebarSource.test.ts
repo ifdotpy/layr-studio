@@ -81,3 +81,22 @@ it("invalidates an already observed screen activation when its connection is com
     stop();
   }
 });
+
+it("updates the selector in its lifetime and keeps model reads pure", () => {
+  const source = new ShellSidebarSource(
+    new ScreenSelection([]),
+    () => undefined,
+  );
+  const select = vi.spyOn(source, "select");
+  const stop = source.start();
+  const first = source.model;
+  select.mockClear();
+  expect(source.model).toBe(first);
+  expect(select).not.toHaveBeenCalled();
+  source.selection.updateServers(["unavailable"]);
+  expect(select).toHaveBeenCalledOnce();
+  stop();
+  select.mockClear();
+  source.selection.updateServers([]);
+  expect(select).not.toHaveBeenCalled();
+});

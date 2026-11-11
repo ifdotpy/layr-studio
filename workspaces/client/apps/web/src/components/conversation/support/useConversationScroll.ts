@@ -1,9 +1,5 @@
-import {
-  useCallback,
-  useLayoutEffect,
-  useRef,
-  useSyncExternalStore,
-} from "react";
+import { makeAutoObservable, reaction } from "mobx";
+import { useMemo, useRef } from "react";
 import { followsStoredAnchor } from "./historyAnchorStore.ts";
 
 /** Distance from the bottom, in CSS pixels, inside which the transcript keeps
@@ -19,12 +15,6 @@ export function shouldFollowTranscriptTail(
 }
 /** Time, in milliseconds, for which wheel, touch, or key input is recent. */
 const RECENT_INPUT_MS = 600;
-export function useFollowState(
-  subscribe: (listener: () => void) => () => void,
-  getSnapshot: () => boolean,
-) {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-}
 
 export function useConversationScroll(
   _id: string,
@@ -32,33 +22,45 @@ export function useConversationScroll(
   followTail = true,
   anchorStorageKey?: string,
 ) {
-  const scroll = useRef<HTMLDivElement>(null);
-  const content = useRef<HTMLDivElement>(null);
-  const following = useRef(true);
-  const followListeners = useRef(new Set<() => void>());
-  const getFollow = useCallback(() => following.current, []);
-  const subscribeFollow = useCallback((listener: () => void) => {
-    followListeners.current.add(listener);
-    return () => {
-      followListeners.current.delete(listener);
-    };
-  }, []);
-  const updateFollow = useCallback((value: boolean) => {
-    if (following.current === value) return;
-    following.current = value;
-    followListeners.current.forEach((listener) => listener());
-  }, []);
-  const available = useRef(ready);
-  available.current = ready;
-  const lastTop = useRef(0);
-  const lastHeight = useRef(0);
-  const lastScrollInput = useRef(-Infinity);
-  const hasRecentScrollInput = useCallback(
-    () => performance.now() - lastScrollInput.current < RECENT_INPUT_MS,
-    [],
+  const values = useRef({ ready, followTail });
+  values.current = { ready, followTail };
+  return useMemo(
+    () =>
+      createConversationScroll(
+        () => values.current.ready,
+        () => values.current.followTail,
+        anchorStorageKey,
+      ),
+    [_id, anchorStorageKey],
   );
-  const lastHistoryInput = useRef(-Infinity);
-  const consumeHistoryScrollInput = useCallback(() => {
+}
+
+export function createConversationScroll(
+  ready: () => boolean,
+  followTail: () => boolean,
+  anchorStorageKey?: string,
+) {
+  const scroll = { current: null as HTMLDivElement | null };
+  const content = { current: null as HTMLDivElement | null };
+  const following = makeAutoObservable(
+    {
+      current: followsStoredAnchor(anchorStorageKey),
+      update(value: boolean) {
+        this.current = value;
+      },
+    },
+    {},
+    { autoBind: true },
+  );
+  const getFollow = () => following.current && followTail();
+  const updateFollow = following.update.bind(following);
+  const lastTop = { current: 0 };
+  const lastHeight = { current: 0 };
+  const lastScrollInput = { current: -Infinity };
+  const hasRecentScrollInput = () =>
+    performance.now() - lastScrollInput.current < RECENT_INPUT_MS;
+  const lastHistoryInput = { current: -Infinity };
+  const consumeHistoryScrollInput = () => {
     if (
       !hasRecentScrollInput() ||
       lastHistoryInput.current === lastScrollInput.current
@@ -66,41 +68,23 @@ export function useConversationScroll(
       return false;
     lastHistoryInput.current = lastScrollInput.current;
     return true;
-  }, [hasRecentScrollInput]);
-  const remember = useCallback(() => {
+  };
+  const remember = () => {
     const root = scroll.current;
     if (!root) return;
     lastTop.current = root.scrollTop;
     lastHeight.current = root.scrollHeight;
     root.dispatchEvent(new Event("studio-history-remember"));
-  }, []);
-  const setFollow = useCallback(
-    (value: boolean) => {
-      updateFollow(value);
-      if (value) lastScrollInput.current = -Infinity;
-      if (value)
-        scroll.current?.dispatchEvent(new Event("studio-history-follow"));
-      else remember();
-    },
-    [remember, updateFollow],
-  );
-  useLayoutEffect(() => {
-    lastScrollInput.current = -Infinity;
-    lastHistoryInput.current = -Infinity;
-    lastTop.current = 0;
-    lastHeight.current = 0;
-    updateFollow(followsStoredAnchor(anchorStorageKey));
-  }, [_id, anchorStorageKey]);
-  useLayoutEffect(() => {
-    if (!followTail) updateFollow(false);
-    else if (following.current)
+  };
+  const setFollow = (value: boolean) => {
+    updateFollow(value);
+    if (value) lastScrollInput.current = -Infinity;
+    if (value)
       scroll.current?.dispatchEvent(new Event("studio-history-follow"));
-  }, [followTail]);
-
-  useLayoutEffect(() => {
-    const root = scroll.current;
-    const body = content.current;
-    if (!root || !body) return;
+    else remember();
+  };
+  const bindInput = (root: HTMLDivElement | null) => {
+    if (!root) return () => {};
     const input = (event: Event) => {
       if (event instanceof KeyboardEvent) {
         if (
@@ -138,12 +122,21 @@ export function useConversationScroll(
       for (const type of ["wheel", "touchmove", "keydown", "pointerdown"])
         root.removeEventListener(type, input);
     };
-  }, [_id]);
+  };
+  let unbind = () => {};
+  let root: HTMLDivElement | null = null;
+  Object.defineProperty(scroll, "current", {
+    get: () => root,
+    set: (next: HTMLDivElement | null) => {
+      unbind();
+      root = next;
+      unbind = bindInput(next);
+    },
+  });
 
-  const onScroll = useCallback(() => {
+  const onScroll = () => {
     const root = scroll.current;
-    if (!root || !available.current || root.scrollTop === lastTop.current)
-      return;
+    if (!root || !ready() || root.scrollTop === lastTop.current) return;
     if (
       following.current &&
       !hasRecentScrollInput() &&
@@ -154,7 +147,7 @@ export function useConversationScroll(
     }
     const atBottom = shouldFollowTranscriptTail(
       root.scrollHeight - root.scrollTop - root.clientHeight,
-      followTail,
+      followTail(),
     );
     updateFollow(
       atBottom &&
@@ -163,25 +156,26 @@ export function useConversationScroll(
             root.scrollHeight === lastHeight.current)),
     );
     remember();
-  }, [followTail, hasRecentScrollInput, remember, updateFollow]);
-  const revealRequest = useCallback((node: HTMLElement, offset = 12) => {
+  };
+  const revealRequest = (node: HTMLElement, offset = 12) => {
     updateFollow(false);
     scroll.current?.dispatchEvent(
       new CustomEvent("studio-history-position", { detail: { node, offset } }),
     );
-  }, []);
-  const getAnchorId = useCallback(() => {
+  };
+  const getAnchorId = () => {
     const detail: { id: string | null } = { id: null };
     scroll.current?.dispatchEvent(
       new CustomEvent("studio-history-anchor-id", { detail }),
     );
     return detail.id;
-  }, []);
+  };
   return {
     scroll,
     content,
     getFollow,
-    subscribeFollow,
+    subscribeFollow: (listener: () => void): (() => void) =>
+      reaction(getFollow, listener),
     setFollow,
     onScroll,
     hasRecentScrollInput,

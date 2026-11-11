@@ -1,4 +1,4 @@
-import { makeAutoObservable, observableShallow, runInAction } from "mobx";
+import { makeAutoObservable, observableShallow, flowResult } from "mobx";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { ApiError, errorText, type PostBody } from "../api.ts";
 import {
@@ -55,10 +55,12 @@ export class CombinedSidebarOwner {
         return projectedServices();
       },
       commands: {
-        rename: this.rename,
+        rename: (id, name) => flowResult(this.rename(id, name)),
         notify: source.notify,
       },
-      run: this.run,
+      run: (command) => {
+        void this.run(command);
+      },
       creation: inputs.creation,
       visibility: shell,
       selection: shell,
@@ -101,7 +103,7 @@ export class CombinedSidebarOwner {
       this.source.notify(errorText(failure));
     }
   }
-  run = (command: ServerCommand) => {
+  *run(command: ServerCommand) {
     const { online, send, executeCommand, settings, search, notify } =
       this.source;
     const model = this.shell.model;
@@ -114,13 +116,17 @@ export class CombinedSidebarOwner {
       if (!reference || !online(reference.owner)) return;
       const id = command.id;
       this.marking.add(id);
-      void executeCommand(reference.owner, {
-        ...command,
-        id: reference.id,
-        target: { ...command.target },
-      })
-        .catch((failure) => notify(errorText(failure)))
-        .finally(() => runInAction(() => this.marking.delete(id)));
+      try {
+        yield executeCommand(reference.owner, {
+          ...command,
+          id: reference.id,
+          target: { ...command.target },
+        });
+      } catch (failure) {
+        notify(errorText(failure));
+      } finally {
+        this.marking.delete(id);
+      }
     } else if (command.action === "open") {
       try {
         const reference = model.requireReference(
@@ -192,8 +198,8 @@ export class CombinedSidebarOwner {
       if (online(this.shell.current)) send(this.shell.current, command);
       else notify("The sidebar server is offline.");
     }
-  };
-  rename = async (id: string, name: string) => {
+  }
+  *rename(id: string, name: string) {
     const backend = this.projectedServices.owner({ kind: "chat", id });
     const reference = this.shell.model.requireReference(
       this.shell.model.chatReferences,
@@ -213,7 +219,7 @@ export class CombinedSidebarOwner {
         throw new Error("Retry the saved name before changing it.");
       backend.storage.setItem(key, JSON.stringify(request));
       if (!request.acknowledged) {
-        await backend.post("/api/rename", request.body);
+        yield backend.post("/api/rename", request.body);
         request.acknowledged = true;
         backend.storage.setItem(key, JSON.stringify(request));
       }
@@ -230,7 +236,7 @@ export class CombinedSidebarOwner {
       this.source.notify(errorText(failure));
       throw failure;
     }
-  };
+  }
   start() {
     return this.list.start();
   }

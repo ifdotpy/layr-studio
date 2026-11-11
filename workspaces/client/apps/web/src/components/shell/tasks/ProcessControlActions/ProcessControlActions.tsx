@@ -1,7 +1,6 @@
 import { observer } from "mobx-react-lite";
 import { Button, Checkbox } from "@mantine/core";
 import { Square } from "lucide-react";
-import { runInAction } from "mobx";
 import { useBackgroundTaskActions } from "../support/backgroundTaskActions.tsx";
 
 export const ProcessControlActions = observer(function ProcessControlActions() {
@@ -23,9 +22,7 @@ export const ProcessControlActions = observer(function ProcessControlActions() {
         label="Include worker processes"
         checked={actions.includeWorkers}
         onChange={(event) =>
-          runInAction(() => {
-            actions.includeWorkers = event.currentTarget.checked;
-          })
+          actions.setIncludeWorkers(event.currentTarget.checked)
         }
         disabled={actions.controlPending || blocked}
       />

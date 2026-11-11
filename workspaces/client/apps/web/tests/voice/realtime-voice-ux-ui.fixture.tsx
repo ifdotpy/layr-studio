@@ -1,12 +1,21 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import RealtimeVoice from "../../src/components/conversation/RealtimeVoice/RealtimeVoice.tsx";
-import { watchVoiceTransport } from "../../src/components/conversation/RealtimeVoice/voiceTransport.ts";
-import type { ConnectionHealth } from "../../src/sync/connectionState.ts";
+import RealtimeVoice, {
+  createRealtimeVoice,
+} from "../../src/components/conversation/RealtimeVoice/RealtimeVoice.tsx";
+import { browserAreas } from "../fixtures/owner-support.tsx";
+import { autorun } from "mobx";
+import type { NetStatus } from "../../src/servers/net/status.ts";
 import type { components } from "../../src/generated/api.ts";
 import {
   API_SCHEMA_HASH,
@@ -26,7 +35,7 @@ type VoiceHarness = {
   >[];
   pending: boolean;
   voiceError: string;
-  voiceTransport?: ConnectionHealth;
+  voiceTransport?: NetStatus["connection"];
   holdPermission?: boolean;
   releasePermission?: () => void;
   holdStart?: boolean;
@@ -112,20 +121,39 @@ window.emit = function (event) {
 };
 window.resourceChange = () =>
   nativeFetch("/audit/resource-change", { method: "POST" });
-window.render = (id) =>
+const areas = browserAreas(fixtureServerStore);
+const services = areas.scope.services;
+let currentId: string | undefined;
+let voiceStore: ReturnType<typeof createRealtimeVoice> | undefined;
+window.addEventListener("pagehide", () => voiceStore?.dispose(), {
+  once: true,
+});
+window.render = (id) => {
+  if (id !== currentId) {
+    voiceStore?.dispose();
+    currentId = id;
+    voiceStore = createRealtimeVoice({
+      agentId: id,
+      notify: () => {},
+      store: fixtureServerStore,
+      api: services.api,
+      audio: services.audio,
+      connection: services.net.status,
+    });
+    voiceStore.start();
+  }
   root.render(
     <MantineProvider defaultColorScheme="dark">
-      <ServerViewStoreProvider>
-        <RealtimeVoice agentId={id} notify={() => {}} />
-      </ServerViewStoreProvider>
+      <ServerStoreProvider value={fixtureServerStore}>
+        <RealtimeVoice voiceStore={voiceStore!} />
+      </ServerStoreProvider>
     </MantineProvider>,
   );
-watchVoiceTransport(
-  (state) => {
-    window.voiceTransport = state;
-  },
-  () => {},
-);
+};
+const stopTransportView = autorun(() => {
+  window.voiceTransport = services.net.status.connection;
+});
+window.addEventListener("pagehide", stopTransportView, { once: true });
 fixtureWindow.codexDesktop = {
   requestMicrophone: async () => {
     window.order.push("permission");

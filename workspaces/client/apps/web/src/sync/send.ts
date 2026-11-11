@@ -1,3 +1,4 @@
+import { action, flow, observable, reaction } from "mobx";
 import {
   reportUnsentFailure,
   sendStore,
@@ -73,13 +74,17 @@ export function createOutbox(options: {
   const { command } = options.api;
   const buffer =
     options.buffer ?? sendStore(options.serverId ?? serverViewId ?? "local");
-  const saved = new Map<string, SavedSend>();
+  const saved = observable.map<string, SavedSend>(undefined, { deep: false });
+  const save = action((id: string, value: SavedSend) => saved.set(id, value));
+  const removeSaved = action((id: string) => saved.delete(id));
   const removed = new Set<string>();
   const initialWrites = new Map<string, Promise<void>>();
   let initialization: Promise<void> | undefined;
   const ready = () =>
-    (initialization ??= (async () => {
-      for (const [id, stored] of await buffer.loadAll()) {
+    (initialization ??= flow(function* () {
+      const records: Awaited<ReturnType<typeof buffer.loadAll>> =
+        yield buffer.loadAll();
+      for (const [id, stored] of records) {
         const value: StoredSend =
           stored.localState.kind === "in_flight"
             ? {
@@ -91,17 +96,15 @@ export function createOutbox(options: {
               }
             : stored;
         if (!saved.has(id) && !removed.has(id)) {
-          saved.set(id, value);
+          save(id, value);
         }
       }
     })().catch((error: unknown) => {
       initialization = undefined;
       throw error;
     }));
-  const listeners = new Set<() => void>();
   const active = new Map<string, Promise<SendResult>>();
   const key = (room: string, id: string) => JSON.stringify([room, id]);
-  const publish = () => listeners.forEach((listener) => listener());
   function list(): OutboxEntry[] {
     return [...saved.values()]
       .map((value) => ({
@@ -134,8 +137,7 @@ export function createOutbox(options: {
         ? {}
         : { displayText: value.displayText }),
     };
-    saved.set(id, value);
-    publish();
+    save(id, value);
     const pending = initial
       ? buffer.put(id, record)
       : (initialWrites.get(id) ?? Promise.resolve()).then(() =>
@@ -158,8 +160,7 @@ export function createOutbox(options: {
   async function remove(room: string, id: string) {
     const identity = key(room, id);
     removed.add(identity);
-    saved.delete(identity);
-    publish();
+    removeSaved(identity);
     await initialWrites.get(identity)?.catch(() => {});
     initialWrites.delete(identity);
     await buffer.delete(identity);
@@ -245,8 +246,7 @@ export function createOutbox(options: {
         notifyPersisted();
         if (receipt.status === MessageSendStatus.uncertain) {
           if (read(value.request.target, id)) {
-            saved.set(key(value.request.target, id), { ...value, receipt });
-            publish();
+            save(key(value.request.target, id), { ...value, receipt });
           }
         } else {
           void remove(value.request.target, id).catch(reportUnsentFailure);
@@ -365,8 +365,7 @@ export function createOutbox(options: {
       const value = read(room, receipt.id);
       if (value?.workspaceId !== workspaceId) continue;
       if (receipt.status === MessageSendStatus.uncertain) {
-        saved.set(key(room, receipt.id), { ...value, receipt });
-        publish();
+        save(key(room, receipt.id), { ...value, receipt });
       } else await remove(room, receipt.id);
     }
   }
@@ -403,7 +402,7 @@ export function createOutbox(options: {
         setError(errorText(failure));
       }
     };
-    listeners.add(update);
+    const stopEntries = reaction(list, update);
     let wasLive = false;
     const stopConnection = options.watchResourceConnection((status) => {
       const reconnected = status === "live" && !wasLive;
@@ -417,11 +416,12 @@ export function createOutbox(options: {
       })
       .catch((failure) => setError(errorText(failure)));
     return () => {
-      listeners.delete(update);
+      stopEntries();
       stopConnection();
     };
   }
   return {
+    outbox: list,
     observeOutbox,
     durableSend,
     reconcileOutboxReceipts,
@@ -432,6 +432,7 @@ export function createOutbox(options: {
 }
 
 export const {
+  outbox,
   observeOutbox,
   durableSend,
   reconcileOutboxReceipts,

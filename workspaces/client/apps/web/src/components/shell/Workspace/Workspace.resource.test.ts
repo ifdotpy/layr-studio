@@ -2,16 +2,20 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
-import { flowResult } from "mobx";
+import { autorun, flowResult } from "mobx";
 import { expect, it, vi } from "vitest";
+import { WorkspaceResources } from "./WorkspaceResources.ts";
 import { WorkspaceResource } from "./WorkspaceResource.ts";
-import { useWorkspaceResource } from "./useWorkspaceResource.ts";
 
-const api = vi.hoisted(() => ({ get: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({ useServerApi: () => api }),
 );
+let workspace: WorkspaceResources;
+vi.mock("../../../app/ServerAreasProvider.tsx", () => ({
+  useServerAreas: () => ({ workspace }),
+}));
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: Error) => void;
@@ -99,40 +103,52 @@ it("the panel caller tracks query changes, command revisions and late cleanup re
     .mockReset()
     .mockReturnValueOnce(first.promise)
     .mockResolvedValue({ checkpoints: [{ id: "new" }] });
-  const View = observer(
-    ({ agent, revision }: { agent: string; revision: number }) => {
-      const state = useWorkspaceResource("/api/checkpoints", revision, {
-        query: { agent },
-      });
-      return createElement(
-        "p",
-        null,
-        state.data?.checkpoints[0]?.id ??
-          (state.loading ? "Loading" : state.error),
-      );
-    },
-  );
+  workspace = new WorkspaceResources(api);
+  const View = observer(({ agent }: { agent: string }) => {
+    const state = workspace.reads["/api/checkpoints"]({ agent });
+    return createElement(
+      "p",
+      null,
+      state.data?.checkpoints[0]?.id ??
+        (state.loading ? "Loading" : state.error),
+    );
+  });
   const host = document.body.appendChild(document.createElement("div")),
     root = createRoot(host);
   try {
-    await act(async () =>
-      root.render(createElement(View, { agent: "old", revision: 0 })),
-    );
+    await act(async () => root.render(createElement(View, { agent: "old" })));
     expect(host.textContent).toBe("Loading");
-    await act(async () =>
-      root.render(createElement(View, { agent: "new", revision: 0 })),
-    );
+    await act(async () => root.render(createElement(View, { agent: "new" })));
     expect(api.get.mock.calls[0]?.[1].signal.aborted).toBe(true);
     expect(host.textContent).toBe("new");
     await act(async () => first.resolve({ checkpoints: [] }));
     expect(host.textContent).toBe("new");
-    await act(async () =>
-      root.render(createElement(View, { agent: "new", revision: 1 })),
-    );
+    await act(async () => workspace.reload());
     expect(api.get).toHaveBeenCalledTimes(3);
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    workspace.dispose();
     vi.unstubAllGlobals();
   }
+});
+
+it("loads only while observed and aborts when its last observer leaves", async () => {
+  const pending = deferred<{ value: string } | undefined>();
+  const read = vi
+    .fn<WorkspaceResource<{ value: string }>["read"]>()
+    .mockReturnValue(pending.promise);
+  const state = new WorkspaceResource(read);
+  expect(read).not.toHaveBeenCalled();
+  const stop = autorun(() => {
+    void state.data;
+  });
+  await Promise.resolve();
+  expect(read).toHaveBeenCalledTimes(1);
+  stop();
+  await Promise.resolve();
+  expect(read.mock.calls[0]?.[0].aborted).toBe(true);
+  pending.resolve({ value: "late" });
+  await pending.promise;
+  expect(state.data).toBeNull();
 });

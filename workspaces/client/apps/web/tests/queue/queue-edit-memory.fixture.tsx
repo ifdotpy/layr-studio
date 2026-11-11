@@ -1,6 +1,7 @@
 import "../../src/rendererStyles.ts";
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { createMessageQueueStore } from "../../src/components/conversation/MessageQueue/MessageQueueStore.ts";
 import MessageQueue from "../../src/components/conversation/MessageQueue/MessageQueue.tsx";
 import type { QueueItemDto } from "../../src/api.ts";
 
@@ -14,16 +15,18 @@ export function mount() {
     status: "queued",
     kind: "user",
   } as QueueItemDto;
-  createRoot(node).render(
-    <MessageQueue
-      scope="test"
-      items={[item]}
-      canReorder={false}
-      onEdit={async (_item, text) => {
+  const store = createMessageQueueStore(
+    () => ({
+      scope: "test",
+      items: [item],
+      canReorder: false,
+      onEdit: async (_item, text) => {
         document.title = text;
-      }}
-      onCancel={async () => {}}
-      onReorder={async () => {}}
-    />,
+      },
+      onCancel: async () => {},
+      onReorder: async () => {},
+    }),
+    "local",
   );
+  createRoot(node).render(<MessageQueue store={store} />);
 }

@@ -3,10 +3,11 @@ import { approval, question, browserOpen } from "../approvalFixtures.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Button } from "@mantine/core";
 import QuestionCard from "../components/conversation/questions/QuestionCard/QuestionCard.tsx";
-import Requests, {
-  RequestArea,
-} from "../components/conversation/questions/Requests/Requests.tsx";
-import { RequestFixture } from "../components/conversation/questions/support/requestFixtures.ts";
+import Requests from "../components/conversation/questions/Requests/Requests.tsx";
+import {
+  RequestFixture,
+  createRequestFixture,
+} from "../components/conversation/questions/support/requestFixtures.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { expect } from "storybook/test";
 import {
@@ -83,6 +84,7 @@ function NoticeAudit() {
 const meta = {
   title: "Design/Semantic audit",
   component: NoticeAudit,
+  beforeEach: setupRequestAudit,
   parameters: { layout: "fullscreen" },
 } satisfies Meta<typeof NoticeAudit>;
 export default meta;
@@ -109,7 +111,8 @@ export const NoticesDark: Story = {
   play: ({ canvasElement }) => verifyNotices(canvasElement),
 };
 
-function PrimaryAudit() {
+let auditOwner: ReturnType<typeof createRequestFixture>;
+function setupRequestAudit() {
   const requests = [
     approval({
       id: "audit-question",
@@ -125,6 +128,28 @@ function PrimaryAudit() {
       },
     }),
   ];
+  const fixture = createRequestFixture({
+    scope: "semantic-audit",
+    notify() {},
+    requests: [
+      ...requests,
+      approval({
+        id: "audit-signin",
+        agent: "audit-lead",
+        request: browserOpen("https://example.com/device", {
+          host: "example.com",
+          userCode: "ABCD-1234",
+        }),
+      }),
+    ],
+    agents: [agentSummaryFixture("audit-lead", { name: "Release lead" })],
+    details: [{ id: "audit-lead" }],
+  });
+  fixture.start();
+  auditOwner = fixture;
+  return () => fixture.dispose();
+}
+function PrimaryAudit() {
   return (
     <main className="foundation-sheet">
       <span
@@ -151,24 +176,8 @@ function PrimaryAudit() {
         }}
         onAnswer={() => {}}
       />
-      <RequestFixture
-        requests={[
-          ...requests,
-          approval({
-            id: "audit-signin",
-            agent: "audit-lead",
-            request: browserOpen("https://example.com/device", {
-              host: "example.com",
-              userCode: "ABCD-1234",
-            }),
-          }),
-        ]}
-        agents={[agentSummaryFixture("audit-lead", { name: "Release lead" })]}
-        details={[{ id: "audit-lead" }]}
-      >
-        <RequestArea scope="semantic-audit" notify={() => {}}>
-          <Requests all />
-        </RequestArea>
+      <RequestFixture owner={auditOwner}>
+        <Requests all />
       </RequestFixture>
       <Button variant="filled">Create project</Button>
       <Button data-audit-quiet>Cancel</Button>

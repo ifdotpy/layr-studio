@@ -1,3 +1,4 @@
+import { observable, action, reaction } from "mobx";
 import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import { sidebarEntities } from "./sidebarSnapshot.ts";
 import {
@@ -93,11 +94,10 @@ function source(
   });
 }
 function backend(value: SidebarSource) {
-  const values = new Map<string, string>();
+  const values = observable.map<string, string>();
   // This window's preference fields with edit times, as uiPreferenceStore keeps them.
-  const fields: PreferenceFields = {};
+  const fields = observable.object<PreferenceFields>({});
   const writes: string[] = [];
-  const listeners = new Map<string, Set<() => void>>();
   const storage = {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, data: string) => {
@@ -135,23 +135,14 @@ function backend(value: SidebarSource) {
             timestamp,
             writer: "this-window",
           };
-      listeners.get(key)?.forEach((listener) => listener());
       return next;
     },
     preferenceFields: () => ({ ...fields }),
     adoptPreferenceFields(incoming) {
       Object.assign(fields, mergePreferenceFields(fields, incoming));
     },
-    subscribePreference(key, update) {
-      const callbacks = listeners.get(key) || new Set();
-      callbacks.add(update);
-      listeners.set(key, callbacks);
-      return () => {
-        callbacks.delete(update);
-      };
-    },
   };
-  return { backend: result, values, writes, listeners, fields };
+  return { backend: result, values, writes, fields };
 }
 
 describe("complete multi-server sidebar projection", () => {
@@ -736,7 +727,7 @@ describe("original saved sidebar state", () => {
     expect(mergeSidebar([local, remote]).collapsed[key]).toBe(true);
   });
 
-  it("writes only changed source fields, keeps unrelated keys and subscribes to original keys", () => {
+  it("writes only changed source fields, keeps unrelated keys and observes original keys", () => {
     const local = source("local");
     const remote = source("remote");
     assert.ok(remote.sidebar.projects[0] != null);
@@ -762,8 +753,13 @@ describe("original saved sidebar state", () => {
     const previous = cache.saved<Record<string, boolean>>(key, {});
     const mapped = model.mapTreeKey("remote", treeKey("folder"));
     let updates = 0;
-    const stop = cache.subscribePreference(key, () => updates++);
-    cache.editPreference(key, previous, { ...previous, [mapped]: false });
+    const stop = reaction(
+      () => JSON.stringify(cache.saved(key, {})),
+      () => updates++,
+    );
+    action(() =>
+      cache.editPreference(key, previous, { ...previous, [mapped]: false }),
+    )();
     expect(a.writes).toEqual([]);
     expect(b.writes).toEqual([`codex-project-tree:${scope}`]);
     expect(b.backend.saved(`codex-project-tree:${scope}`, {})).toEqual({
@@ -772,9 +768,6 @@ describe("original saved sidebar state", () => {
     });
     expect(updates).toBe(1);
     stop();
-    expect(
-      [...b.listeners.values()].every((listeners) => !listeners.size),
-    ).toBe(true);
   });
 
   it("refuses offline preference changes before touching any source", () => {

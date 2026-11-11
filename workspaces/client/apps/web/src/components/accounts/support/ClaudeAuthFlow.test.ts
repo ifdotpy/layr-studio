@@ -1,5 +1,7 @@
+import { createApiStorage } from "../../../apiStorage.ts";
 import { OBSERVABLE_INTEREST_DELAY_MS } from "../../../store/interest.ts";
-import { flowResult } from "mobx";
+import { autorun, flowResult } from "mobx";
+import { now } from "../../../clock.ts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "../../../api.ts";
 import { transientTestFixture } from "../../../sync/subscriptions/transientTestFixture.ts";
@@ -23,7 +25,6 @@ function flow(accountKey?: string) {
     },
   );
   flows.push(current);
-  current.startWatching();
   return { current, ready };
 }
 function receipt(
@@ -172,7 +173,7 @@ it("publishes completion once and clears its saved add attempt before a reload",
   current.dispose();
   expect(flow().current.requestId).toBe("");
 });
-it("disposes receipt reactions and unknown-request timers", async () => {
+it("disposes receipt reactions before delayed completion", async () => {
   const { current, ready } = flow();
   owner.post.mockRejectedValueOnce(new Error("Lost reply"));
   await flowResult(current.start());
@@ -184,14 +185,6 @@ it("disposes receipt reactions and unknown-request timers", async () => {
   );
   await vi.advanceTimersByTimeAsync(6000);
   expect(ready).not.toHaveBeenCalled();
-  const attempt = current.flow;
-  if (!attempt) throw new Error("Missing saved attempt");
-  current.persist({ ...attempt, unknownSince: Date.now() });
-  const restored = flow().current;
-  const clock = restored.now;
-  restored.dispose();
-  await vi.advanceTimersByTimeAsync(6000);
-  expect(restored.now).toBe(clock);
 });
 
 it("keeps saved-account cancellation identity after an uncertain response and dialog remount", async () => {
@@ -216,4 +209,91 @@ it("keeps saved-account cancellation identity after an uncertain response and di
   await vi.advanceTimersByTimeAsync(OBSERVABLE_INTEREST_DELAY_MS);
   expect(owner.post.mock.calls[2]).toEqual(cancellation);
   expect(restored.terminal).toBe(true);
+});
+
+it("keeps the Codex cancellation request identity after a lost reply and dialog remount", async () => {
+  const { CodexAuthFlow } = await import("./CodexAuthFlow.ts");
+  const services = {
+    api: owner.areas.scope.services.api,
+    store: {
+      ...owner.areas.scope.store,
+      authProgress: stream.store.authProgress,
+    },
+    resources: {
+      ...owner.areas.scope.services.resources,
+      ...stream.subscriptions,
+    },
+  };
+  Object.assign(
+    services.api,
+    createApiStorage(owner.areas.scope.services.storage),
+  );
+  const options = {
+    scope: "fixture-codex",
+    accountKey: "personal",
+    email: "",
+    label: "Personal",
+  };
+  const current = new CodexAuthFlow(services, options);
+  let restored: InstanceType<typeof CodexAuthFlow> | undefined;
+  try {
+    owner.post.mockImplementationOnce(
+      async (
+        _path: unknown,
+        body: import("../../../api.ts").PostBody<"/api/accounts/login">,
+      ) => ({
+        requestId: body.login_id,
+        accountKey: "personal",
+        status: "pending",
+      }),
+    );
+    await flowResult(current.run("start"));
+    await vi.advanceTimersByTimeAsync(OBSERVABLE_INTEREST_DELAY_MS);
+    owner.post.mockRejectedValueOnce(new Error("Lost cancel reply"));
+    await flowResult(current.run("cancel"));
+    const cancellation = owner.post.mock.calls[1];
+    expect(current.error).toBe("Lost cancel reply");
+    current.dispose();
+    restored = new CodexAuthFlow(services, options);
+    expect(restored.requestId).toBe(current.requestId);
+    owner.post.mockResolvedValueOnce({
+      requestId: current.requestId,
+      accountKey: "personal",
+      status: "cancelled",
+    });
+    await flowResult(restored.run("cancel"));
+    await vi.advanceTimersByTimeAsync(OBSERVABLE_INTEREST_DELAY_MS);
+    expect(owner.post.mock.calls[2]).toEqual(cancellation);
+    expect(restored.receipt?.status).toBe("cancelled");
+  } finally {
+    current.dispose();
+    restored?.dispose();
+  }
+});
+
+it("offers a new attempt at the exact unknown-request deadline regardless of clock tick phase", async () => {
+  const stopClock = autorun(() => now());
+  await vi.advanceTimersByTimeAsync(100);
+  const { current } = flow();
+  current.persist({
+    requestId: "unknown",
+    startRequestId: "",
+    label: "Profile",
+    email: "",
+    createdAt: Date.now(),
+    unknownSince: Date.now(),
+  });
+  let expired = false;
+  const stop = autorun(() => {
+    expired = current.unknownTooLong;
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(expired).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(expired).toBe(true);
+  } finally {
+    stop();
+    stopClock();
+  }
 });

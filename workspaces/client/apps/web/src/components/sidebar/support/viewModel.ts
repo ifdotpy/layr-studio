@@ -189,22 +189,20 @@ export function createProjectStatusView(
   rows: readonly SidebarChatView[],
   archived: boolean,
 ) {
-  const counts = computed(() => {
-    const value = { working: 0, answer: 0, error: 0 };
-    for (const row of rows) {
-      if (row.agent.archived !== archived) continue;
-      const kind = row.indicator.kind;
-      if (kind === "working" || kind === "answer" || kind === "error")
-        value[kind]++;
-    }
-    return value;
-  });
   return {
     get counts() {
-      return counts.get();
+      const value = { working: 0, answer: 0, error: 0 };
+      for (const row of rows) {
+        if (row.agent.archived !== archived) continue;
+        const kind = row.indicator.kind;
+        if (kind === "working" || kind === "answer" || kind === "error")
+          value[kind]++;
+      }
+      return value;
     },
   };
 }
+
 /** Callers retain transient controls and effective order in their existing owners.
  * A React caller recreates this facade when those plain inputs change. */
 export function createSidebarViewModel(

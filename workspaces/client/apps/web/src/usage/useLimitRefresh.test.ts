@@ -38,7 +38,6 @@ async function fixture(label = "First", token = "credential-one") {
     localStorage: preferenceMemory,
     sessionStorage: preferenceMemory,
     beginMutation: createMutationJournal(label, preferenceMemory),
-    beginActivity: () => () => {},
   });
   api.receiveStreamSession({
     routes: [],

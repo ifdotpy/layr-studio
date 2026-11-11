@@ -1,3 +1,9 @@
+const fixtureServerStore = createServerStore(defaultSubscriptions);
+window.addEventListener("pagehide", () => fixtureServerStore.dispose(), {
+  once: true,
+});
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import { desktopFixture } from "../files/desktop.fixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
@@ -17,7 +23,7 @@ import "@mantine/core/styles.css";
 import FilePreview, {
   useFilePreview,
 } from "../../src/components/conversation/FilePreview/FilePreview.tsx";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
 import {
   parseDelimited,
@@ -54,7 +60,7 @@ function App() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  <ServerViewStoreProvider>
+  <ServerStoreProvider value={fixtureServerStore}>
     <App />
-  </ServerViewStoreProvider>,
+  </ServerStoreProvider>,
 );

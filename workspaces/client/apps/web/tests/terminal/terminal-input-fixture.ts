@@ -1,40 +1,41 @@
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
-import { observer } from "mobx-react-lite";
-import { useServerStore } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { resourceData } from "../../src/store/runtime.ts";
+import { FixtureAreas } from "../fixtures/owner-support.tsx";
+
 import { cacheFixture } from "../cacheFixture.ts";
-import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import TerminalDock from "../../src/components/shell/TerminalDock/TerminalDock.tsx";
 import { setToken } from "../../src/servers/net/api.ts";
-const Terminal = observer(function Terminal() {
-  const agent = resourceData(useServerStore().state().current)?.agents.get(
-    "agent",
-  );
-  return React.createElement(TerminalDock, {
-    agent,
-    notify: (value) => window.notices.push(value),
-  });
-});
+let disposeStore = () => {};
+window.addEventListener("pagehide", () => disposeStore(), { once: true });
 export function mount(shell: string) {
   window.reactRoot?.unmount();
+  disposeStore();
   localStorage.setItem("codex.terminal.open", cacheFixture(true));
   localStorage.setItem(
     "codex.terminal.selected",
     cacheFixture("shell:" + shell),
   );
   setToken("fixture-token");
+  const store = createServerStore(defaultSubscriptions);
+  disposeStore = store.dispose;
   const root = createRoot(document.getElementById("app")!);
   root.render(
     React.createElement(
       MantineProvider,
       null,
       React.createElement(
-        ServerViewStoreProvider,
-        null,
-        React.createElement(Terminal),
+        ServerStoreProvider,
+        { value: store },
+        React.createElement(FixtureAreas, {
+          selectedId: "agent",
+          notify: (message: string) => window.notices.push(message),
+          children: React.createElement(TerminalDock),
+        }),
       ),
     ),
   );

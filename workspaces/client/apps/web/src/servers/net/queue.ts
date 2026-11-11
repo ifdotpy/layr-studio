@@ -1,6 +1,7 @@
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { outboxRequests } from "../../browserPersistence.ts";
 import {
+  flow,
   makeAutoObservable,
   observableRef,
   computed,
@@ -65,89 +66,88 @@ export function createMessageQueue(
   const suffix = `${p.scope}:${p.id}`,
     key = outboxRequests(storage).key("queueChange", suffix);
   const stored = readStoredQueueRequest(storage, suffix);
-  const queue = {
-    subscribeCommands: (listener: () => void) =>
-      api.pending.subscribe(listener),
-    key,
-    active: true,
-    error: stored.error,
-    blocked: !!stored.error,
-    busy: false,
-    pending: stored.pending,
-    commands: api.pending.list(),
-    get current() {
-      return p.enabled && p.id ? store.state().current : undefined;
+  const queue = makeAutoObservable(
+    {
+      key,
+      active: true,
+      error: stored.error,
+      blocked: !!stored.error,
+      busy: false,
+      pending: stored.pending,
+      get commands() {
+        return api.pending.list();
+      },
+      get current(): ReturnType<typeof store.state>["current"] | undefined {
+        return p.enabled && p.id ? store.state().current : undefined;
+      },
+      get view(): DeepReadonly<QueueView> {
+        return (
+          (this.current &&
+            p.id &&
+            resourceData(store.state().current)?.queues.get(p.id)) ||
+          emptyQueue
+        );
+      },
+      get items(): DeepReadonly<QueueItemDto>[] {
+        return this.view.items.filter(
+          (item) =>
+            !this.commands.some(
+              (entry) =>
+                entry.kind === "withdraw" &&
+                entry.target === p.id &&
+                entry.message === item.id,
+            ),
+        );
+      },
+      get loading() {
+        return !["live", "stale"].includes(this.current?.status || "");
+      },
+      get canReorder() {
+        return !this.blocked && !!this.view.capabilities?.reorder;
+      },
+      syncPending() {
+        const stored = readStoredQueueRequest(storage, suffix);
+        if (stored.error || this.blocked) this.error = stored.error;
+        this.blocked = !!stored.error;
+        this.pending = stored.pending;
+      },
     },
-    get view() {
-      return (
-        (this.current &&
-          p.id &&
-          resourceData(this.current)?.queues.get(p.id)) ||
-        emptyQueue
+    {
+      active: false,
+      pending: observableRef,
+      items: computed({ equals: compareShallow }),
+    },
+    { autoBind: true },
+  );
+  const clearRequest = flow(function* (request: QueueMutation) {
+    const next: QueueMutation | null =
+      yield updateQueueRequest<QueueMutation | null>(suffix, null, (current) =>
+        current?.request_id === request.request_id ? null : current,
       );
-    },
-    get items() {
-      return this.view.items.filter(
-        (item) =>
-          !this.commands.some(
-            (entry) =>
-              entry.kind === "withdraw" &&
-              entry.target === p.id &&
-              entry.message === item.id,
-          ),
-      );
-    },
-    get loading() {
-      return !["live", "stale"].includes(this.current?.status || "");
-    },
-    get canReorder() {
-      return !this.blocked && !!this.view.capabilities?.reorder;
-    },
-    setPending(request: QueueMutation | null) {
-      this.pending = request;
-    },
-    finish() {
+    if (queue.active) queue.pending = next;
+  });
+  const run = flow(function* (operation: () => Promise<void>) {
+    if (queue.blocked) throw new Error(queue.error);
+    if (locks.has(key)) throw new Error("Wait for the current queue change.");
+    locks.add(key);
+    queue.busy = true;
+    try {
+      yield operation();
+    } finally {
       locks.delete(key);
-      this.busy = false;
-    },
-    syncPending() {
-      const stored = readStoredQueueRequest(storage, suffix);
-      if (stored.error || this.blocked) this.error = stored.error;
-      this.blocked = !!stored.error;
-      this.setPending(stored.pending);
-    },
-    syncCommands() {
-      this.commands = api.pending.list();
-    },
-    async clearRequest(request: QueueMutation) {
-      const next = await updateQueueRequest<QueueMutation | null>(
-        suffix,
-        null,
-        (current) =>
-          current?.request_id === request.request_id ? null : current,
-      );
-      if (this.active) this.setPending(next);
-    },
-    async run(operation: () => Promise<void>) {
-      if (this.blocked) throw new Error(this.error);
-      if (locks.has(key)) throw new Error("Wait for the current queue change.");
-      locks.add(key);
-      this.busy = true;
-      try {
-        await operation();
-      } finally {
-        this.finish();
-      }
-    },
-    async execute(request: QueueMutation) {
-      if (!p.id || request.agent !== p.id)
-        throw new Error("The queue belongs to another chat.");
-      await this.run(async () => {
+      queue.busy = false;
+    }
+  });
+  const execute = flow(function* (request: QueueMutation) {
+    if (!p.id || request.agent !== p.id)
+      throw new Error("The queue belongs to another chat.");
+    yield run(
+      flow(function* () {
         try {
-          await syncPost("/api/queue", request, {
+          yield syncPost("/api/queue", request, {
             workspaceId: p.workspaceId,
           });
-          await this.clearRequest(request);
+          yield clearRequest(request);
           if (request.action === "edit" && request.id)
             p.edited?.(request.id, request.text);
         } catch (error) {
@@ -155,90 +155,84 @@ export function createMessageQueue(
             error instanceof ApiError &&
             [400, 401, 403, 404].includes(error.status)
           )
-            await this.clearRequest(request);
+            yield clearRequest(request);
           throw error;
         }
-      });
-    },
-    fail(error: unknown) {
-      this.error = errorText(error);
-    },
-    async mutate(change: QueueChange) {
-      if (!p.id) throw new Error("The queue belongs to another chat.");
-      this.syncPending();
-      if (this.blocked) throw new Error(this.error);
-      const existing = this.pending;
-      if (existing !== null)
+      }),
+    );
+  });
+  const mutate = flow(function* (change: QueueChange) {
+    if (!p.id) throw new Error("The queue belongs to another chat.");
+    queue.syncPending();
+    if (queue.blocked) throw new Error(queue.error);
+    const existing = queue.pending;
+    if (existing !== null)
+      throw new Error(
+        "Retry the previous queue change before making another change.",
+      );
+    if (!queue.view.capabilities?.receipts || !queue.view.revision)
+      throw new Error(
+        "The queue is still loading or the server needs an update.",
+      );
+    const request = {
+      ...change,
+      agent: p.id,
+      expected_revision: queue.view.revision,
+      request_id: randomUUID(),
+    } satisfies QueueMutation;
+    // Save before HTTP so a lost response or reload reuses the same operation.
+    yield updateQueueRequest<unknown>(suffix, null, (current) => {
+      if (current !== null)
         throw new Error(
           "Retry the previous queue change before making another change.",
         );
-      if (!this.view.capabilities?.receipts || !this.view.revision)
-        throw new Error(
-          "The queue is still loading or the server needs an update.",
-        );
-      const request = {
-        ...change,
-        agent: p.id,
-        expected_revision: this.view.revision,
-        request_id: randomUUID(),
-      } satisfies QueueMutation;
-      // Save before HTTP so a lost response or reload reuses the same operation.
-      await updateQueueRequest<unknown>(suffix, null, (current) => {
-        if (current !== null)
-          throw new Error(
-            "Retry the previous queue change before making another change.",
-          );
-        return request;
-      });
-      this.setPending(request);
-      return this.execute(request);
-    },
-    async retry() {
-      this.syncPending();
-      if (this.blocked) throw new Error(this.error);
-      const request = this.pending;
-      if (request !== null) {
-        await this.execute(request);
-      }
-    },
-    async edit(item: DeepReadonly<QueueItemDto>, text: string) {
-      const current = this.view.items.find((row) => row.id === item.id);
-      await this.mutate({
-        action: "edit",
-        id: item.id,
-        text,
-        expectedText: current?.text === text.trim() ? current.text : item.text,
-      });
-    },
-    async cancel(item: DeepReadonly<QueueItemDto>) {
-      const id = p.id;
-      if (!id) throw new Error("The queue belongs to another chat.");
-      await this.run(async () => {
-        await api.command.withdraw(id, item.id, {
+      return request;
+    });
+    queue.pending = request;
+    yield execute(request);
+  });
+  const retry = flow(function* () {
+    queue.syncPending();
+    if (queue.blocked) throw new Error(queue.error);
+    const request = queue.pending;
+    if (request !== null) {
+      yield execute(request);
+    }
+  });
+  const edit = flow(function* (item: DeepReadonly<QueueItemDto>, text: string) {
+    const current = queue.view.items.find((row) => row.id === item.id);
+    yield mutate({
+      action: "edit",
+      id: item.id,
+      text,
+      expectedText: current?.text === text.trim() ? current.text : item.text,
+    });
+  });
+  const cancel = flow(function* (item: DeepReadonly<QueueItemDto>) {
+    const id = p.id;
+    if (!id) throw new Error("The queue belongs to another chat.");
+    yield run(
+      flow(function* () {
+        yield api.command.withdraw(id, item.id, {
           workspaceId: p.workspaceId,
         });
         p.observed?.([item.id]);
-      });
-    },
+      }),
+    );
+  });
+  return Object.assign(queue, {
+    retry,
+    edit,
+    cancel,
     sendNow(item: DeepReadonly<QueueItemDto>) {
-      return this.mutate({
+      return mutate({
         action: "send_now",
         id: item.id,
         expectedText: item.text,
       });
     },
     reorder(ids: string[]) {
-      return this.mutate({ action: "reorder", ordered_ids: ids });
+      return mutate({ action: "reorder", ordered_ids: ids });
     },
-  };
-  return makeAutoObservable(
-    queue,
-    {
-      active: false,
-      pending: observableRef,
-      commands: observableRef,
-      items: computed({ equals: compareShallow }),
-    },
-    { autoBind: true },
-  );
+  });
 }

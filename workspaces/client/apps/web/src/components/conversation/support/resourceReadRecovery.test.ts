@@ -1,3 +1,4 @@
+import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
 import { createNet } from "../../../servers/net/net.ts";
 import * as netApi from "../../../servers/net/api.ts";
 import * as netLocalDrafts from "../../../sync/localDraft.ts";
@@ -7,7 +8,7 @@ import { outboxRequests } from "../../../browserPersistence.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import type { ComponentSnapshot as Snapshot } from "../ComposerAttachments/componentTestFixtures.ts";
 // @vitest-environment happy-dom
-import { observable, runInAction } from "mobx";
+import { observable, action, Reaction } from "mobx";
 import { createModelsMirror } from "../../../generated/observableResources.ts";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
@@ -305,14 +306,19 @@ function publishQueue(revision: string, text: string | null) {
 }
 
 import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
-import { useMessageQueue } from "./useMessageQueue.ts";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import type { QueueOptions } from "../../../servers/net/queue.ts";
+function useMessageQueue(options: QueueOptions) {
+  return useServerNet().queue(options, new Set());
+}
 import { ApiError } from "../../../api.ts";
 import {
   useWorkerModels,
   readWorkerModels,
 } from "../../agents/support/WorkerModelPicker.tsx";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
-import ProductUsage from "../Usage/Usage.tsx";
+import ProductUsage, { createUsageView } from "../Usage/Usage.tsx";
+let usageStore: ReturnType<typeof createUsageView>;
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
 import { serializeStateCollections } from "../../../generated/observableResources.ts";
 function Usage({
@@ -327,7 +333,7 @@ function Usage({
   opened?: boolean;
   visible?: boolean;
 }) {
-  runInAction(() => {
+  action(() => {
     nativeState.apply([
       ...serializeStateCollections(nativeState.current).filter(
         (row) => row.collection !== "agentSummary",
@@ -344,9 +350,15 @@ function Usage({
         },
       },
     ]);
-  });
+  })();
   cursor.usage = true;
-  return ProductUsage({ agent, opened, visible, onChange: () => {} });
+  return ProductUsage({
+    agent,
+    opened,
+    visible,
+    onChange: () => {},
+    usageStore,
+  });
 }
 
 function selectedReceipts(workspaceId = "") {
@@ -389,13 +401,25 @@ function selectedReceipts(workspaceId = "") {
   return selected.receipts;
 }
 
+let renderReaction: Reaction | undefined;
 function mount<T>(action: () => T): T {
-  let result: T;
+  if (!renderReaction) {
+    renderReaction = new Reaction("resource read fixture", () => {
+      cursor.dirty = true;
+    });
+    cleanups.push(() => {
+      renderReaction?.dispose();
+      renderReaction = undefined;
+    });
+  }
+  let result!: T;
   do {
     cursor.state = cursor.ref = cursor.memo = 0;
     cursor.dirty = false;
     cursor.usage = false;
-    result = action();
+    renderReaction.track(() => {
+      result = action();
+    });
     for (const effect of effects.splice(0)) {
       const cleanup = effect();
       if (cleanup) cleanups.push(cleanup);
@@ -406,13 +430,21 @@ function mount<T>(action: () => T): T {
 
 describe("resource read callers", () => {
   beforeEach(() => {
+    usageStore = createUsageView(
+      { ...netApi, post },
+      nativeStore,
+      () =>
+        nativeState.current.agents.values().next().value?.accountKey ||
+        "default",
+    );
+    usageStore.start();
     projectionListeners.clear();
     nativeState.apply([]);
     modelState.apply([]);
-    runInAction(() => {
+    action(() => {
       costsState.set({ status: "loading" });
       sessionState.set({ status: "loading" });
-    });
+    })();
     modelReader = { scope: "fixture", read: get };
     projectionListeners.add((snapshot) => {
       const runtime = (snapshot as Snapshot).runtime;
@@ -424,14 +456,14 @@ describe("resource read callers", () => {
             value: runtime.accountsSummary,
           },
         ]);
-      runInAction(() => {
+      action(() => {
         costsState.set({
           status: "live",
           data: Object.values(runtime.accountCostsByAccount ?? {}),
         });
         const cost = runtime.sessionCostsByAgent?.lead;
         if (cost) sessionState.set({ status: "live", data: cost });
-      });
+      })();
     });
     reconnect.mockClear();
     vi.useFakeTimers();
@@ -473,6 +505,7 @@ describe("resource read callers", () => {
   });
 
   afterEach(() => {
+    usageStore.dispose();
     for (const cleanup of cleanups.splice(0).reverse()) cleanup();
     expect(post).not.toHaveBeenCalled();
     vi.useRealTimers();
@@ -665,6 +698,13 @@ describe("resource read callers", () => {
   );
 
   it("uses streamed models for display and a fresh owner read for selection", async () => {
+    const areas = conversationActionsFixture(undefined, nativeStore);
+    Object.assign(areas.scope.services, { modelReader });
+    contexts.set(ServerAreasContextProvider, areas);
+    cleanups.push(() => {
+      areas.dispose();
+      areas.scope.services.close();
+    });
     const publish = (model: string) =>
       modelState.apply([
         {
@@ -726,17 +766,22 @@ describe("resource read callers", () => {
         }),
       );
     render(false);
+    await vi.advanceTimersByTimeAsync(0);
     for (const accept of projectionListeners) accept({ runtime: {} });
     expect(post).not.toHaveBeenCalled();
     render(true);
+    await vi.advanceTimersByTimeAsync(0);
     render(true);
+    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(600_000);
     expect(post).toHaveBeenCalledExactlyOnceWith("/api/costs/interest", {
       account_key: "default",
     });
     expect(get).not.toHaveBeenCalled();
     render(false);
+    await vi.advanceTimersByTimeAsync(0);
     render(true);
+    await vi.advanceTimersByTimeAsync(0);
     expect(post).toHaveBeenCalledTimes(2);
     post.mockClear();
   });
@@ -755,8 +800,9 @@ describe("resource read callers", () => {
         }),
       );
     render();
+    await vi.advanceTimersByTimeAsync(0);
     for (const accept of projectionListeners) accept({ runtime: {} });
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     const saved = {
       accountKey: "default",
       at: 100,
@@ -794,6 +840,7 @@ describe("resource read callers", () => {
         }),
       );
     render(false);
+    await vi.advanceTimersByTimeAsync(0);
     const saved = {
       accountKey: "default",
       at: 100,
@@ -806,8 +853,9 @@ describe("resource read callers", () => {
     for (const accept of projectionListeners)
       accept({ runtime: { accountCostsByAccount: { default: saved } } });
     render(true);
+    await vi.advanceTimersByTimeAsync(0);
     reject(new Error("Response lost"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(JSON.stringify(render(true))).toContain(
       "Refresh failed · stale estimate",
     );
@@ -844,11 +892,14 @@ describe("resource read callers", () => {
         }),
       );
     render(true);
+    await vi.advanceTimersByTimeAsync(0);
     for (const accept of projectionListeners) accept({ runtime: {} });
     render(false);
+    await vi.advanceTimersByTimeAsync(0);
     render(true);
+    await vi.advanceTimersByTimeAsync(0);
     rejections[0]!(new Error("Old opening failed"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(JSON.stringify(render(true))).not.toContain(
       "Refresh failed · stale estimate",
     );
@@ -864,7 +915,7 @@ describe("resource read callers", () => {
     for (const accept of projectionListeners)
       accept({ runtime: { accountCostsByAccount: { default: fresh } } });
     rejections[1]!(new Error("New response lost after SSE"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     const view = JSON.stringify(render(true));
     expect(view).not.toContain("Refresh failed · stale estimate");
     expect(view).toContain("$4.00");
@@ -890,6 +941,7 @@ describe("resource read callers", () => {
         }),
       );
     render("default");
+    await vi.advanceTimersByTimeAsync(0);
     for (const accept of projectionListeners)
       accept({
         runtime: {
@@ -913,6 +965,7 @@ describe("resource read callers", () => {
         },
       });
     render("second");
+    await vi.advanceTimersByTimeAsync(0);
     expect(post).toHaveBeenCalledTimes(2);
     for (const accept of projectionListeners)
       accept({
@@ -931,7 +984,7 @@ describe("resource read callers", () => {
       });
     expect(post).toHaveBeenCalledTimes(2);
     rejections[1]!(new Error("Second account interest failed"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     const view = JSON.stringify(render("second"));
     expect(view).toContain("Refresh failed · stale estimate");
     expect(view).toContain("$5.00");
@@ -954,6 +1007,7 @@ describe("resource read callers", () => {
         }),
       );
     render("a");
+    await vi.advanceTimersByTimeAsync(0);
     const saved = {
       accountKey: "a",
       at: 100,
@@ -965,15 +1019,17 @@ describe("resource read callers", () => {
     for (const accept of projectionListeners)
       accept({ runtime: { accountCostsByAccount: { a: saved } } });
     render("b");
+    await vi.advanceTimersByTimeAsync(0);
     render("a");
+    await vi.advanceTimersByTimeAsync(0);
     expect(post).toHaveBeenCalledTimes(3);
     rejections[1]!(new Error("Old B failed"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(JSON.stringify(render("a"))).not.toContain(
       "Refresh failed · stale estimate",
     );
     rejections[2]!(new Error("Newest A response lost"));
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(JSON.stringify(render("a"))).toContain(
       "Refresh failed · stale estimate",
     );

@@ -1,3 +1,6 @@
+import { ClaudeRepairReportStore } from "../ClaudeRepairNotice/ClaudeRepairReportStore.ts";
+import { autorun, Reaction } from "mobx";
+import { ClaudeSettingsStore } from "../../settings/ClaudeSettingsView/ClaudeSettingsStore.ts";
 import { createNet } from "../../../servers/net/net.ts";
 import * as api from "../../../servers/net/api.ts";
 import type { ComponentSnapshot as Snapshot } from "../ComposerAttachments/componentTestFixtures.ts";
@@ -65,7 +68,16 @@ vi.mock("react", async (original) => ({
     h.cells[index] ??= { current: initial };
     return h.cells[index];
   },
-  useMemo: (compute: () => unknown) => compute(),
+  useMemo: (compute: () => unknown, deps: unknown[]) => {
+    const index = h.cursor++;
+    const previous = h.cells[index];
+    if (
+      !previous ||
+      deps.some((value, i) => !Object.is(value, previous.deps?.[i]))
+    )
+      h.cells[index] = { deps, value: compute() };
+    return required(h.cells[index]).value;
+  },
   useCallback: (callback: unknown) => callback,
   useEffect: (effect: EffectCallback, deps: unknown[]) => {
     const index = h.cursor++;
@@ -98,6 +110,7 @@ vi.mock(
     ...(await original<
       typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
+    useServerServices: () => undefined,
     useServerNet: () =>
       createNet({ ...api, get: h.get, post: h.post }, () => reads),
     useServerStore: () => detailStore,
@@ -143,10 +156,18 @@ import ClaudeRepairNotice from "../ClaudeRepairNotice/ClaudeRepairNotice.tsx";
 import ProjectLocationsSettings from "../../settings/ProjectLocationsSettings/ProjectLocationsSettings.tsx";
 import { NativeNotice } from "../../shell/NativeNotice/NativeNotice.tsx";
 
+let renderReaction = new Reaction("detail reads harness", () => {});
 function render<T>(read: () => T) {
   h.cursor = 0;
   const value = read();
   for (const effect of h.effects.splice(0)) effect();
+  return value;
+}
+function renderObserved<T>(read: () => T) {
+  let value!: T;
+  renderReaction.track(() => {
+    value = render(read);
+  });
   return value;
 }
 async function settle() {
@@ -174,6 +195,8 @@ function find(
   return undefined;
 }
 afterEach(() => {
+  renderReaction.dispose();
+  renderReaction = new Reaction("detail reads harness", () => {});
   reads.dispose();
   reads = actionStore();
   for (const cell of h.cells) cell?.cleanup?.();
@@ -194,7 +217,7 @@ const agent: Agent = {
 
 it("new failed and uncertain turns use inline errors without analytics reads", async () => {
   h.get.mockResolvedValue({ turns: [] });
-  render(() => useTurnErrors([], agent, "live-turns"));
+  renderObserved(() => useTurnErrors([], agent, "live-turns"));
   await settle();
   for (const turnStatus of ["failed", "uncertain"] as const) {
     const items: Message[] = [
@@ -206,11 +229,13 @@ it("new failed and uncertain turns use inline errors without analytics reads", a
         turnStatus,
       },
     ];
-    const result = render(() => useTurnErrors(items, agent, "live-turns"));
+    const result = renderObserved(() =>
+      useTurnErrors(items, agent, "live-turns"),
+    );
     await settle();
     expect(result.loading.length).toBe(0);
     expect(h.get).not.toHaveBeenCalled();
-    const inline = render(() =>
+    const inline = renderObserved(() =>
       useTurnErrors(
         [{ ...required(items[0]), turnError: "Streamed failure" }],
         agent,
@@ -248,13 +273,13 @@ it("historical error first load and an explicit retry still read once each", asy
     },
   ];
   const read = () => useTurnErrors(items, agent, "past-turns");
-  render(read);
+  renderObserved(read);
   await settle();
-  const result = render(read);
+  const result = renderObserved(read);
   expect(result.loading.length).toBe(0);
   expect(result.failed.includes("past")).toBe(true);
   result.retry("past");
-  render(read);
+  renderObserved(read);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(2);
 });
@@ -270,16 +295,16 @@ it("opening a different thread loads its historical errors once", async () => {
       turnStatus: "failed",
     },
   ];
-  render(() => useTurnErrors(items, agent, "thread-switch"));
+  renderObserved(() => useTurnErrors(items, agent, "thread-switch"));
   await settle();
   const nextAgent = { ...agent, threadId: "next-thread" };
-  render(() => useTurnErrors(items, nextAgent, "thread-switch"));
+  renderObserved(() => useTurnErrors(items, nextAgent, "thread-switch"));
   await settle();
   expect(h.get).toHaveBeenCalledTimes(2);
   expect(required(required(h.get.mock.calls[1])[1]).query.thread).toBe(
     "next-thread",
   );
-  render(() =>
+  renderObserved(() =>
     useTurnErrors(
       [...items, { ...required(items[0]), id: "live", turnId: "live" }],
       nextAgent,
@@ -403,7 +428,7 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
   ).toBeUndefined();
 });
 
-it("Claude account status and key updates do not reload settings; explicit retry does", async () => {
+it("Claude account status and key updates do not reload settings; explicit retry does", async (ctx) => {
   h.post.mockRejectedValue(new Error("Sign in with claude auth login first"));
   let currentAgent = agent;
   let account: Account = {
@@ -414,7 +439,16 @@ it("Claude account status and key updates do not reload settings; explicit retry
     provider: GeneratedApiProviderKind.claude,
     label: "Claude",
   };
-  const read = () => ClaudeSettings({ agent: currentAgent, account });
+  const model = new ClaudeSettingsStore(
+    { ...api, post: h.post },
+    () => currentAgent,
+  );
+  const stop = autorun(() => model.state);
+  ctx.onTestFinished(() => {
+    stop();
+    model.dispose();
+  });
+  const read = () => ClaudeSettings({ agent: currentAgent, account, model });
   render(read);
   await settle();
   account = { ...account, status: GeneratedApiAccountStatus.ready } as Account;
@@ -449,10 +483,19 @@ it("Claude account status and key updates do not reload settings; explicit retry
   ).toBeUndefined();
 });
 
-it("repair scope changes hide old evidence without reads; refresh uses the current agent", async () => {
+it("repair scope changes hide old evidence without reads; refresh uses the current agent", async (ctx) => {
   h.get.mockResolvedValue({ status: "none" });
   let currentAgent = { ...agent, error: "CLAUDE_SESSION_REPAIR_REQUIRED" };
-  const read = () => ClaudeRepairNotice({ agent: currentAgent });
+  const report = new ClaudeRepairReportStore(
+    { ...api, get: h.get },
+    () => currentAgent,
+  );
+  const stop = autorun(() => report.current);
+  ctx.onTestFinished(() => {
+    stop();
+    report.dispose();
+  });
+  const read = () => ClaudeRepairNotice({ agent: currentAgent, store: report });
   render(read);
   await settle();
   for (const patch of [

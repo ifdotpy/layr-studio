@@ -402,3 +402,39 @@ test("sealed statement calls are not compiler SQL sinks but string sinks at the 
     1,
   );
 });
+
+test("JSX data labels are presentation while query callbacks remain SQL", () => {
+  const label = ["Select", "an", "agent"].join(" ");
+  const query = ["SELECT", "name", "FROM", "agents"].join(" ");
+  assert.deepEqual(
+    scanTypeScript(
+      "view.tsx",
+      `<NativeSelect data={[{ value: "", label: "${label}" }]} />`,
+    ),
+    [],
+  );
+  const found = scanTypeScript(
+    "view.tsx",
+    `<View onClick={() => db.exec("${query}")} />`,
+  );
+  assert.equal(found.length, 1);
+  assert.equal(found[0]?.text, JSON.stringify(query));
+});
+
+for (const kind of ["template substitution", "property access"] as const) {
+  test(`SQL in a JSX data label ${kind} remains executable`, () => {
+    const query = ["SELECT", "name", "FROM", "agents"].join(" ");
+    const expression =
+      kind === "template substitution"
+        ? "`" + "${db.exec(" + JSON.stringify(query) + ")}" + "`"
+        : "({ label: " + JSON.stringify(query) + " }).label";
+    const found = scanTypeScript(
+      "view.tsx",
+      "<NativeSelect data={[{ label: " + expression + " }]} />",
+    );
+    assert.equal(
+      found.filter((site) => site.text === JSON.stringify(query)).length,
+      1,
+    );
+  });
+}

@@ -3,7 +3,7 @@ import type { DeepReadonly } from "../deepReadonly.ts";
 import { decodeSidebarRanks } from "./sidebarOrderRanks.ts";
 import type { PeerTeam, Project } from "../types.ts";
 import type { StateCollections } from "../generated/observableResources.ts";
-import { compareStructural, computed, observable, runInAction } from "mobx";
+import { compareStructural, computed, observable, action } from "mobx";
 import {
   createSidebarViewModel,
   type SidebarAgent,
@@ -720,7 +720,7 @@ export function createMergedSidebarSelector(combined = true) {
             entries[index]?.[0] !== id || entries[index]?.[1] !== value,
         )
       )
-        runInAction(() => views.replace(nextViews));
+        action(() => views.replace(nextViews))();
       previous = next;
       return next;
     },
@@ -739,9 +739,9 @@ export function createMergedSidebarSelector(combined = true) {
           source.creation !== prior[index]?.creation,
       )
     )
-      runInAction(() => inputs.set(sources));
+      action(() => inputs.set(sources))();
     const next = selection.get();
-    runInAction(() => routing.set(next));
+    action(() => routing.set(next))();
     return next;
   };
 }

@@ -10,7 +10,6 @@ import { providerLabel } from "../../../generated/providerKind.ts";
 import { Button, Select, Textarea } from "@mantine/core";
 import { useRef, useState } from "react";
 import { ApiError, errorText, type PostBody } from "../../../api.ts";
-import { useRoomHistory } from "../../../conversation/roomHistory.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import { observer, Observer } from "mobx-react-lite";
 import { useConversationActions } from "../support/navigation.ts";
@@ -39,7 +38,6 @@ type Attempt = {
 };
 export default observer(function RadioChat({
   room,
-  visible = true,
 }: {
   room: RadioRoom;
   visible?: boolean;
@@ -47,7 +45,7 @@ export default observer(function RadioChat({
   const store = useServerStore();
   const state = resourceData(store.state().current);
   if (!state || !room?.radio) return <p role="status">Loading shared chat…</p>;
-  return <RadioScreen room={room} state={state} visible={visible} />;
+  return <RadioScreen room={room} state={state} />;
 });
 
 type RadioRoom =
@@ -55,16 +53,14 @@ type RadioRoom =
 const RadioScreen = observer(function RadioScreen({
   room,
   state,
-  visible,
 }: {
   room: RadioRoom;
   state: StateCollections;
-  visible: boolean;
 }) {
   useMessageRenderProbe("radio-screen", room.id);
   const { post, save, saved } = useServerApi();
   const area = useConversationActions();
-  const { getDraft, subscribeDraft } = area.scope.services.drafts;
+  const { getDraft } = area.scope.services.drafts;
   const { editDraft: setDraft } = area.delivery;
   const { notify } = area.notices;
   const radio = room.radio!;
@@ -80,7 +76,7 @@ const RadioScreen = observer(function RadioScreen({
   const members = (room.members || [])
     .map((id) => state.agents.get(id))
     .filter((a) => !!a);
-  const messages = useRoomHistory(room.id, stateDir, visible);
+  const messages = area.selected.history;
   const { scroll, content, onScroll } = useConversationScroll(
     room.id,
     messages.loaded,
@@ -257,7 +253,7 @@ const RadioScreen = observer(function RadioScreen({
               />
             </article>
           ))}
-          <RequestArea scope={stateDir} notify={notify}>
+          <RequestArea owner={area.selected.requestOwner}>
             <Requests
               agentId={radio.active?.agentId}
               turnId={radio.active?.turnId}
@@ -269,7 +265,6 @@ const RadioScreen = observer(function RadioScreen({
       <PromptComposer
         session={room.id}
         getDraft={getDraft}
-        subscribeDraft={subscribeDraft}
         className="radio-composer"
         onSubmit={(e) => {
           e.preventDefault();

@@ -1,3 +1,4 @@
+import { autorun } from "mobx";
 import { describe, expect, it, vi } from "vitest";
 import {
   PENDING_COMMAND_MAX_MS,
@@ -8,7 +9,7 @@ describe("pending layer", () => {
   it("shows the expected result at once and clears when the client has the row", () => {
     const pending = createPendingCommands();
     const seen = vi.fn();
-    pending.subscribe(seen);
+    const stop = autorun(() => seen(pending.list()));
     pending.begin({ id: "c1", kind: "stop", target: "chat" });
     expect(pending.list().map((entry) => entry.id)).toEqual(["c1"]);
     pending.settle("c1", 10);
@@ -18,6 +19,7 @@ describe("pending layer", () => {
     pending.observeClientSeq(10);
     expect(pending.list()).toHaveLength(0);
     expect(seen).toHaveBeenCalled();
+    stop();
   });
 
   it("clears at once when the client already holds the response sequence", () => {
@@ -56,4 +58,19 @@ describe("pending layer", () => {
       vi.useRealTimers();
     }
   });
+});
+
+it("notifies observable readers without a component subscription", () => {
+  const pending = createPendingCommands();
+  const snapshots: string[][] = [];
+  const stop = autorun(() =>
+    snapshots.push(pending.list().map((row) => row.id)),
+  );
+  try {
+    pending.begin({ id: "stop", kind: "stop", target: "chat" });
+    pending.fail("stop");
+    expect(snapshots).toEqual([[], ["stop"], []]);
+  } finally {
+    stop();
+  }
 });

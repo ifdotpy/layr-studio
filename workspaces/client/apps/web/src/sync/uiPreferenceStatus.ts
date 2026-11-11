@@ -1,3 +1,4 @@
+import { action, observable } from "mobx";
 import type { PreferenceScope } from "./uiPreferenceMerge.ts";
 
 export type PreferenceWriteStatus =
@@ -7,28 +8,24 @@ export type PreferenceWriteStatus =
 const saved: PreferenceWriteStatus = { state: "saved" };
 const statuses = new WeakMap<
   Storage,
-  Partial<Record<PreferenceScope, PreferenceWriteStatus>>
+  Record<PreferenceScope, PreferenceWriteStatus>
 >();
+function forStorage(storage: Storage) {
+  const status =
+    statuses.get(storage) ?? observable({ user: saved, server: saved });
+  statuses.set(storage, status);
+  return status;
+}
 const retries = new WeakMap<Storage, () => void>();
-const listeners = new Set<() => void>();
 export const readPreferenceWriteStatus = (
   storage: Storage,
   scope: PreferenceScope,
-) => statuses.get(storage)?.[scope] ?? saved;
-export function setPreferenceWriteStatus(
-  storage: Storage,
-  scope: PreferenceScope,
-  status: PreferenceWriteStatus,
-) {
-  statuses.set(storage, { ...statuses.get(storage), [scope]: status });
-  listeners.forEach((listener) => listener());
-}
-export function subscribePreferenceWriteStatus(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
+) => forStorage(storage)[scope];
+export const setPreferenceWriteStatus = action(
+  (storage: Storage, scope: PreferenceScope, status: PreferenceWriteStatus) => {
+    forStorage(storage)[scope] = status;
+  },
+);
 export function registerPreferenceRetry(storage: Storage, retry: () => void) {
   retries.set(storage, retry);
   return () => {

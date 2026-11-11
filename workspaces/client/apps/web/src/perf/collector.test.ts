@@ -79,7 +79,8 @@ it("starts once and disposes observers and the reporting timer", async () => {
       },
     };
     const dispose = startPerformanceReporting(reportingApi);
-    expect(startPerformanceReporting(reportingApi)).toBe(dispose);
+    const releaseOtherOwner = startPerformanceReporting(reportingApi);
+    releaseOtherOwner();
     expect(observers).toHaveLength(2);
     expect(interval).toHaveBeenCalledTimes(1);
     collector.render("composer", 5);
@@ -101,6 +102,35 @@ it("starts once and disposes observers and the reporting timer", async () => {
   } finally {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
+});
+
+it("one reporting owner's disposal preserves the other owner's timer and API", async () => {
+  vi.useFakeTimers();
+  const first = {
+    fetchAuthenticatedRequest: vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 })),
+  };
+  const second = {
+    fetchAuthenticatedRequest: vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 })),
+  };
+  const releaseFirst = startPerformanceReporting(first);
+  const releaseSecond = startPerformanceReporting(second);
+  try {
+    releaseFirst();
+    collector.render("composer", 5);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(second.fetchAuthenticatedRequest).toHaveBeenCalledOnce();
+    expect(first.fetchAuthenticatedRequest).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+  } finally {
+    releaseFirst();
+    releaseSecond();
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
   }
 });

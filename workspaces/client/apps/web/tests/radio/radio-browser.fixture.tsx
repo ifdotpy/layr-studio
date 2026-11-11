@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import "../../src/rendererStyles.ts";
 import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import "@mantine/core/styles.css";
@@ -22,7 +23,7 @@ import type { Room, PeerTeam } from "../../src/types.ts";
 
 import { messageModels } from "../messages/message-models.fixture";
 import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
-import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
+import React, { useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import RadioChat from "../../src/components/conversation/RadioChat/RadioChat.tsx";
@@ -90,6 +91,7 @@ models.apply([
   { collection: "room", id: room.id, value: room },
   { collection: "peerTeam", id: team.id, value: team },
 ]);
+const draftValues = observable.map<string, string>();
 function Fixture() {
   const [value, setRoom] = useState(room);
   useLayoutEffect(
@@ -100,33 +102,14 @@ function Fixture() {
       ]),
     [value],
   );
-  const drafts = useRef<Record<string, string>>({});
-  const listeners = useRef(new Map<string, Set<() => void>>());
-  const getDraft = useCallback(
-    (session: string) => drafts.current[session] || "",
-    [],
-  );
-  const subscribeDraft = useCallback(
-    (session: string, listener: () => void) => {
-      let current = listeners.current.get(session);
-      if (!current) listeners.current.set(session, (current = new Set()));
-      current.add(listener);
-      return () => {
-        current.delete(listener);
-        if (!current.size) listeners.current.delete(session);
-      };
-    },
-    [],
-  );
+  const getDraft = (session: string) => draftValues.get(session) || "";
   const setDraft = (
     value: string | ((before: string) => string),
     session = room.id,
   ) => {
-    const previous = drafts.current[session] || "";
+    const previous = draftValues.get(session) || "";
     const text = typeof value === "function" ? value(previous) : value;
-    drafts.current = { ...drafts.current, [session]: text };
-    if (text !== previous)
-      listeners.current.get(session)?.forEach((listener) => listener());
+    action(() => draftValues.set(session, text))();
   };
   window.setRoom = setRoom;
   window.currentRoom = value;
@@ -134,9 +117,8 @@ function Fixture() {
 
   const [area] = useState(() => conversationActionsFixture());
   area.scope.services.drafts.getDraft = getDraft;
-  area.scope.services.drafts.subscribeDraft = subscribeDraft;
   area.scope.services.drafts.setDrafts = (update) => {
-    const previous = drafts.current;
+    const previous = Object.fromEntries(draftValues);
     const next = typeof update === "function" ? update(previous) : update;
     for (const session of new Set([
       ...Object.keys(previous),

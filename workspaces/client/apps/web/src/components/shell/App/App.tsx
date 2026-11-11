@@ -1,7 +1,26 @@
+import { ProjectSave } from "../../../app/projects/ProjectSave.ts";
+import { TerminalState } from "../../../generated/api.ts";
+import { TerminalDockStore } from "../TerminalDock/TerminalDock.tsx";
+import { running } from "../TerminalDock/TerminalDock.tsx";
+import {
+  isClassicServerView,
+  serverViewId,
+} from "../../../servers/environment.ts";
+import type { ComponentProps } from "react";
+import { ProjectServerSelection } from "../../../app/projects/CreationOwner.ts";
+import type { ShellFlow } from "../support/flow.ts";
+import {
+  createTeamChatsStore,
+  type TeamChatsOwner,
+} from "../messages/TeamChats/TeamChats.tsx";
+import {
+  complaintId,
+  type ComplaintDetailResponse,
+} from "../../../generated/observableResources.ts";
 import { AppTeam } from "../AppTeam/AppTeam.tsx";
 import { AppPanels } from "../AppPanels/AppPanels.tsx";
 import { AppDialogs } from "../AppDialogs/AppDialogs.tsx";
-import { lazy, Suspense, useMemo } from "react";
+import { lazy, Suspense } from "react";
 import { Tabs } from "@mantine/core";
 import Accounts, { frameAccounts } from "../../accounts/Accounts/Accounts.tsx";
 import AccountSignInNotice from "../../accounts/AccountSignInNotice/AccountSignInNotice.tsx";
@@ -20,12 +39,16 @@ import { useAppPreferences } from "../../../app/settings/useAppPreferences.ts";
 import { SidebarListOwner } from "../../../app/shell/SidebarOwner.ts";
 import { startAppFrame } from "../../../servers/frameBridge.ts";
 import type { ServerCommand } from "../../../servers/navigation.ts";
-import { makeAutoObservable, observableRef, reaction, runInAction } from "mobx";
-import { useEffect, useState, type ReactNode } from "react";
+import { makeAutoObservable, observableRef, reaction, flowResult } from "mobx";
+import {
+  createBackgroundTaskArea,
+  type BackgroundTaskActions,
+} from "../tasks/BackgroundTasks/BackgroundTasks.tsx";
+import { type ReactNode } from "react";
 import { Button, Modal } from "@mantine/core";
 import type { ServerAreas, AgentModel } from "../../../app/contracts.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { errorText } from "../../../api.ts";
+import { errorText, type GetResult } from "../../../api.ts";
 import { StopOutcome, AgentStatus } from "../../../generated/api.ts";
 import {
   deleteConversation,
@@ -76,9 +99,7 @@ export default observer(function App() {
   const a = useServerAreas(),
     { scope, startup, layout } = a;
   const c = a.settings;
-  const p = useAppPreferences(a, a.preferenceBridge, (preferences) =>
-    a.frame.publish({ kind: "studio-server-preferences", preferences }),
-  );
+  const p = useAppPreferences(a);
   const signIn = (key: string) => {
     const account = [
       ...(a.accounts?.accounts || []),
@@ -96,7 +117,6 @@ export default observer(function App() {
       });
     }
   };
-  useEffect(() => startAppFrame(a), [a]);
   reportPromptComposerRender("app");
   if (!scope.screen.active) return null;
   if (scope.screen.channel && startup.isSchemaGateVisible)
@@ -152,13 +172,27 @@ const AppWorkspace = observer(function AppWorkspace({
 
 const AppSidebar = observer(function AppSidebar() {
   const a = useServerAreas();
-  const [owner] = useState(() => new SidebarListOwner(a, undefined, a.ui.run));
-  useEffect(() => owner.start(), [owner]);
-  return a.sidebar.delegated ? null : <Sidebar owner={owner} />;
+  return a.sidebar.delegated || !a.ui.sidebarList ? null : (
+    <Sidebar owner={a.ui.sidebarList} />
+  );
 });
 
 export class AppUi {
+  sidebarList: SidebarListOwner | undefined;
+  activity: BackgroundTaskActions | undefined;
+  readonly messageCache = new Map<string, ComplaintDetailResponse>();
+  rememberComplaint(key: string, result: ComplaintDetailResponse) {
+    const cached = this.messageCache.get(key);
+    if (!cached || cached.version <= result.version)
+      this.messageCache.set(key, result);
+  }
+  setTeamOpen(value: boolean) {
+    this.teamOpen = value;
+  }
+  readonly catalog;
+  readonly chats: TeamChatsOwner;
   readonly areas: ServerAreas;
+  readonly terminal: TerminalDockStore;
   readonly requests;
   visited = false;
   section = "";
@@ -168,6 +202,7 @@ export class AppUi {
   searchOpen = false;
   taskFocus: { leadId: string; id: string; requestId: string } | undefined;
   filePreview: FilePreviewSelection | null = null;
+  projectSelection: ProjectServerSelection | null = null;
   descriptor: { title: string; body: ReactNode } | null = null;
   generation = 0;
   restore = 0;
@@ -177,9 +212,24 @@ export class AppUi {
     return this.areas.selected.pendingDeletion;
   }
   projectScope = new Set<string>();
-  openProject: (id: string) => void = () => {};
   constructor(areas: ServerAreas) {
     this.areas = areas;
+    this.terminal = new TerminalDockStore({
+      ...areas.scope.services.api,
+      notify: (message) => areas.notices.notify(message),
+    });
+    this.catalog = createAgentCatalog(areas.scope.store);
+    this.chats = createTeamChatsStore(
+      areas.scope.store,
+      areas.scope.services.api,
+      "",
+      undefined,
+      () => ({
+        stateDir: areas.state?.workspaces.values().next().value?.stateDir || "",
+        leadId: areas.navigation.selectedLead?.id,
+        focus: this.focus,
+      }),
+    );
     this.requests = areas.scope.store.requests();
     this.teamPreferred = areas.scope.services.api.saved(
       "codex-team-open",
@@ -196,7 +246,12 @@ export class AppUi {
       { autoBind: true },
     );
   }
-  async run(command: ServerCommand) {
+  run(command: ServerCommand) {
+    return flowResult(this.dispatch(command));
+  }
+  *dispatch(
+    command: ServerCommand,
+  ): ShellFlow<void, Awaited<ReturnType<ServerAreas["run"]>>> {
     if (command.action === "remove-chat") {
       const model = command.room
         ? this.areas.state?.rooms.get(command.id)
@@ -208,18 +263,18 @@ export class AppUi {
     } else if (command.action === "project-account")
       this.showProjectAccount(command.path);
     else if (command.action === "project-folders")
-      await this.showFolders(command.projectId, command.server);
+      yield this.showFolders(command.projectId, command.server);
     else if (command.action === "add-project") this.openAddProject();
     else if (command.action === "delete-project")
-      this.openProject(command.projectId);
+      this.areas.projectDeletion.open(command.projectId);
     else if (this.areas.settings.run(command)) return;
     else if (command.action === "search") {
       this.openSearch();
     } else if (command.action === "notifications") this.navigate(command);
     else {
-      const result = await this.areas.run(command);
+      const result = yield this.areas.run(command);
       if (result && typeof result === "object")
-        await this.chooseProject(result.cwd, result.folder, result.binding);
+        yield this.chooseProject(result.cwd, result.folder, result.binding);
     }
   }
   navigate(target: { agentId: string; itemId?: string; requestId?: string }) {
@@ -348,6 +403,8 @@ export class AppUi {
   }
 
   closeDialog() {
+    this.projectSelection?.dispose();
+    this.projectSelection = null;
     this.generation++;
     this.descriptor = null;
   }
@@ -377,11 +434,14 @@ export class AppUi {
       ),
     };
   }
-  async chooseProject(
+  chooseProject(path?: string, folder?: string, binding?: ProjectBinding) {
+    return flowResult(this.chooseProjectFlow(path, folder, binding));
+  }
+  *chooseProjectFlow(
     path?: string,
     folder?: string,
     binding?: ProjectBinding,
-  ) {
+  ): ShellFlow<void, Awaited<ReturnType<typeof readProjectServers>>> {
     this.closeDialog();
     this.areas.sidebar.close();
     const request = this.generation,
@@ -394,7 +454,7 @@ export class AppUi {
       name: path?.split("/").pop() || "Current folder",
     };
     try {
-      const servers = await readProjectServers(
+      const servers = yield readProjectServers(
         this.areas.scope.services.api.get,
       );
       if (
@@ -402,7 +462,20 @@ export class AppUi {
         scope !== this.areas.startup.creationScope
       )
         return;
-      runInAction(() => {
+      {
+        this.projectSelection = new ProjectServerSelection(
+          {
+            ...project,
+            path: project.path || "",
+            name: project.name || "Current folder",
+          },
+          () => servers,
+          this.areas.scope.services.api.saved(
+            `project-last-server:${project.id}`,
+            "local",
+          ),
+          (id) => (id === "local" ? this.areas.scope.services : undefined),
+        );
         this.descriptor = {
           title: "New chat",
           body: (
@@ -413,10 +486,7 @@ export class AppUi {
                 name: project.name || "Current folder",
               }}
               servers={servers}
-              lastServer={this.areas.scope.services.api.saved(
-                `project-last-server:${project.id}`,
-                "local",
-              )}
+              owner={this.projectSelection}
               onCancel={this.closeDialog}
               onAdd={() => this.openAddProject()}
               onChoose={(location, settings) => {
@@ -445,7 +515,7 @@ export class AppUi {
             />
           ),
         };
-      });
+      }
     } catch (error) {
       if (
         request === this.generation &&
@@ -454,11 +524,17 @@ export class AppUi {
         this.areas.notices.notify(errorText(error));
     }
   }
-  async showFolders(id: string, server?: string) {
+  showFolders(id: string, server?: string) {
+    return flowResult(this.showFoldersFlow(id, server));
+  }
+  *showFoldersFlow(
+    id: string,
+    server?: string,
+  ): ShellFlow<void, GetResult<"/api/projects">> {
     const scope = this.areas.startup.creationScope,
       request = ++this.generation;
     try {
-      const response = await this.areas.scope.services.api.get("/api/projects");
+      const response = yield this.areas.scope.services.api.get("/api/projects");
       if (
         this.disposed ||
         scope !== this.areas.startup.creationScope ||
@@ -472,49 +548,53 @@ export class AppUi {
           [...(this.areas.state?.projects.values() || [])].find(
             (p) => p.path === found.path,
           ));
-      if (isLocatedProject(project))
-        runInAction(() => {
-          const heads = (project.locations || []).map((location) => {
-            const slot = this.areas.scope.store.reads.projectLocations(
-              this.areas.scope.services.api,
-              {
-                project: project.id,
-                server: location.serverId,
-                path: location.path,
-                action: "info",
-              },
-            );
-            void slot.read().catch(() => {});
-            return {
+      if (isLocatedProject(project)) {
+        const heads = (project.locations || []).map((location) => {
+          const slot = this.areas.scope.store.reads.projectLocations(
+            this.areas.scope.services.api,
+            {
               project: project.id,
               server: location.serverId,
               path: location.path,
-              slot,
-            };
-          });
-          this.areas.sidebar.close();
-          this.descriptor = {
-            title: "Project settings",
-            body: (
-              <ProjectFoldersDialog
-                key={request}
-                project={project}
-                initialHeads={heads}
-                initialServer={server}
-                initialBrowse={
-                  server
-                    ? browseDirectory(
-                        this.areas.scope.services.net,
-                        undefined,
-                        server,
-                        project.id,
-                      )
-                    : undefined
-                }
-              />
-            ),
+              action: "info",
+            },
+          );
+          void slot.read().catch(() => {});
+          return {
+            project: project.id,
+            server: location.serverId,
+            path: location.path,
+            slot,
           };
         });
+        this.areas.sidebar.close();
+        this.descriptor = {
+          title: "Project settings",
+          body: (
+            <ProjectFoldersDialog
+              key={request}
+              project={project}
+              peers={this.areas.settings.openProjectPeers(
+                project.id,
+                this.areas.scope.services.api,
+                this.areas.notices.notify,
+              )}
+              initialHeads={heads}
+              initialServer={server}
+              initialBrowse={
+                server
+                  ? browseDirectory(
+                      this.areas.scope.services.net,
+                      undefined,
+                      server,
+                      project.id,
+                    )
+                  : undefined
+              }
+            />
+          ),
+        };
+      }
     } catch (error) {
       this.areas.notices.notify(errorText(error));
     }
@@ -558,18 +638,29 @@ export class AppUi {
     this.areas.sidebar.close();
     const generation = this.generation,
       scope = this.areas.startup.creationScope;
+    const saved = async () => {
+      if (
+        !this.disposed &&
+        generation === this.generation &&
+        scope === this.areas.startup.creationScope
+      )
+        this.closeDialog();
+    };
+    const backend = this.areas.scope.services.sidebarServices.cache;
     this.descriptor = {
       title: "Project settings",
       body: (
         <ProjectAccountSettings
           path={path}
-          saved={async () => {
-            if (
-              !this.disposed &&
-              generation === this.generation &&
-              scope === this.areas.startup.creationScope
-            )
-              this.closeDialog();
+          saves={{
+            account: new ProjectSave(backend, "/api/projects", saved),
+            worker: new ProjectSave(backend, "/api/projects", saved),
+            order: new ProjectSave(backend, "/api/projects", saved),
+            defaultOrder: new ProjectSave(
+              backend,
+              "/api/accounts/default-groups",
+              saved,
+            ),
           }}
         />
       ),
@@ -652,9 +743,7 @@ export class AppUi {
               if (this.pending.has(id)) return;
               const controller = new AbortController();
               this.pending.set(id, controller);
-              runInAction(() => {
-                this.areas.selected.suspendReaders(new Set([id]));
-              });
+              this.areas.selected.suspendReaders(new Set([id]));
               void deleteConversation(
                 (chat, signal) =>
                   this.areas.scope.services.api.command.delete(chat, {
@@ -682,16 +771,7 @@ export class AppUi {
                         : "Delete may not have completed. Check the chat list before trying again.",
                     );
                 })
-                .finally(() =>
-                  runInAction(() => {
-                    if (this.pending.get(id) === controller) {
-                      this.pending.delete(id);
-
-                      if (!this.projectScope.has(id))
-                        this.areas.selected.resumeReaders(new Set([id]));
-                    }
-                  }),
-                );
+                .finally(() => this.finishDelete(id, controller));
             }}
           >
             {worker ? "Delete" : "Delete chat"}
@@ -700,41 +780,182 @@ export class AppUi {
       ),
     };
   }
+  finishDelete(id: string, controller: AbortController) {
+    if (this.pending.get(id) !== controller) return;
+    this.pending.delete(id);
+    if (!this.projectScope.has(id))
+      this.areas.selected.resumeReaders(new Set([id]));
+  }
+  get terminalVisible() {
+    const a = this.areas;
+    return (
+      a.startup.isReady &&
+      !(a.scope.screen.channel && a.startup.isSchemaGateVisible) &&
+      !!a.state &&
+      a.scope.screen.active &&
+      !a.layout.isMobile &&
+      a.preferences.value.showTerminals
+    );
+  }
+  createTerminal() {
+    const agent =
+      this.areas.navigation.selectedAgent || this.areas.navigation.selectedLead;
+    if (agent)
+      void flowResult(this.terminal.create(agent.id, this.terminal.scroll));
+  }
   start() {
+    const a = this.areas;
+    const stopTerminalOwner = reaction(
+      () => [this.terminalVisible, a.scope.screen.channel] as const,
+      ([visible, screen]) => {
+        this.terminal.dispose();
+        if (visible) this.terminal.start(screen, this.createTerminal);
+      },
+      { fireImmediately: true },
+    );
+    const stopTerminalFrame = reaction(
+      () => {
+        const screen = a.scope.screen.channel;
+        if (
+          !this.terminalVisible ||
+          this.terminal.measuredHeight === null ||
+          (!screen &&
+            (!serverViewId || isClassicServerView || window.parent === window))
+        )
+          return null;
+        const entries = (
+          resourceData(a.scope.store.terminals().current) || []
+        ).filter((shell) => shell.status !== TerminalState.closed);
+        return {
+          kind: "studio-server-terminal",
+          serverId: screen?.owner ?? serverViewId,
+          opened: this.terminal.opened,
+          height: this.terminal.measuredHeight,
+          count: entries.length,
+          active: entries.filter((shell) => running(shell.status)).length,
+          canCreate: !!(
+            a.navigation.selectedAgent || a.navigation.selectedLead
+          ),
+        };
+      },
+      (message) => {
+        if (message) a.frame.publish(message);
+      },
+      { fireImmediately: true },
+    );
     this.disposed = false;
-    const stop = reaction(
+    this.sidebarList = new SidebarListOwner(this.areas, undefined, this.run);
+    const stopSidebar = this.sidebarList.start();
+    const stopFrame = startAppFrame(this.areas);
+    const stopMessageCache = reaction(
       () =>
-        [...this.pending.keys()].filter(
-          (id) => !this.areas.creation.lookup(id),
-        ),
+        [...this.messageCache].flatMap(([key, confirmed]) => {
+          const latest = resourceData(
+            a.scope.store.complaint(complaintId(confirmed.id)).current,
+          );
+          return latest && latest.version >= confirmed.version ? [key] : [];
+        }),
+      (keys) => {
+        for (const key of keys) this.messageCache.delete(key);
+      },
+    );
+    let stopActivity: (() => void) | undefined;
+    const stopActivityOwner = reaction(
+      () =>
+        [
+          a.scope.screen.active && this.tasksOpen,
+          a.navigation.selectedLead?.id,
+        ] as const,
+      ([opened, leadId]) => {
+        stopActivity?.();
+        if (!leadId) {
+          this.activity = undefined;
+          return;
+        }
+        if (!opened) return;
+        this.activity = createBackgroundTaskArea(
+          a.scope.services.api,
+          a.scope.store,
+          a.scope.services.owner.id,
+          {
+            opened: true,
+            leadId,
+            close: this.closeTasks,
+            openAgent: a.open,
+            notify: a.notices.notify,
+          },
+        );
+        stopActivity = this.activity?.start();
+        if (this.taskFocus && this.taskFocus.leadId === leadId)
+          this.activity?.focus(this.taskFocus.id);
+      },
+      { fireImmediately: true },
+    );
+    const stopTaskFocus = reaction(
+      () => this.taskFocus,
+      (focus) => {
+        if (focus && focus.leadId === this.activity?.leadId)
+          this.activity.focus(focus.id);
+      },
+    );
+    const stopAccountCommand = reaction(
+      () =>
+        [
+          a.settings.command,
+          a.accountsUi.summary,
+          a.accountsUi.pending,
+        ] as const,
+      ([command, summary, pending]) => {
+        a.accountsUi.receive(command);
+        if (command && summary && !pending) a.settings.setCommand(null);
+      },
+      { fireImmediately: true },
+    );
+    const stopAccountDialog = reaction(
+      () => a.accountsUi.dialogOpen,
+      a.settings.reportAccountDialog,
+      { fireImmediately: true },
+    );
+    const stop = reaction(
+      () => [...this.pending.keys()].filter((id) => !a.creation.lookup(id)),
       (ids) => {
         for (const id of ids) {
           this.pending.get(id)?.abort();
           this.pending.delete(id);
 
-          this.areas.selected.resumeReaders(new Set([id]));
+          a.selected.resumeReaders(new Set([id]));
         }
       },
     );
     const stopNavigation = reaction(
-      () =>
-        [
-          this.areas.navigation.navigationIntent,
-          this.areas.scope.screen.active,
-        ] as const,
+      () => [a.navigation.navigationIntent, a.scope.screen.active] as const,
       () => {
         this.closeTeamDrawer();
-        if (!this.areas.scope.screen.active) this.closePreview();
+        if (!a.scope.screen.active) this.closePreview();
         cancelAnimationFrame(this.restore);
       },
     );
     return () => {
       stop();
       stopNavigation();
+      stopActivityOwner();
+      stopTaskFocus();
+      stopActivity?.();
+      stopSidebar();
+      stopFrame();
+      stopMessageCache();
+      stopAccountCommand();
+      stopAccountDialog();
+      a.settings.reportAccountDialog(false);
+      stopTerminalOwner();
+      stopTerminalFrame();
+      this.terminal.dispose();
       this.dispose();
     };
   }
   dispose() {
+    this.projectSelection?.dispose();
+    this.projectSelection = null;
     this.disposed = true;
     this.pending.forEach((c) => c.abort());
     this.pending.clear();
@@ -905,25 +1126,17 @@ const AppSettings = observer(function AppSettings({
     c = a.settings,
     ui = a.ui,
     run = ui.run;
-  const catalog = useMemo(() => createAgentCatalog(a.scope.store), [a]);
+  const catalog = a.ui.catalog;
   const lead = a.navigation.selectedLead || a.navigation.selectedAgent;
   const server = a.scope.services.owner;
   return (
     <>
-      <Accounts
-        managerOnly
-        state={a.accounts}
-        scope={a.scope.services.owner.id}
-        onError={a.notices.notify}
-        onModalOpenChange={c.reportAccountDialog}
-        externalCommand={c.command}
-        onExternalCommandHandled={() => c.setCommand(null)}
-      />
+      <Accounts />
       <Modal
-        opened={c.studioOpen && !c.accountModalOpen}
+        opened={c.studioOpen && !a.accountsUi.dialogOpen}
         transitionProps={{ duration: 0 }}
-        closeOnEscape={!c.accountModalOpen}
-        closeOnClickOutside={!c.accountModalOpen}
+        closeOnEscape={!a.accountsUi.dialogOpen}
+        closeOnClickOutside={!a.accountsUi.dialogOpen}
         onClose={() => c.setStudioOpen(false)}
         size={modalSizes.settings}
         title="Studio settings"
@@ -1026,7 +1239,7 @@ const AppAccountNotices = observer(function AppAccountNotices({
   signIn: (key: string) => void;
 }) {
   const a = useServerAreas(),
-    catalog = useMemo(() => createAgentCatalog(a.scope.store), [a]);
+    catalog = a.ui.catalog;
   const agent = a.navigation.selectedAgent,
     lead = a.navigation.selectedLead || agent;
   const key =
@@ -1064,10 +1277,10 @@ const AppAccountNotices = observer(function AppAccountNotices({
 
 const ProjectAccountSettings = observer(function ProjectAccountSettings({
   path,
-  saved,
+  saves,
 }: {
   path: string;
-  saved: () => Promise<void>;
+  saves: ComponentProps<typeof ProjectAccount>["saves"];
 }) {
   const a = useServerAreas();
   const accounts = a.accounts;
@@ -1089,7 +1302,7 @@ const ProjectAccountSettings = observer(function ProjectAccountSettings({
           .sort((x, y) => (y.path?.length || 0) - (x.path?.length || 0))[0]
           ?.accountKey || accounts.defaultAccountKey
       }
-      saved={saved}
+      saves={saves}
     />
   );
 });

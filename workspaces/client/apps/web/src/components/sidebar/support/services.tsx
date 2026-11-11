@@ -4,7 +4,6 @@ import * as resources from "../../../sync/subscriptions/events.ts";
 import { post, saved, save } from "../../../servers/net/api.ts";
 import { serverViewId } from "../../../servers/environment.ts";
 import { serverLocalStorage } from "../../../servers/storage.ts";
-import { preferenceEvent } from "../../../sync/uiPreferenceMerge.ts";
 import {
   readPreferenceFields,
   receivePreferenceFields,
@@ -37,7 +36,6 @@ export type SidebarBackend = {
   storage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
   editPreference: typeof writePreferenceEdit;
   viewPreference?: typeof writePreferenceEdit;
-  subscribePreference: (key: string, update: () => void) => () => void;
   /** This window's server-scope preference fields with their edit times. */
   preferenceFields?: () => PreferenceFields;
   /** Merge fields by edit time before an edit, so the edit is newer than every shown value. */
@@ -72,19 +70,6 @@ export const localSidebarBackend: SidebarBackend = {
   editPreference: writePreferenceEdit,
   preferenceFields: () => readPreferenceFields("server"),
   adoptPreferenceFields: (fields) => receivePreferenceFields("server", fields),
-  subscribePreference(key, update) {
-    const receive = (event: Event) => {
-      if (event instanceof CustomEvent && event.detail !== key) return;
-      if (event instanceof StorageEvent && event.key !== key) return;
-      update();
-    };
-    window.addEventListener(preferenceEvent, receive);
-    window.addEventListener("storage", receive);
-    return () => {
-      window.removeEventListener(preferenceEvent, receive);
-      window.removeEventListener("storage", receive);
-    };
-  },
 };
 
 /** Render identities resolve here; backend adapters retain original wire IDs. */

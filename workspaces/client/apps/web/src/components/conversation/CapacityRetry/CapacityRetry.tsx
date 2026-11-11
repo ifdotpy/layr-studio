@@ -1,6 +1,8 @@
 import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { observer } from "mobx-react-lite";
+import { now as currentTime } from "../../../clock.ts";
 import ErrorDescription from "../../shell/ErrorDescription/ErrorDescription.tsx";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { errorText, type PostResult } from "../../../api.ts";
 import {
@@ -8,7 +10,7 @@ import {
   type CapacityRetry as CapacityRetryRecord,
 } from "../../../capacityRetry.ts";
 
-export default function CapacityRetry({
+export default observer(function CapacityRetry({
   agentId,
   retry,
 }: {
@@ -21,7 +23,7 @@ export default function CapacityRetry({
     useState<PostResult<"/api/capacity-retry"> | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [now, setNow] = useState(() => Date.now() / 1000);
+
   const lock = useRef(false);
   const current =
     confirmed &&
@@ -30,15 +32,9 @@ export default function CapacityRetry({
       ? confirmed
       : retry;
   const scheduled = current.status === "scheduled";
-  useEffect(() => {
-    if (!scheduled) return;
-    setNow(Date.now() / 1000);
-    const timer = setInterval(() => setNow(Date.now() / 1000), 250);
-    return () => clearInterval(timer);
-  }, [scheduled, current.dueAt]);
   const seconds =
-    typeof current.dueAt === "number"
-      ? Math.max(0, Math.ceil(current.dueAt - now))
+    scheduled && current.dueAt
+      ? Math.max(0, Math.ceil(current.dueAt - currentTime() / 1000))
       : 0;
   const available =
     !current.claimedAt &&
@@ -123,4 +119,4 @@ export default function CapacityRetry({
       {error && <p role="alert">{error}</p>}
     </div>
   );
-}
+});

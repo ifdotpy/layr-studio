@@ -1,4 +1,3 @@
-import { useEffect, useMemo } from "react";
 import {
   makeAutoObservable,
   observableRef,
@@ -9,11 +8,19 @@ import { errorText } from "../../../api.ts";
 import { onResume } from "../../../sync/resume.ts";
 import { retryableReadError } from "../../../sync/readRetry.ts";
 import { onUploadsChanged, type PendingUpload } from "../../../sync/uploads.ts";
-import { useServerUploads } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import type { useAttachmentDrafts } from "./useAttachmentDrafts.ts";
+import type { ServerServices } from "../../../servers/serverServices.ts";
+import type { AttachmentDrafts } from "./useAttachmentDrafts.ts";
 
-type Uploads = ReturnType<typeof useServerUploads>;
-type Attach = ReturnType<typeof useAttachmentDrafts>[1];
+type Uploads = Pick<
+  ServerServices["uploads"],
+  | "pendingUploads"
+  | "deliverUpload"
+  | "finishUpload"
+  | "removeUpload"
+  | "uploadCancelled"
+  | "onUploadsChanged"
+>;
+type Attach = AttachmentDrafts["set"];
 const UPLOAD_RETRY_BASE_DELAY_MS = 1_000;
 const UPLOAD_RETRY_MAX_DELAY_MS = 30_000;
 
@@ -249,18 +256,4 @@ export class UploadRecovery {
       }
     }
   }
-}
-
-export function useUploadRecovery(
-  stateDir: string,
-  workspaceId: string,
-  attach: Attach,
-) {
-  const uploads = useServerUploads();
-  const store = useMemo(
-    () => new UploadRecovery(uploads, stateDir, workspaceId, attach),
-    [uploads, stateDir, workspaceId],
-  );
-  useEffect(store.start, [store]);
-  return store;
 }

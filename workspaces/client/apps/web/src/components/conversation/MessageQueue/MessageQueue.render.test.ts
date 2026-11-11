@@ -1,3 +1,4 @@
+import { createMessageQueueStore } from "./MessageQueueStore.ts";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -6,10 +7,6 @@ import { expect, it, vi } from "vitest";
 import { createStateMirror } from "../../../generated/observableResources.ts";
 import { MessageSendStatus } from "../../../generated/api.ts";
 import MessageQueue from "./MessageQueue.tsx";
-
-vi.mock("../../../unsent/useUnsentText.ts", () => ({
-  useUnsentText: () => [null, vi.fn(), vi.fn()],
-}));
 
 it("renders in-place queue item updates without a parent render", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -65,12 +62,17 @@ it("renders in-place queue item updates without a parent render", async () => {
           MantineProvider,
           null,
           createElement(MessageQueue, {
-            items: queue.items,
-            scope: "queue-render",
-            onEdit: noop,
-            onCancel: noop,
-            onReorder: noop,
-            canReorder: true,
+            store: createMessageQueueStore(
+              () => ({
+                items: queue.items,
+                scope: "queue-render",
+                onEdit: noop,
+                onCancel: noop,
+                onReorder: noop,
+                canReorder: true,
+              }),
+              "local",
+            ),
           }),
         ),
       ),

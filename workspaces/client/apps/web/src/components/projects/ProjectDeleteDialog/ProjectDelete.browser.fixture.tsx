@@ -38,13 +38,18 @@ declare global {
 }
 const rootElement = document.getElementById("root");
 
-import React, { useMemo, useState } from "react";
+import React from "react";
+import { action, computed, observable, reaction } from "mobx";
+import { observer } from "mobx-react-lite";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import Sidebar from "../../sidebar/Sidebar/Sidebar.fixture.tsx";
-import { CombinedSidebarFixture as CombinedServerSidebar } from "../../../servers/CombinedServerSidebar.fixture.tsx";
+import {
+  createCombinedSidebarFixture,
+  CombinedSidebarFixtureView,
+} from "../../../servers/CombinedServerSidebar.fixture.tsx";
 import { ProjectDeleteDialog } from "./ProjectDeleteDialog.tsx";
-import { useProjectDelete } from "../../../useProjectDelete.ts";
+import { ProjectDeletion } from "../../../useProjectDelete.ts";
 import "@mantine/core/styles.css";
 import "../../../design/layout.css";
 import "../../../appearance.css";
@@ -90,6 +95,7 @@ const partialInitial: ProjectDeleteFixtureSnapshot = {
     rules: [],
     peerTeams: [],
     events: [],
+    studioErrors: [],
     work: [],
     projectOrganizationVersion: 1,
     peerTeamsVersion: 1,
@@ -102,7 +108,7 @@ window.finished = [];
 window.suspended = [];
 window.fail = false;
 window.retire = () => {};
-const store = new Map<string, string>();
+const store = observable.map<string, string>();
 const backend: SidebarBackend = {
   ownerId: "owner",
   storage: {
@@ -116,7 +122,6 @@ const backend: SidebarBackend = {
   },
   save: () => {},
   editPreference: (_key, _before, after) => after,
-  subscribePreference: () => () => {},
   post: async (path, body) => {
     const request = fixturePostBody<"/api/projects/delete">(body);
     window.posts.push({ path, body: request });
@@ -138,94 +143,153 @@ const services: SidebarServices = {
   byOwner: () => backend,
   serverForChat: () => "owner",
 };
-function Fixture() {
-  const [data, setData] = useState(
-    location.search.includes("empty")
-      ? {
-          ...initial,
-          threads: [],
-          nodes: [],
-          runtime: { ...initial.runtime, agents: [] },
-        }
-      : initial,
-  );
-  const [, setScope] = useState<ReadonlySet<string>>(new Set());
-  window.retire = () =>
-    setData({
-      ...initial,
-      threads: [],
-      nodes: [],
-      runtime: { ...initial.runtime, agents: [], projects: [] },
-    });
-  const state = useMemo(() => stateFromFixture(data), [data]);
-  const metadata = useMemo(
-    () =>
-      createProjectionMetadataMirror({
-        workspaceId: data.entityWorkspaceId ?? "",
-        ready: true,
-        complete: data.entitiesComplete === true,
-        projectSequences: data.runtime.projectSequences ?? {},
+const fixtureData = observable.box(
+  location.search.includes("empty")
+    ? {
+        ...initial,
+        threads: [],
+        nodes: [],
+        runtime: { ...initial.runtime, agents: [] },
+      }
+    : initial,
+  { deep: false },
+);
+window.retire = action(() =>
+  fixtureData.set({
+    ...initial,
+    threads: [],
+    nodes: [],
+    runtime: { ...initial.runtime, agents: [], projects: [] },
+  }),
+);
+const state = computed(() => stateFromFixture(fixtureData.get()));
+const metadata = computed(() => {
+  const data = fixtureData.get();
+  return createProjectionMetadataMirror({
+    workspaceId: data.entityWorkspaceId ?? "",
+    ready: true,
+    complete: data.entitiesComplete === true,
+    projectSequences: data.runtime.projectSequences ?? {},
+  }).current;
+});
+const deletion = new ProjectDeletion({
+  get state() {
+    return state.get();
+  },
+  get metadata() {
+    return metadata.get();
+  },
+  workspaceId: "workspace",
+  services,
+  onSuspend: (scope) => {
+    window.suspended = [...scope];
+  },
+  onResume: () => {
+    window.suspended = [];
+  },
+  onFinish: (ids) => {
+    window.finished.push(ids);
+    window.suspended = [];
+  },
+  notify: (message) => {
+    window.notice = message;
+  },
+});
+const logical = location.search.includes("logical");
+const sources = computed(() => {
+  const data = fixtureData.get();
+  const source = createSidebarSourceStore();
+  source.update(
+    "owner",
+    sidebarSnapshot(
+      stateFromFixture({
+        ...data,
+        runtime: {
+          ...data.runtime,
+          projects: data.runtime.projects.map((project) => ({
+            ...project,
+            ...(location.search.includes("legacy") ? { id: "" } : {}),
+          })),
+        },
       }),
-    [data],
+      [
+        ...data.runtime.projects.map((value) => ({
+          collection: "project" as const,
+          id: value.id,
+          value,
+        })),
+        ...data.threads.map((chat) => ({
+          collection: "agentSummary" as const,
+          id: chat.id,
+          value: agentSummaryFixture(chat.id, {
+            name: chat.name || "Chat",
+            projectPath: chat.projectPath || chat.cwd || "",
+          }),
+        })),
+      ],
+    ),
   );
-  const deletion = useProjectDelete({
-    state,
-    metadata: metadata.current,
-    workspaceId: "workspace",
-    services,
-    onSuspend: (scope) => {
-      window.suspended = [...scope];
-      setScope(scope);
+  return source.sources(["owner"], new Set(["owner"]));
+});
+
+const select = createMergedSidebarSelector();
+const model = computed(() => select(sources.get()));
+const combinedServices: import("../../../servers/combinedSidebarServices.ts").CombinedSidebarServices =
+  {
+    backends: new Map([["owner", backend]]),
+    online: () => true,
+    refreshOwner: async () => {
+      throw new Error("Unexpected refresh");
     },
-    onResume: () => setScope(new Set()),
-    onFinish: (ids) => {
-      window.finished.push(ids);
-      setScope(new Set());
+    executeCommand: async () => {
+      throw new Error("Unexpected command");
     },
+    aliases: {},
+    send: (owner, command) => {
+      window.owner = owner;
+      if (command.action === "delete-project") deletion.open(command.projectId);
+    },
+    applyNavigation: () => {},
+    settings: () => {},
+    search: () => {},
     notify: (message) => {
       window.notice = message;
     },
-  });
-  const logical = location.search.includes("logical");
-  const sources = useMemo(() => {
-    const source = createSidebarSourceStore();
-    source.update(
-      "owner",
-      sidebarSnapshot(
-        stateFromFixture({
-          ...data,
-          runtime: {
-            ...data.runtime,
-            projects: data.runtime.projects.map((project) => ({
-              ...project,
-              ...(location.search.includes("legacy") ? { id: "" } : {}),
-            })),
-          },
-        }),
-        [
-          ...data.runtime.projects.map((value) => ({
-            collection: "project" as const,
-            id: value.id,
-            value,
-          })),
-          ...data.threads.map((chat) => ({
-            collection: "agentSummary" as const,
-            id: chat.id,
-            value: agentSummaryFixture(chat.id, {
-              name: chat.name || "Chat",
-              projectPath: chat.projectPath || chat.cwd || "",
-            }),
-          })),
-        ],
-      ),
-    );
-    return source.sources(["owner"], new Set(["owner"]));
-  }, [data]);
-  const model = useMemo(
-    () => createMergedSidebarSelector()(sources),
-    [sources],
-  );
-  const collections = sources[0]!.collections;
+  };
+const sidebarInput = () => ({
+  model: model.get(),
+  current: "owner",
+  navigation: {},
+  mobile: true,
+  hidden: false,
+  close: () => {},
+  notice: "",
+  hideOldChatsThreshold: 20,
+});
+const combined = createCombinedSidebarFixture(sidebarInput(), combinedServices);
+const stops = [
+  deletion.start(),
+  ...(logical
+    ? [
+        combined.start(),
+        reaction(
+          () => model.get(),
+          () => combined.update(sidebarInput(), combinedServices),
+        ),
+      ]
+    : []),
+];
+window.addEventListener(
+  "pagehide",
+  () => {
+    stops.reverse().forEach((stop) => stop());
+    injectedStore.store.dispose();
+  },
+  { once: true },
+);
+const Fixture = observer(function Fixture() {
+  const data = fixtureData.get();
+  const collections = sources.get()[0]!.collections;
   return React.createElement(
     React.Fragment,
     null,
@@ -236,38 +300,10 @@ function Fixture() {
           React.createElement(
             CombinedSidebarServicesProvider,
             {
-              value: {
-                backends: new Map([["owner", backend]]),
-                online: () => true,
-                refreshOwner: async () => {
-                  throw new Error("Unexpected refresh");
-                },
-                executeCommand: async () => {
-                  throw new Error("Unexpected command");
-                },
-                aliases: {},
-                send: (owner, command) => {
-                  window.owner = owner;
-                  if (command.action === "delete-project")
-                    deletion.open(command.projectId);
-                },
-                applyNavigation: () => {},
-                settings: () => {},
-                search: () => {},
-                notify: (message) => {
-                  window.notice = message;
-                },
-              },
+              value: combinedServices,
             },
-            React.createElement(CombinedServerSidebar, {
-              model,
-              current: "owner",
-              navigation: {},
-              mobile: true,
-              hidden: false,
-              close: () => {},
-              notice: "",
-              hideOldChatsThreshold: 20,
+            React.createElement(CombinedSidebarFixtureView, {
+              fixture: combined,
             }),
           ),
         )
@@ -305,7 +341,7 @@ function Fixture() {
         ),
     React.createElement(ProjectDeleteDialog, deletion.dialog),
   );
-}
+});
 createRoot(rootElement!).render(
   React.createElement(
     React.StrictMode,

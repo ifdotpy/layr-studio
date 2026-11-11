@@ -69,7 +69,7 @@ it("action observations schedule no subscription stabilization timer", async () 
   vi.useRealTimers();
 });
 
-it("action reads join one key, never start on observation, and discard evicted replies", async () => {
+it("observed and explicit reads join one key and discard evicted replies", async () => {
   const f = fixture();
   const reads = f.runtime.keyed<string>({ read: true });
   const pending = Promise.withResolvers<string>();
@@ -306,13 +306,14 @@ describe("observable resource runtime over the subscription owner", () => {
     f.subscriptions.dispose();
   });
 
-  it("marks the last reader stale immediately and reuses transport through grace", async () => {
+  it("marks the last reader stale after publication and reuses transport through grace", async () => {
     const f = fixture();
     const first = autorun(() => f.slot.current);
     await vi.advanceTimersByTimeAsync(100);
     f.publish("one");
     await vi.advanceTimersByTimeAsync(0);
     first();
+    await vi.advanceTimersByTimeAsync(0);
     expect(f.slot.current.status).toBe("stale");
     expect(f.removed).not.toHaveBeenCalled();
     const second = autorun(() => f.slot.current);
@@ -474,6 +475,7 @@ describe("bounded keyed observable facades", () => {
     expect(slot.current).toBe(current);
     expect(seen).toHaveBeenCalledTimes(renders);
     stop();
+    await vi.advanceTimersByTimeAsync(0);
     expect(slot.current.status).toBe("stale");
     await vi.advanceTimersByTimeAsync(19_999);
     expect(f.removed).not.toHaveBeenCalled();
@@ -503,6 +505,7 @@ describe("bounded keyed observable facades", () => {
     f.publish("oldest");
     await vi.advanceTimersByTimeAsync(0);
     stop();
+    await vi.advanceTimersByTimeAsync(0);
     expect(oldest.current.status).toBe("stale");
     const recent = f.get(f.ref("recent"));
     for (let i = 0; i < MAX_INACTIVE_RESOURCE_FACADES - 2; i++)
@@ -733,4 +736,94 @@ it("unwraps only live and stale resource data, including stale errors", () => {
     data,
   ]);
   expect(resourceData(cases[5]!)).toBe(data);
+});
+
+it("loads a keyed read once when observed without an imperative read call", async () => {
+  const f = fixture();
+  const load = vi.fn(async () => "observed");
+  const slot = f.runtime.keyed<string>({ read: true })({
+    key: "auto",
+    read: load,
+  });
+  const seen: string[] = [];
+  const stop = autorun(() => seen.push(slot.current.status));
+  await vi.waitFor(() => expect(slot.current.status).toBe("live"));
+  expect(load).toHaveBeenCalledOnce();
+  expect(seen).toContain("loading");
+  stop();
+  f.runtime.dispose();
+  f.subscriptions.dispose();
+});
+
+it("releases observed reads after settlement and remounts with one new request", async () => {
+  const f = fixture();
+  const pending = Promise.withResolvers<string>();
+  const load = vi.fn(() => pending.promise);
+  const slot = f.runtime.keyed<string>({
+    read: true,
+    releaseOnUnobserved: true,
+  })({ key: "released", read: load });
+  const stop = autorun(() => slot.current);
+  const request = slot.read();
+  stop();
+  expect(slot.read()).toBe(request);
+  const stopAgain = autorun(() => slot.current);
+  stopAgain();
+  pending.resolve("late");
+  await request;
+  expect(slot.current.status).toBe("absent");
+  const remount = autorun(() => slot.current);
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  remount();
+  f.runtime.dispose();
+  f.subscriptions.dispose();
+});
+
+it("preserves the read intent as the explicit loader's receiver", async () => {
+  const f = fixture();
+  const slot = f.runtime.keyed<string>({ read: true })({
+    key: "loader-context",
+    read() {
+      return Promise.resolve(this.key);
+    },
+  });
+  await expect(slot.read()).resolves.toBe("loader-context");
+  f.runtime.dispose();
+  f.subscriptions.dispose();
+});
+
+it("starts no observed read after its server runtime is disposed", async () => {
+  const f = fixture();
+  const load = vi.fn(async () => "closed");
+  const slot = f.runtime.keyed<string>({ read: true })({
+    key: "closed",
+    read: load,
+  });
+  f.runtime.dispose();
+  const stop = autorun(() => slot.current);
+  await Promise.resolve();
+  expect(load).not.toHaveBeenCalled();
+  stop();
+  f.subscriptions.dispose();
+});
+
+it("defers observable staleness until after the unobserving derivation", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const stop = autorun(() => f.slot.current);
+  try {
+    await vi.advanceTimersByTimeAsync(100);
+    f.publish("ready");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.slot.current.status).toBe("live");
+    stop();
+    expect(f.slot.current.status).toBe("live");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.slot.current.status).toBe("stale");
+  } finally {
+    stop();
+    f.runtime.dispose();
+    f.subscriptions.dispose();
+    vi.useRealTimers();
+  }
 });

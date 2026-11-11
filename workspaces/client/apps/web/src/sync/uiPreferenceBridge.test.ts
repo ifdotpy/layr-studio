@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { syncPost } from "../api.ts";
@@ -5,7 +6,7 @@ import type { syncPost } from "../api.ts";
 const mocks = vi.hoisted(() => ({
   acknowledge: vi.fn(),
   isSchemaMismatch: vi.fn(() => false),
-  read: vi.fn((_scope?: string) => ({})),
+  read: vi.fn((_scope?: string, _storage?: Storage) => ({})),
   sessionRead: vi.fn(),
   receive: vi.fn(),
   transportWrite: vi.fn(),
@@ -16,7 +17,6 @@ const mocks = vi.hoisted(() => ({
       return { fields: body.fields ?? {} };
     },
   ),
-  watch: vi.fn((_listener: () => void) => () => {}),
 }));
 
 vi.mock("../servers/net/api.ts", () => ({
@@ -27,14 +27,18 @@ vi.mock("../servers/net/api.ts", () => ({
 }));
 vi.mock("./uiPreferenceStore.ts", () => ({
   acknowledgePreferenceFields: mocks.acknowledge,
-  readPreferenceFields: mocks.read,
+  readPreferenceFields: (scope: string, storage: Storage) => {
+    publication.get();
+    return mocks.read(scope, storage);
+  },
   receivePreferenceFields: mocks.receive,
-  watchPreferenceWrites: mocks.watch,
 }));
 
 import { createUiPreferenceBridge } from "./uiPreferenceBridge.ts";
 
 const storage = {} as Storage;
+const publication = observable.box(0);
+const changed = action(() => publication.set(publication.get() + 1));
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -54,18 +58,14 @@ afterEach(() => {
 
 describe("UI preference projection bridge", () => {
   it("sends an explicit edit made before the first projection", async () => {
-    let changed = () => {};
-    mocks.watch.mockImplementation((listener) => {
-      changed = listener;
-      return () => {};
-    });
+    mocks.read.mockReturnValue({});
+    const bridge = createUiPreferenceBridge(storage, mocks.syncPost);
+    const stop = bridge.start();
     mocks.read.mockImplementation((scope) =>
       scope === "user"
         ? { theme: { value: "dark", timestamp: 2, writer: "w" } }
         : {},
     );
-    const bridge = createUiPreferenceBridge(storage, mocks.syncPost);
-    const stop = bridge.start();
     changed();
     expect(mocks.syncPost).not.toHaveBeenCalled();
     bridge.receiveProjection({});
@@ -74,11 +74,6 @@ describe("UI preference projection bridge", () => {
     stop();
   });
   it("does not send stored fields on initial or repeated projection", async () => {
-    let changed = () => {};
-    mocks.watch.mockImplementation((listener) => {
-      changed = listener;
-      return () => {};
-    });
     mocks.receive.mockImplementation(() => changed());
     mocks.read.mockReturnValue({
       old: { value: "old", timestamp: 1, writer: "w" },
@@ -150,11 +145,6 @@ describe("UI preference projection bridge", () => {
   });
 
   it("sends local changes once through the gated API without reading a session", async () => {
-    let changed = () => {};
-    mocks.watch.mockImplementation((listener) => {
-      changed = listener;
-      return () => {};
-    });
     mocks.read.mockReturnValue({});
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
@@ -186,7 +176,6 @@ describe("UI preference projection bridge", () => {
   });
 
   it("does not resend acknowledged fields when the server reorders keys", async () => {
-    let changed = () => {};
     const local = {
       z: { value: "last", timestamp: 2, writer: "w" },
       a: { value: "first", timestamp: 1, writer: "w" },
@@ -195,10 +184,6 @@ describe("UI preference projection bridge", () => {
       a: local.a,
       z: local.z,
     };
-    mocks.watch.mockImplementation((listener) => {
-      changed = listener;
-      return () => {};
-    });
     mocks.read.mockImplementation((scope) => (scope === "user" ? local : {}));
     mocks.acknowledge.mockImplementation(() => changed());
     let posts = 0;
@@ -269,11 +254,6 @@ describe("UI preference projection bridge", () => {
   });
 
   it("sends nothing while the API schema gate is raised", async () => {
-    let changed = () => {};
-    mocks.watch.mockImplementation((listener) => {
-      changed = listener;
-      return () => {};
-    });
     mocks.read.mockImplementation((scope) =>
       scope === "user"
         ? { local: { value: "local", timestamp: 2, writer: "w" } }

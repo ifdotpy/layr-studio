@@ -8,7 +8,7 @@ import { useServerStorage } from "../ServerServicesProvider/ServerServicesProvid
 import { useServerApi } from "../ServerServicesProvider/ServerServicesProvider.tsx";
 import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
 import { Button, SegmentedControl, Textarea, TextInput } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { errorText } from "../../../api.ts";
 import type { ServerAccessRequest } from "../../../servers/accessContract.ts";
 export default observer(function ServerAccessSettings({
@@ -29,13 +29,14 @@ export default observer(function ServerAccessSettings({
   const [grant, setGrant] = useState<"full" | "observe">("full");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const pending = useRef<ServerAccessRequest | null>(null);
-  useEffect(() => {
-    if (!active) return;
+  const pending = useRef<ServerAccessRequest | null>(readPending());
+  function readPending(): ServerAccessRequest | null {
     try {
-      pending.current = JSON.parse(outbox.get("serverAccess", "") || "null");
-    } catch {}
-  }, [active]);
+      return JSON.parse(outbox.get("serverAccess", "") || "null");
+    } catch {
+      return null;
+    }
+  }
   if (!active) return null;
   const run = (next: ServerAccessRequest) => {
     if (busy) return;

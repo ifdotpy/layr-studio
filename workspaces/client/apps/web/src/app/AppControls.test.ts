@@ -3,7 +3,7 @@ import { createRetainedWorktreesMirror } from "../generated/observableResources.
 import { afterEach, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { runInAction } from "mobx";
+import { action } from "mobx";
 import { AgentStatus, AgentSource } from "../generated/api.ts";
 import { AppTeam } from "../components/shell/AppTeam/AppTeam.tsx";
 import { ServerAreas } from "./ServerAreasProvider.tsx";
@@ -15,7 +15,11 @@ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 const h = vi.hoisted(() => ({
   area: undefined as unknown,
   controls: undefined as
-    | { completedOpen: boolean; setCompletedOpen(open: boolean): void }
+    | {
+        completedOpen: boolean;
+        setCompletedOpen(open: boolean): void;
+        hasTeam(): boolean;
+      }
     | undefined,
   retained: false,
 }));
@@ -32,6 +36,7 @@ vi.mock("../components/agents/support/TeamPanelContext.tsx", () => ({
     children: React.ReactNode;
   }) => {
     h.controls = value;
+    h.retained = value.hasTeam();
     return createElement(
       "div",
       { "data-completed": value.completedOpen },
@@ -94,7 +99,7 @@ async function mount(retained = false) {
     },
     screen: { active: true, channel: null },
   });
-  runInAction(() => {
+  action(() => {
     setStartupFixture(
       area,
       Object.assign(
@@ -117,7 +122,7 @@ async function mount(retained = false) {
       ),
     );
     area.navigation.selectedId = "A";
-  });
+  })();
   h.area = area;
   const navigation = area.navigation;
   const host = document.createElement("div"),
@@ -140,14 +145,14 @@ it("clears a completed override on A to B to A", async () => {
   expect(h.controls?.completedOpen).toBe(true);
   await act(async () => h.controls?.setCompletedOpen(false));
   await act(async () =>
-    runInAction(() => {
+    action(() => {
       navigation.selectedId = "B";
-    }),
+    })(),
   );
   await act(async () =>
-    runInAction(() => {
+    action(() => {
       navigation.selectedId = "A";
-    }),
+    })(),
   );
   expect(h.controls?.completedOpen).toBe(true);
 });
@@ -157,3 +162,51 @@ it("passes the global retained-only team hint", async () => {
 });
 
 import { setStartupFixture } from "../components/shell/integration-support/observableFixture.tsx";
+
+import { ownerFixture } from "./conversation/ownerFixture.ts";
+it.each([true, false])(
+  "posts and settles a %s read-state write through its owner",
+  async (read) => {
+    const f = ownerFixture();
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("visible");
+    const proof = { id: "lead", threadId: "thread", turnId: "turn" };
+    const target = {
+      threadId: "thread",
+      turnId: "turn",
+      revision: 2,
+      read: !read,
+    };
+    f.post.mockResolvedValue({
+      id: "lead",
+      readState: { ...target, read, revision: 3 },
+    });
+    try {
+      await f.read.write(proof, read, target);
+      expect(f.post).toHaveBeenCalledWith(
+        "/api/organization",
+        {
+          id: "lead",
+          read_state: {
+            thread_id: "thread",
+            turn_id: "turn",
+            read,
+            expected_revision: 2,
+          },
+        },
+        { workspaceId: "workspace", timeoutMs: 15000 },
+      );
+      expect(f.read.scope.states.get("lead")).toMatchObject({
+        read,
+        revision: 3,
+      });
+      expect(f.read.scope.requests.size).toBe(0);
+    } finally {
+      focus.mockRestore();
+      visibility.mockRestore();
+      f.dispose();
+    }
+  },
+);

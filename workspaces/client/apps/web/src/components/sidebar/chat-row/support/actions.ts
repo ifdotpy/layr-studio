@@ -81,6 +81,7 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
           actions: false,
           server: computed({ equals: compareShallow }),
         },
+        { autoBind: true },
       ),
     [area, row, priority],
   );

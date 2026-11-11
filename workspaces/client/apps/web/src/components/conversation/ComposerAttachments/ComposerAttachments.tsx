@@ -1,9 +1,11 @@
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../../../store/runtime.ts";
 import { MAX_TURN_ATTACHMENTS } from "../../../generated/sharedValues.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useServerFileDialogs } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { Button, Loader } from "@mantine/core";
 import { File, Paperclip, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { errorText } from "../../../api.ts";
 import { IconAction } from "../../ui/actions/IconAction/IconAction.tsx";
 import FilePreview, { useFilePreview } from "../FilePreview/FilePreview.tsx";
@@ -129,33 +131,27 @@ export default function ComposerAttachments(p: {
   );
 }
 
-function AttachmentImage(p: { asset: Attachment; onPreview: () => void }) {
-  const { get } = useServerApi();
+const AttachmentImage = observer(function AttachmentImage(p: {
+  asset: Attachment;
+  onPreview: () => void;
+}) {
+  const net = useServerNet();
 
-  const [src, setSrc] = useState<string>();
-  const [error, setError] = useState("");
-  useEffect(() => {
-    let live = true;
-    setSrc(undefined);
-    setError("");
-    get("/api/file", { query: { asset: p.asset.id } })
-      .then((file) => {
-        if (
-          live &&
-          ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
-            file.mime,
-          )
-        )
-          setSrc(`data:${file.mime};base64,${file.base64}`);
-        else if (live) setError("This image type has no preview.");
-      })
-      .catch((error) => {
-        if (live) setError(errorText(error));
-      });
-    return () => {
-      live = false;
-    };
-  }, [p.asset.id]);
+  const slot = net.reads.file({ asset: p.asset.id }).current;
+  const file = resourceData(slot);
+  const [failed, setFailed] = useState<string>();
+  const supported =
+    file &&
+    ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.mime);
+  const src = supported ? `data:${file.mime};base64,${file.base64}` : undefined;
+  const error =
+    failed === p.asset.id
+      ? "Cannot load this image."
+      : slot.status === "error"
+        ? errorText(slot.error)
+        : file && !supported
+          ? "This image type has no preview."
+          : "";
   return error ? (
     <p role="alert">{error}</p>
   ) : src ? (
@@ -169,13 +165,13 @@ function AttachmentImage(p: { asset: Attachment; onPreview: () => void }) {
         src={src}
         alt={p.asset.name}
         loading="lazy"
-        onError={() => setError("Cannot load this image.")}
+        onError={() => setFailed(p.asset.id)}
       />
     </button>
   ) : (
     <span role="status">Load image…</span>
   );
-}
+});
 
 export function MessageAttachments(p: {
   assets: readonly Attachment[];

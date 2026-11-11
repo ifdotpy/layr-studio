@@ -34,12 +34,10 @@ export type FilePreviewSelection = {
   slot: ReadSlot<GetResult<"/api/file">>;
 };
 type LoadedFile = {
-  key: string;
   name: string;
   mime: string;
-  url: string;
   text: string;
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   format: ReturnType<typeof fileFormat>;
 };
 export function useFilePreview() {
@@ -57,8 +55,7 @@ export function openFilePreview(
   target: PreviewTarget,
 ) {
   const { agent, path, asset } = target;
-  const query = { agent, path, asset };
-  const slot = net.reads.file(query);
+  const slot = net.reads.file({ agent, path, asset });
   void slot.read().catch(() => {});
   return { target, slot };
 }
@@ -75,27 +72,8 @@ export default observer(function FilePreview({
   const slot = target && selection ? selection.slot.current : null;
   const result = slot ? resourceData(slot) : undefined;
 
-  const key = JSON.stringify([target?.agent, target?.path, target?.asset]);
-  const [loaded, setLoaded] = useState<LoadedFile | null>(null);
-  const file = loaded?.key === key ? loaded : null;
-  const [failure, setFailure] = useState<{
-    key: string;
-    error: unknown;
-  } | null>(null);
-  const [source, setSource] = useState(false);
-  const selectedLine = useRef<HTMLElement>(null);
-  const error =
-    failure?.key === key
-      ? failure.error
-      : slot?.status === "error"
-        ? slot.error
-        : null;
-  useEffect(() => {
-    setLoaded(null);
-    setFailure(null);
-    setSource(!!target?.line);
-    if (!target || !result) return;
-    let url = "";
+  const file = useMemo<LoadedFile | null>(() => {
+    if (!result) return null;
     const bytes = Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0));
     const format = fileFormat(result.name, result.mime);
     const text = [
@@ -109,28 +87,41 @@ export default observer(function FilePreview({
     ].includes(format)
       ? new TextDecoder().decode(bytes)
       : "";
-    const body = format === "svg" ? safeSvg(text) : bytes;
-    url = URL.createObjectURL(
-      new Blob([body], {
-        type: format === "svg" ? "image/svg+xml" : result.mime,
+    return { name: result.name, mime: result.mime, bytes, format, text };
+  }, [result]);
+  const [failure, setFailure] = useState<{
+    selection: typeof selection;
+    error: unknown;
+  } | null>(null);
+  const [view, setView] = useState<{
+    selection: typeof selection;
+    source: boolean;
+  }>();
+  const source = view?.selection === selection ? view.source : !!target?.line;
+  const setSource = (source: boolean) => setView({ selection, source });
+  const selectedLine = useRef<HTMLElement>(null);
+  const error =
+    failure?.selection === selection
+      ? failure.error
+      : slot?.status === "error"
+        ? slot.error
+        : null;
+  const [objectUrl, setObjectUrl] = useState<{
+    file: LoadedFile;
+    url: string;
+  }>();
+  const url = objectUrl?.file === file ? objectUrl?.url : undefined;
+  // Blob URLs are mounted browser media resources; decoded file data is derived above.
+  useEffect(() => {
+    if (!file) return setObjectUrl(undefined);
+    const url = URL.createObjectURL(
+      new Blob([file.format === "svg" ? safeSvg(file.text) : file.bytes], {
+        type: file.format === "svg" ? "image/svg+xml" : file.mime,
       }),
     );
-    setLoaded({
-      key,
-      name: result.name,
-      mime: result.mime,
-      bytes,
-      format,
-      url,
-      text,
-    });
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [key, result, selection]);
-  useEffect(() => {
-    if (target?.line) setSource(true);
-  }, [target?.line]);
+    setObjectUrl({ file, url });
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
   useEffect(() => {
     if (!file || !target?.line || !source) return;
     const frame = requestAnimationFrame(() =>
@@ -176,7 +167,7 @@ export default observer(function FilePreview({
     }
   }, [file]);
   const act = (operation: () => Promise<unknown>) => {
-    operation().catch((error) => setFailure({ key, error }));
+    operation().catch((error) => setFailure({ selection, error }));
   };
   const toggle =
     file && ["markdown", "csv", "tsv", "json"].includes(file.format);
@@ -274,6 +265,7 @@ export default observer(function FilePreview({
         </div>
       )}
       {file &&
+        url &&
         (source || file.format === "text" ? (
           <pre className="file-preview-body file-preview-source">
             {excerpt ? (
@@ -290,10 +282,10 @@ export default observer(function FilePreview({
           </pre>
         ) : file.format === "image" || file.format === "svg" ? (
           <ImageViewer
-            src={file.url}
+            src={url}
             alt={file.name}
             onError={() =>
-              setFailure({ key, error: "Cannot load this image." })
+              setFailure({ selection, error: "Cannot load this image." })
             }
           />
         ) : file.format === "markdown" ? (
@@ -346,28 +338,28 @@ export default observer(function FilePreview({
           <iframe
             title={file.name}
             className="workspace-preview-frame"
-            src={file.url}
+            src={url}
           />
         ) : file.format === "audio" ? (
           <audio
             onError={() =>
-              setFailure({ key, error: "Cannot play this audio format." })
+              setFailure({ selection, error: "Cannot play this audio format." })
             }
             className="file-preview-media"
             controls
             preload="metadata"
-            src={file.url}
+            src={url}
           />
         ) : file.format === "video" ? (
           <video
             onError={() =>
-              setFailure({ key, error: "Cannot play this video format." })
+              setFailure({ selection, error: "Cannot play this video format." })
             }
             className="file-preview-media"
             controls
             playsInline
             preload="metadata"
-            src={file.url}
+            src={url}
           />
         ) : (
           <p>No preview for this file type.</p>

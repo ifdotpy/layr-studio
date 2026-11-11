@@ -1,30 +1,24 @@
-import { useEffect, useMemo } from "react";
+import type { ServerApi } from "../api.ts";
 import {
   autorun,
   makeAutoObservable,
   observableRef,
-  runInAction,
+  action,
+  flow,
   reaction,
 } from "mobx";
 import {
-  roomId,
-  roomLegacy,
   createRoomMirror,
   type RoomData,
   type ChatRead,
   type MessageRecord,
 } from "../generated/observableResources.ts";
-import {
-  useServerApi,
-  useServerStore,
-} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData, type ResourceSlot } from "../store/runtime.ts";
 import {
   boundTranscriptItems,
-  trimTranscriptPageCache,
   MAX_TRANSCRIPT_PAGE_BYTES,
 } from "../transcriptPageBounds.ts";
-import { errorText } from "../api.ts";
+import { errorText, type GetResult } from "../api.ts";
 import type { Message } from "../types.ts";
 
 type ChatMessage = NonNullable<ChatRead["messages"]>[number];
@@ -112,21 +106,28 @@ export class RoomHistory {
   private readonly views = createRoomViews();
   readonly id: string | null;
   private readonly slot: ResourceSlot<RoomData> | undefined;
-  private readonly api: Pick<ReturnType<typeof useServerApi>, "syncGet">;
+  private readonly api: Pick<ServerApi, "syncGet">;
   private readonly legacy: boolean;
   constructor(
     id: string | null,
     slot: ResourceSlot<RoomData> | undefined,
-    api: Pick<ReturnType<typeof useServerApi>, "syncGet">,
+    api: Pick<ServerApi, "syncGet">,
     legacy: boolean,
   ) {
     this.id = id;
     this.slot = slot;
     this.api = api;
     this.legacy = legacy;
-    makeAutoObservable<this, "slot" | "api" | "views">(
+    makeAutoObservable<this, "slot" | "api" | "views" | "accept">(
       this,
-      { items: observableRef, slot: false, api: false, views: false },
+      {
+        items: observableRef,
+        slot: false,
+        api: false,
+        views: false,
+        accept: action,
+        unavailable: action,
+      },
       { autoBind: true },
     );
   }
@@ -205,22 +206,10 @@ export class RoomHistory {
           void data.nextBefore;
           void data.nextAfter;
         }
-        runInAction(() => this.accept(data));
-      } else if (!this.id || current?.status === "absent")
-        runInAction(() => {
-          this.loaded = true;
-          this.items = [];
-          this.before = null;
-          this.after = null;
-        });
+        this.accept(data);
+      } else if (!this.id || current?.status === "absent") this.unavailable();
       if (current && "error" in current && current.error)
-        runInAction(() => {
-          this.notice = errorText(current.error);
-          this.loaded = true;
-          this.items = [];
-          this.before = null;
-          this.after = null;
-        });
+        this.unavailable(current.error);
     });
     const stopBounds = reaction(
       () => this.size,
@@ -239,41 +228,42 @@ export class RoomHistory {
           this.after = String(this.items.at(-1)?.seq ?? "") || null;
       },
     );
-    return () =>
-      runInAction(() => {
-        stopBounds();
-        this.active = false;
-        this.pageLoading = false;
-        this.attempt++;
-        stop();
-      });
+    return action(() => {
+      stopBounds();
+      this.active = false;
+      this.pageLoading = false;
+      this.attempt++;
+      stop();
+    });
   }
-  async reload() {
+  unavailable(error?: unknown) {
+    this.notice = error ? errorText(error) : "";
+    this.loaded = true;
+    this.items = [];
+    this.before = null;
+    this.after = null;
+  }
+  reload = flow(function* (this: RoomHistory) {
     if (!this.id) return;
     const attempt = ++this.attempt;
     this.pageLoading = false;
     try {
-      const data = this.legacy
-        ? await this.api.syncGet("/api/messages", { query: { room: this.id } })
-        : await this.api.syncGet("/api/agent-chat", {
-            query: { room: this.id, limit: 100 },
-          });
+      const data: GetResult<"/api/messages"> | GetResult<"/api/agent-chat"> =
+        yield this.legacy
+          ? this.api.syncGet("/api/messages", { query: { room: this.id } })
+          : this.api.syncGet("/api/agent-chat", {
+              query: { room: this.id, limit: 100 },
+            });
       if (this.active && attempt === this.attempt) {
         const mirror = createRoomMirror(data);
-        runInAction(() => this.accept(mirror.current));
+        this.accept(mirror.current);
       }
     } catch (error) {
-      if (this.active && attempt === this.attempt)
-        runInAction(() => {
-          this.notice = errorText(error);
-          this.loaded = true;
-          this.items = [];
-          this.before = null;
-          this.after = null;
-        });
+      if (this.active && attempt === this.attempt) this.unavailable(error);
     }
-  }
-  private async page(
+  });
+  private page = flow(function* (
+    this: RoomHistory,
     direction: "older" | "newer",
     captureAnchor?: CaptureAnchor,
   ) {
@@ -284,13 +274,16 @@ export class RoomHistory {
     const attempt = ++this.attempt;
     this.pageLoading = true;
     try {
-      const data = await this.api.syncGet("/api/agent-chat", {
-        query: {
-          room: this.id,
-          [direction === "older" ? "before" : "after"]: numeric,
-          limit: 100,
+      const data: GetResult<"/api/agent-chat"> = yield this.api.syncGet(
+        "/api/agent-chat",
+        {
+          query: {
+            room: this.id,
+            [direction === "older" ? "before" : "after"]: numeric,
+            limit: 100,
+          },
         },
-      });
+      );
       if (!this.active || attempt !== this.attempt) return;
       if (
         direction === "newer" &&
@@ -299,14 +292,11 @@ export class RoomHistory {
       )
         throw new Error("The room update cursor did not advance.");
       const mirror = createRoomMirror(data);
-      runInAction(() => this.accept(mirror.current, direction, captureAnchor));
+      this.accept(mirror.current, direction, captureAnchor);
     } finally {
-      if (attempt === this.attempt)
-        runInAction(() => {
-          this.pageLoading = false;
-        });
+      if (attempt === this.attempt) this.pageLoading = false;
     }
-  }
+  });
   older(captureAnchor?: CaptureAnchor) {
     return this.page("older", captureAnchor);
   }
@@ -316,60 +306,16 @@ export class RoomHistory {
   setPageAnchor(id: string | null) {
     this.anchor = id || undefined;
   }
-  async showLatest() {
+  showLatest() {
     this.attempt++;
     this.pageLoading = false;
     this.items = [];
     this.before = null;
     this.after = null;
     this.loaded = false;
-    await this.reload();
+    return this.reload();
   }
-  async ensureMessage(id: string) {
-    return this.items.some((item) => item.id === id);
+  ensureMessage(id: string) {
+    return Promise.resolve(this.items.some((item) => item.id === id));
   }
-}
-
-export function useRoomHistory(
-  id: string | null,
-  workspace = "",
-  enabled = true,
-  legacy = false,
-) {
-  const store = useServerStore();
-  const api = useServerApi();
-  const pages = useMemo(
-    () => new Map<string, RoomHistory>(),
-    [store, api, workspace, legacy],
-  );
-  const scope = id || "";
-  const session = useMemo(() => {
-    let page = pages.get(scope);
-    if (!page)
-      page = new RoomHistory(
-        id,
-        id
-          ? store.room(roomId(id), legacy ? roomLegacy(true) : undefined)
-          : undefined,
-        api,
-        legacy,
-      );
-    pages.delete(scope);
-    pages.set(scope, page);
-    trimTranscriptPageCache(pages, scope);
-    return page;
-  }, [pages, scope, id, store, api, legacy]);
-  useEffect(() => {
-    if (!enabled) return;
-    const stop = session.start();
-    const boundCache = reaction(
-      () => session.size,
-      () => trimTranscriptPageCache(pages, scope),
-    );
-    return () => {
-      boundCache();
-      stop();
-    };
-  }, [session, enabled, pages, scope]);
-  return session;
 }

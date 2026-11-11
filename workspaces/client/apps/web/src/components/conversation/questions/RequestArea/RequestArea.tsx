@@ -1,18 +1,20 @@
-import { createRef, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { makeAutoObservable, runInAction } from "mobx";
+import { createRef, type ReactNode } from "react";
+import { reaction, flowResult, makeAutoObservable, observable } from "mobx";
 import { ApiError, errorText } from "../../../../api.ts";
 import { serverMutationResponseIsUncertain } from "../../../../servers/mutationIdentity.ts";
-import {
-  useServerApi,
-  useServerServices,
-  useServerStorage,
-  useServerStore,
-} from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import type { ServerApi } from "../../../../api.ts";
+import type { createServerStore } from "../../../../store/server.ts";
+import { resourceData } from "../../../../store/runtime.ts";
+import { requestDraftsForStorage } from "../support/requestDrafts.ts";
+import { savedAnswer } from "../AnswerForm/AnswerForm.tsx";
+import type {
+  AnswerValue,
+  AnswerValues,
+} from "../AnswerFields/AnswerFields.tsx";
 import {
   agentId,
   type RequestsCollections,
 } from "../../../../generated/observableResources.ts";
-import { serverViewId } from "../../../../servers/environment.ts";
 import { reportUnsentFailure, unsentStore } from "../../../../unsent/store.ts";
 import { nativeThreadError } from "../../../../nativeErrors.ts";
 import {
@@ -28,30 +30,32 @@ import {
   isFieldRequest,
   requestQuestions,
 } from "../support/requestData.ts";
+import {
+  createRequestsView,
+  type RequestScope,
+} from "../../support/requestView.ts";
 import { approveSignInPage } from "../support/openSignIn.ts";
 
 export type RequestModel =
   RequestsCollections["requests"] extends ReadonlyMap<string, infer T>
     ? T
     : never;
-type RequestCommands = {
+export type RequestCommands = {
   scope: string;
   notify(message: string): void;
   onAnswerOpen?: (() => void) | undefined;
   onAnswerPosition?: ((node: HTMLElement) => void) | undefined;
 };
-const [Provider, useRequestActions] = createArea<RequestCommands>("Requests");
-export const useRequestScope = useRequestActions;
+const [Provider, useRequestOwner] = createArea<RequestAreaOwner>("Requests");
+export { useRequestOwner };
 export function RequestArea({
+  owner,
   children,
-  ...commands
-}: RequestCommands & { children?: ReactNode }) {
-  const { scope, notify, onAnswerOpen, onAnswerPosition } = commands;
-  const value = useMemo(
-    () => ({ scope, notify, onAnswerOpen, onAnswerPosition }),
-    [scope, notify, onAnswerOpen, onAnswerPosition],
-  );
-  return <Provider value={value}>{children}</Provider>;
+}: {
+  owner: RequestAreaOwner;
+  children?: ReactNode;
+}) {
+  return <Provider value={owner}>{children}</Provider>;
 }
 export const answerKey = (
   scope: string,
@@ -75,220 +79,310 @@ declare global {
   }
 }
 
-export function useRequestView(request: RequestModel) {
-  const commands = useRequestActions(),
-    api = useServerApi(),
-    store = useServerStore();
-  const services = useServerServices(),
-    storage = useServerStorage();
-  const latest = useRef(commands);
-  latest.current = commands;
-  const scope = commands.scope;
-  const view = useMemo(() => {
-    const server = services?.owner.id ?? serverViewId ?? "local";
-    const value = {
-      request,
-      card: createRef<HTMLDivElement>(),
-      trigger: createRef<HTMLButtonElement>(),
-      open: false,
-      sending: false,
-      error: "",
-      pending: false,
-      mounted: true,
-      get draftKey() {
-        return answerKey(scope, request, this.questions);
-      },
-      get owner() {
-        const current = store.state().current;
-        return current.status === "live" || current.status === "stale"
-          ? current.data.agents.get(request.agent)
-          : undefined;
-      },
-      get detail() {
-        const owner = this.owner;
-        if (!owner) return undefined;
-        const current = store.agentDetail(agentId(owner.id)).current;
-        return current.status === "live" || current.status === "stale"
-          ? current.data
-          : undefined;
-      },
-      get unavailable() {
-        return !!this.owner && !this.detail;
-      },
-      get blocked() {
-        return (
-          !!nativeThreadError(this.owner, this.detail) &&
-          approvalThreadId(request) === this.owner?.threadId
-        );
-      },
-      get disabled() {
-        return this.sending || this.unavailable;
-      },
-      get browserOpen() {
-        return browserOpenDetails(request);
-      },
-      get questions() {
-        return requestQuestions(request);
-      },
-      get stdinApproval() {
-        return (
-          request.request.kind === "exec" &&
-          approvalParams(request).kind === "writeStdin"
-        );
-      },
-      get question() {
-        return isFieldRequest(request);
-      },
-      notify(text: string) {
-        latest.current.notify(text);
-      },
-      close() {
-        this.open = false;
-        this.trigger.current?.focus();
-      },
-      toggle() {
-        if (!this.open) latest.current.onAnswerOpen?.();
-        this.open = !this.open;
-      },
-      position(node: HTMLElement) {
-        const transcript = node.closest<HTMLElement>("#messages");
-        const requests = node.closest<HTMLElement>("#requests");
-        if (!node.querySelector(".request-answer-form") || !transcript) return;
-        if (requests) {
-          const cardBounds = node.getBoundingClientRect(),
-            requestsBounds = requests.getBoundingClientRect();
-          if (
-            cardBounds.top < requestsBounds.top ||
-            cardBounds.top >= requestsBounds.bottom
-          )
-            requests.scrollTop += cardBounds.top - requestsBounds.top - 12;
-        }
-        if (latest.current.onAnswerPosition)
-          latest.current.onAnswerPosition(node);
-        else
-          transcript.scrollTop +=
-            node.getBoundingClientRect().top -
-            transcript.getBoundingClientRect().top -
-            12;
-      },
-      async post(body: Json, submitted?: string): Promise<boolean> {
-        if (this.unavailable) {
-          this.notify("Chat details are not available yet.");
-          return false;
-        }
-        if (this.blocked) {
-          this.notify("This chat stopped as a precaution. Open another chat.");
-          return false;
-        }
-        if (this.pending) return false;
-        this.pending = true;
-        this.sending = true;
-        this.error = "";
-        const draftKey = this.draftKey;
-        try {
-          const approve = async () => {
-            const response = await api.command.answer(request.id, body);
-            if (response.kind !== "answer")
-              throw new Error("Studio returned another result for an answer.");
-            return response.result;
-          };
-          if (this.browserOpen && body.decision === "accept")
-            await approveSignInPage({
-              url: this.browserOpen.url,
-              requestId: request.id,
-              owner: services?.owner.id,
-              approve,
-              onOpenError: (error) =>
-                this.notify(
-                  `Studio approved the link, but could not confirm that its page opened: ${errorText(error)}`,
-                ),
-            });
-          else await approve();
-          void removeAnswerDraft(storage, server, draftKey, submitted).catch(
-            reportUnsentFailure,
-          );
-          if (!this.mounted) return true;
-          runInAction(() => {
-            this.open = false;
-          });
-          return true;
-        } catch (error) {
-          if (
-            submitted !== undefined &&
-            error instanceof ApiError &&
-            !serverMutationResponseIsUncertain(error.status, error.response)
-          )
-            void unsentStore(server, "answer")
-              .deleteIfEqual(draftKey, submitted)
-              .catch(reportUnsentFailure);
-          if (this.mounted) {
-            runInAction(() => {
-              this.error = errorText(error);
-            });
-            this.notify(errorText(error));
-          }
-          return false;
-        } finally {
-          runInAction(() => {
-            this.pending = false;
-            if (this.mounted) this.sending = false;
-          });
-        }
-      },
-      async defer(remove = false) {
-        if (this.pending) return;
-        this.pending = true;
-        this.sending = true;
-        this.error = "";
-        const draftKey = this.draftKey;
-        try {
-          if (remove) {
-            await api.post("/api/questions/delete", { id: request.id });
-            void removeAnswerDraft(storage, server, draftKey).catch(
-              reportUnsentFailure,
-            );
-          } else
-            await api.post("/api/questions/defer", {
-              id: request.id,
-              deferred: !isDeferred(request),
-            });
-          if (this.mounted)
-            runInAction(() => {
-              this.open = false;
-            });
-        } catch (error) {
-          if (this.mounted) {
-            runInAction(() => {
-              this.error = errorText(error);
-            });
-            this.notify(errorText(error));
-          }
-        } finally {
-          runInAction(() => {
-            this.pending = false;
-            if (this.mounted) this.sending = false;
-          });
-        }
-      },
-    };
-    return makeAutoObservable(
-      value,
+export type RequestDependencies = {
+  api(): ServerApi;
+  store: ReturnType<typeof createServerStore>;
+  storage: Storage;
+  server: string;
+};
+/** Created and started by the selected conversation owner, never by React. */
+export class RequestAreaOwner {
+  readonly list;
+  views = observable.map<string, RequestView>([], { deep: false });
+  readonly dependencies: RequestDependencies;
+  readonly commands: () => RequestCommands;
+  #stop: (() => void) | undefined;
+  constructor(
+    dependencies: RequestDependencies,
+    commands: () => RequestCommands,
+    scope: RequestScope | (() => RequestScope) = { all: true },
+  ) {
+    this.list = createRequestsView(dependencies.store, scope);
+    this.dependencies = dependencies;
+    this.commands = commands;
+    makeAutoObservable(
+      this,
       {
-        request: false,
-        card: false,
-        trigger: false,
-        pending: false,
-        mounted: false,
+        list: false,
+        dependencies: false,
+        commands: false,
       },
       { autoBind: true },
     );
-  }, [request, store, storage, scope]);
-  useEffect(() => {
-    view.mounted = true;
-    return () => {
-      view.mounted = false;
+  }
+  start() {
+    if (this.#stop) return;
+    const { store, storage } = this.dependencies;
+    const read = () => {
+      const data = resourceData(store.requests().current);
+      return data && [...data.requests.values()];
     };
-  }, [view]);
+    const receive = (requests: readonly RequestModel[] | undefined) => {
+      if (!requests) return;
+      const active = new Set(
+        requests.map((request) => answerKey(this.commands().scope, request)),
+      );
+      for (const request of requests) {
+        if (this.views.get(request.id)?.request === request) continue;
+        this.views.get(request.id)?.dispose();
+        this.views.set(request.id, createRequestView(this, request));
+      }
+      for (const [id, view] of this.views)
+        if (!requests.some((request) => request.id === id)) {
+          view.dispose();
+          this.views.delete(id);
+        }
+      const drafts = requestDraftsForStorage(storage);
+      for (const key of drafts.keys())
+        if (JSON.parse(key)[0] === this.commands().scope && !active.has(key))
+          drafts.delete(key);
+    };
+    receive(read());
+    this.#stop = reaction(read, receive);
+  }
+
+  dispose() {
+    this.#stop?.();
+    this.#stop = undefined;
+    for (const view of this.views.values()) view.dispose();
+    this.views.clear();
+  }
+}
+export function useRequestView(request: RequestModel) {
+  return useRequestOwner().views.get(request.id)!;
+}
+function createRequestView(area: RequestAreaOwner, request: RequestModel) {
+  const { api, store, storage, server } = area.dependencies;
+  const commands = area.commands,
+    scope = commands().scope;
+  const drafts = requestDraftsForStorage(storage);
+  const buffer = unsentStore(server, "answer");
+  let stop: () => void;
+  const value = {
+    request,
+    card: createRef<HTMLDivElement>(),
+    trigger: createRef<HTMLButtonElement>(),
+    open: false,
+    sending: false,
+    error: "",
+    mounted: true,
+    *restore(key: string) {
+      const questions = this.questions;
+      const saved: string | undefined = yield buffer.get(key);
+      if (this.mounted)
+        drafts.set(key, {
+          ...restoredAnswers(saved ?? null, questions),
+          ...drafts.get(key),
+        });
+    },
+    get values(): AnswerValues {
+      return drafts.get(this.draftKey) ?? {};
+    },
+    setValue(id: string, value: AnswerValue) {
+      const next = { ...this.values, [id]: value };
+      drafts.set(this.draftKey, next);
+      void buffer
+        .put(this.draftKey, savedAnswer(this, next))
+        .catch(reportUnsentFailure);
+    },
+    dispose() {
+      this.mounted = false;
+      stop();
+    },
+    get draftKey() {
+      return answerKey(scope, request, this.questions);
+    },
+    get owner() {
+      return resourceData(store.state().current)?.agents.get(request.agent);
+    },
+    get detail() {
+      const owner = this.owner;
+      if (!owner) return undefined;
+      return resourceData(store.agentDetail(agentId(owner.id)).current);
+    },
+    get unavailable() {
+      return !!this.owner && !this.detail;
+    },
+    get blocked() {
+      return (
+        !!nativeThreadError(this.owner, this.detail) &&
+        approvalThreadId(request) === this.owner?.threadId
+      );
+    },
+    get disabled() {
+      return this.sending || this.unavailable;
+    },
+    get browserOpen() {
+      return browserOpenDetails(request);
+    },
+    get questions() {
+      return requestQuestions(request);
+    },
+    get stdinApproval() {
+      return (
+        request.request.kind === "exec" &&
+        approvalParams(request).kind === "writeStdin"
+      );
+    },
+    get question() {
+      return isFieldRequest(request);
+    },
+    notify(text: string) {
+      commands().notify(text);
+    },
+    close() {
+      this.open = false;
+      this.trigger.current?.focus();
+    },
+    toggle() {
+      if (!this.open) commands().onAnswerOpen?.();
+      this.open = !this.open;
+    },
+    position(node: HTMLElement) {
+      const transcript = node.closest<HTMLElement>("#messages");
+      const requests = node.closest<HTMLElement>("#requests");
+      if (!node.querySelector(".request-answer-form") || !transcript) return;
+      if (requests) {
+        const cardBounds = node.getBoundingClientRect(),
+          requestsBounds = requests.getBoundingClientRect();
+        if (
+          cardBounds.top < requestsBounds.top ||
+          cardBounds.top >= requestsBounds.bottom
+        )
+          requests.scrollTop += cardBounds.top - requestsBounds.top - 12;
+      }
+      const position = commands().onAnswerPosition;
+      if (position) position(node);
+      else
+        transcript.scrollTop +=
+          node.getBoundingClientRect().top -
+          transcript.getBoundingClientRect().top -
+          12;
+    },
+    post(body: Json, submitted?: string) {
+      if (this.unavailable || this.blocked) {
+        this.notify(
+          this.unavailable
+            ? "Chat details are not available yet."
+            : "This chat stopped as a precaution. Open another chat.",
+        );
+        return Promise.resolve(false);
+      }
+      const approve = async () => {
+        const response = await api().command.answer(request.id, body);
+        if (response.kind !== "answer")
+          throw new Error("Studio returned another result for an answer.");
+        return response.result;
+      };
+      const operation =
+        this.browserOpen && body.decision === "accept"
+          ? () =>
+              approveSignInPage({
+                url: this.browserOpen!.url,
+                requestId: request.id,
+                owner: server,
+                approve,
+                onOpenError: (error) =>
+                  this.notify(
+                    `Studio approved the link, but could not confirm that its page opened: ${errorText(error)}`,
+                  ),
+              })
+          : approve;
+      return flowResult(this.mutate(operation, true, submitted));
+    },
+    defer(remove = false) {
+      return flowResult(
+        this.mutate(
+          () =>
+            remove
+              ? api().post("/api/questions/delete", { id: request.id })
+              : api().post("/api/questions/defer", {
+                  id: request.id,
+                  deferred: !isDeferred(request),
+                }),
+          remove,
+        ),
+      );
+    },
+    *mutate(
+      operation: () => Promise<unknown>,
+      remove: boolean,
+      submitted?: string,
+    ) {
+      if (this.sending) return false;
+      this.sending = true;
+      this.error = "";
+      const draftKey = this.draftKey;
+      try {
+        yield operation();
+        if (remove)
+          void removeAnswerDraft(storage, server, draftKey, submitted).catch(
+            reportUnsentFailure,
+          );
+        if (this.mounted) this.open = false;
+        return true;
+      } catch (error) {
+        if (
+          submitted !== undefined &&
+          error instanceof ApiError &&
+          !serverMutationResponseIsUncertain(error.status, error.response)
+        )
+          void buffer
+            .deleteIfEqual(draftKey, submitted)
+            .catch(reportUnsentFailure);
+        if (this.mounted) {
+          this.error = errorText(error);
+          this.notify(this.error);
+        }
+        return false;
+      } finally {
+        this.sending = false;
+      }
+    },
+  };
+  const view = makeAutoObservable(
+    value,
+    {
+      request: false,
+      card: false,
+      trigger: false,
+      mounted: false,
+    },
+    { autoBind: true },
+  );
+  stop = reaction(
+    () => view.draftKey,
+    (key) => {
+      void flowResult(view.restore(key)).catch(reportUnsentFailure);
+    },
+    { fireImmediately: true },
+  );
   return view;
 }
-export type RequestView = ReturnType<typeof useRequestView>;
+export type RequestView = ReturnType<typeof createRequestView>;
+function restoredAnswers(
+  savedAnswer: string | null,
+  questions: ReturnType<typeof requestQuestions>,
+): AnswerValues {
+  try {
+    const saved: unknown = JSON.parse(savedAnswer || "null");
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+    return Object.fromEntries(
+      questions
+        .filter((q) => !q.isSecret)
+        .flatMap((q) => {
+          const value = Reflect.get(saved, q.id);
+          return typeof value === "string" ||
+            (value &&
+              typeof value === "object" &&
+              typeof value.other === "string" &&
+              Array.isArray(value.selected) &&
+              value.selected.every((item: unknown) => typeof item === "string"))
+            ? [[q.id, value]]
+            : [];
+        }),
+    );
+  } catch {
+    return {};
+  }
+}

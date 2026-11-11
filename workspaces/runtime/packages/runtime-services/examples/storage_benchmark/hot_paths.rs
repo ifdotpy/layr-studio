@@ -299,7 +299,11 @@ pub async fn seed(store: &RuntimeStore, rows: u64) -> Result<()> {
             DirtySource::descriptor().install_if_absent(tx)?;
             DirtyTarget::descriptor().install_if_absent(tx)?;
             let mut typed = canvas_tx(tx);
-            for id in [-1, if rows % 2 == 0 { -2 } else { -3 }, rows as i64 - 1] {
+            for id in [
+                -1,
+                if rows.is_multiple_of(2) { -2 } else { -3 },
+                rows as i64 - 1,
+            ] {
                 typed.insert_new(&DirtySource { id, value: 0 })?;
             }
             online_migration::begin(tx, &dirty_plan())?;

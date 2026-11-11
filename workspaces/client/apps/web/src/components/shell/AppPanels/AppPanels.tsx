@@ -54,6 +54,7 @@ export const AppPanels = observer(function AppPanels() {
         />
       )}
       <BackgroundTasks
+        actions={ui.activity}
         key={`tasks:${lead?.id || "none"}`}
         opened={active && ui.tasksOpen}
         initialFocus={ui.taskFocus}
@@ -63,9 +64,7 @@ export const AppPanels = observer(function AppPanels() {
         openAgent={a.open}
         notify={a.notices.notify}
       />
-      {active && !l.isMobile && a.preferences.value.showTerminals && (
-        <TerminalDock agent={agent || lead} notify={a.notices.notify} />
-      )}
+      {ui.terminalVisible && <TerminalDock />}
       <FilePreview
         target={active ? ui.filePreview : null}
         onClose={ui.closePreview}

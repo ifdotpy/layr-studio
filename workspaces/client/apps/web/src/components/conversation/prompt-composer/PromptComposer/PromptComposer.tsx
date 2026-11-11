@@ -1,44 +1,22 @@
 import { observer } from "mobx-react-lite";
-import {
-  useSyncExternalStore,
-  type DragEventHandler,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { type DragEventHandler, type FormEvent, type ReactNode } from "react";
 import { reportPromptComposerRender } from "../../../../perf/promptComposerRenderProbe.ts";
 
-export type DraftSubscription = (
-  session: string,
-  listener: () => void,
-) => () => void;
 export type DraftReader = (session: string) => string;
 export type DraftWriter = (
   text: string | ((current: string) => string),
   session?: string,
 ) => void;
 
-export function usePromptDraft(
-  session: string,
-  getDraft: DraftReader,
-  subscribeDraft: DraftSubscription,
-) {
-  return useSyncExternalStore(
-    (notify) => subscribeDraft(session, notify),
-    () => getDraft(session),
-    () => getDraft(session),
-  );
-}
-
 type DraftSource = {
   session: string;
   getDraft: DraftReader;
-  subscribeDraft: DraftSubscription;
 };
 
 export const PromptDraft = observer(function PromptDraft(
   p: DraftSource & { children: (draft: string) => ReactNode },
 ) {
-  const draft = usePromptDraft(p.session, p.getDraft, p.subscribeDraft);
+  const draft = p.getDraft(p.session);
   reportPromptComposerRender("prompt-composer", p.session);
   return p.children(draft);
 });

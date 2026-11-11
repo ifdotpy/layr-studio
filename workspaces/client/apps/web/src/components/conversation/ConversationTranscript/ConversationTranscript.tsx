@@ -3,8 +3,7 @@ import { useConversationStore } from "../support/ConversationStore.ts";
 import { observer } from "mobx-react-lite";
 import { Button, ActionIcon } from "@mantine/core";
 import { Trash2 } from "lucide-react";
-import { useEffect, useCallback, useMemo, useRef } from "react";
-import { errorText } from "../../../api.ts";
+import { useCallback, useMemo, useRef } from "react";
 import { currentCapacityRetry } from "../../../capacityRetry.ts";
 import { nativeThreadError } from "../../../nativeErrors.ts";
 import { resourceData } from "../../../store/runtime.ts";
@@ -28,7 +27,6 @@ import {
 } from "../../shell/NativeNotice/NativeNotice.tsx";
 import FullOutput from "../transcript/FullOutput/FullOutput.tsx";
 import SafetyBuffering from "../transcript/SafetyBuffering/SafetyBuffering.tsx";
-import { useDisplayPhase } from "../support/useDisplayPhase.ts";
 import {
   deliveryLabel,
   messageRenderKey,
@@ -55,22 +53,10 @@ import { LiveConversationStart } from "../LiveConversationStart/LiveConversation
 export function renderConversationTranscript() {
   const control = useConversationStore();
   const { actions, opened, stateDir } = control.context;
-  const { navigation, selected, read, startup, delivery, notices, layout } =
-    actions;
-  const {
-    selectedAgent: agent,
-    selectedRoom: room,
-    selectedJumpTarget: jumpTarget,
-  } = navigation;
-  const {
-    scroll,
-    setFollow,
-    revealRequest,
-    remember,
-    getFollow,
-    hasRecentScrollInput,
-    content,
-  } = control.context.scrolling;
+  const { navigation, selected, read, startup, delivery, layout } = actions;
+  const { selectedAgent: agent, selectedRoom: room } = navigation;
+  const { scroll, remember, getFollow, hasRecentScrollInput, content } =
+    control.context.scrolling;
   const {
     visibleMessages,
     history: historySession,
@@ -80,7 +66,6 @@ export function renderConversationTranscript() {
   } = selected;
   const { loaded, historical, after, connection, notice } = historySession;
   const { onHistoryScroll, pageAtEdge, returnToLatest } = control;
-  const mobileClient = layout.isMobile;
   useVisibleChatResult(
     scroll,
     agent,
@@ -92,10 +77,7 @@ export function renderConversationTranscript() {
   );
   const threadBlock = nativeThreadError(agent, detail);
   const capacityRetry = agent ? currentCapacityRetry(agent) : null;
-  const displayPhase = useDisplayPhase(
-    opened,
-    detail?.activity?.phase || "thinking",
-  );
+  const displayPhase = selected.displayPhase.current;
   const detailedActivity =
     !!threadBlock ||
     capacityRetry?.status === "scheduled" ||
@@ -139,7 +121,6 @@ export function renderConversationTranscript() {
     [planType],
   );
   const inlineRequests = control.inlineRequests;
-  const onAnswerOpen = useCallback(() => setFollow(false), [setFollow]);
   const requestCards = useMemo(
     () =>
       new Map(
@@ -178,7 +159,11 @@ export function renderConversationTranscript() {
   const transcript = (
     <TranscriptProvider value={transcriptActions}>
       {managed && !room && agent?.provider === ProviderKind.Claude && (
-        <ObservedClaudeRepairNotice agent={agent} detail={detail} />
+        <ObservedClaudeRepairNotice
+          agent={agent}
+          detail={detail}
+          store={control.repairReport}
+        />
       )}
       <TurnHistory
         key={stateDir + ":" + opened}
@@ -198,16 +183,6 @@ export function renderConversationTranscript() {
     </TranscriptProvider>
   );
   const touchHistoryY = useRef<number | null>(null);
-  useEffect(
-    action(() => {
-      if (!jumpTarget || control.handledJump === jumpTarget.requestId) return;
-      control.handledJump = jumpTarget.requestId;
-      void control
-        .navigateToMessage(jumpTarget.messageId)
-        .catch((error) => notices.notify(errorText(error)));
-    }),
-    [jumpTarget?.requestId, opened, control],
-  );
   return (
     <div
       id="messages"
@@ -248,12 +223,7 @@ export function renderConversationTranscript() {
           pageAtEdge("newer");
       })}
     >
-      <RequestArea
-        scope={stateDir}
-        notify={notices.notify}
-        onAnswerOpen={onAnswerOpen}
-        onAnswerPosition={revealRequest}
-      >
+      <RequestArea owner={selected.requestOwner}>
         <div ref={content} className="message-content">
           {layout.railGeometry && (
             <div className="transcript-heading">
@@ -312,13 +282,7 @@ export function renderConversationTranscript() {
               phase}
           </div>
           {!room && detailedActivity && phase}
-          <Requests
-            agentId={opened}
-            familyId={room?.rootId}
-            includeTeam={!mobileClient}
-            showDates={!!room}
-            excludeIds={inlineRequestIds}
-          />
+          <Requests showDates={!!room} excludeIds={inlineRequestIds} />
         </div>
       </RequestArea>
     </div>

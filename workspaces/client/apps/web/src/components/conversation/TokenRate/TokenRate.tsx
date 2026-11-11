@@ -1,5 +1,5 @@
 import { useServerTokenRates } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type { Agent } from "../../../types.ts";
 import { formatTokenRate, tweenTokenRate } from "../../../usage/tokenRate.ts";
 import { useVisualActivity } from "../../../hooks/useVisualActivity.ts";
@@ -13,10 +13,11 @@ export default observer(function TokenRate({
   variant?: "footer" | "worker";
 }) {
   const { getTokenRate, getWorkspaceTeamTokenRate } = useServerTokenRates();
-
+  const label = useRef<HTMLSpanElement | null>(null);
   const [visualRef, visualActive] = useVisualActivity<HTMLElement>();
   const observeRate = useCallback(
     (element: HTMLSpanElement | null) => {
+      label.current = element;
       // Empty worker meters are display:none. Their visible metadata row must
       // keep the subscription active until the first rate arrives.
       visualRef(
@@ -32,18 +33,8 @@ export default observer(function TokenRate({
     visualActive && variant === "worker"
       ? getWorkspaceTeamTokenRate(agent.rootId || "", agent.id)
       : null;
-  const [motionReduced, setMotionReduced] = useState(
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
-  const [shown, setShown] = useState(0);
   const current = useRef(0);
   const previousTurn = useRef("");
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setMotionReduced(media.matches);
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
   const rate = visualActive
     ? variant === "worker"
       ? workspaceTeamRate
@@ -60,32 +51,49 @@ export default observer(function TokenRate({
     (!active || rate.rate > 0);
   const target = visible ? rate.rate : 0;
   const turn = `${agent.id}:${variant === "worker" ? rate?.turnId || "" : agent.turnId || rate?.turnId || ""}`;
-  useEffect(() => {
-    if (!visualActive) return;
+  const prefix = rate?.estimated ? "≈" : "";
+  useLayoutEffect(() => {
+    const element = label.current;
+    if (!visualActive || !element) return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let frame = 0;
+    const paint = (value: number) => {
+      current.current = value;
+      element.textContent = visible
+        ? `${prefix}${formatTokenRate(value)} tok/s`
+        : "";
+      element.dataset.reducedMotion = String(media.matches);
+    };
+    const snap = () => {
+      cancelAnimationFrame(frame);
+      paint(target);
+    };
+    media.addEventListener("change", snap);
     // The first sample of a new turn must not tween from the previous turn.
     if (
       previousTurn.current !== turn ||
-      motionReduced ||
+      media.matches ||
       !visible ||
       !current.current
     ) {
       previousTurn.current = turn;
-      current.current = target;
-      setShown(target);
-      return;
+      paint(target);
+    } else {
+      const from = current.current;
+      paint(from);
+      const started = performance.now();
+      const tick = (now: number) => {
+        const value = tweenTokenRate(from, target, now - started);
+        paint(value);
+        if (now - started < 450) frame = requestAnimationFrame(tick);
+      };
+      frame = requestAnimationFrame(tick);
     }
-    const from = current.current;
-    const started = performance.now();
-    let frame: number;
-    const tick = (now: number) => {
-      const value = tweenTokenRate(from, target, now - started);
-      current.current = value;
-      setShown(value);
-      if (now - started < 450) frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      media.removeEventListener("change", snap);
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [target, turn, motionReduced, visible, visualActive]);
+  }, [target, turn, visible, visualActive, prefix]);
   return (
     <span
       ref={observeRate}
@@ -96,7 +104,6 @@ export default observer(function TokenRate({
       data-agent={agent.id}
       data-active={active}
       data-estimated={rate?.estimated || false}
-      data-reduced-motion={motionReduced}
       data-rate={visible ? target : ""}
       aria-label={
         visible
@@ -109,9 +116,7 @@ export default observer(function TokenRate({
           : undefined
       }
     >
-      {visible
-        ? `${rate?.estimated ? "≈" : ""}${formatTokenRate(previousTurn.current === turn && shown > 0 ? shown : target)} tok/s`
-        : ""}
+      {visible ? `${prefix}${formatTokenRate(target)} tok/s` : ""}
     </span>
   );
 });

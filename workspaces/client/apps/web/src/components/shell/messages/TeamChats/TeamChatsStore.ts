@@ -1,4 +1,8 @@
-import { makeAutoObservable, computed, compareShallow } from "mobx";
+import { whileObserved } from "../../../../observed.ts";
+import { RoomHistory } from "../../../../conversation/roomHistory.ts";
+import { roomId } from "../../../../generated/observableResources.ts";
+import { trimTranscriptPageCache } from "../../../../transcriptPageBounds.ts";
+import { makeAutoObservable, computed, compareShallow, reaction } from "mobx";
 import { createArea } from "../../../../app/area.ts";
 import { RoomKind as GeneratedApiRoomKind } from "../../../../generated/api.ts";
 import type { StateCollections } from "../../../../generated/observableResources.ts";
@@ -39,13 +43,47 @@ export const [TeamChatsProvider, useTeamChats] =
   createArea<ReturnType<typeof createTeamChatsStore>>("TeamChats");
 export function createTeamChatsStore(
   store: ReturnType<typeof useServerStore>,
-  api: Pick<ReturnType<typeof useServerApi>, "saved" | "save">,
+  api: Pick<ReturnType<typeof useServerApi>, "saved" | "save"> &
+    Partial<Pick<ReturnType<typeof useServerApi>, "syncGet">>,
   stateDir: string,
   leadId: string | undefined,
+  source?: () => {
+    stateDir: string;
+    leadId: string | undefined;
+    focus?: { id: string; requestId: string; roomId?: string } | undefined;
+  },
 ) {
+  const syncGet = api.syncGet;
+  const page = (id: string | null) => {
+    if (!syncGet) return undefined;
+    const history = new RoomHistory(
+      id,
+      id ? store.room(roomId(id)) : undefined,
+      { syncGet },
+      false,
+    );
+    return history;
+  };
+  const empty = page(null),
+    pages = new Map<string, RoomHistory>();
+  let stopHistory: (() => void) | undefined;
+  const releaseHistory = () => {
+    stopHistory?.();
+    stopHistory = undefined;
+  };
   class TeamChatsStore {
-    readonly stateDir = stateDir;
-    readonly leadId = leadId;
+    get stateDir() {
+      return source?.().stateDir ?? stateDir;
+    }
+    get leadId() {
+      return source ? source().leadId : leadId;
+    }
+    get current() {
+      return this;
+    }
+    get messages() {
+      return this.room ? pages.get(this.room.id) : empty;
+    }
     requests = createRequestsView(store, { all: true });
     selected = "you";
     detail = false;
@@ -59,17 +97,20 @@ export function createTeamChatsStore(
     get state() {
       return resourceData(store.state().current);
     }
-    readonly scope = stateDir + ":" + leadId;
+    get scope() {
+      return this.stateDir + ":" + this.leadId;
+    }
     get rooms() {
       const member = (id: string) =>
-        id === leadId || this.state?.agents.get(id)?.rootId === leadId;
+        id === this.leadId ||
+        this.state?.agents.get(id)?.rootId === this.leadId;
       return [...(this.state?.rooms.values() || [])].filter(
         (room) =>
-          leadId &&
+          this.leadId &&
           (room.kind === GeneratedApiRoomKind.federated
             ? (room.localMembers ?? room.members ?? []).some((id) => member(id))
             : room.kind === GeneratedApiRoomKind.broadcast
-              ? room.rootId === leadId
+              ? room.rootId === this.leadId
               : !!room.members?.length &&
                 (room.members.every((id) => member(id)) ||
                   (!!room.peerTeamId &&
@@ -80,7 +121,7 @@ export function createTeamChatsStore(
       if (room.kind === GeneratedApiRoomKind.federated)
         return room.peerLabel || room.name;
       if (room.kind === GeneratedApiRoomKind.broadcast) return "Team broadcast";
-      const peers = (room.members ?? []).filter((id) => id !== leadId);
+      const peers = (room.members ?? []).filter((id) => id !== this.leadId);
       return peers.length === 1
         ? this.state?.agents.get(peers[0]!)?.name || room.name
         : room.name;
@@ -122,10 +163,19 @@ export function createTeamChatsStore(
       return text.toLowerCase().includes(this.query.toLowerCase());
     }
     choose(id: string) {
+      releaseHistory();
+      if (!pages.has(id)) {
+        const history = page(id);
+        if (history) pages.set(id, history);
+      }
+      trimTranscriptPageCache(pages, id);
       this.selected = id;
       this.detail = true;
+      stopHistory = (id === "you" ? empty : pages.get(id))?.start();
     }
     back() {
+      releaseHistory();
+      this.selected = "you";
       this.detail = false;
     }
     search(query: string) {
@@ -152,7 +202,7 @@ export function createTeamChatsStore(
         (this.seen.get(room.id) || 0) >= seq
       )
         return;
-      const key = "codex-chat-seen:" + stateDir;
+      const key = "codex-chat-seen:" + this.stateDir;
       const next = {
         ...api.saved<Record<string, number>>(key, {}),
         ...Object.fromEntries(this.seen),
@@ -169,7 +219,38 @@ export function createTeamChatsStore(
         },
         { autoBind: true },
       );
+      whileObserved(this, "current", () => {
+        const stop = reaction(
+          () => [this.scope, source?.().focus] as const,
+          ([scope, focus], previous) => {
+            if (scope !== previous?.[0]) {
+              this.selected = "you";
+              this.query = "";
+              this.detail = false;
+              this.limit = 60;
+              releaseHistory();
+              pages.clear();
+              this.seen = new Map(
+                Object.entries(
+                  api.saved<Record<string, number>>(
+                    "codex-chat-seen:" + this.stateDir,
+                    {},
+                  ),
+                ),
+              );
+            }
+            if (focus) this.focus(focus.roomId, focus.id, focus.requestId);
+          },
+          { fireImmediately: true, equals: compareShallow },
+        );
+        return () => {
+          stop();
+          releaseHistory();
+        };
+      });
     }
   }
   return new TeamChatsStore();
 }
+
+export type TeamChatsOwner = ReturnType<typeof createTeamChatsStore>;

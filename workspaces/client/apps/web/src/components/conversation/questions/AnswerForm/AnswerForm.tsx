@@ -2,80 +2,25 @@ import {
   questionAnswer,
   savedAnswer as serializeAnswer,
 } from "./answerData.ts";
-import { useEffect, useState } from "react";
 import { observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
 import { errorText } from "../../../../api.ts";
-import { useServerStorage } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useUnsentText } from "../../../../unsent/useUnsentText.ts";
-import { requestDraftsForStorage } from "../support/requestDrafts.ts";
 import { elicitationSchema } from "../support/requestData.ts";
-import AnswerFields, {
-  answerList,
-  type AnswerValue,
-  type AnswerValues,
-} from "../AnswerFields/AnswerFields.tsx";
+import AnswerFields, { answerList } from "../AnswerFields/AnswerFields.tsx";
 import {
   requestRenderProbe,
   type RequestView,
 } from "../RequestArea/RequestArea.tsx";
 export function AnswerForm({ view }: { view: RequestView }) {
-  const request = view.request,
-    draftKey = view.draftKey,
-    sending = view.disabled;
-  const { post, close, notify } = view;
-  const answerDrafts = requestDraftsForStorage(useServerStorage());
+  const { request, disabled: sending } = view;
+  const { post, close, notify, values, questions } = view;
   requestRenderProbe("answer", request.id);
-  const [savedAnswer, saveAnswer] = useUnsentText("answer", draftKey);
-
-  const [values, setValues] = useState<AnswerValues>(
-    () => answerDrafts.get(draftKey) || {},
-  );
-  const questions = view.questions;
-  useEffect(() => {
-    if (!savedAnswer) return;
-    try {
-      const saved: unknown = JSON.parse(savedAnswer);
-      if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
-      const restored: AnswerValues = {};
-      for (const question of questions) {
-        if (question.isSecret || !(question.id in saved)) continue;
-        const value = Reflect.get(saved, question.id);
-        if (typeof value === "string") restored[question.id] = value;
-        else if (
-          value &&
-          typeof value === "object" &&
-          "other" in value &&
-          typeof value.other === "string" &&
-          "selected" in value &&
-          Array.isArray(value.selected) &&
-          value.selected.every((item: unknown) => typeof item === "string")
-        )
-          restored[question.id] = {
-            other: value.other,
-            selected: value.selected,
-          };
-      }
-      setValues((current) => ({ ...current, ...restored }));
-    } catch {
-      /* Ignore a damaged answer. */
-    }
-  }, [savedAnswer]);
-  const kind = request.request.kind;
-  const schema = elicitationSchema(request);
-  const elicitation = kind === "elicitation";
-  const required = new Set(elicitation ? (schema?.required ?? []) : []);
-  const missingRequired = [...required].some(
-    (id) => !questions.some((question) => question.id === id),
-  );
-  const setValue = (id: string, value: AnswerValue) => {
-    const next = { ...values, [id]: value };
-    answerDrafts.set(draftKey, next);
-    setValues(next);
-    saveAnswer(serializeAnswer(view, next));
-  };
+  const elicitation = request.request.kind === "elicitation";
+  const required = new Set(elicitationSchema(request)?.required);
   const ready =
-    !missingRequired &&
+    [...required].every((id) =>
+      questions.some((question) => question.id === id),
+    ) &&
     (elicitation || questions.length > 0) &&
     questions
       .filter((q) => !elicitation || required.has(q.id))
@@ -107,7 +52,7 @@ export function AnswerForm({ view }: { view: RequestView }) {
         questions={questions}
         values={values}
         disabled={sending}
-        onChange={setValue}
+        onChange={view.setValue}
       />
       <div className="request-answer-actions">
         <Button
@@ -115,9 +60,7 @@ export function AnswerForm({ view }: { view: RequestView }) {
           aria-label="Close reply"
           variant="subtle"
           disabled={sending}
-          onClick={() => {
-            close();
-          }}
+          onClick={close}
         >
           Answer later
         </Button>
@@ -136,3 +79,5 @@ export function AnswerForm({ view }: { view: RequestView }) {
 }
 
 export default observer(AnswerForm);
+
+export { savedAnswer } from "./answerData.ts";

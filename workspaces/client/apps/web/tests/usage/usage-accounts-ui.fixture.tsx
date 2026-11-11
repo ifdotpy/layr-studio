@@ -7,7 +7,7 @@ import {
   usageAccountCost,
 } from "./usage-fixture.ts";
 
-import React, { useState } from "react";
+import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -18,7 +18,10 @@ import {
   createCostsMirror,
 } from "../../src/generated/observableResources.ts";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { UsageFixture as Usage } from "../../src/app/settings/UsageFixture.tsx";
+import {
+  createUsageFixture,
+  UsageFixture as Usage,
+} from "../../src/app/settings/UsageFixture.tsx";
 import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import * as sync from "../../src/sync/client.ts";
 const services = partialUsageServices({
@@ -103,93 +106,108 @@ const scheme = new URLSearchParams(location.search).get("scheme");
 if (scheme !== null && scheme !== "light" && scheme !== "dark")
   throw new Error("Invalid fixture color scheme");
 
-function Fixture() {
-  const [multi] = useState(location.search.includes("multi"));
-  const [teamReady, setTeamReady] = useState(false);
-  const accounts: UsageAccount[] = geometry
-    ? accountLimitFixtures
-    : [
-        {
-          key: "own",
-          provider: "codex",
-          label: "Own account",
-          email: "own@example.test",
-          accountId: "own-account",
-          limits: ownLimits,
-          loading: false,
-          reload: (force = false) => {
-            window.reloadCalls.push(["own", force]);
-          },
+import * as api from "../../src/servers/net/api.ts";
+const multi = location.search.includes("multi");
+let teamReady = false;
+const setTeamReady = (value: boolean) => {
+  teamReady = value;
+};
+const accounts: UsageAccount[] = geometry
+  ? accountLimitFixtures
+  : [
+      {
+        key: "own",
+        provider: "codex",
+        label: "Own account",
+        email: "own@example.test",
+        accountId: "own-account",
+        limits: ownLimits,
+        loading: false,
+        reload: (force = false) => {
+          window.reloadCalls.push(["own", force]);
         },
-        ...(multi
-          ? ([
-              {
-                key: "team",
-                label: "Team account",
-                email: "team@example.test",
-                provider: "codex",
-                accountId: "team-account",
-                limits: teamReady ? teamLimits : null,
-                loading: false,
-                reload: (force = false) => {
-                  window.reloadCalls.push(["team", force]);
-                  if (!teamReady) setTeamReady(true);
-                },
+      },
+      ...(multi
+        ? ([
+            {
+              key: "team",
+              label: "Team account",
+              email: "team@example.test",
+              provider: "codex",
+              accountId: "team-account",
+              limits: teamReady ? teamLimits : null,
+              loading: false,
+              reload: (force = false) => {
+                window.reloadCalls.push(["team", force]);
+                if (!teamReady) setTeamReady(true);
               },
-              {
-                key: "claude",
-                label: "Claude work",
-                email: "claude@example.test",
-                provider: "claude",
-                limits: {
-                  accountKey: "claude",
-                  at: now,
-                  data: {
-                    rateLimits: {
-                      limitId: "claude",
-                      primary: { usedPercent: 50, resetsAt: now + 3600 },
-                    },
+            },
+            {
+              key: "claude",
+              label: "Claude work",
+              email: "claude@example.test",
+              provider: "claude",
+              limits: {
+                accountKey: "claude",
+                at: now,
+                data: {
+                  rateLimits: {
+                    limitId: "claude",
+                    primary: { usedPercent: 50, resetsAt: now + 3600 },
                   },
                 },
-                loading: false,
-                reload: (force = false) => {
-                  window.reloadCalls.push(["claude", force]);
-                },
               },
-              {
-                key: "unnamed",
-                label: "unnamed",
-                provider: "codex",
-                limits: {
-                  accountKey: "unnamed",
-                  at: now,
-                  data: {
-                    rateLimits: {
-                      limitId: "codex",
-                      primary: { usedPercent: 85, resetsAt: now + 3600 },
-                    },
+              loading: false,
+              reload: (force = false) => {
+                window.reloadCalls.push(["claude", force]);
+              },
+            },
+            {
+              key: "unnamed",
+              label: "unnamed",
+              provider: "codex",
+              limits: {
+                accountKey: "unnamed",
+                at: now,
+                data: {
+                  rateLimits: {
+                    limitId: "codex",
+                    primary: { usedPercent: 85, resetsAt: now + 3600 },
                   },
                 },
-                loading: false,
-                reload: (force = false) => {
-                  window.reloadCalls.push(["unnamed", force]);
-                },
               },
-            ] satisfies UsageAccount[])
-          : []),
-      ];
-  const [models] = useState(() => observableFixture([own]));
-  const [session] = useState(() => createSessionCostMirror(usageSessionCost()));
-  const [costs] = useState(() => createCostsMirror([usageAccountCost("own")]));
-  const store = {
-    ...models.store,
-    sessionCost: () => ({
-      current: { status: "live" as const, data: session.current },
-    }),
-    costs: () => ({
-      current: { status: "live" as const, data: costs.current },
-    }),
-  };
+              loading: false,
+              reload: (force = false) => {
+                window.reloadCalls.push(["unnamed", force]);
+              },
+            },
+          ] satisfies UsageAccount[])
+        : []),
+    ];
+const models = observableFixture([own]);
+const session = createSessionCostMirror(usageSessionCost());
+const costs = createCostsMirror([usageAccountCost("own")]);
+const store = {
+  ...models.store,
+  sessionCost: () => ({
+    current: { status: "live" as const, data: session.current },
+  }),
+  costs: () => ({
+    current: { status: "live" as const, data: costs.current },
+  }),
+};
+const usageAgent = geometry ? { ...own, accountKey: "codex-main" } : own;
+const owner = createUsageFixture(store, api, { agent: usageAgent, accounts });
+owner.start();
+window.addEventListener(
+  "pagehide",
+  () => {
+    owner.dispose();
+    models.store.dispose();
+  },
+  { once: true },
+);
+function Fixture() {
   return (
     <MantineProvider
       theme={theme}
@@ -214,6 +232,7 @@ function Fixture() {
           }
         >
           <Usage
+            owner={owner}
             agent={geometry ? { ...own, accountKey: "codex-main" } : own}
             stateDir="/fixture"
             limits={ownLimits}

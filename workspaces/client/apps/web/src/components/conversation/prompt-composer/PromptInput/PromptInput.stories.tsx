@@ -1,14 +1,11 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useState, useRef } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, within } from "storybook/test";
 import PromptInput from "./PromptInput.tsx";
 import PromptComposer, {
   type DraftWriter,
 } from "../PromptComposer/PromptComposer.tsx";
-import type {
-  DraftReader,
-  DraftSubscription,
-} from "../PromptComposer/PromptComposer.tsx";
+import type { DraftReader } from "../PromptComposer/PromptComposer.tsx";
 
 type PromptInputStoryProps = {
   initialValue?: string;
@@ -24,40 +21,11 @@ type PromptInputStoryProps = {
 function PromptInputStory(p: PromptInputStoryProps) {
   const initialValue =
     p.initialValue ?? (p.draftTooLong ? "x".repeat(12001) : "");
-  const store = useMemo(() => {
-    const values = new Map<string, string>([["storybook", initialValue]]);
-    const listeners = new Map<string, Set<() => void>>();
-    return {
-      get: (session: string) => values.get(session) || "",
-      subscribe: (session: string, listener: () => void) => {
-        const subscribers = listeners.get(session) || new Set<() => void>();
-        subscribers.add(listener);
-        listeners.set(session, subscribers);
-        return () => {
-          subscribers.delete(listener);
-          if (!subscribers.size) listeners.delete(session);
-        };
-      },
-      set: (value: string | ((current: string) => string), session: string) => {
-        const current = values.get(session) || "";
-        const next = typeof value === "function" ? value(current) : value;
-        if (next === current) return;
-        values.set(session, next);
-        listeners.get(session)?.forEach((listener) => listener());
-      },
-    };
-  }, [initialValue]);
-  const getDraft = useCallback<DraftReader>(
-    (session) => store.get(session),
-    [store],
-  );
-  const subscribeDraft = useCallback<DraftSubscription>(
-    (session, listener) => store.subscribe(session, listener),
-    [store],
-  );
+  const [draft, setDraftValue] = useState(initialValue);
+  const getDraft = useCallback<DraftReader>(() => draft, [draft]);
   const setDraft = useCallback<DraftWriter>(
-    (value, session = "storybook") => store.set(value, session),
-    [store],
+    (value) => setDraftValue(value),
+    [],
   );
   const session = "storybook";
   const input = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +33,6 @@ function PromptInputStory(p: PromptInputStoryProps) {
     <PromptComposer
       session={session}
       getDraft={getDraft}
-      subscribeDraft={subscribeDraft}
       onSubmit={(event) => {
         event.preventDefault();
         p.onSend();

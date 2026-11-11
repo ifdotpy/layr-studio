@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { AccessClientStatus } from "../../../generated/api.ts";
 import type { ConnectionHealth } from "../../../sync/connectionState.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
@@ -9,7 +10,7 @@ import { SettingsSection } from "../../ui/PanelHeader/PanelHeader.tsx";
 import DiscoveryPanel from "../DiscoveryPanel/DiscoveryPanel.tsx";
 import ServerAccessSettings from "../ServerAccessSettings/ServerAccessSettings.tsx";
 import { setServerExcluded } from "../../../servers/excludedServers.ts";
-import type { useServerDiscovery } from "../../../servers/useServerDiscovery.ts";
+import type { ServerDiscovery } from "../../../servers/useServerDiscovery.ts";
 
 import { parseInvitation } from "../../../servers/pairing.ts";
 import {
@@ -41,7 +42,7 @@ import type {
   ServerNavigation,
   ServerAccount,
 } from "../../../servers/navigation.ts";
-export default function ServerManager({
+export default observer(function ServerManager({
   servers,
   add,
   remove,
@@ -55,7 +56,19 @@ export default function ServerManager({
   servers: StudioServer[];
   add: (server: StudioServer) => void;
   remove: (server: StudioServer) => void;
-  discovery: ReturnType<typeof useServerDiscovery>;
+  discovery: Pick<
+    ServerDiscovery,
+    | "snapshot"
+    | "checkedAt"
+    | "error"
+    | "busy"
+    | "actions"
+    | "setName"
+    | "setAlias"
+    | "revoke"
+    | "allowAgain"
+    | "retry"
+  >;
   localEnabled: boolean;
   statuses?: Record<string, ConnectionHealth>;
   lastSeen?: Record<string, number>;
@@ -515,4 +528,4 @@ export default function ServerManager({
       </Modal>
     </div>
   );
-}
+});

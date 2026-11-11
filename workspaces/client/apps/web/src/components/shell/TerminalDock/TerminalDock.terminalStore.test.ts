@@ -79,7 +79,7 @@ it("output on terminal A causes zero renders of terminal B's leaves", async () =
     await vi.waitFor(() => expect(writes).toEqual(["a🙂", "a🙂"]));
     renders.length = 0;
     await act(async () => a.apply({ ...initial, text: "a🙂中", offset: 3 }));
-    expect(renders.filter((id) => id === "A").length).toBeGreaterThan(0);
+    expect(renders.filter((id) => id === "A")).toHaveLength(0);
     expect(renders.filter((id) => id === "B")).toHaveLength(0);
     expect(writes.slice(-1)).toEqual(["中"]);
     await act(async () =>

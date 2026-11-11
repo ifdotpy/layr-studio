@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import type {
+  useServerStore,
+  useServerApi,
+} from "../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { serializeStateCollections } from "../../generated/observableResources.ts";
 import { observableFixture } from "../../components/shell/integration-support/observableFixture.tsx";
-import {
-  useServerStore,
-  ServerStoreProvider,
-} from "../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerStoreProvider } from "../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../store/runtime.ts";
-import Usage from "../../components/conversation/Usage/Usage.tsx";
+import Usage, {
+  createUsageView,
+} from "../../components/conversation/Usage/Usage.tsx";
 import type { Account } from "../../components/accounts/support/Accounts.tsx";
 import type { DeepReadonly } from "../../deepReadonly.ts";
 import type { AccountLimitsData } from "../../usage/accountUsage.ts";
@@ -29,14 +31,7 @@ export type UsageAccount = DeepReadonly<
 import type { Agent } from "../../types.ts";
 import { projectedLimits } from "../../usage/accountLimits.fixture.ts";
 
-/** Story/test inputs enter through the generated store, just as live entities do. */
-export function UsageFixture({
-  agent,
-  accounts = [],
-  opened = false,
-  visible = true,
-  onChange,
-}: {
+export type UsageFixtureInputs = {
   agent: Agent;
   accounts?: UsageAccount[];
   opened?: boolean;
@@ -47,67 +42,95 @@ export function UsageFixture({
   onChange?: (opened: boolean) => void;
   accountLabel?: string;
   limitsLoading?: boolean;
-}) {
-  const parent = useServerStore();
-  const [fixture] = useState(() => {
-    const models = observableFixture([agent]);
-    models.apply([
-      ...serializeStateCollections(models.mirror.current),
-      {
-        collection: "accounts",
-        id: "current",
-        value: {
-          accounts: accounts.map((account) => ({
-            id: account.key,
-            label: account.label,
-            email: account.email,
-            provider: account.provider || "codex",
-            plan: account.plan,
-            accountId: account.accountId,
-            status: "ready",
-            home: "",
-            source: "fixture",
-          })),
-          archivedAccounts: [],
-          defaultAccountKey: agent.accountKey || "default",
-          defaultAccountGroups: [],
-          supportsDelete: true,
-          supportsDisconnect: true,
-        },
-      },
-      ...accounts.map((account) => {
-        const base = projectedLimits(account.key, account.limits?.at || 0);
-        return {
-          collection: "rateLimit" as const,
+};
+
+/** Callers create, start, and dispose this fixture outside React rendering. */
+export function createUsageFixture(
+  parent: ReturnType<typeof useServerStore>,
+  api: ReturnType<typeof useServerApi>,
+  { agent, accounts = [] }: UsageFixtureInputs,
+) {
+  const models = observableFixture([agent]);
+  models.apply([
+    ...serializeStateCollections(models.mirror.current),
+    {
+      collection: "accounts",
+      id: "current",
+      value: {
+        accounts: accounts.map((account) => ({
           id: account.key,
-          value: {
-            observation: account.limits || base.observation,
-            projection: {
-              ...base.projection,
-              ...(account.runway && { runway: account.runway }),
-              ...(account.buckets && { buckets: account.buckets }),
-              ...(account.reset && { reset: account.reset }),
-              ...(account.status && { status: account.status }),
-              ...(account.agents && { agents: account.agents }),
-            },
+          label: account.label,
+          email: account.email,
+          provider: account.provider || "codex",
+          plan: account.plan,
+          accountId: account.accountId,
+          status: "ready",
+          home: "",
+          source: "fixture",
+        })),
+        archivedAccounts: [],
+        defaultAccountKey: agent.accountKey || "default",
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+    },
+    ...accounts.map((account) => {
+      const base = projectedLimits(account.key, account.limits?.at || 0);
+      return {
+        collection: "rateLimit" as const,
+        id: account.key,
+        value: {
+          observation: account.limits || base.observation,
+          projection: {
+            ...base.projection,
+            ...(account.runway && { runway: account.runway }),
+            ...(account.buckets && { buckets: account.buckets }),
+            ...(account.reset && { reset: account.reset }),
+            ...(account.status && { status: account.status }),
+            ...(account.agents && { agents: account.agents }),
           },
-        };
-      }),
-    ]);
-    const store = {
-      ...models.store,
-      agentDetail: parent.agentDetail,
-      sessionCost: parent.sessionCost,
-      costs: parent.costs,
-    };
-    return { store, dispose: models.store.dispose };
-  });
-  useEffect(() => () => fixture.dispose(), [fixture]);
+        },
+      };
+    }),
+  ]);
+  const store = {
+    ...models.store,
+    agentDetail: parent.agentDetail,
+    sessionCost: parent.sessionCost,
+    costs: parent.costs,
+  };
+  const usageStore = createUsageView(
+    api,
+    store,
+    () => agent.accountKey || "default",
+  );
+  return {
+    parent,
+    store,
+    usageStore,
+    start: usageStore.start,
+    dispose() {
+      usageStore.dispose();
+      models.store.dispose();
+    },
+  };
+}
+
+export function UsageFixture({
+  agent,
+  opened = false,
+  visible = true,
+  onChange,
+  owner,
+}: UsageFixtureInputs & { owner: ReturnType<typeof createUsageFixture> }) {
   return (
-    <ServerStoreProvider value={fixture.store}>
+    <ServerStoreProvider value={owner.store}>
       <Usage
+        usageStore={owner.usageStore}
         agent={
-          resourceData(parent.state().current)?.agents.get(agent.id) || agent
+          resourceData(owner.parent.state().current)?.agents.get(agent.id) ||
+          agent
         }
         opened={opened}
         {...(onChange ? { onChange } : {})}

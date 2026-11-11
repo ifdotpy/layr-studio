@@ -1,13 +1,20 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { observer } from "mobx-react-lite";
+import { reached } from "../../../../clock.ts";
 
 /** How long a transient delivery step must last before it shows, in ms. */
 export const DELIVERY_SETTLE_MS = 1000;
 
-/**
- * A normal send passes through Sending and Queued within a second and ends
- * at Sent. Only an outcome, or a step that lasts, is worth showing: the user
- * then sees one change instead of three.
- */
+const TransientDelivery = observer(function TransientDelivery({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const [started] = useState(Date.now);
+  return reached(started + DELIVERY_SETTLE_MS) ? children : null;
+});
+
+/** Outcomes show immediately; transient steps share the observed clock. */
 export default function SettledDelivery({
   transient,
   children,
@@ -15,15 +22,9 @@ export default function SettledDelivery({
   transient: boolean;
   children: ReactNode;
 }) {
-  const [settled, setSettled] = useState(!transient);
-  useEffect(() => {
-    if (!transient) {
-      setSettled(true);
-      return;
-    }
-    setSettled(false);
-    const timer = setTimeout(() => setSettled(true), DELIVERY_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [transient]);
-  return settled ? children : null;
+  return transient ? (
+    <TransientDelivery>{children}</TransientDelivery>
+  ) : (
+    children
+  );
 }

@@ -21,17 +21,9 @@ import { serverLocalStorage } from "../../../servers/storage.ts";
 import * as defaultFileActions from "../../../fileActions.ts";
 import * as defaultFileDialogs from "../../../native/fileDialogs.ts";
 import { watchResourceReads } from "../../../sync/subscriptions/reads.ts";
-import * as defaultActivity from "../../../servers/activity.ts";
 import { createDrafts } from "../../../sync/drafts.ts";
 import * as defaultOutbox from "../../../sync/send.ts";
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  Fragment,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, Fragment, type ReactNode } from "react";
 import { localSidebarServices } from "../../sidebar/support/services.tsx";
 import * as defaultApi from "../../../servers/net/api.ts";
 import * as defaultSync from "../../../sync/client.ts";
@@ -47,12 +39,6 @@ const StoreContext = createContext<ReturnType<typeof createServerStore> | null>(
 );
 export const ServerStoreProvider = StoreContext.Provider;
 
-/** An isolated server-view window keeps its existing transport and credential owner. */
-export function ServerViewStoreProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(() => createServerStore(defaultResources));
-  useEffect(() => () => store.dispose(), [store]);
-  return <ServerStoreProvider value={store}>{children}</ServerStoreProvider>;
-}
 export function createServerViewServices(
   createAreas: (scope: AppScope) => ServerAreas,
 ): ServerServices {
@@ -102,7 +88,6 @@ export function createServerViewServices(
     fileDialogs: defaultFileDialogs,
     fileActions: defaultFileActions,
     watchResourceReads,
-    activity: defaultActivity,
     sequences: defaultSequences,
     transcripts: defaultTranscripts,
     outbox: defaultOutbox,

@@ -10,7 +10,7 @@ import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
 import { useRef, useState } from "react";
-import { useProjectSave } from "../support/useProjectSave.ts";
+import type { ProjectSave } from "../../../app/projects/ProjectSave.ts";
 import type { ProjectModel } from "../../../app/contracts.ts";
 import type { AccountsState } from "../../accounts/support/Accounts.tsx";
 import { observer } from "mobx-react-lite";
@@ -20,13 +20,18 @@ export default observer(function ProjectAccount({
   project,
   defaultAccountKey,
   accounts,
-  saved,
+  saves,
 }: {
   path: string;
   project?: ProjectModel | undefined;
   accounts: AccountsState;
   defaultAccountKey: string;
-  saved: () => Promise<void>;
+  saves: {
+    account: ProjectSave<"/api/projects">;
+    worker: ProjectSave<"/api/projects">;
+    order: ProjectSave<"/api/projects">;
+    defaultOrder: ProjectSave<"/api/accounts/default-groups">;
+  };
 }) {
   const [key, setKey] = useState(project?.accountKey || defaultAccountKey);
   const [keys, setKeys] = useState([
@@ -38,8 +43,12 @@ export default observer(function ProjectAccount({
     return accountCanStart(account);
   });
   const displayedKey = selectableKeys.includes(key) ? key : "";
-  const save = useProjectSave("/api/projects", saved);
-  const saveWorkerBase = useProjectSave("/api/projects", saved);
+  const {
+    account: save,
+    worker: saveWorkerBase,
+    order: saveOrder,
+    defaultOrder: saveDefaultOrder,
+  } = saves;
   const activeAccounts = accounts.accounts;
   const archivedMemberships = (accounts.archivedAccounts || []).filter(
     (account) => keys.includes(account.id),
@@ -60,11 +69,6 @@ export default observer(function ProjectAccount({
   const savedDefaultOrder = (accounts.defaultAccountGroups || []).join(", ");
   const [order, setOrder] = useState(savedOrder);
   const [defaultOrder, setDefaultOrder] = useState(savedDefaultOrder);
-  const saveOrder = useProjectSave("/api/projects", saved);
-  const saveDefaultOrder = useProjectSave(
-    "/api/accounts/default-groups",
-    saved,
-  );
   const orderRevision = useRef(project?.accountGroupsRevision || 0);
   const parsedOrder = parseGroups(order);
   const parsedDefaultOrder = parseGroups(defaultOrder);

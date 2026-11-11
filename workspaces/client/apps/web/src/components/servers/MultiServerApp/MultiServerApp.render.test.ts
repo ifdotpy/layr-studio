@@ -2,17 +2,22 @@
 import { StrictMode, act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import { configure, spy } from "mobx";
+import { configure, spy, observable, action } from "mobx";
 import { expect, it, vi } from "vitest";
 import type { CombinedSidebarServices } from "../../../servers/combinedSidebarServices.ts";
 import type { DiscoverySnapshot } from "../../../servers/discoveryModel.ts";
 
 const captured = vi.hoisted(() => ({
   source: undefined as CombinedSidebarServices | undefined,
-  snapshot: null as DiscoverySnapshot | null,
   firstBackends: [] as string[],
   realApp: false,
 }));
+const discoverySnapshot = observable.box<DiscoverySnapshot | null>(null, {
+  deep: false,
+});
+const setDiscoverySnapshot = action((value: DiscoverySnapshot | null) =>
+  discoverySnapshot.set(value),
+);
 vi.mock("../../shell/App/App.tsx", async (original) => {
   const actual = await original<typeof import("../../shell/App/App.tsx")>();
   return {
@@ -23,12 +28,12 @@ vi.mock("../../shell/App/App.tsx", async (original) => {
 vi.mock(
   "../../shell/ServerAreasProvider/ServerAreasProvider.tsx",
   async (original) => {
-    const { Provider: AreaProvider } =
-      await import("../../../app/ServerAreasProvider.tsx");
-    return {
-      ...(await original<
+    const actual =
+      await original<
         typeof import("../../shell/ServerAreasProvider/ServerAreasProvider.tsx")
-      >()),
+      >();
+    return {
+      ...actual,
       ServerAreasProvider: ({
         areas,
         children,
@@ -37,7 +42,7 @@ vi.mock(
         children: ReactNode;
       }) =>
         captured.realApp
-          ? createElement(AreaProvider, { value: areas }, children)
+          ? createElement(actual.ServerAreasProvider, { areas, children })
           : children,
     };
   },
@@ -46,21 +51,21 @@ vi.mock("../ServerAccessSettings/ServerAccessSettings.tsx", () => ({
   default: () => null,
 }));
 vi.mock("../../../servers/useUiPreferenceSync.ts", () => ({
-  useUiPreferenceSync() {},
+  startUiPreferenceSync: () => () => {},
 }));
 vi.mock("../../../servers/useServerDiscovery.ts", () => ({
-  // Like the real hook, every render derives a fresh snapshot object.
-  useServerDiscovery: () => ({
-    snapshot: captured.snapshot && {
-      ...captured.snapshot,
-      aliases: { ...captured.snapshot.aliases },
-      servers: [...captured.snapshot.servers],
-    },
-    error: "",
-    busy: false,
-    pending: null,
-    actions: { find() {}, setAutoPair() {}, setAutoUpdate() {} },
-  }),
+  ServerDiscovery: class {
+    get snapshot() {
+      return discoverySnapshot.get();
+    }
+    start() {
+      return () => {};
+    }
+    error = "";
+    busy = false;
+    pending = null;
+    actions = { find() {}, setAutoPair() {}, setAutoUpdate() {} };
+  },
 }));
 vi.mock("../../../servers/registry.ts", async (original) => ({
   ...(await original<typeof import("../../../servers/registry.ts")>()),
@@ -93,7 +98,10 @@ vi.mock("../../../servers/CombinedServerSidebar.tsx", async (original) => {
     },
   };
 });
-import MultiServerApp from "./MultiServerApp.tsx";
+import MultiServerApp, {
+  ShellState,
+  createShellState,
+} from "./MultiServerApp.tsx";
 
 it("commits complete sidebar connections before paint without MobX render or action-boundary warnings in StrictMode", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -121,12 +129,18 @@ it("commits complete sidebar connections before paint without MobX render or act
   });
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
+  const shell = new ShellState();
+  const stopShell = shell.start();
   const render = () =>
     root.render(
       createElement(
         StrictMode,
         null,
-        createElement(MantineProvider, null, createElement(MultiServerApp)),
+        createElement(
+          MantineProvider,
+          null,
+          createElement(MultiServerApp, { shell }),
+        ),
       ),
     );
   try {
@@ -140,13 +154,15 @@ it("commits complete sidebar connections before paint without MobX render or act
       "remote",
     ]);
     expect(captured.source?.aliases.remote).toBe("REM");
-    captured.snapshot = {
-      localServerId: "local",
-      aliases: { remote: "NEW" },
-      autoPair: false,
-      autoUpdate: false,
-      servers: [],
-    };
+    await act(async () =>
+      setDiscoverySnapshot({
+        localServerId: "local",
+        aliases: { remote: "NEW" },
+        autoPair: false,
+        autoUpdate: false,
+        servers: [],
+      }),
+    );
     await act(async () => render());
     expect(captured.source?.aliases.remote).toBe("NEW");
     expect(renderWrites).toEqual([]);
@@ -158,6 +174,7 @@ it("commits complete sidebar connections before paint without MobX render or act
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    stopShell();
     stop();
     warnings.mockRestore();
     vi.unstubAllGlobals();
@@ -176,7 +193,7 @@ it("opens settings with streamed running counts and accounts without a summary r
     .spyOn(summary, "fetchServerSummary")
     .mockRejectedValue(new Error("Unexpected summary read"));
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  captured.snapshot = null;
+  setDiscoverySnapshot(null);
   window.matchMedia = vi.fn(() => ({
     matches: false,
     media: "",
@@ -229,13 +246,15 @@ it("opens settings with streamed running counts and accounts without a summary r
     );
   const host = document.body.appendChild(document.createElement("div"));
   const root = createRoot(host);
+  const shell = new ShellState();
+  const stopShell = shell.start();
   try {
     await act(async () =>
       root.render(
         createElement(
           MantineProvider,
           { env: "test" },
-          createElement(MultiServerApp),
+          createElement(MultiServerApp, { shell }),
         ),
       ),
     );
@@ -267,6 +286,7 @@ it("opens settings with streamed running counts and accounts without a summary r
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    stopShell();
     service.close();
     f.store.dispose();
     read.mockRestore();
@@ -290,7 +310,7 @@ it("retains unchanged service and channel owners, replaces changed credentials, 
       .spyOn(remote, "close")
       .mockImplementation(() => closeRemote());
     const localClose = vi.spyOn(local, "close");
-    channel.bind(() => {});
+    expect(channel.ready).toBe(true);
     shell.connectServices(undefined, false);
     expect(shell.serviceInstances.get("remote")).toBe(remote);
     expect(shell.screens.get("remote")).toBe(channel);
@@ -304,7 +324,7 @@ it("retains unchanged service and channel owners, replaces changed credentials, 
     shell.connectServices(undefined, false);
     expect(close).toHaveBeenCalledExactlyOnceWith(true);
     expect(channel.ready).toBe(false);
-    expect(shell.serviceInstances.get("remote")).not.toBe(remote);
+    expect(shell.serviceInstances.get("remote") === remote).toBe(false);
     expect(shell.serviceInstances.get("local")).toBe(local);
     const replacement = shell.serviceInstances.get("remote")!;
     const replacementClose = vi.spyOn(replacement, "close");
@@ -359,22 +379,23 @@ it.each(["credentials", "revival"])(
       dispatchEvent: () => true,
     }));
     captured.realApp = true;
-    captured.snapshot = null;
+    setDiscoverySnapshot(null);
     const host = document.body.appendChild(document.createElement("div")),
       root = createRoot(host);
+    const shell = new ShellState();
+    const stopShell = shell.start();
     try {
       await act(async () =>
         root.render(
           createElement(
             MantineProvider,
             { env: "test" },
-            createElement(MultiServerApp),
+            createElement(MultiServerApp, { shell }),
           ),
         ),
       );
       const local = owners.find((service) => service.owner.id === "local")!;
-      const shell =
-        local.shellSettings as import("./MultiServerApp.tsx").ShellState;
+      expect(local.shellSettings).toBe(shell);
       const previous = shell.serviceInstances.get("remote")!,
         channel = previous.screen.channel!;
       expect(channel.ready).toBe(true);
@@ -396,6 +417,7 @@ it.each(["credentials", "revival"])(
     } finally {
       await act(async () => root.unmount());
       host.remove();
+      stopShell();
       captured.realApp = false;
       for (const owner of owners) owner.close();
       createSpy.mockRestore();
@@ -404,3 +426,24 @@ it.each(["credentials", "revival"])(
     }
   },
 );
+
+it("keeps shell connections alive while the document is cached and closes them when it leaves", () => {
+  const shell = createShellState();
+  const connected = shell.serviceInstances.size;
+  expect(connected).toBeGreaterThan(0);
+  const areas = [...shell.serviceInstances.values()].map(
+    (service) => service.areas,
+  );
+  expect(areas.every((owner) => owner.stops.length > 0)).toBe(true);
+  const cached = new Event("pagehide");
+  Object.defineProperty(cached, "persisted", { value: true });
+  window.dispatchEvent(cached);
+  expect(shell.serviceInstances.size).toBe(connected);
+  const leaving = new Event("pagehide");
+  Object.defineProperty(leaving, "persisted", { value: false });
+  window.dispatchEvent(leaving);
+  expect(shell.serviceInstances.size).toBe(0);
+  expect(
+    areas.every((owner) => owner.disposed && owner.stops.length === 0),
+  ).toBe(true);
+});

@@ -1,8 +1,7 @@
-import { useEffect, useEffectEvent, useState, type KeyboardEvent } from "react";
-import { reaction, runInAction } from "mobx";
+import { useEffect, type KeyboardEvent } from "react";
+import { reaction, makeAutoObservable } from "mobx";
 import { useMantineColorScheme } from "@mantine/core";
 import type { ServerAreas } from "../contracts.ts";
-import type { createUiPreferenceBridge } from "../../sync/uiPreferenceBridge.ts";
 import { writePreferenceEdit } from "../../sync/uiPreferenceStore.ts";
 import {
   applyStudioPreferences,
@@ -31,43 +30,58 @@ export function loadStudioPreferences(storage: Storage) {
     };
   }
 }
-export function useAppPreferences(
-  a: Pick<ServerAreas, "scope" | "preferences">,
-  bridge: ReturnType<typeof createUiPreferenceBridge>,
-  publish: (preferences: StudioPreferences) => void,
-) {
-  const { storage, resources } = a.scope.services;
-  const { setColorScheme } = useMantineColorScheme();
-  const applyTheme = useEffectEvent(setColorScheme);
-  const value = a.preferences.value;
-  const [preferenceError, setError] = useState(
-    () => loadStudioPreferences(storage).error,
-  );
-  const [thresholdEdit, editThreshold] = useState<string | null>(null),
-    [shortcutFeedback, setShortcutFeedback] = useState("");
-  const accept = (next: StudioPreferences) =>
-    runInAction(() => {
-      a.preferences.value = next;
-    });
-  const update = (patch: Record<string, unknown>) => {
+export class AppPreferences {
+  readonly areas;
+  preferenceError;
+  thresholdEdit: string | null = null;
+  shortcutFeedback = "";
+  constructor(
+    a: Pick<
+      ServerAreas,
+      "scope" | "preferences" | "frame" | "preferenceBridge"
+    >,
+  ) {
+    this.areas = a;
+    this.preferenceError = loadStudioPreferences(
+      a.scope.services.storage,
+    ).error;
+    makeAutoObservable(this, { areas: false }, { autoBind: true });
+  }
+  get value() {
+    return this.areas.preferences.value;
+  }
+  accept(value: StudioPreferences) {
+    this.areas.preferences.value = value;
+  }
+  editThreshold(value: string | null) {
+    this.thresholdEdit = value;
+  }
+  update(patch: Record<string, unknown>) {
     try {
-      const next = normalizeStudioPreferences({ ...value, ...patch });
+      const next = normalizeStudioPreferences({ ...this.value, ...patch });
       const saved = writePreferenceEdit(
         studioPreferencesStorageKey,
-        value,
+        this.value,
         next,
-        storage,
+        this.areas.scope.services.storage,
         normalizeStudioPreferences,
       );
-      accept(saved);
+      this.areas.preferences.value = saved;
       window.dispatchEvent(new Event("studio-preferences-change"));
-      publish(saved);
-      setError("");
+      this.areas.frame.publish({
+        kind: "studio-server-preferences",
+        preferences: saved,
+      });
+      this.preferenceError = "";
     } catch {
-      setError("Studio preferences could not be saved in this browser.");
+      this.preferenceError =
+        "Studio preferences could not be saved in this browser.";
     }
-  };
-  useEffect(() => {
+  }
+  start() {
+    const a = this.areas,
+      { resources } = a.scope.services,
+      bridge = a.preferenceBridge;
     let wasLive = false;
     const stopConnection = resources.watchResourceConnection((status) => {
       const reconnected = status === "live" && !wasLive;
@@ -78,7 +92,6 @@ export function useAppPreferences(
       () => (a.scope.screen.active ? a.preferences.value : null),
       (next) => {
         if (next) {
-          applyTheme(next.theme);
           applyStudioPreferences(next, document.documentElement);
         }
       },
@@ -91,7 +104,7 @@ export function useAppPreferences(
       )
         return;
       try {
-        accept(
+        this.accept(
           event instanceof StorageEvent
             ? parseStudioPreferences(event.newValue || "")
             : normalizeStudioPreferences((event as CustomEvent).detail),
@@ -108,11 +121,12 @@ export function useAppPreferences(
       window.removeEventListener("storage", receive);
       window.removeEventListener("studio-shell-preferences", receive);
     };
-  }, [a, bridge, resources]);
-  const hideOldChatsThresholdText =
-    thresholdEdit ?? String(value.hideOldChatsThreshold);
-  const commitThreshold = () => {
-    const text = hideOldChatsThresholdText,
+  }
+  get hideOldChatsThresholdText() {
+    return this.thresholdEdit ?? String(this.value.hideOldChatsThreshold);
+  }
+  commitThreshold() {
+    const text = this.hideOldChatsThresholdText,
       count = Number(text);
     if (
       /^\d+$/.test(text) &&
@@ -120,13 +134,15 @@ export function useAppPreferences(
       count >= MIN_HIDE_OLD_CHATS_THRESHOLD &&
       count <= MAX_HIDE_OLD_CHATS_THRESHOLD
     )
-      update({ hideOldChatsThreshold: count });
-    editThreshold(null);
-  };
-  const resetShortcutFeedback = () => setShortcutFeedback("");
-  const captureShortcut = (event: KeyboardEvent<HTMLInputElement>) => {
+      this.update({ hideOldChatsThreshold: count });
+    this.editThreshold(null);
+  }
+  resetShortcutFeedback() {
+    this.shortcutFeedback = "";
+  }
+  captureShortcut(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Tab" || event.key === "Escape") {
-      resetShortcutFeedback();
+      this.resetShortcutFeedback();
       return;
     }
     if (["Control", "Meta", "Alt", "Shift"].includes(event.key)) return;
@@ -139,23 +155,22 @@ export function useAppPreferences(
       "+" +
       event.key;
     if (!parseSidebarShortcut(candidate)) {
-      setShortcutFeedback(
-        "Choose a letter or number with Ctrl or ⌘. Browser-reserved shortcuts cannot be used.",
-      );
+      this.shortcutFeedback =
+        "Choose a letter or number with Ctrl or ⌘. Browser-reserved shortcuts cannot be used.";
       return;
     }
-    resetShortcutFeedback();
-    update({ sidebarShortcut: candidate });
-  };
-  return {
-    value,
-    preferenceError,
-    shortcutFeedback,
-    update,
-    hideOldChatsThresholdText,
-    editThreshold,
-    commitThreshold,
-    captureShortcut,
-    resetShortcutFeedback,
-  };
+    this.resetShortcutFeedback();
+    this.update({ sidebarShortcut: candidate });
+  }
+}
+
+/** Mantine applies the theme to the DOM. */
+export function useAppPreferences(
+  a: Pick<ServerAreas, "preferenceControls">,
+): AppPreferences {
+  const owner = a.preferenceControls;
+  const { setColorScheme } = useMantineColorScheme();
+  const theme = owner.value.theme;
+  useEffect(() => setColorScheme(theme), [setColorScheme, theme]);
+  return owner;
 }

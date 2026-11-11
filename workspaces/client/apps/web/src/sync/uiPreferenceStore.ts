@@ -1,3 +1,4 @@
+import { action } from "mobx";
 import { setPreferenceWriteStatus } from "./uiPreferenceStatus.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
@@ -27,7 +28,6 @@ const retiredModelWhitelistField = JSON.stringify([
   RETIRED_MODEL_WHITELIST_KEY,
 ]);
 let applying = false;
-const listeners = new Set<() => void>();
 function cache(storage: Storage, scope: PreferenceScope): PreferenceFields {
   const key = `${preferenceCacheKey}:${scope}`;
   try {
@@ -137,7 +137,6 @@ export function capturePreferenceWrite(
   if (!changed) return;
   persist(target, scope, fields);
   setPreferenceWriteStatus(storage, scope, { state: "saving" });
-  listeners.forEach((listener) => listener());
   window.dispatchEvent(new CustomEvent(preferenceEvent, { detail: key }));
 }
 export function readPreferenceFields(
@@ -212,13 +211,6 @@ export function receivePreferenceFields(
   } finally {
     applying = false;
   }
-  listeners.forEach((listener) => listener());
-}
-export function watchPreferenceWrites(listener: () => void) {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
 }
 export function preferenceStorageForServer(id: string) {
   return scopedPreferenceStorage(id);
@@ -251,18 +243,20 @@ export function writePreferenceEdit<T extends Record<string, unknown>>(
       else delete latest[name];
     }
   }
-  applying = true;
-  try {
-    storage.setItem(key, JSON.stringify(latest));
-  } finally {
-    applying = false;
-  }
-  capturePreferenceWrite(
-    key,
-    JSON.stringify(next),
-    JSON.stringify(previous),
-    storage,
-  );
+  action(() => {
+    applying = true;
+    try {
+      storage.setItem(key, JSON.stringify(latest));
+    } finally {
+      applying = false;
+    }
+    capturePreferenceWrite(
+      key,
+      JSON.stringify(next),
+      JSON.stringify(previous),
+      storage,
+    );
+  })();
   return latest;
 }
 
@@ -307,6 +301,5 @@ export function writePreferenceValue(
   fields[name] = { value, timestamp, writer: writer() };
   persist(target, scope, fields);
   setPreferenceWriteStatus(storage, scope, { state: "saving" });
-  listeners.forEach((listener) => listener());
   window.dispatchEvent(new CustomEvent(preferenceEvent, { detail: key }));
 }

@@ -1,8 +1,8 @@
 import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { serverActivityActive } from "./servers/activity.ts";
 import {
+  posting,
   ApiError,
   errorText,
   NetworkTimeoutError,
@@ -44,10 +44,10 @@ describe("OpenAPI transport facade", () => {
       { signal: controller.signal },
     );
     await running;
-    expect(serverActivityActive()).toBe(true);
+    expect(posting.count > 0).toBe(true);
     controller.abort();
     await expect(result).rejects.toMatchObject({ name: "AbortError" });
-    expect(serverActivityActive()).toBe(false);
+    expect(posting.count).toBe(0);
   });
   it("requires bodies for all successful GET and POST operations in the OpenAPI owner", () => {
     const spec: unknown = JSON.parse(

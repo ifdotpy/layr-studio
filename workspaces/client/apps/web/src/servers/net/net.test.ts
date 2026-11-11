@@ -47,7 +47,6 @@ it("observes every connection state and finite request outcome without probing",
     localStorage: storage,
     sessionStorage: memoryStorage(),
     beginMutation: createMutationJournal("fixture", storage),
-    beginActivity: () => () => {},
     requestStatus: status,
   });
   const subscriptions = createSubscriptions({
@@ -127,8 +126,7 @@ function accountingApi(
   unknown: () => Promise<void> = async () => {},
 ) {
   const status = new NetStatus(),
-    completed = vi.fn(),
-    cleanup = vi.fn();
+    completed = vi.fn();
   const storage = memoryStorage();
   const journal = createMutationJournal("accounting", storage);
   const beginMutation = Object.assign(
@@ -146,7 +144,6 @@ function accountingApi(
     localStorage: storage,
     sessionStorage: memoryStorage(),
     beginMutation,
-    beginActivity: () => cleanup,
     requestStatus: {
       begin() {
         const finish = status.begin();
@@ -157,7 +154,7 @@ function accountingApi(
       },
     },
   });
-  return { api, status, completed, cleanup };
+  return { api, status, completed };
 }
 
 it.each(["get", "post", "access"] as const)(
@@ -165,7 +162,7 @@ it.each(["get", "post", "access"] as const)(
   async (kind) => {
     vi.useFakeTimers();
     try {
-      const { api, status, completed, cleanup } = accountingApi(
+      const { api, status, completed } = accountingApi(
         (request) =>
           new Promise<Response>((_resolve, reject) => {
             request.signal.addEventListener(
@@ -192,7 +189,7 @@ it.each(["get", "post", "access"] as const)(
       expect(status.lastError).toBe(errorText(error));
       expect(completed).toHaveBeenCalledExactlyOnceWith(error);
       expect(status.inFlight).toBe(0);
-      if (kind === "post") expect(cleanup).toHaveBeenCalledOnce();
+      expect(api.posting.count).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -208,7 +205,7 @@ it.each(["settles", "fails"] as const)(
     const journalError = new Error(
       "The uncertainty journal could not be saved",
     );
-    const { api, status, completed, cleanup } = accountingApi(
+    const { api, status, completed } = accountingApi(
       async () => {
         throw lost;
       },
@@ -225,7 +222,7 @@ it.each(["settles", "fails"] as const)(
       expect(status.inFlight).toBe(1);
       expect(status.lastError).toBeNull();
       expect(completed).not.toHaveBeenCalled();
-      expect(cleanup).not.toHaveBeenCalled();
+      expect(api.posting.count).toBe(1);
     } finally {
       if (outcome === "fails") journal.reject(journalError);
       else journal.resolve();
@@ -236,8 +233,59 @@ it.each(["settles", "fails"] as const)(
     expect(status.inFlight).toBe(0);
     expect(completed).toHaveBeenCalledExactlyOnceWith(error);
     expect(status.lastError).toBe(errorText(error));
-    expect(cleanup.mock.invocationCallOrder[0]).toBeLessThan(
-      completed.mock.invocationCallOrder[0] ?? 0,
-    );
+    expect(api.posting.count).toBe(0);
   },
 );
+
+it("binds transcript search to the server's observation-driven keyed reads", async () => {
+  const { autorun } = await import("mobx");
+  const pending =
+    Promise.withResolvers<
+      import("../../api.ts").GetResult<"/api/transcript/search">
+    >();
+  const fetch = vi.fn(() =>
+    pending.promise.then(
+      (data) =>
+        new Response(JSON.stringify(data), {
+          headers: {
+            "Content-Type": "application/json",
+            [API_SCHEMA_HASH_HEADER]: API_SCHEMA_HASH,
+          },
+        }),
+    ),
+  );
+  const storage = memoryStorage();
+  const bound = createApiScope({
+    origin: "https://server.test",
+    fetch,
+    localStorage: storage,
+    sessionStorage: memoryStorage(),
+    beginMutation: createMutationJournal("fixture", storage),
+  });
+  const subscriptions = createSubscriptions({
+    watchResourceChanges: () => () => {},
+    watchResourceConnection: () => () => {},
+  });
+  const store = createServerStore(subscriptions);
+  const net = createNet(bound, () => store);
+  const slot = net.reads.transcriptSearch({ id: "agent", q: "word" });
+  expect(fetch).not.toHaveBeenCalled();
+  const stop = autorun(() => {
+    void slot.current;
+  });
+  const joined = net.reads.transcriptSearch({ q: "word", id: "agent" });
+  const stopJoined = autorun(() => {
+    void joined.current;
+  });
+  await Promise.resolve();
+  expect(joined).toBe(slot);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  stop();
+  stopJoined();
+  pending.resolve({ results: [], truncated: false });
+  await pending.promise;
+  await Promise.resolve();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  store.dispose();
+  subscriptions.dispose();
+});

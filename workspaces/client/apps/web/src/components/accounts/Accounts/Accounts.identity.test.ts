@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { transientTestFixture } from "../../../sync/subscriptions/transientTestFixture.ts";
+import { createApiStorage } from "../../../apiStorage.ts";
+import { autorun, flowResult } from "mobx";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ServerCommand } from "../../../servers/navigation.ts";
 import { accountsFixture, personal } from "./Accounts.fixture.ts";
 let fixture: ReturnType<typeof accountsFixture>;
@@ -129,3 +132,72 @@ it("reads dialog accounts and default replacements directly from generated updat
   expect(fixture.ui.dialogAccount?.label).toBe("Updated");
   expect(fixture.ui.canConfirmRemoval).toBe(false);
 });
+
+it.each(["rename", "configure-profile", "disconnect", "remove"] as const)(
+  "disposes the owner-created sign-in flow before a %s dialog replaces it",
+  async (operation) => {
+    vi.useFakeTimers();
+    const stream = transientTestFixture();
+    const services = fixture.areas.scope.services;
+    vi.spyOn(services, "store", "get").mockReturnValue(stream.store);
+    vi.spyOn(services.resources, "publish").mockImplementation(
+      stream.subscriptions.publish,
+    );
+    Object.assign(services.api, createApiStorage(services.storage));
+    let stopReading = () => {};
+    try {
+      fixture.publish({
+        ...fixture.summary,
+        accounts: fixture.summary.accounts.map((account) => ({
+          ...account,
+          disconnected: true,
+        })),
+      });
+      fixture.ui.receive({
+        action: "account-sign-in",
+        accountKey: "personal",
+        provider: "claude",
+        email: personal.email,
+        label: "Personal",
+        serverLabel: "Fixture",
+      });
+      const flow = fixture.ui.claudeFlow;
+      if (!flow)
+        throw new Error("The account owner did not create a sign-in flow");
+      stopReading = autorun(() => {
+        void flow.receipt;
+      });
+      fixture.post.mockImplementationOnce(
+        async (
+          _path: unknown,
+          body: import("../../../api.ts").PostBody<"/api/accounts/claude/login">,
+        ) => ({
+          requestId: body.login_id,
+          accountKey: "personal",
+          status: "pending",
+        }),
+      );
+      await flowResult(flow.start());
+      await vi.advanceTimersByTimeAsync(100);
+      fixture.ui.receive(command(operation, "personal"));
+      fixture.areas.scope.services.resources.publish(
+        { kind: "auth-progress", requestId: flow.requestId },
+        { requestId: flow.requestId, accountKey: "personal", status: "ready" },
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(flow.receipt?.status).toBe("ready");
+      expect(fixture.ui.claudeFlow === null).toBe(true);
+      expect(
+        fixture.post.mock.calls.some(
+          ([path]) => path === "/api/accounts/reconnect",
+        ),
+      ).toBe(false);
+    } finally {
+      stopReading();
+      fixture.ui.dispose();
+      stream.close();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  },
+);

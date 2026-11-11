@@ -16,29 +16,35 @@ export function createQuestionCards(
   agentId: string | undefined,
 ) {
   if (!agentId) return (item: Message) => questionCard(item);
-  const view = makeAutoObservable({
-    get lookup() {
-      const current = resourceData(store.questionHistory().current);
-      const entries = current
-        ? [...current.questionHistory.values()].filter((entry) => {
-            const owner = requests.agents?.get(entry.agent);
-            return (owner?.rootId || entry.agent) === requests.rootId;
-          })
-        : [];
-      const pending = requests.familyRequests.filter(isPendingQuestionRequest);
-      return {
-        agentId,
-        history: questionHistoryIndex(entries),
-        pending: new Map(
-          [...questionHistoryIndex(pending)].map(([key, request]) => [
-            key,
-            request.id,
-          ]),
-        ),
-        pendingIds: new Set(pending.map((request) => request.id)),
-      };
+  const view = makeAutoObservable(
+    {
+      get lookup() {
+        const current = resourceData(store.questionHistory().current);
+        const entries = current
+          ? [...current.questionHistory.values()].filter((entry) => {
+              const owner = requests.agents?.get(entry.agent);
+              return (owner?.rootId || entry.agent) === requests.rootId;
+            })
+          : [];
+        const pending = requests.familyRequests.filter(
+          isPendingQuestionRequest,
+        );
+        return {
+          agentId,
+          history: questionHistoryIndex(entries),
+          pending: new Map(
+            [...questionHistoryIndex(pending)].map(([key, request]) => [
+              key,
+              request.id,
+            ]),
+          ),
+          pendingIds: new Set(pending.map((request) => request.id)),
+        };
+      },
     },
-  });
+    {},
+    { autoBind: true },
+  );
   const cards = new WeakMap<
     Message,
     IComputedValue<ReturnType<typeof questionCard>>

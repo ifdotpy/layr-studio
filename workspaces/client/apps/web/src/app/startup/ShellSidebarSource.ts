@@ -1,7 +1,7 @@
 import type { ServerServices } from "../../servers/serverServices.ts";
 import { sidebarCollectionView } from "../../servers/sidebarSnapshot.ts";
 import { createSidebarViewModel } from "../../components/sidebar/support/viewModel.ts";
-import { makeAutoObservable, observableRef } from "mobx";
+import { makeAutoObservable, observableRef, reaction } from "mobx";
 import { layoutQueries } from "../../layout/layout-contract.generated.ts";
 import { createMergedSidebarSelector } from "../../servers/mergedSidebar.ts";
 import type { SidebarSource } from "../../servers/mergedSidebar.ts";
@@ -29,6 +29,7 @@ export class ShellSidebarSource {
   readonly selection: ScreenSelection;
   readonly servicesFor: (owner: string) => ServerServices | undefined;
   readonly select = createMergedSidebarSelector();
+  model = this.select([]);
   constructor(
     selection: ScreenSelection,
     servicesFor: (owner: string) => ServerServices | undefined,
@@ -48,6 +49,7 @@ export class ShellSidebarSource {
         selection: false,
         servicesFor: false,
         select: false,
+        model: observableRef,
         navigation: observableRef,
         status: observableRef,
         value: observableRef,
@@ -86,8 +88,14 @@ export class ShellSidebarSource {
       }),
     );
   }
-  get model() {
-    return this.select(this.sources);
+  start() {
+    return reaction(
+      () => this.sources,
+      (sources) => {
+        this.model = this.select(sources);
+      },
+      { fireImmediately: true },
+    );
   }
   get sources() {
     return this.selection.available.flatMap((id): SidebarSource[] => {

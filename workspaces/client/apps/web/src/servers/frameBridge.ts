@@ -1,6 +1,6 @@
 import type { ServerAreas } from "../app/contracts.ts";
 import { frameAccounts } from "../components/accounts/Accounts/Accounts.tsx";
-import { reaction } from "mobx";
+import { compareStructural, reaction } from "mobx";
 import {
   formatAgentStatus,
   type ReadState,
@@ -133,8 +133,13 @@ export function startServerFrame(
       );
     } else await source.run(command);
   };
-  const publishNavigation = () =>
-    publish({ kind: "studio-server-navigation", navigation: navigation() });
+  let lastNavigation: ReturnType<typeof navigation> | undefined;
+  const publishNavigation = () => {
+    const value = navigation();
+    if (compareStructural(lastNavigation, value)) return;
+    lastNavigation = value;
+    publish({ kind: "studio-server-navigation", navigation: value });
+  };
   const preferencesChanged = (event: Event) => {
     if (!source.ready) return;
     const stateDir =
@@ -174,12 +179,7 @@ export function startServerFrame(
     services.resources.watchResourceConnection((status) =>
       publish({ kind: "studio-server-status", status }),
     ),
-    reaction(
-      navigation,
-      (value) =>
-        publish({ kind: "studio-server-navigation", navigation: value }),
-      { fireImmediately: true },
-    ),
+    reaction(navigation, publishNavigation, { fireImmediately: true }),
     reaction(
       () => readServerAccounts(source.accounts),
       (accounts) => {
@@ -294,8 +294,17 @@ export function startAppFrame(areas: ServerAreas): Disposer {
   };
   window.addEventListener("desktop-error", onError);
   window.addEventListener("keydown", key);
+  let releaseServerFrame = () => {};
   const stops = [
-    startServerFrame(scope, source),
+    reaction(
+      () => scope.screen.channel,
+      () => {
+        releaseServerFrame();
+        releaseServerFrame = startServerFrame(scope, source);
+      },
+      { fireImmediately: true },
+    ),
+    () => releaseServerFrame(),
     startDesktopNotifications({
       store: scope.store,
       get metadata() {

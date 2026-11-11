@@ -1,9 +1,5 @@
-import type { DeepReadonly } from "../../../deepReadonly.ts";
 import { observer } from "mobx-react-lite";
-type QueueItemDto = DeepReadonly<ApiQueueItemDto>;
-import { useUnsentText } from "../../../unsent/useUnsentText.ts";
-import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -16,42 +12,12 @@ import {
   Trash2,
 } from "lucide-react";
 import {
-  ApiError,
-  errorText,
-  type QueueItemDto as ApiQueueItemDto,
-} from "../../../api.ts";
-import type { Message } from "../../../types.ts";
-
-import { copyText } from "../../../clipboard/clipboard.ts";
-
-export type LocalQueueItem = Pick<
-  Message,
-  "assets" | "id" | "requestedDelivery" | "text" | "deliveryStatus"
-> & { localDelivery: true };
-export type QueueItem =
-  | (QueueItemDto & { localDelivery?: false })
-  | LocalQueueItem;
-
-function isServerQueueItem(item: QueueItem): item is QueueItemDto {
-  return item.localDelivery !== true;
-}
-
-type Props = {
-  items: readonly QueueItem[];
-  scope: string;
-  onEdit: (item: QueueItemDto, text: string) => Promise<void>;
-  onCancel: (item: QueueItemDto) => Promise<void>;
-  onSendNow?: ((item: QueueItemDto) => Promise<void>) | undefined;
-  onReorder: (ids: string[]) => Promise<void>;
-  canReorder: boolean;
-  refreshing?: boolean;
-  loading?: boolean;
-  error?: string;
-};
-
-type EditDraft = { item: QueueItemDto; text: string };
+  isServerQueueItem,
+  type EditDraft,
+  type MessageQueueStore,
+} from "./MessageQueueStore.ts";
+export type { LocalQueueItem, QueueItem } from "./MessageQueueStore.ts";
 const dragType = "application/x-studio-queued-message";
-
 function QueuePreview({
   text,
   index,
@@ -106,136 +72,33 @@ function QueuePreview({
   );
 }
 
-export default function MessageQueue(props: Props) {
-  return <ScopedMessageQueue key={props.scope} {...props} />;
-}
-
-const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
-  const [current, setCurrent] = useState<EditDraft | null>(null);
-  const [savedEdit, saveEditText, clearEdit] = useUnsentText(
-    "queue-edit",
-    p.scope,
-  );
-  useEffect(() => {
-    if (!savedEdit) return;
-    try {
-      const saved: unknown = JSON.parse(savedEdit);
-      if (
-        !saved ||
-        typeof saved !== "object" ||
-        !("id" in saved) ||
-        typeof saved.id !== "string" ||
-        !("text" in saved) ||
-        typeof saved.text !== "string"
-      )
-        return;
-      const item = p.items.find(
-        (entry) => entry.id === saved.id && isServerQueueItem(entry),
-      );
-      if (item && isServerQueueItem(item))
-        setCurrent({ item, text: saved.text });
-    } catch {
-      /* Ignore a damaged edit. */
-    }
-  }, [savedEdit, p.items]);
-  const [collapsed, setCollapsed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const lock = useRef(false);
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [dragged, setDragged] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
+export default observer(function MessageQueue({
+  store,
+}: {
+  store: MessageQueueStore;
+}) {
+  const p = store.props;
+  const {
+    current,
+    collapsed,
+    busy,
+    error,
+    copied,
+    expanded,
+    dragged,
+    dropTarget,
+    textarea,
+    absent,
+    disabled,
+    dismiss,
+    beginEdit,
+    updateDraft,
+    mutate,
+    saveEdit,
+    move,
+    copyDraft,
+  } = store;
   const listId = useId();
-  const textarea = useRef<HTMLTextAreaElement>(null);
-  const absent =
-    current && !p.items.some((item) => item.id === current.item.id)
-      ? current
-      : undefined;
-  const disabled = busy || !!p.refreshing || !!p.loading;
-
-  const dismiss = () => {
-    saveEditText(null);
-    setCurrent(null);
-    setError("");
-  };
-  const beginEdit = (item: QueueItem) => {
-    if (!isServerQueueItem(item)) return;
-    setCurrent({ item, text: item.text });
-    saveEditText(JSON.stringify({ id: item.id, text: item.text }));
-    setCollapsed(false);
-    setError("");
-    setCopied(false);
-  };
-  const updateDraft = (draft: EditDraft, text: string) => {
-    setCurrent({ ...draft, text });
-    saveEditText(JSON.stringify({ id: draft.item.id, text }));
-    setCopied(false);
-  };
-  const mutate = async (operation: () => Promise<void>) => {
-    if (lock.current || p.refreshing) return;
-    lock.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      await operation();
-    } catch (reason) {
-      setError(errorText(reason));
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  };
-  const saveEdit = (draft: EditDraft) => {
-    if (
-      p.loading ||
-      !p.items.some((item) => item.id === draft.item.id) ||
-      (!draft.text.trim() && !draft.item.assets?.length)
-    )
-      return;
-    void mutate(async () => {
-      try {
-        await p.onEdit(draft.item, draft.text);
-        dismiss();
-      } catch (error) {
-        if (
-          error instanceof ApiError &&
-          !serverMutationResponseIsUncertain(error.status, error.response)
-        )
-          await clearEdit(
-            JSON.stringify({ id: draft.item.id, text: draft.text }),
-          );
-        throw error;
-      }
-    });
-  };
-  const move = (id: string, targetIndex: number) => {
-    if (
-      !p.canReorder ||
-      disabled ||
-      targetIndex < 0 ||
-      targetIndex >= p.items.length
-    )
-      return;
-    const ids = p.items.map((item) => item.id);
-    const from = ids.indexOf(id);
-    if (from < 0 || from === targetIndex) return;
-    ids.splice(from, 1);
-    ids.splice(targetIndex, 0, id);
-    void mutate(() => p.onReorder(ids));
-  };
-  const copyDraft = async (draft: EditDraft) => {
-    try {
-      await copyText(draft.text);
-      setCopied(true);
-    } catch {
-      textarea.current?.focus();
-      textarea.current?.select();
-      setError(
-        "Copy is unavailable. Select and copy the text from the editor.",
-      );
-    }
-  };
   const editor = (draft: EditDraft, missing = false) => (
     <div className="message-queue-editor">
       {missing && (
@@ -276,7 +139,7 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
             className="message-queue-save"
             aria-label="Save queued message"
             disabled={
-              disabled || (!draft.text.trim() && !draft.item.assets?.length)
+              disabled || (!draft.text.trim() && !draft.item?.assets?.length)
             }
             onClick={() => saveEdit(draft)}
           >
@@ -317,7 +180,7 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
           className="message-queue-toggle"
           aria-expanded={!collapsed}
           aria-controls={listId}
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => store.update({ collapsed: !collapsed })}
         >
           <ListOrdered size={17} />
           <span>
@@ -341,7 +204,7 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
       <div id={listId} hidden={collapsed} className="message-queue-body">
         <ol aria-label="Queued messages">
           {p.items.map((item, index) => {
-            const draft = current?.item.id === item.id ? current : undefined;
+            const draft = current?.id === item.id ? current : undefined;
             const isExpanded = expanded === item.id;
             return (
               <li
@@ -357,7 +220,7 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
                   event.preventDefault();
                   event.stopPropagation();
                   event.dataTransfer.dropEffect = "move";
-                  setDropTarget(item.id);
+                  store.update({ dropTarget: item.id });
                 }}
                 onDrop={(event) => {
                   if (!dragged || !p.canReorder || disabled) return;
@@ -365,8 +228,8 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
                   event.stopPropagation();
                   if (event.dataTransfer.getData(dragType) === dragged)
                     move(dragged, index);
-                  setDragged(null);
-                  setDropTarget(null);
+                  store.update({ dragged: null });
+                  store.update({ dropTarget: null });
                 }}
               >
                 <div className="message-queue-row">
@@ -379,7 +242,11 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
                         text={item.text}
                         index={index + 1}
                         expanded={isExpanded}
-                        toggle={() => setExpanded(isExpanded ? null : item.id)}
+                        toggle={() =>
+                          store.update({
+                            expanded: isExpanded ? null : item.id,
+                          })
+                        }
                       />
                     )}
                     {!!item.assets?.length && (
@@ -427,11 +294,7 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
                       disabled={disabled || !!item.localDelivery}
                       aria-label={`Delete queued message ${index + 1}`}
                       title="Delete"
-                      onClick={() =>
-                        void mutate(async () => {
-                          if (isServerQueueItem(item)) await p.onCancel(item);
-                        })
-                      }
+                      onClick={() => store.cancel(item)}
                     >
                       <Trash2 size={15} />
                     </button>
@@ -464,11 +327,11 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
                             event.stopPropagation();
                             event.dataTransfer.setData(dragType, item.id);
                             event.dataTransfer.effectAllowed = "move";
-                            setDragged(item.id);
+                            store.update({ dragged: item.id });
                           }}
                           onDragEnd={() => {
-                            setDragged(null);
-                            setDropTarget(null);
+                            store.update({ dragged: null });
+                            store.update({ dropTarget: null });
                           }}
                         >
                           <GripVertical size={15} />
@@ -488,3 +351,8 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
     </section>
   );
 });
+
+export {
+  createMessageQueueStore,
+  type QueueProps,
+} from "./MessageQueueStore.ts";

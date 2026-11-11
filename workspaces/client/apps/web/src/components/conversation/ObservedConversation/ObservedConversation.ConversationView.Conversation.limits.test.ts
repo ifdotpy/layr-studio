@@ -44,7 +44,7 @@ const h = vi.hoisted(() => ({
     | import("../../../servers/serverServices.ts").ServerServices["api"]
     | undefined,
   effects: [] as Array<() => unknown>,
-  read: vi.fn(async () => {}),
+  read: vi.fn<typeof import("../../../servers/net/api.ts").get>(),
 }));
 vi.mock("../../../usePendingCommands.ts", () => ({
   usePendingCommands: () => [],
@@ -109,10 +109,6 @@ vi.mock("../../../conversation/liveText.ts", async (original) => ({
   ...(await original<typeof import("../../../conversation/liveText.ts")>()),
   useLiveText: () => new Map(),
 }));
-vi.mock("../../../servers/activity.ts", async (original) => ({
-  ...(await original<typeof import("../../../servers/activity.ts")>()),
-  useServerActivity: () => {},
-}));
 vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
   useMediaQuery: () => false,
@@ -124,32 +120,11 @@ vi.mock("../TokenRate/TokenRate.tsx", () => ({ default: () => null }));
 vi.mock("../support/usePromptRecall.ts", () => ({
   usePromptRecall: () => ({}),
 }));
-vi.mock("../support/useConversationScroll.ts", () => ({
-  useConversationScroll: () => ({
-    scroll: { current: null },
-    content: { current: null },
-  }),
-}));
-vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
-}));
-vi.mock("../support/useUploadRecovery.ts", () => ({
-  useUploadRecovery: () => ({ pending: [] }),
-}));
 vi.mock("../support/useChatReadState.ts", () => ({
   useVisibleChatResult: () => {},
 }));
-vi.mock("../support/useDisplayPhase.ts", () => ({
-  useDisplayPhase: () => "error",
-}));
 vi.mock("../../agents/support/WorkerModelPicker.tsx", () => ({
   useWorkerModels: () => ({ models: [] }),
-}));
-vi.mock("../support/useMessageQueue.ts", () => ({
-  useMessageQueue: () => ({ items: [] }),
-}));
-vi.mock("../support/useSendingMessageRemoval.ts", () => ({
-  useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../../../wasm/client.ts", () => ({}));
 import { renderConversationViewFixture as Conversation } from "../ConversationView/ConversationView.fixture.tsx";
@@ -172,7 +147,9 @@ function render(
   else if (agent) models.details.delete(agent.id);
   h.read.mockImplementation(async () => {
     reloadLimits();
+    return undefined;
   });
+  vi.spyOn(actions.scope.services.api, "get").mockImplementation(h.read);
   h.areas = actions;
   const element = Conversation();
   const cleanups = h.effects.splice(0).map((effect) => effect());

@@ -1,23 +1,18 @@
 import { observer } from "mobx-react-lite";
-import { useState } from "react";
+import type { AgentsUi } from "../support/AgentsUi.ts";
 import { SegmentedControl, NumberInput, Button } from "@mantine/core";
-import {
-  useServerStore,
-  useServerStorage,
-  useServerApi,
-} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { Agent } from "../../../types.ts";
 import {
   DEFAULT_SUBAGENT_CONCURRENCY as DEFAULT_CONCURRENCY,
   MIN_SUBAGENT_CONCURRENCY as MIN_CONCURRENCY,
   MAX_SUBAGENT_CONCURRENCY as MAX_CONCURRENCY,
 } from "../../../generated/apiSchema.ts";
-import { ConcurrencyStore } from "./ConcurrencyStore.ts";
 export { subagentsOff, decodeStoredConcurrency } from "./ConcurrencyStore.ts";
 const CONCURRENCY_HELP = "0 = lead only; extra work queues.";
 const UNSUPPORTED_HELP =
   "Update the backend to enable numeric subagent parallelism. Saved changes are retained until then.";
 type Props = {
+  agentsUi: AgentsUi;
   compact?: boolean;
   lead: Agent;
   stateDir: string;
@@ -34,16 +29,11 @@ export default function SubagentConcurrencyControl(props: Props) {
 const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
   lead,
   compact = false,
-  workspaceId,
+  agentsUi,
   scope,
 }: Props & { scope: string }) {
-  const owner = useServerStore(),
-    storage = useServerStorage(),
-    api = useServerApi();
-  const [control] = useState(
-    () => new ConcurrencyStore(lead, owner, api, storage, scope, workspaceId),
-  );
-  control.lead = lead;
+  const control = agentsUi.concurrency.get(scope);
+  if (!control) return null;
   const {
     confirmed,
     supported,
@@ -167,3 +157,5 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
     </form>
   );
 });
+
+export { ConcurrencyStore } from "./ConcurrencyStore.ts";

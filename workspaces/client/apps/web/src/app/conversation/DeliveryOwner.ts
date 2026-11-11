@@ -4,7 +4,7 @@ import {
   observable,
   observableRef,
   reaction,
-  runInAction,
+  flow,
 } from "mobx";
 import { createSendingMessageRemoval } from "./delivery/removeSendingMessages.ts";
 import { ApiError, errorText } from "../../api.ts";
@@ -93,40 +93,30 @@ export class DeliveryOwner {
   get hasLocalPersistenceFailure() {
     return this.areas.scope.services.drafts.localPersistenceFailed;
   }
+  receiveOutbox(entries: OutgoingMessage[]) {
+    this.entries = entries;
+    entries.forEach((entry) => this.outgoing.delete(entry.id));
+  }
+  receiveOutboxError(error: string) {
+    this.outboxError = error;
+  }
+  releaseSend(attempt: symbol) {
+    if (this.sendingLock === attempt) this.sendingLock = null;
+  }
   start() {
     const stopDrafts = this.areas.scope.services.drafts.start();
     const stopOutbox = this.areas.scope.services.outbox.observeOutbox(
-      (entries) =>
-        runInAction(() => {
-          this.entries = entries;
-          entries.forEach((entry) => this.outgoing.delete(entry.id));
-        }),
-      (error) =>
-        runInAction(() => {
-          this.outboxError = error;
-        }),
+      this.receiveOutbox,
+      this.receiveOutboxError,
     );
     const stopFeedback = this.startFeedback();
-    let endActivity: (() => void) | undefined;
-    const activity = reaction(
-      () => this.hasLocalPersistenceFailure || this.isSending,
-      (busy) => {
-        endActivity?.();
-        endActivity = busy
-          ? this.areas.scope.services.activity.beginServerActivity()
-          : undefined;
-      },
-      { fireImmediately: true },
-    );
     return () => {
-      activity();
-      endActivity?.();
       stopFeedback();
       stopOutbox();
       stopDrafts();
     };
   }
-  async removeAllSending() {
+  removeAllSending = flow(function* (this: DeliveryOwner) {
     const { notices } = this.areas;
     if (this.removingAllSending) return;
     const state = this.areas.state;
@@ -140,7 +130,7 @@ export class DeliveryOwner {
         stopRemovedMessage: outbox.stopRemovedMessage,
         localStorage: storage,
       });
-      const count = await removal.removeAllSendingMessages(
+      const count: number = yield removal.removeAllSendingMessages(
         {
           stateDir: this.areas.startup.creationScope,
           workspaceId: this.areas.startup.workspaceId,
@@ -154,11 +144,9 @@ export class DeliveryOwner {
     } catch (error) {
       notices.notify(errorText(error));
     } finally {
-      runInAction(() => {
-        this.removingAllSending = false;
-      });
+      this.removingAllSending = false;
     }
-  }
+  });
   editDraft(
     text: string | ((current: string) => string),
     session = this.selectedId || "new",
@@ -215,7 +203,10 @@ export class DeliveryOwner {
       !!request.asTextFile === !!options?.asTextFile
     );
   }
-  async send(options?: ConversationSendOptions) {
+  send = flow(function* (
+    this: DeliveryOwner,
+    options?: ConversationSendOptions,
+  ) {
     const {
       scope: { services },
       creation,
@@ -239,18 +230,14 @@ export class DeliveryOwner {
     const attempt = Symbol();
     this.sendingLock = attempt;
     this.latestSend[draftKey] = attempt;
-    const release = () =>
-      runInAction(() => {
-        if (this.sendingLock !== attempt) return;
-        this.sendingLock = null;
-      });
     let request: SendMessageBody | undefined;
     try {
       if (!fileSend && renameCommand(text) !== undefined && !opened)
         throw new Error("Open a chat before using /rename.");
-      const target = opened || (await creation.ensureConversation());
+      const target: Awaited<ReturnType<typeof creation.ensureConversation>> =
+        opened || (yield creation.ensureConversation());
       if (target && typeof target === "object") {
-        await this.areas.ui.chooseProject(
+        yield this.areas.ui.chooseProject(
           target.cwd,
           target.folder,
           target.binding,
@@ -290,14 +277,14 @@ export class DeliveryOwner {
             "Use the command without additional text, or send a normal message.",
           );
         if (command === "/rename") {
-          await rename.submit(id, text, renameCommand(text));
+          yield rename.submit(id, text, renameCommand(text));
         } else if (command === "/stop" || command === "/stop-team")
-          await serverCommand.stop(
+          yield serverCommand.stop(
             command === "/stop-team" ? (agent.rootId ?? id) : id,
             command === "/stop-team",
           );
         else
-          await native.submit(agent, command.slice(1) as "compact" | "review");
+          yield native.submit(agent, command.slice(1) as "compact" | "review");
       } else {
         const pending = this.entries.some(
           (entry) =>
@@ -332,21 +319,22 @@ export class DeliveryOwner {
           attachments: options?.attachments?.slice() || [],
         };
         this.showOutgoing(entry);
-        const result = await durableSend(
-          request,
-          entry.attachments,
-          async () => {
-            // Keep the draft until the request is saved.
-            clearCapturedDraft((value) => value === draft);
-            // The saved command owns this message. A new user submission,
-            // including identical text, gets its own identity.
-            if (this.sends[id]?.id === entry.id) {
-              delete this.sends[id];
-            }
-            await options?.onPersist?.();
-            release();
-          },
-        );
+        const result: Awaited<ReturnType<typeof durableSend>> =
+          yield durableSend(
+            request,
+            entry.attachments,
+            flow(function* (this: DeliveryOwner) {
+              // Keep the draft until the request is saved.
+              clearCapturedDraft((value) => value === draft);
+              // The saved command owns this message. A new user submission,
+              // including identical text, gets its own identity.
+              if (this.sends[id]?.id === entry.id) {
+                delete this.sends[id];
+              }
+              yield options?.onPersist?.();
+              this.releaseSend(attempt);
+            }).bind(this),
+          );
         if (result.kind === "confirmed") {
           this.dropOutgoing(entry.id);
         } else if (result.kind === "removed") {
@@ -407,9 +395,9 @@ export class DeliveryOwner {
       if (!request) notify(errorText(e));
       throw e;
     } finally {
-      release();
+      this.releaseSend(attempt);
     }
-  }
+  });
   get transportFailures() {
     return this.outgoingMessages.flatMap((entry) =>
       entry.status.source === "device" &&

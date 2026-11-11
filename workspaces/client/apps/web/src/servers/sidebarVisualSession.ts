@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type { MergedSidebar } from "./mergedSidebar.ts";
 import type { ServerSidebarSnapshot } from "./sidebarSnapshot.ts";
@@ -17,7 +18,9 @@ type Override = {
 
 /** Session views do not change saved preference records. */
 export function createSidebarVisualSession() {
-  const values = new Map<string, Map<string, Override>>();
+  const values = observable.map<string, Map<string, Override>>(undefined, {
+    deep: false,
+  });
   return (
     model: MergedSidebar,
     backend: SidebarBackend,
@@ -42,7 +45,6 @@ export function createSidebarVisualSession() {
           source?.sidebar !== choice.snapshot &&
           source?.sidebar[choice.kind][choice.name] !== override.value
         ) {
-          overrides.delete(field);
           continue;
         }
         if (
@@ -51,7 +53,6 @@ export function createSidebarVisualSession() {
               model.sourceById.get(owner)?.sidebar !== snapshot,
           )
         ) {
-          overrides.delete(field);
           continue;
         }
         if (override.value === undefined) delete result[field];
@@ -78,74 +79,92 @@ export function createSidebarVisualSession() {
     return {
       ...backend,
       saved: read,
-      viewPreference(key, previous, next) {
-        const overrides = values.get(key) || new Map<string, Override>();
-        for (const field of new Set([
-          ...Object.keys(previous),
-          ...Object.keys(next),
-        ]))
-          if (previous[field] !== next[field])
-            overrides.set(field, {
-              value: next[field] as boolean | undefined,
-              sources: new Map(),
-            });
-        values.set(key, overrides);
-        return read(key, previous);
-      },
-      editPreference(key, previous, next) {
-        const kind = kindFor(key);
-        const prior = previous as Record<string, boolean>;
-        const value = next as Record<string, boolean>;
-        const changed = kind
-          ? [...new Set([...Object.keys(prior), ...Object.keys(value)])].filter(
-              (field) => prior[field] !== value[field],
-            )
-          : [];
-        try {
-          const accepted = backend.editPreference(key, previous, next);
-          const overrides = values.get(key) || new Map<string, Override>();
-          for (const field of changed) {
-            const owner = kind && model.preferenceOwner(kind, field);
-            const source = owner && model.sourceById.get(owner);
-            const name =
-              source &&
-              kind &&
-              [...model.preferenceKeys.get(source.id)![kind]].find(
-                (name) =>
-                  (kind === "compact"
-                    ? model.projectKey(source.id, name)
-                    : model.mapTreeKey(source.id, name)) === field,
-              );
-            overrides.set(field, {
-              value: value[field],
-              sources: new Map(),
-              choice:
-                source && kind && typeof name === "string"
-                  ? { owner: source.id, name, kind, snapshot: source.sidebar }
-                  : undefined,
-            });
-          }
+      viewPreference: action(
+        <T extends Record<string, unknown>>(
+          key: string,
+          previous: T,
+          next: T,
+        ): T => {
+          const overrides =
+            values.get(key) ||
+            observable.map<string, Override>(undefined, { deep: false });
+          for (const field of new Set([
+            ...Object.keys(previous),
+            ...Object.keys(next),
+          ]))
+            if (previous[field] !== next[field])
+              overrides.set(field, {
+                value: next[field] as boolean | undefined,
+                sources: new Map(),
+              });
           values.set(key, overrides);
-          return read(key, accepted);
-        } catch (failure) {
-          if (
-            kind &&
-            failure instanceof Error &&
-            failure.message === "The sidebar server is offline."
-          ) {
-            const overrides = values.get(key) || new Map<string, Override>();
-            for (const field of changed)
+          return read(key, previous);
+        },
+      ),
+      editPreference: action(
+        <T extends Record<string, unknown>>(
+          key: string,
+          previous: T,
+          next: T,
+        ): T => {
+          const kind = kindFor(key);
+          const prior = previous as Record<string, boolean>;
+          const value = next as Record<string, boolean>;
+          const changed = kind
+            ? [
+                ...new Set([...Object.keys(prior), ...Object.keys(value)]),
+              ].filter((field) => prior[field] !== value[field])
+            : [];
+          try {
+            const accepted = backend.editPreference(key, previous, next);
+            const overrides =
+              values.get(key) ||
+              observable.map<string, Override>(undefined, { deep: false });
+            for (const field of changed) {
+              const owner = kind && model.preferenceOwner(kind, field);
+              const source = owner && model.sourceById.get(owner);
+              const name =
+                source &&
+                kind &&
+                [...model.preferenceKeys.get(source.id)![kind]].find(
+                  (name) =>
+                    (kind === "compact"
+                      ? model.projectKey(source.id, name)
+                      : model.mapTreeKey(source.id, name)) === field,
+                );
               overrides.set(field, {
                 value: value[field],
-                sources: owners(kind, field),
+                sources: new Map(),
+                choice:
+                  source && kind && typeof name === "string"
+                    ? { owner: source.id, name, kind, snapshot: source.sidebar }
+                    : undefined,
               });
+            }
             values.set(key, overrides);
-            return read(key, previous);
+            return read(key, accepted);
+          } catch (failure) {
+            if (
+              kind &&
+              failure instanceof Error &&
+              failure.message === "The sidebar server is offline."
+            ) {
+              const overrides =
+                values.get(key) ||
+                observable.map<string, Override>(undefined, { deep: false });
+              for (const field of changed)
+                overrides.set(field, {
+                  value: value[field],
+                  sources: owners(kind, field),
+                });
+              values.set(key, overrides);
+              return read(key, previous);
+            }
+            failed(failure);
+            return previous;
           }
-          failed(failure);
-          return previous;
-        }
-      },
+        },
+      ),
     };
   };
 }

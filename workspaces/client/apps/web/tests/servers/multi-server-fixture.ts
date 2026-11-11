@@ -680,6 +680,11 @@ export async function fixture(
       if (account) {
         account.disconnected = false;
         account.status = "ready";
+        const summaryAccount = snapshot.runtime.accountsSummary?.accounts.find(
+          (row) => row.id === account.id,
+        );
+        if (summaryAccount) Object.assign(summaryAccount, account);
+        notify.forEach((send) => send([{ kind: "state" }]));
       }
       json({
         accounts: savedAccounts,

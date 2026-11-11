@@ -3,6 +3,9 @@ import { AgentModelsFixture } from "../../src/components/shell/integration-suppo
 import type { ComponentProps } from "react";
 import { observer } from "mobx-react-lite";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { RequestAreaOwner } from "../../src/components/conversation/questions/RequestArea/RequestArea.tsx";
+import * as api from "../../src/servers/net/api.ts";
+import { serverLocalStorage } from "../../src/servers/storage.ts";
 import { requestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -74,8 +77,31 @@ const initial: Approval[] = [
     params: { itemId: "command-item" },
   }),
 ];
+const fixture = requestFixture(initial);
+const owner = new RequestAreaOwner(
+  {
+    api: () => api,
+    store: fixture.store,
+    storage: serverLocalStorage,
+    server: "local",
+  },
+  () => ({
+    scope: "identity",
+    notify: (text) => {
+      throw new Error(text);
+    },
+  }),
+);
+owner.start();
+window.addEventListener(
+  "pagehide",
+  () => {
+    owner.dispose();
+    fixture.store.dispose();
+  },
+  { once: true },
+);
 const Fixture = observer(function Fixture() {
-  const [fixture] = useState(() => requestFixture(initial));
   const requests = [...fixture.live.current.requests.values()];
   const [items, setItems] = useState([question, approvalItem]);
   window.publishAnsweredRequest = (id: string) => {
@@ -131,12 +157,9 @@ const Fixture = observer(function Fixture() {
   const ids = new Set(
     [...linked.values()].flatMap((request) => (request ? [request.id] : [])),
   );
-  const notify = (text: string) => {
-    throw new Error(text);
-  };
   return (
     <ServerStoreProvider value={fixture.store}>
-      <RequestArea scope="identity" notify={notify}>
+      <RequestArea owner={owner}>
         <main id="messages" style={{ maxWidth: 650, margin: "24px auto" }}>
           <TurnHistory
             items={items}
@@ -148,11 +171,7 @@ const Fixture = observer(function Fixture() {
                 [...linked].map(([messageId, request]) => [
                   messageId,
                   request && (
-                    <RequestArea
-                      key={request.id}
-                      scope="identity"
-                      notify={notify}
-                    >
+                    <RequestArea key={request.id} owner={owner}>
                       <RequestCard request={request} messageId={messageId} />
                     </RequestArea>
                   ),

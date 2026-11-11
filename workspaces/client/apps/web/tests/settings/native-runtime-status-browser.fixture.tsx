@@ -21,7 +21,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
 import NativeRuntimeStatus from "../../src/components/settings/NativeRuntimeStatus/NativeRuntimeStatus.tsx";
-import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
+
 import "../../src/studio-theme.css";
 import "../../src/appearance.css";
 import { ConversationWarningsFixture as ConversationWarnings } from "../../src/components/conversation/notices/support/noticesFixture.tsx";
@@ -53,15 +53,6 @@ const notices = [
     message: "Claude account version warning",
   },
 ] as components["schemas"]["NativeNoticeRecord"][];
-// Partial fixture view: base data omits archives/groups/logins/support flags; refresh returns no data.
-const accountsState: Partial<
-  Record<keyof React.ComponentProps<typeof Accounts>["state"], unknown>
-> = {
-  data: { accounts, defaultAccountKey: "default" },
-  setData: () => {},
-  error: "",
-  scope: "fixture",
-};
 function Fixture() {
   const [opened, setOpened] = useState(false);
   const [integrated, setIntegrated] = useState(false);
@@ -81,13 +72,7 @@ function Fixture() {
           onClose={() => setIntegrated(false)}
           title="Accounts"
         >
-          <Accounts
-            managerOnly
-            state={
-              accountsState as React.ComponentProps<typeof Accounts>["state"]
-            }
-            onError={() => {}}
-          />
+          <NativeRuntimeStatus opened={integrated} accounts={accounts} />
         </Modal>
         <StudioErrorsProvider>
           <ConversationWarnings

@@ -1,4 +1,8 @@
-import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+import { reaction } from "mobx";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../../shell/integration-support/observableFixture.tsx";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
   observer: <T>(component: T) => component,
@@ -14,7 +18,10 @@ import {
   ProviderKind,
 } from "../../../generated/api.ts";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { Provider as AreasProvider } from "../../../app/ServerAreasProvider.tsx";
+const renderToStaticMarkup = (node: Parameters<typeof renderMarkup>[0]) =>
+  renderMarkup(createElement(AreasProvider, { value: areas }, node));
 import { MantineProvider } from "@mantine/core";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ExecutionSettings } from "./ExecutionSettings.tsx";
@@ -23,6 +30,8 @@ import { INHERITED_MODEL } from "../../settings/models/support/modelOption.ts";
 import type { AgentSetupPickerProps } from "../AgentSetupPicker/AgentSetupPicker.tsx";
 import type { Agent } from "../../../types.ts";
 
+let areas: ReturnType<typeof conversationActionsFixture>;
+let stopFields: (() => void) | undefined;
 const generatedFixtures: ReturnType<typeof observableFixture>[] = [];
 function settingsInput(agent: Agent) {
   const f = observableFixture([agent]);
@@ -60,6 +69,7 @@ test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
         MantineProvider,
         null,
         createElement(ExecutionSettings, {
+          agentsUi: areas.agentsUi,
           presentation: "panel",
           initialRole: "review",
           input: settingsInput(agent),
@@ -100,6 +110,7 @@ test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
         MantineProvider,
         null,
         createElement(ExecutionSettings, {
+          agentsUi: areas.agentsUi,
           settingsRow: true,
           initialRole: "review",
           input: settingsInput(agent),
@@ -120,6 +131,7 @@ test("worker settings retain the same-as-main model option", () => {
       MantineProvider,
       null,
       createElement(ExecutionSettings, {
+        agentsUi: areas.agentsUi,
         presentation: "panel",
         initialRole: "worker",
         input: settingsInput({
@@ -148,6 +160,7 @@ test("shows the server reason alongside an unavailable account", () => {
       MantineProvider,
       null,
       createElement(ExecutionSettings, {
+        agentsUi: areas.agentsUi,
         presentation: "panel",
         initialRole: "orchestrator",
         input: settingsInput({
@@ -191,6 +204,7 @@ test("the agent settings chooser shows exclusions even without transfer destinat
       MantineProvider,
       null,
       createElement(ExecutionSettings, {
+        agentsUi: areas.agentsUi,
         presentation: "panel",
         initialRole: "orchestrator",
         input: settingsInput({
@@ -242,6 +256,7 @@ test.each(["worker", "review"] as const)(
         MantineProvider,
         null,
         createElement(ExecutionSettings, {
+          agentsUi: areas.agentsUi,
           presentation: "panel",
           initialRole: role,
           input: settingsInput({
@@ -360,6 +375,27 @@ vi.mock(
 );
 
 beforeEach(() => {
+  stopFields?.();
+  areas?.dispose();
+  areas = conversationActionsFixture();
+  stopFields = reaction(
+    () =>
+      [...areas.agentsUi.fields.values()].flatMap((state) => [
+        state.saving,
+        state.error,
+        state.status,
+      ]),
+    (values) => {
+      choices.states.push(...values);
+      if (
+        [...areas.agentsUi.fields.values()].some(
+          (state) =>
+            !state.saving && (state.status?.kind === "saved" || !!state.error),
+        )
+      )
+        choices.terminal?.();
+    },
+  );
   for (const f of generatedFixtures.splice(0)) f.store.dispose();
   choices.pickers.length = 0;
   choices.states.length = 0;
@@ -393,6 +429,7 @@ for (const initialRole of ["orchestrator", "worker", "review"] as const) {
           MantineProvider,
           null,
           createElement(ExecutionSettings, {
+            agentsUi: areas.agentsUi,
             presentation: "panel",
             initialRole,
             input: settingsInput(agent),
@@ -427,6 +464,7 @@ for (const isLead of [true, false]) {
         MantineProvider,
         null,
         createElement(ExecutionSettings, {
+          agentsUi: areas.agentsUi,
           presentation: "panel",
           settingsRow: true,
           input: settingsInput({
@@ -455,6 +493,7 @@ for (const initialRole of ["orchestrator", "review"] as const) {
         MantineProvider,
         null,
         createElement(ExecutionSettings, {
+          agentsUi: areas.agentsUi,
           presentation: "panel",
           initialRole,
           input: settingsInput({
@@ -550,6 +589,7 @@ function futureWorkerChoice() {
       MantineProvider,
       null,
       createElement(ExecutionSettings, {
+        agentsUi: areas.agentsUi,
         presentation: "panel",
         initialRole: "worker",
         settingsRow: true,
@@ -662,6 +702,7 @@ for (const provider of ["claude", "future"] as const) {
         MantineProvider,
         null,
         createElement(ExecutionSettings, {
+          agentsUi: areas.agentsUi,
           presentation: "panel",
           initialRole: "orchestrator",
           input: settingsInput({

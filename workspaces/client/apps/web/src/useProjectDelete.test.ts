@@ -1,5 +1,5 @@
 import type { ComponentSnapshot as Snapshot } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
-import { runInAction } from "mobx";
+import { observable, runInAction } from "mobx";
 import {
   createStateMirror,
   createProjectionMetadataMirror,
@@ -10,7 +10,7 @@ import { componentSnapshot as snapshotFixture } from "./components/conversation/
 import { writePreferenceEdit } from "./sync/uiPreferenceStore.ts";
 import { StopOutcome } from "./generated/api.ts";
 import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import type {
   SidebarServices,
   SidebarBackend,
@@ -18,51 +18,11 @@ import type {
 
 import { ApiError } from "./api.ts";
 
-// A deterministic render/effect harness, including effect replay, without a DOM dependency.
-const hooks = vi.hoisted(() => ({
-  slots: [] as unknown[],
-  cursor: 0,
-  effects: [] as (() => void)[],
-  dirty: false,
-}));
-vi.mock("react", () => {
-  const effect = (run: () => void, deps: unknown[]) => {
-    const index = hooks.cursor++;
-    const prior = hooks.slots[index] as unknown[] | undefined;
-    if (!prior || deps.some((value, i) => !Object.is(value, prior[i])))
-      hooks.effects.push(run);
-    hooks.slots[index] = deps;
-  };
-  return {
-    useRef: (value: unknown) => {
-      const index = hooks.cursor++;
-      return (hooks.slots[index] ||= { current: value });
-    },
-    useState: (value: unknown) => {
-      const index = hooks.cursor++;
-      if (!(index in hooks.slots))
-        hooks.slots[index] = typeof value === "function" ? value() : value;
-      return [
-        hooks.slots[index],
-        (next: unknown) => {
-          hooks.slots[index] =
-            typeof next === "function" ? next(hooks.slots[index]) : next;
-          hooks.dirty = true;
-        },
-      ];
-    },
-    useEffect: effect,
-    useLayoutEffect: effect,
-  };
-});
-import { useProjectDelete } from "./useProjectDelete.ts";
+vi.mock("./app/ServerAreasProvider.tsx", () => ({ useServerAreas: vi.fn() }));
+import { ProjectDeletion } from "./useProjectDelete.ts";
 
-beforeEach(() => {
-  hooks.slots = [];
-  hooks.cursor = 0;
-  hooks.effects = [];
-  hooks.dirty = false;
-});
+const stops: (() => void)[] = [];
+afterEach(() => stops.splice(0).forEach((stop) => stop()));
 const project = {
   id: "project",
   path: "/project",
@@ -118,23 +78,26 @@ function fixture() {
     },
     save: (key, value) => storage.setItem(key, JSON.stringify(value)),
     editPreference: writePreferenceEdit,
-    subscribePreference: () => () => {},
   };
   const owner = vi.fn(() => backend);
-  const options = {
-    data,
-    workspaceId: "workspace",
-    services: {
-      owner,
-      cache: backend,
-      byOwner: () => backend,
-      serverForChat: () => backend.ownerId,
-    } satisfies SidebarServices,
-    onSuspend: vi.fn(),
-    onResume: vi.fn(),
-    onFinish: vi.fn(),
-    notify: vi.fn(),
-  };
+  const options = observable(
+    {
+      data,
+      workspaceId: "workspace",
+      services: {
+        owner,
+        cache: backend,
+        byOwner: () => backend,
+        serverForChat: () => backend.ownerId,
+      } satisfies SidebarServices,
+      onSuspend: vi.fn(),
+      onResume: vi.fn(),
+      onFinish: vi.fn(),
+      notify: vi.fn(),
+    },
+    {},
+    { deep: false },
+  );
   const state = createStateMirror();
   const metadata = createProjectionMetadataMirror({
     workspaceId: "",
@@ -142,10 +105,21 @@ function fixture() {
     complete: false,
     projectSequences: {},
   });
-  let result: ReturnType<typeof useProjectDelete>;
+  const result = new ProjectDeletion({
+    ...options,
+    get state() {
+      return state.current;
+    },
+    get metadata() {
+      return metadata.current;
+    },
+    get workspaceId() {
+      return options.workspaceId;
+    },
+  });
+  const stop = result.start();
+  stops.push(stop);
   const render = () => {
-    hooks.cursor = 0;
-    hooks.dirty = false;
     runInAction(() => {
       metadata.apply({
         workspaceId: options.data.entityWorkspaceId ?? "",
@@ -155,23 +129,15 @@ function fixture() {
       });
       state.apply(serializeStateCollections(stateFromFixture(options.data)));
     });
-    result = useProjectDelete({
-      ...options,
-      state: state.current,
-      metadata: metadata.current,
-    });
-    const effects = hooks.effects.splice(0);
-    for (const effect of effects) effect();
     return result;
   };
   const settle = async () => {
     for (let i = 0; i < 5; i++) {
       await Promise.resolve();
-      if (hooks.dirty) render();
     }
     return result;
   };
-  return { options, render, settle, post, owner, storage, values };
+  return { options, render, settle, post, owner, storage, values, close: stop };
 }
 
 it("cancel posts nothing; repeated confirmation and effect replay send once to services.owner", async () => {
@@ -229,6 +195,7 @@ it("keeps unknown visible across SSE retirement and recovers only the saved requ
   expect(f.render().dialog.phase).toBe("unknown");
   expect(f.options.onFinish).not.toHaveBeenCalled();
 
+  await f.settle();
   const request = required(f.post.mock.calls[0])[1];
   f.options.data = {
     ...data,
@@ -258,8 +225,9 @@ it("restores a saved intention after remount without automatically replaying HTT
   f.render().dialog.onConfirm();
   f.render();
   await f.settle();
-  hooks.slots = [];
-  hooks.cursor = 0;
+  stops.splice(0).forEach((stop) => stop());
+  const stop = f.render().start();
+  stops.push(stop);
   f.render();
   const restored = await f.settle();
   expect(restored.dialog.phase).toBe("unknown");
@@ -352,7 +320,7 @@ it("never applies an old workspace's late deletion response to the current draft
   f.render().open("project");
   f.render().dialog.onConfirm();
   f.render();
-
+  await f.settle();
   const request = required(f.post.mock.calls[0])[1];
   f.options.workspaceId = "new-workspace";
   f.options.data = { ...data, entityWorkspaceId: "new-workspace" };
@@ -430,7 +398,7 @@ it("does not release confirmed IDs from an incomplete projection", async () => {
   f.render().open("project");
   f.render().dialog.onConfirm();
   f.render();
-
+  await f.settle();
   const request = required(f.post.mock.calls[0])[1];
   f.options.data = { ...data, entitiesComplete: false, threads: [] };
   f.render();
@@ -445,4 +413,13 @@ it("does not release confirmed IDs from an incomplete projection", async () => {
   await f.settle();
   expect(f.options.onResume).not.toHaveBeenCalled();
   expect(f.options.onSuspend).toHaveBeenLastCalledWith(new Set(["lead"]));
+});
+
+it("disposing the owner prevents a scheduled deletion from starting", async () => {
+  const f = fixture();
+  f.render().open("project");
+  f.render().confirm();
+  f.close();
+  await f.settle();
+  expect(f.post).not.toHaveBeenCalled();
 });

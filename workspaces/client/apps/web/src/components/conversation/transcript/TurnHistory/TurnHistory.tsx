@@ -8,7 +8,6 @@ import {
   Fragment,
   useCallback,
   useMemo,
-  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -591,11 +590,9 @@ function TurnHistory({
     const partitioned = scrollContainer
       ? windowHistoryRows(groups, previousRows.current)
       : groups;
+    previousRows.current = partitioned;
     return partitioned;
   }, [groups, scrollContainer]);
-  useLayoutEffect(() => {
-    previousRows.current = rows;
-  }, [rows]);
   const cwd = agent?.cwd ?? undefined;
   const renderRow = useCallback(
     (group: HistoryGroup, revealedMessage?: string) => (

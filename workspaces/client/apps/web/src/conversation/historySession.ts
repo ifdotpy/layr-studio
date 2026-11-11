@@ -5,7 +5,8 @@ import {
   makeAutoObservable,
   observableRef,
   reaction,
-  runInAction,
+  action,
+  flow,
 } from "mobx";
 import { SubscriptionReplyKind } from "../generated/api.ts";
 import { createTranscriptMirror } from "../generated/observableResources.ts";
@@ -26,7 +27,7 @@ import {
   selectMessageConnection,
   type MessageConnection,
 } from "../hooks/messageConnection.ts";
-import { errorText } from "../api.ts";
+import { errorText, type GetResult } from "../api.ts";
 import type { Message } from "../types.ts";
 import { createMessageViews } from "./messageView.ts";
 import { createLiveText } from "./liveText.ts";
@@ -84,7 +85,7 @@ export class TranscriptHistory {
     this.views = createMessageViews(id);
     makeAutoObservable<
       this,
-      "latest" | "slot" | "api" | "resources" | "views" | "byteSizes"
+      "latest" | "slot" | "api" | "resources" | "views" | "byteSizes" | "accept"
     >(
       this,
       {
@@ -97,6 +98,9 @@ export class TranscriptHistory {
         views: false,
         byteSizes: false,
         live: false,
+        accept: action,
+        unavailable: action,
+        failed: action,
       },
       { autoBind: true },
     );
@@ -186,30 +190,15 @@ export class TranscriptHistory {
         void data.nextCursor;
         void data.truncated;
         void data.unavailable;
-        runInAction(() => this.accept(data));
-      } else if (!this.id || current?.status === "absent")
-        runInAction(() => {
-          this.loaded = true;
-          this.items = [];
-          this.before = null;
-          this.after = null;
-          this.historical = false;
-          this.latest = undefined;
-          this.attempt++;
-          this.pageLoading = false;
-          this.live.clear();
-          this.notice = this.id ? "This session is no longer available." : "";
-        });
+        this.accept(data);
+      } else if (!this.id || current?.status === "absent") this.unavailable();
       if (current && "error" in current && current.error)
-        runInAction(() => {
-          this.notice = errorText(current.error);
-          this.loaded = true;
-        });
+        this.failed(current.error);
     });
     const stopConnection =
       this.id && this.managed
-        ? this.resources.watchResourceConnection((health, activity, detail) =>
-            runInAction(() => {
+        ? this.resources.watchResourceConnection(
+            action((health, activity, detail) => {
               if (health !== "live" || activity !== "open") this.live.clear();
               const next = selectMessageConnection(health, activity, detail);
               if (
@@ -229,15 +218,13 @@ export class TranscriptHistory {
               agentId: this.id,
               tail: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
             },
-            (version) => {
+            action((version) => {
               if (version?.replyKind !== SubscriptionReplyKind.snapshot) return;
-              runInAction(() => {
-                this.resetWindow();
-                const current = this.slot?.current;
-                const data = current && resourceData(current);
-                if (data) this.accept(data);
-              });
-            },
+              this.resetWindow();
+              const current = this.slot?.current;
+              const data = current && resourceData(current);
+              if (data) this.accept(data);
+            }),
             { waitForBaseline: true },
           )
         : () => {};
@@ -271,54 +258,68 @@ export class TranscriptHistory {
           this.after = this.items.at(-1)?.id || this.after;
       },
     );
-    return () =>
-      runInAction(() => {
-        this.active = false;
-        this.attempt++;
-        stop();
-        stopConnection();
-        stopReceipt();
-        stopLive();
-        stopDurable();
-        stopBounds();
-        this.pageLoading = false;
-        this.live.clear();
-      });
+    return action(() => {
+      this.active = false;
+      this.attempt++;
+      stop();
+      stopConnection();
+      stopReceipt();
+      stopLive();
+      stopDurable();
+      stopBounds();
+      this.pageLoading = false;
+      this.live.clear();
+    });
   }
-  async reload() {
+  unavailable() {
+    this.resetWindow();
+    this.loaded = true;
+    this.latest = undefined;
+    this.notice = this.id ? "This session is no longer available." : "";
+  }
+  failed(error: unknown) {
+    this.notice = errorText(error);
+    this.loaded = true;
+  }
+  reload = flow(function* (this: TranscriptHistory) {
     if (!this.id) return;
     const attempt = ++this.attempt;
     this.pageLoading = false;
     try {
-      const dto = await this.api.syncGet("/api/transcript", {
-        query: { id: this.id },
-      });
+      const dto: GetResult<"/api/transcript"> = yield this.api.syncGet(
+        "/api/transcript",
+        {
+          query: { id: this.id },
+        },
+      );
       if (!this.active || attempt !== this.attempt) return;
       const mirror = createTranscriptMirror(dto);
-      runInAction(() => this.accept(mirror.current));
+      this.accept(mirror.current);
     } catch (error) {
-      if (this.active && attempt === this.attempt)
-        runInAction(() => {
-          this.notice = errorText(error);
-          this.loaded = true;
-        });
+      if (this.active && attempt === this.attempt) this.failed(error);
     }
-  }
-  private async fetchPage(query: PageQuery) {
+  });
+  private fetchPage = flow(function* (
+    this: TranscriptHistory,
+    query: PageQuery,
+  ) {
     if (!this.id || !this.managed || (this.pageLoading && !query.around))
       return false;
     const attempt = ++this.attempt;
     this.pageLoading = true;
     try {
-      const result = await this.api.syncGet("/api/transcript/page", {
-        query: {
-          id: this.id,
-          limit: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
-          ...(query.before ? { before: query.before } : {}),
-          ...(query.after ? { after: query.after } : {}),
-          ...(query.around ? { around: query.around } : {}),
+      const result: GetResult<"/api/transcript/page"> = yield this.api.syncGet(
+        "/api/transcript/page",
+        {
+          query: {
+            id: this.id,
+            limit: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
+            ...(query.before ? { before: query.before } : {}),
+            ...(query.after ? { after: query.after } : {}),
+            ...(query.around ? { around: query.around } : {}),
+          },
         },
-      });
+      );
       if (!this.active || attempt !== this.attempt) return false;
       if (
         result.historyVersion &&
@@ -364,51 +365,47 @@ export class TranscriptHistory {
         anchor,
         captured?.endId || undefined,
       );
-      runInAction(() => {
-        this.publish(bounded.items);
-        this.before = bounded.before;
-        this.after = bounded.after;
-        this.historical =
-          !!query.around ||
-          (!!(query.before || query.after) && this.historical);
-        this.anchor = anchor;
-        this.loaded = true;
-      });
+      this.publish(bounded.items);
+      this.before = bounded.before;
+      this.after = bounded.after;
+      this.historical =
+        !!query.around || (!!(query.before || query.after) && this.historical);
+      this.anchor = anchor;
+      this.loaded = true;
       return true;
     } finally {
-      if (attempt === this.attempt)
-        runInAction(() => {
-          this.pageLoading = false;
-        });
+      if (attempt === this.attempt) this.pageLoading = false;
     }
+  });
+  older(captureAnchor?: CaptureAnchor): Promise<void> {
+    return this.before
+      ? this.fetchPage({ before: this.before, captureAnchor }).then(() => {})
+      : Promise.resolve();
   }
-  async older(captureAnchor?: CaptureAnchor) {
-    if (this.before)
-      await this.fetchPage({ before: this.before, captureAnchor });
-  }
-  async newer(captureAnchor?: CaptureAnchor) {
-    if (this.after) await this.fetchPage({ after: this.after, captureAnchor });
+  newer(captureAnchor?: CaptureAnchor): Promise<void> {
+    return this.after
+      ? this.fetchPage({ after: this.after, captureAnchor }).then(() => {})
+      : Promise.resolve();
   }
   setPageAnchor(id: string | null) {
     this.anchor = id || undefined;
   }
-  async ensureMessage(id: string) {
-    return (
-      this.items.some((item) => item.id === id || item.sourceId === id) ||
-      this.fetchPage({ around: id })
-    );
+  ensureMessage(id: string) {
+    return this.items.some((item) => item.id === id || item.sourceId === id)
+      ? Promise.resolve(true)
+      : this.fetchPage({ around: id });
   }
-  async showLatest() {
+  showLatest(): Promise<void> {
     this.attempt++;
     this.pageLoading = false;
-    if (this.after && !this.historical) {
-      await this.fetchPage({});
-      return;
+    if (this.after && !this.historical)
+      return this.fetchPage({}).then(() => {});
+    if (this.historical) {
+      this.historical = false;
+      this.after = null;
+      this.items = [];
+      if (this.latest) this.accept(this.latest);
     }
-    if (!this.historical) return;
-    this.historical = false;
-    this.after = null;
-    this.items = [];
-    if (this.latest) this.accept(this.latest);
+    return Promise.resolve();
   }
 }

@@ -1,6 +1,6 @@
 import type { ComponentSnapshot as Snapshot } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
-import { useLayoutEffect, useState, type ReactNode } from "react";
-import { observable, runInAction } from "mobx";
+import type { ReactNode } from "react";
+import { observable, action, flow } from "mobx";
 import { createModelsMirror } from "../../../generated/observableResources.ts";
 import {
   ServerServicesProvider,
@@ -24,42 +24,31 @@ export type ModelCatalogFixtureSource = {
     fail: (error: unknown | null) => void,
   ): () => void;
 };
-/** Legacy fixture inputs feed generated models and an explicit server owner. */
-export function ModelCatalogFixture({
-  value,
-  children,
-}: {
-  value: ModelCatalogFixtureSource;
-  children: ReactNode;
-}) {
-  const parent = useServerStore();
-  const services = useServerServices();
-  const [models] = useState(createModelsMirror);
-  const [ready] = useState(() => observable.box(false));
-  useLayoutEffect(
-    () =>
-      value.subscribeState(
-        (snapshot) => {
-          models.apply(
-            Object.entries(snapshot.runtime.modelsByAccount ?? {}).flatMap(
-              ([key, rows]) =>
-                rows.map((row) => ({
-                  collection: "model" as const,
-                  id: JSON.stringify([key, row.model]),
-                  value: row,
-                })),
-            ),
-          );
-          runInAction(() => ready.set(snapshot.entitiesComplete === true));
-        },
-        () => {},
-      ),
-    [value, models, ready],
+/** Browser entrypoints create the catalog before rendering and dispose it on teardown. */
+export function createModelCatalogFixture(value: ModelCatalogFixtureSource) {
+  const models = createModelsMirror();
+  const ready = observable.box(false);
+  const dispose = value.subscribeState(
+    (snapshot) => {
+      models.apply(
+        Object.entries(snapshot.runtime.modelsByAccount ?? {}).flatMap(
+          ([key, rows]) =>
+            rows.map((row) => ({
+              collection: "model" as const,
+              id: JSON.stringify([key, row.model]),
+              value: row,
+            })),
+        ),
+      );
+      action(() => ready.set(snapshot.entitiesComplete === true))();
+    },
+    () => {},
   );
   const modelReader = {
     scope: value.scope,
-    async read(options: Parameters<typeof value.read>[0]) {
-      const result = await value.read(options);
+    read: flow(function* (options: Parameters<typeof value.read>[0]) {
+      const result: Awaited<ReturnType<typeof value.read>> =
+        yield value.read(options);
       if (options.query?.retry && result.data?.length) {
         const accountKey = options.query.account_key ?? "default";
         models.apply(
@@ -76,8 +65,20 @@ export function ModelCatalogFixture({
         );
       }
       return result;
-    },
+    }),
   };
+  return { models, ready, modelReader, dispose };
+}
+export function ModelCatalogFixture({
+  value,
+  children,
+}: {
+  value: ReturnType<typeof createModelCatalogFixture>;
+  children: ReactNode;
+}) {
+  const parent = useServerStore();
+  const services = useServerServices();
+  const { models, ready, modelReader } = value;
   const owner = {
     ...services,
     owner: services?.owner ?? {

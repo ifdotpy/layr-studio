@@ -25,7 +25,10 @@ import ConversationTitle from "../../shell/ConversationTitle/ConversationTitle.t
 import ConversationStart from "../LiveConversationStart/LiveConversationStart.tsx";
 import { ExecutionSettingsFixture as ExecutionSettings } from "../../shell/integration-support/observableFixture.tsx";
 import type { UsageAccount } from "../../../app/settings/UsageFixture.tsx";
-import { UsageFixture as Usage } from "../../../app/settings/UsageFixture.tsx";
+import {
+  UsageFixture as Usage,
+  createUsageFixture,
+} from "../../../app/settings/UsageFixture.tsx";
 import { createServerServices } from "../../../servers/serverServices.ts";
 import { ServerServicesProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { Agent } from "../../../types.ts";
@@ -229,8 +232,17 @@ function TitleFixture() {
   );
 }
 
+let usageFixture: ReturnType<typeof createUsageFixture>;
 const meta = {
   title: "Conversation/Dispatch chrome",
+  beforeEach: () => {
+    usageFixture = createUsageFixture(titleFixture.store, services.api, {
+      agent: lead,
+      accounts: usageAccounts,
+    });
+    usageFixture.start();
+    return () => usageFixture.dispose();
+  },
   parameters: { layout: "fullscreen" },
   args: { onSelect: fn(), onTeam: fn() },
   render: (args: { onSelect: (id: string) => void; onTeam: () => void }) => (
@@ -304,6 +316,7 @@ const meta = {
             </form>
             <div className="conversation-composer-footer">
               <Usage
+                owner={usageFixture}
                 agent={lead}
                 stateDir="story-dispatch"
                 limits={limits}

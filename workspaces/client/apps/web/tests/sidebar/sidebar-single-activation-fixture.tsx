@@ -24,7 +24,10 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import Sidebar from "../../src/components/sidebar/Sidebar/Sidebar.fixture.tsx";
-import { CombinedSidebarFixture as CombinedServerSidebar } from "../../src/servers/CombinedServerSidebar.fixture.tsx";
+import {
+  createCombinedSidebarFixture,
+  CombinedSidebarFixtureView as CombinedServerSidebar,
+} from "../../src/servers/CombinedServerSidebar.fixture.tsx";
 import { mergeSidebar } from "../../src/servers/mergedSidebar.ts";
 import { localSidebarBackend } from "../../src/components/sidebar/support/services.tsx";
 import { theme } from "../../src/theme.ts";
@@ -176,6 +179,32 @@ const online = () => true;
 const fixtureNavigation = (
   value: Partial<ServerNavigation>,
 ): ServerNavigation => value as ServerNavigation;
+const combined = createCombinedSidebarFixture(
+  {
+    model,
+    current: "local",
+    navigation: { local: fixtureNavigation({ opened: null }) },
+    mobile: true,
+    hidden: false,
+    close: noop,
+    notice: "",
+    hideOldChatsThreshold: 2,
+  },
+  {
+    backends,
+    online,
+    refreshOwner: async () => fixtureNavigation({}),
+    executeCommand: async () => {},
+    aliases: { local: "Fixture" },
+    send: noop,
+    applyNavigation: noop,
+    settings: noop,
+    search: noop,
+    notify: noop,
+  },
+);
+const stopCombined = combined.start();
+window.addEventListener("pagehide", stopCombined, { once: true });
 function Fixture() {
   const [opened, setOpened] = useState<string | null>(null);
   const [opens, setOpens] = useState<string[]>([]);
@@ -197,16 +226,7 @@ function Fixture() {
               notify: noop,
             }}
           >
-            <CombinedServerSidebar
-              model={model}
-              current="local"
-              navigation={{ local: fixtureNavigation({ opened: null }) }}
-              mobile={true}
-              hidden={false}
-              close={noop}
-              notice=""
-              hideOldChatsThreshold={2}
-            />
+            <CombinedServerSidebar fixture={combined} />
           </CombinedSidebarServicesProvider>
         </injectedStore.Provider>
       ) : (

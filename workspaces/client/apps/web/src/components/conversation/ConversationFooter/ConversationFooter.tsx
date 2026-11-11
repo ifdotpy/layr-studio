@@ -21,6 +21,7 @@ export function renderConversationFooter() {
       {agent?.source === AgentSource.managed && (
         <Usage
           agent={agent}
+          usageStore={control.usageStore}
           opened={control.limitsOpen}
           onChange={action((value) => {
             control.limitsOpen = value;

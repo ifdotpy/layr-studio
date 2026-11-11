@@ -1,8 +1,9 @@
+import { flowValue } from "../../../flowValue.ts";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { SidebarBackend, SidebarServices } from "./services.tsx";
 import type { DragEvent, KeyboardEvent } from "react";
-import { makeAutoObservable, observableRef, reaction } from "mobx";
+import { makeAutoObservable, observableRef, reaction, flow } from "mobx";
 import {
   ApiError,
   errorText,
@@ -10,37 +11,44 @@ import {
   type PostBody,
   type PostResult,
 } from "../../../api.ts";
-
 import type { components } from "../../../generated/api.ts";
 import type { DeepReadonly } from "../../../deepReadonly.ts";
-
 type Order = Readonly<Record<string, readonly string[]>>;
-type Drag = { group: string; id: string };
-export type SidebarDragTarget = Drag & { after: boolean };
+type Drag = {
+  group: string;
+  id: string;
+};
+export type SidebarDragTarget = Drag & {
+  after: boolean;
+};
 type ServerOrder = DeepReadonly<components["schemas"]["SidebarOrderDto"]>;
 type Pending = {
   ownerId?: string;
-  body: Extract<PostBody<"/api/projects">, { action: "reorder" }>;
+  body: Extract<
+    PostBody<"/api/projects">,
+    {
+      action: "reorder";
+    }
+  >;
 };
-
 // ProjectsResponse also includes generic JSON; narrow its reorder variant.
 function isSidebarOrderResponse(
   value: PostResult<"/api/projects">,
 ): value is components["schemas"]["SidebarOrderResponse"] {
   return "groups" in value && typeof value.revision === "number";
 }
-
 export function sidebarOrderCanWrite(
   sessionToken: string | undefined,
   available: boolean | undefined,
 ): boolean {
   return available !== false && (!!sessionToken || available === true);
 }
-
 export interface SidebarOrderSource {
   readonly stateDir: string;
   readonly runtime:
-    | { readonly sidebarOrder?: ServerOrder | null | undefined }
+    | {
+        readonly sidebarOrder?: ServerOrder | null | undefined;
+      }
     | undefined;
   readonly services: SidebarServices;
   readonly sessionToken?: string | undefined;
@@ -141,7 +149,11 @@ export class SidebarOrderOwner {
   setDestination = (value: string | null) => {
     this.destination = value;
   };
-  send = async (request: Pending, optimistic?: Order) => {
+  send = flow(function* (
+    this: SidebarOrderOwner,
+    request: Pending,
+    optimistic?: Order,
+  ) {
     if (this.busy) return false;
     this.busy = true;
     const suffix = this.pendingSuffix;
@@ -156,8 +168,10 @@ export class SidebarOrderOwner {
         );
       this.requestBackend = backend;
       // The request ID makes a repeated reorder return the first receipt.
-      const result = await untilAnswered(() =>
-        backend.post("/api/projects", request.body, { timeoutMs: 30000 }),
+      const result = yield* flowValue(
+        untilAnswered(() =>
+          backend.post("/api/projects", request.body, { timeoutMs: 30000 }),
+        ),
       );
       if (isSidebarOrderResponse(result) && result.revision >= this.revision) {
         this.revision = result.revision;
@@ -190,7 +204,7 @@ export class SidebarOrderOwner {
       this.busy = false;
       if (clearPending) this.outbox.remove("sidebarOrder", suffix);
     }
-  };
+  });
   rank = (group: string, id: string) => {
     const index = this.order[group]?.indexOf(id) ?? -1;
     return index < 0 ? Number.MAX_SAFE_INTEGER : index;

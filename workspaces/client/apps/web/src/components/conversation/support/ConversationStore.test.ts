@@ -1,3 +1,6 @@
+import { createMessageQueueStore } from "../MessageQueue/MessageQueueStore.ts";
+import { action } from "mobx";
+import { createConversationContext } from "./conversationContext.ts";
 import type { Message } from "../../../types.ts";
 import { TranscriptHistory } from "../../../conversation/historySession.ts";
 // @vitest-environment happy-dom
@@ -14,6 +17,7 @@ import { AttachmentDrafts } from "./useAttachmentDrafts.ts";
 import { UploadRecovery } from "./useUploadRecovery.ts";
 import {
   ConversationOperations,
+  ConversationStore,
   type ConversationContext,
 } from "./ConversationStore.ts";
 
@@ -57,6 +61,7 @@ function mount() {
     getAnchorId: () => null,
   };
   const context = {
+    ...createConversationContext(areas, attachmentDrafts),
     actions: areas,
     opened: "lead",
     stateDir: "fixture",
@@ -79,11 +84,12 @@ function mount() {
     input: { current: null },
     operations: new ConversationOperations(),
     scrolling,
+    start: () => () => {},
   } satisfies ConversationContext;
-  const store = areas.selected.openConversation(context);
-  const stop = store.start();
+  const store = new ConversationStore(context);
+  areas.selected.conversation = store;
   cleanups.push(() => {
-    stop();
+    store.resetRecall();
     services.close();
     models.store.dispose();
   });
@@ -114,26 +120,14 @@ it("locks a pending branch, keeps its identity on an uncertain retry, then relea
   expect(post.mock.calls[1]).toEqual(post.mock.calls[0]);
   expect(store.branching).toBe(false);
 });
-it("retains a chat's store across dependency renders and releases its pending subscription on switch", () => {
-  const { store, areas, context, api } = mount();
-  store.limitsOpen = true;
-  expect(
-    areas.selected.openConversation({
-      ...context,
-      messageQueue: { ...context.messageQueue },
-    }),
-  ).toBe(store);
+it("reads pending commands directly without a component subscription", () => {
+  const { store, api } = mount();
   const shown: boolean[] = [];
   const stop = autorun(() => shown.push(store.stopShown));
   cleanups.push(stop);
   api.pending.begin({ id: "stop-request", kind: "stop", target: "lead" });
-  expect(shown.at(-1)).toBe(true);
-  const revision = store.pendingRevision;
-  areas.navigation.selectedId = "other";
-  const next = areas.selected.openConversation({ ...context, opened: "other" });
-  expect(next).not.toBe(store);
   api.pending.fail("stop-request");
-  expect(store.pendingRevision).toBe(revision);
+  expect(shown).toEqual([false, true, false]);
 });
 it("locks file staging until the captured upload finishes and exposes its error", async () => {
   const { store, uploads } = mount();
@@ -158,16 +152,39 @@ it("ignores a completed message jump after switching the workspace with the same
   vi.spyOn(TranscriptHistory.prototype, "ensureMessage").mockReturnValueOnce(
     pending.promise,
   );
-  const { store, areas, context } = mount();
+  const { store, areas } = mount();
   const root = document.createElement("div"),
     row = document.createElement("article");
   row.dataset.message = "target";
   root.append(row);
   store.context.scrolling.scroll.current = root;
   const jump = store.navigateToMessage("target");
-  areas.selected.openConversation({ ...context, stateDir: "other-workspace" });
+  areas.selected.closeConversation();
   pending.resolve(true);
   await jump;
   expect(store.highlighted).toBeNull();
   expect(store.context.scrolling.revealRequest).not.toHaveBeenCalled();
+});
+
+it("reads an already restored edit directly without a component synchronization effect", () => {
+  const owner = createMessageQueueStore(
+    () => ({
+      scope: "restored-queue",
+      items: [],
+      onEdit: async () => {},
+      onCancel: async () => {},
+      onReorder: async () => {},
+      canReorder: false,
+    }),
+    "local",
+  );
+  const apply = action(() => {
+    owner.buffer.values.set(
+      owner.buffer.key("queue-edit", "restored-queue"),
+      JSON.stringify({ id: "departed", text: "Saved edit" }),
+    );
+  });
+  apply();
+  expect(owner.current?.text).toBe("Saved edit");
+  expect(owner.absent?.text).toBe("Saved edit");
 });

@@ -1,7 +1,7 @@
 import { LOGIN_LABEL_MAX_CHARS } from "../../../generated/sharedValues.ts";
 import { Button, Stack, TextInput } from "@mantine/core";
 import { createContext, useContext, type ReactNode } from "react";
-import { observable, runInAction } from "mobx";
+import { makeAutoObservable } from "mobx";
 import { observer } from "mobx-react-lite";
 import {
   PROVIDER_KINDS,
@@ -14,13 +14,24 @@ export const ACCOUNT_SIGN_IN_HINTS: Record<ProviderKind, string> = {
   [ProviderKind.Claude]: "Claude subscription, link + paste code",
 };
 
-export type AccountAddDraft = {
-  provider: ProviderKind | "";
-  label: string;
-  email: string;
-};
-export const createAccountAddDraft = () =>
-  observable<AccountAddDraft>({ provider: "", label: "", email: "" });
+export class AccountAddDraft {
+  provider: ProviderKind | "" = "";
+  label = "";
+  email = "";
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
+  setProvider(value: ProviderKind) {
+    this.provider = value;
+  }
+  setLabel(value: string) {
+    this.label = value;
+  }
+  setEmail(value: string) {
+    this.email = value;
+  }
+}
+export const createAccountAddDraft = () => new AccountAddDraft();
 export const AccountAddActionsContext = createContext<{
   onCancel: () => void;
   onContinue: () => void;
@@ -51,11 +62,7 @@ export const AccountAddForm = observer(function AccountAddForm({
             type="button"
             className={`account-provider-choice${model.provider === kind ? " selected" : ""}`}
             aria-pressed={model.provider === kind}
-            onClick={() =>
-              runInAction(() => {
-                model.provider = kind;
-              })
-            }
+            onClick={() => model.setProvider(kind)}
           >
             <strong>{PROVIDER_LABELS[kind]}</strong>
             <span>{ACCOUNT_SIGN_IN_HINTS[kind]}</span>
@@ -67,21 +74,13 @@ export const AccountAddForm = observer(function AccountAddForm({
         label="Name"
         value={model.label}
         maxLength={LOGIN_LABEL_MAX_CHARS}
-        onChange={(event) =>
-          runInAction(() => {
-            model.label = event.currentTarget.value;
-          })
-        }
+        onChange={(event) => model.setLabel(event.currentTarget.value)}
       />
       <TextInput
         label="Email (optional)"
         type="email"
         value={model.email}
-        onChange={(event) =>
-          runInAction(() => {
-            model.email = event.currentTarget.value;
-          })
-        }
+        onChange={(event) => model.setEmail(event.currentTarget.value)}
         description="Studio checks that you sign in with this account."
       />
       <div className="account-add-dialog-actions">

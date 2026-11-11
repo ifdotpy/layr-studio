@@ -35,6 +35,9 @@ vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
     useServerUploads: () => ({
+      uploadsChanged: () => {},
+      attachmentCancelled: mocks.uploadCancelled,
+      queueUploads: async () => [],
       pendingUploads: mocks.pendingUploads,
       deliverUpload: mocks.deliverUpload,
       finishUpload: mocks.finishUpload,
@@ -61,18 +64,31 @@ vi.mock("../../../sync/readRetry.ts", () => ({
   retryableReadError: (error: unknown) => error instanceof TypeError,
 }));
 
-import { useUploadRecovery } from "./useUploadRecovery.ts";
+import { UploadRecovery } from "./useUploadRecovery.ts";
 import type { PendingUpload } from "../../../sync/uploads.ts";
 
 function mountOwner(
-  attach: Parameters<typeof useUploadRecovery>[2] = async () => true,
+  attach: ConstructorParameters<typeof UploadRecovery>[3] = async () => true,
 ) {
-  const store = useUploadRecovery("/workspace/state", "workspace-1", attach);
-  const cleanups = mocks.effects.splice(0).flatMap((effect) => {
-    const cleanup = effect();
-    return cleanup ? [cleanup] : [];
-  });
-  return { store, unmount: () => cleanups.forEach((cleanup) => cleanup()) };
+  const store = new UploadRecovery(
+    {
+      pendingUploads: mocks.pendingUploads,
+      deliverUpload: mocks.deliverUpload,
+      finishUpload: mocks.finishUpload,
+      removeUpload: mocks.removeUpload,
+      uploadCancelled: mocks.uploadCancelled,
+      onUploadsChanged: (listener) => {
+        mocks.uploadListeners.add(listener);
+        return () => {
+          mocks.uploadListeners.delete(listener);
+        };
+      },
+    },
+    "/workspace/state",
+    "workspace-1",
+    attach,
+  );
+  return { store, unmount: store.start() };
 }
 
 function mount() {

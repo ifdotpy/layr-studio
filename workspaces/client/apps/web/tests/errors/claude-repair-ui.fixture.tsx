@@ -17,6 +17,10 @@ function TurnHistory(props: ComponentProps<typeof History>) {
 }
 import ClaudeRepairNotice from "../../src/components/conversation/ClaudeRepairNotice/ClaudeRepairNotice.tsx";
 import { NativeNotice } from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
+import { ClaudeRepairReportStore } from "../../src/components/conversation/ClaudeRepairNotice/ClaudeRepairReportStore.ts";
+import * as api from "../../src/servers/net/api.ts";
+import { observer } from "mobx-react-lite";
+const RepairNotice = observer(ClaudeRepairNotice);
 const agent: Agent = {
   id: "agent",
   threadId: "thread",
@@ -45,6 +49,9 @@ const items: Message[] = [
     },
   },
 ];
+const repair = new ClaudeRepairReportStore(api, () => agent, false);
+await repair.refresh();
+window.addEventListener("pagehide", () => repair.dispose(), { once: true });
 createRoot(document.getElementById("root")!).render(
   React.createElement(
     MantineProvider,
@@ -53,7 +60,7 @@ createRoot(document.getElementById("root")!).render(
       "main",
       { style: { maxWidth: 900, margin: "auto", padding: 12 } },
       React.createElement("h1", null, "Conversation"),
-      React.createElement(ClaudeRepairNotice, { agent }),
+      React.createElement(RepairNotice, { agent, store: repair }),
       React.createElement(TurnHistory, {
         items,
         agent,

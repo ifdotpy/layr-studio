@@ -1,3 +1,5 @@
+import { action, observable, onBecomeUnobserved, reaction } from "mobx";
+import type { IObservableValue } from "mobx";
 import { createFrameBatch } from "./frameBatch.ts";
 
 import type {
@@ -16,19 +18,23 @@ export function createTranscriptCache() {
     { value: CachedTranscript; size: number; itemIndexes: Map<string, number> }
   >();
 
-  const listeners = new Map<string, Set<(entry: CachedTranscript) => void>>();
+  const publications = new Map<
+    string,
+    IObservableValue<CachedTranscript | undefined>
+  >();
 
   const pendingNotifications = new Map<string, CachedTranscript>();
 
-  const publication = createFrameBatch(() => {
-    const pending = [...pendingNotifications];
-    pendingNotifications.clear();
-    for (const [key, value] of pending)
-      listeners.get(key)?.forEach((accept) => accept(value));
-  });
+  const publication = createFrameBatch(
+    action(() => {
+      const pending = [...pendingNotifications];
+      pendingNotifications.clear();
+      for (const [key, value] of pending) publications.get(key)?.set(value);
+    }),
+  );
 
   function notify(key: string, value: CachedTranscript) {
-    if (!listeners.has(key)) return;
+    if (!publications.has(key)) return;
     pendingNotifications.set(key, value);
     publication.schedule();
   }
@@ -52,13 +58,14 @@ export function createTranscriptCache() {
   }
 
   /** Drop a memory-only transcript when a successful pull confirms no local row. */
-  function clearTranscript(workspaceId: string, id: string) {
+  const clearTranscript = action((workspaceId: string, id: string) => {
     const key = keyOf(workspaceId, id);
     const previous = entries.get(key);
     if (previous) size -= previous.size;
     entries.delete(key);
     pendingNotifications.delete(key);
-  }
+    publications.get(key)?.set(undefined);
+  });
 
   function subscribeTranscript(
     workspaceId: string,
@@ -66,18 +73,24 @@ export function createTranscriptCache() {
     accept: (entry: CachedTranscript) => void,
   ) {
     const key = keyOf(workspaceId, id);
-    let set = listeners.get(key);
-    if (!set) listeners.set(key, (set = new Set()));
-    set.add(accept);
-    const entry = peekTranscript(workspaceId, id);
-    if (entry) accept(entry);
-    return () => {
-      set.delete(accept);
-      if (!set.size) {
-        listeners.delete(key);
+    let value = publications.get(key);
+    if (!value) {
+      value = observable.box(peekTranscript(workspaceId, id), { deep: false });
+      publications.set(key, value);
+      onBecomeUnobserved(value, () => {
+        publications.delete(key);
         pendingNotifications.delete(key);
-      }
-    };
+      });
+    }
+    const stop = reaction(
+      () => value.get(),
+      (entry) => {
+        if (entry) accept(entry);
+      },
+    );
+    const current = peekTranscript(workspaceId, id);
+    if (current) accept(current);
+    return stop;
   }
 
   /** Cache a decoded transcript without serializing and parsing the page again. */

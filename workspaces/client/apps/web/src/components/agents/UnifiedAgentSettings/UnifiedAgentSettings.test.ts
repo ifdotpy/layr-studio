@@ -1,8 +1,6 @@
+import { observable, action } from "mobx";
 // @vitest-environment happy-dom
-vi.mock("mobx-react-lite", async (original) => ({
-  ...(await original<typeof import("mobx-react-lite")>()),
-  observer: <T>(component: T) => component,
-}));
+import { observer } from "mobx-react-lite";
 import { beforeEach, expect, test, vi } from "vitest";
 import { act, createElement, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
@@ -25,11 +23,11 @@ vi.mock(
     >()),
     useServerStore: () => ({
       agentDetail: () => ({
-        appliedVersion: harness.version,
+        appliedVersion: publication.version,
         current: {
           status: "live",
           data: {
-            workerExcludedAccountKeys: harness.excluded,
+            workerExcludedAccountKeys: publication.excluded,
             reviewerExcludedAccountKeys: [],
           },
         },
@@ -39,7 +37,15 @@ vi.mock(
   }),
 );
 
+const publication = observable({
+  excluded: [] as string[],
+  version: { epoch: "session", revision: 1 },
+});
 beforeEach(() => {
+  action(() => {
+    publication.excluded = [];
+    publication.version = { epoch: "session", revision: 1 };
+  })();
   harness.post.mockReset();
   harness.excluded = [];
   harness.version = { epoch: "session", revision: 1 };
@@ -52,7 +58,7 @@ function mount() {
   const notify = vi.fn();
   let current!: ReturnType<typeof UnifiedAgentSettings>;
   const root = createRoot(document.createElement("div"));
-  function Fixture() {
+  const Fixture = observer(function Fixture() {
     current = UnifiedAgentSettings({
       state: {
         accounts: [],
@@ -71,7 +77,7 @@ function mount() {
       notify,
     });
     return null;
-  }
+  });
   const render = () =>
     act(() =>
       root.render(
@@ -88,6 +94,12 @@ function mount() {
     publish(keys: string[], revision: number, epoch = "session") {
       harness.excluded = keys;
       harness.version = { epoch, revision };
+      act(() =>
+        action(() => {
+          publication.excluded = keys;
+          publication.version = { epoch, revision };
+        })(),
+      );
       render();
     },
     refresh,

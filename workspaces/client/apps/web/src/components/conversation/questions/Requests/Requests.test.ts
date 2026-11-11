@@ -1,3 +1,4 @@
+import { requestApiFixture } from "../support/requestFixtures.ts";
 import {
   QuestionDecision,
   type components,
@@ -43,7 +44,15 @@ let root: ReturnType<typeof requestTestRoot>;
 const notify = vi.fn();
 requestTestEnvironment();
 beforeEach(() => {
-  root = requestTestRoot(() => h.store?.dispose());
+  root = requestTestRoot(
+    () => h.store?.dispose(),
+    () => ({
+      api: () => requestApiFixture(h),
+      store: h.store!,
+      storage: h.storage,
+      server: "local",
+    }),
+  );
 });
 afterEach(async () => {
   await root.close();
@@ -260,3 +269,56 @@ function questionAnswerConstructionWitness() {
   void [missingAnswers, missingContent, wrongMethod];
 }
 void questionAnswerConstructionWitness;
+
+it("keeps an open editor when the parent replaces its callbacks", async () => {
+  await render(
+    approval({
+      id: "callbacks",
+      request: {
+        kind: "agent_question",
+        questions: [question("answer", "Continue?")],
+      },
+    }),
+  );
+  await click("Answer");
+  await root.render(createElement(Requests, { all: true }), {
+    scope: "server",
+    notify: () => {},
+  });
+  expect(document.querySelector(".request-answer-form")).not.toBeNull();
+});
+
+it("replaces the request owner across scopes instead of reusing the previous answer draft", async () => {
+  await render(
+    approval({
+      id: "switch",
+      request: {
+        kind: "agent_question",
+        questions: [question("answer", "Continue?")],
+      },
+    }),
+  );
+  await click("Answer");
+  const field = document.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Continue?"]',
+  )!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!.call(field, "Previous workspace answer");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(field.value).toBe("Previous workspace answer");
+  await root.render(createElement(Requests, { all: true }), {
+    scope: "next-server",
+    notify,
+  });
+  expect(document.querySelector(".request-answer-form")).toBeNull();
+  await click("Answer");
+  expect(
+    document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Continue?"]',
+    )?.value,
+  ).toBe("");
+});

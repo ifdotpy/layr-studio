@@ -13,8 +13,7 @@ import {
   useServerStore,
 } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { Button, Textarea } from "@mantine/core";
-import { useEffect, useState } from "react";
-import { autorun, observable, runInAction } from "mobx";
+import { useState } from "react";
 import { observer } from "mobx-react-lite";
 import { ApiError, errorText } from "../../../../api.ts";
 
@@ -46,28 +45,20 @@ export const UserMessage = observer(function UserMessage({
   useMessageRenderProbe("user-message", message.id);
   const { get } = useServerApi();
   const store = useServerStore();
-  const confirmedMessages = useMessageCache();
+  const ui = useConversationActions().ui;
+  const confirmedMessages = ui.messageCache;
 
   const confirmedKey = JSON.stringify([scope, message.id]);
-  const [reply, setReply] = useState(focused || requests.has(message.id));
+  const [reply, setReply] = useState<{
+    request: string | undefined;
+    open: boolean;
+  } | null>(null);
+  const replyOpen =
+    reply && reply.request === focusRequestId
+      ? reply.open
+      : focused || requests.has(message.id);
   const [error, setError] = useState<unknown>(null);
   const current = store.complaint(complaintId(message.id)).current;
-  useEffect(() => {
-    if (focused) setReply(true);
-  }, [focused, focusRequestId]);
-  // Retire only when full authoritative detail has materialized the confirmed version.
-  useEffect(
-    () =>
-      autorun(() => {
-        const latest = resourceData(
-          store.complaint(complaintId(message.id)).current,
-        );
-        const confirmed = confirmedMessages.get(confirmedKey);
-        if (latest && confirmed && latest.version >= confirmed.version)
-          runInAction(() => confirmedMessages.delete(confirmedKey));
-      }),
-    [store, message.id, confirmedMessages, confirmedKey],
-  );
   const confirmed = confirmedMessages.get(confirmedKey);
   const source = resourceData(current) || message;
   const detail =
@@ -76,11 +67,7 @@ export const UserMessage = observer(function UserMessage({
       ? confirmed
       : source;
   const remember = (result: ComplaintDetailResponse) =>
-    runInAction(() => {
-      const cached = confirmedMessages.get(confirmedKey);
-      if (!cached || cached.version <= result.version)
-        confirmedMessages.set(confirmedKey, result);
-    });
+    ui.rememberComplaint(confirmedKey, result);
   const retryDetail = () => {
     void get("/api/complaint", { query: { id: message.id } })
       .then((result) => {
@@ -135,12 +122,14 @@ export const UserMessage = observer(function UserMessage({
           <Button
             variant="subtle"
             size="compact-xs"
-            aria-expanded={reply}
-            onClick={() => setReply(!reply)}
+            aria-expanded={replyOpen}
+            onClick={() =>
+              setReply({ request: focusRequestId, open: !replyOpen })
+            }
           >
-            {reply ? "Close reply" : "Reply"}
+            {replyOpen ? "Close reply" : "Reply"}
           </Button>
-          {reply && (
+          {replyOpen && (
             <MessageResponse
               detail={detail}
               requests={requests}
@@ -159,18 +148,6 @@ type ComplaintSummary =
   StateCollections["complaints"] extends ReadonlyMap<string, infer T>
     ? T
     : never;
-
-const caches = new WeakMap<Storage, Map<string, ComplaintDetailResponse>>();
-
-function useMessageCache() {
-  const storage = useServerStorage();
-  let cache = caches.get(storage);
-  if (!cache) {
-    cache = observable.map(undefined, { deep: false });
-    caches.set(storage, cache);
-  }
-  return cache;
-}
 
 const MessageResponse = observer(function MessageResponse({
   detail,
@@ -195,10 +172,8 @@ const MessageResponse = observer(function MessageResponse({
   ]);
   const [savedReply, saveReply, clearReply] = useUnsentText("reply", draftKey);
   const previous = requests.get(detail.id);
-  const [text, setText] = useState(previous?.text || "");
-  useEffect(() => {
-    if (!previous && savedReply !== null) setText(savedReply);
-  }, [savedReply]);
+  const [edited, setText] = useState<string | undefined>(previous?.text);
+  const text = edited ?? savedReply ?? "";
   const status: UserComplaintResponse["status"] =
     previous?.status || "in_progress";
   const [sending, setSending] = useState(false);
@@ -237,7 +212,9 @@ const MessageResponse = observer(function MessageResponse({
       requests.delete(detail.id);
       setRetry(false);
       await clearReply(payload.text);
-      setText((current) => (current === payload.text ? "" : current));
+      setText((current) =>
+        (current ?? savedReply ?? "") === payload.text ? "" : current,
+      );
       if ("detail" in outcome) onResponse(outcome.detail);
       else notify(errorText(outcome.reloadError));
     } catch (failure) {

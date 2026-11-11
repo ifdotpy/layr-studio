@@ -3,8 +3,9 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
+import { Provider } from "../../../app/ServerAreasProvider.tsx";
+import { conversationActionsFixture } from "../integration-support/observableFixture.tsx";
 import { observableFixture } from "../integration-support/observableFixture.tsx";
-import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
 
 const captured = vi.hoisted(() => ({ values: [] as unknown[] }));
 vi.mock("../../../app/area.ts", async (original) => {
@@ -31,8 +32,9 @@ vi.mock("../../../app/area.ts", async (original) => {
   };
 });
 import TerminalDock from "./TerminalDock.tsx";
+import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
 
-it("provides the same terminal actions when an unrelated dock prop changes", async () => {
+it("provides the same terminal actions when the selected agent changes", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.matchMedia = vi.fn(() => ({
     matches: false,
@@ -44,11 +46,15 @@ it("provides the same terminal actions when an unrelated dock prop changes", asy
     removeEventListener() {},
     dispatchEvent: () => true,
   }));
-  const fixture = observableFixture();
+  const fixture = observableFixture([
+    agentSummaryFixture("first"),
+    agentSummaryFixture("second"),
+  ]);
+  const areas = conversationActionsFixture(undefined, fixture.store);
   const host = document.body.appendChild(document.createElement("div")),
     root = createRoot(host);
-  const notify = vi.fn();
-  const render = (id: string) =>
+  const render = (id: string) => {
+    areas.navigation.selectExternal(id, { requestId: id });
     root.render(
       createElement(
         fixture.Provider,
@@ -56,13 +62,15 @@ it("provides the same terminal actions when an unrelated dock prop changes", asy
         createElement(
           MantineProvider,
           null,
-          createElement(TerminalDock, {
-            notify,
-            agent: agentSummaryFixture(id),
-          }),
+          createElement(
+            Provider,
+            { value: areas },
+            createElement(TerminalDock),
+          ),
         ),
       ),
     );
+  };
   try {
     await act(async () => render("first"));
     const first = captured.values.at(-1),
@@ -73,6 +81,8 @@ it("provides the same terminal actions when an unrelated dock prop changes", asy
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    areas.dispose();
+    areas.scope.services.close();
     fixture.store.dispose();
     vi.unstubAllGlobals();
   }

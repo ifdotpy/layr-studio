@@ -1,10 +1,11 @@
+import { serverLocalStorage } from "../../../servers/storage.ts";
 import { observer } from "mobx-react-lite";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { Attachment } from "./ComposerAttachments.tsx";
-import { useAttachmentDrafts } from "../support/useAttachmentDrafts.ts";
+import { AttachmentDrafts } from "../support/useAttachmentDrafts.ts";
 
 const { cancelled } = vi.hoisted(() => ({ cancelled: new Set<string>() }));
 vi.mock(
@@ -20,10 +21,11 @@ it("retains attachment entries across renders and replaces only changed files", 
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div");
   const root = createRoot(host);
-  let draft!: ReturnType<typeof useAttachmentDrafts>;
+  const store = new AttachmentDrafts((id) => cancelled.has(id), vi.fn());
+  let draft!: readonly [typeof store.current, typeof store.set];
   const View = observer(function View({ version }: { version: number }) {
     void version;
-    draft = useAttachmentDrafts("chat", vi.fn());
+    draft = [store.current, store.set];
     return null;
   });
   let version = 0;
@@ -51,6 +53,9 @@ it("retains attachment entries across renders and replaces only changed files", 
     expect(draft[0]).toBe(initial);
     expect(draft[0].agent).toBe(files);
     cancelled.add("one");
+    await act(async () => {
+      await store.set((current) => current);
+    });
     await act(async () =>
       root.render(createElement(View, { version: version++ })),
     );
@@ -73,4 +78,60 @@ it("retains attachment entries across renders and replaces only changed files", 
     cancelled.clear();
     vi.unstubAllGlobals();
   }
+});
+
+import { autorun } from "mobx";
+it("reloads attachments from the existing storage key", async () => {
+  const key = "codex-agent-attachments:reload";
+  serverLocalStorage.removeItem(key);
+  const options = { key, storage: serverLocalStorage };
+  const first = new AttachmentDrafts(() => false, vi.fn(), options);
+  const asset: Attachment = {
+    id: "saved",
+    name: "saved",
+    size: 1,
+    mime: "text/plain",
+    image: false,
+  };
+  expect(await first.set({ lead: [asset] })).toBe(true);
+  const reopened = new AttachmentDrafts(() => false, vi.fn(), options);
+  expect(reopened.current.lead?.map((item) => item.id)).toEqual(["saved"]);
+  serverLocalStorage.removeItem(key);
+});
+it("merges another tab's write and reflects storage events into the observer", async () => {
+  const key = "codex-agent-attachments:tabs";
+  serverLocalStorage.removeItem(key);
+  const options = { key, storage: serverLocalStorage };
+  const first = new AttachmentDrafts(() => false, vi.fn(), options);
+  const second = new AttachmentDrafts(() => false, vi.fn(), options);
+  const observed: string[][] = [];
+  const stop = autorun(() => {
+    observed.push((first.current.lead || []).map((item) => item.id));
+  });
+  const asset = (id: string): Attachment => ({
+    id,
+    name: id,
+    size: 1,
+    mime: "text/plain",
+    image: false,
+  });
+  await first.set({ lead: [asset("first")] });
+  await second.set((current) => ({
+    ...current,
+    lead: [...(current.lead || []), asset("second")],
+  }));
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key,
+      newValue: serverLocalStorage.getItem(key),
+    }),
+  );
+  expect(observed.at(-1)).toEqual(["first", "second"]);
+  expect(
+    new AttachmentDrafts(() => false, vi.fn(), options).current.lead?.map(
+      (item) => item.id,
+    ),
+  ).toEqual(["first", "second"]);
+  stop();
+  serverLocalStorage.removeItem(key);
 });

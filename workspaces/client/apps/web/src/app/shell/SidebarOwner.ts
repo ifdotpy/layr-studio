@@ -1,3 +1,5 @@
+import { ProjectSave } from "../projects/ProjectSave.ts";
+import { flowValue } from "../../flowValue.ts";
 import { COMPACT_RECENT_WINDOW_SECONDS } from "../../generated/sharedValues.ts";
 import { remoteProjectGroups } from "../../components/sidebar/RemoteProjects/RemoteProjects.tsx";
 import { SidebarFrameOwner } from "../../components/sidebar/SidebarFrame/SidebarFrame.tsx";
@@ -11,7 +13,7 @@ import {
   makeAutoObservable,
   observable,
   reaction,
-  runInAction,
+  flow,
 } from "mobx";
 import { errorText } from "../../api.ts";
 import type { paths } from "../../generated/api.ts";
@@ -21,7 +23,6 @@ import type {
   ProjectFolder,
 } from "../projects/ProjectOrganization.tsx";
 import { PeerTeamMoveOwner } from "../projects/peerTeamMutation.ts";
-
 import type { SidebarCommands } from "../../components/sidebar/support/commands.ts";
 import type {
   SidebarServices,
@@ -35,28 +36,26 @@ import {
   type SidebarChatView,
 } from "../../components/sidebar/support/viewModel.ts";
 import { SidebarOrderOwner } from "../../components/sidebar/support/useSidebarOrder.ts";
-
 import { readServerAliases } from "../../servers/registry.ts";
-import { observeServerAliases } from "../../servers/serverAliases.ts";
+import { currentServerAliases } from "../../servers/serverAliases.ts";
 import { itemGroup } from "../../components/sidebar/support/catalog.ts";
-
 import type { MergedSidebar } from "../../servers/mergedSidebar.ts";
 type OrganizationRequest =
   paths["/api/organization"]["post"]["requestBody"]["content"]["application/json"];
-type WithoutOrganizationId<Request> = Request extends { id: string }
+type WithoutOrganizationId<Request> = Request extends {
+  id: string;
+}
   ? Omit<Request, "id">
   : never;
 type OrganizationData = WithoutOrganizationId<OrganizationRequest>;
 export type NavigableProject = SidebarProjectView;
 const emptyCollections = createStateMirror().current;
-
 import type { ServerServices } from "../../servers/serverServices.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import {
   serverViewId,
   isClassicServerView,
 } from "../../servers/environment.ts";
-
 import { restoreSidebarFocus } from "../../components/sidebar/SidebarFrame/SidebarFrame.tsx";
 /** Visibility choices only. SidebarFrame remains the single sidebar width authority. */
 export class SidebarOwner {
@@ -131,7 +130,6 @@ export class SidebarOwner {
     });
   }
 }
-
 export interface CombinedSidebarBoundary {
   readonly model: MergedSidebar;
   readonly commands: Pick<SidebarCommands, "rename" | "notify">;
@@ -254,7 +252,9 @@ export class SidebarListOwner {
       ? this.state.current.data
       : emptyCollections;
   }
-  lastOpened: { current: string | null };
+  lastOpened: {
+    current: string | null;
+  };
   canEdit = (target: SidebarTarget) =>
     this.services.available?.(target) ?? true;
   unavailableReason = (target: SidebarTarget) =>
@@ -291,14 +291,19 @@ export class SidebarListOwner {
       this.combined?.model.sidebar.rooms ?? [...this.collections.rooms.values()]
     );
   }
-  aliases = observable.map(Object.entries(readServerAliases()));
+  get aliases() {
+    return new Map(Object.entries(currentServerAliases(readServerAliases)));
+  }
   renaming: string | null = null;
   renameInPriority = false;
   name = "";
   organizing: string | null = null;
   overrides = observable.map<
     string,
-    { pinned?: boolean; archived?: boolean }
+    {
+      pinned?: boolean;
+      archived?: boolean;
+    }
   >();
   get offline() {
     return this.combined?.model.offlineServers ?? new Set<string>();
@@ -346,18 +351,18 @@ export class SidebarListOwner {
   get compactKey() {
     return `codex-project-compact:${this.stateDir}`;
   }
-  compactProjects: Record<string, boolean> = {};
-  setCompactProjects = (value: Record<string, boolean>) => {
-    this.compactProjects = value;
-  };
+  get compactProjects() {
+    return this.services.cache.saved<Record<string, boolean>>(
+      this.compactKey,
+      {},
+    );
+  }
   setCompactProject = (path: string, value: boolean) => {
     const next = { ...this.compactProjects, [path]: value };
-    this.setCompactProjects(
-      this.services.cache.editPreference(
-        this.compactKey,
-        this.compactProjects,
-        next,
-      ),
+    this.services.cache.editPreference(
+      this.compactKey,
+      this.compactProjects,
+      next,
     );
   };
   teamDialog: {
@@ -396,7 +401,23 @@ export class SidebarListOwner {
     parentId?: string | undefined;
     agentId?: string;
   } | null = null;
+  projectNameSave: ProjectSave<"/api/projects"> | null = null;
+  moveChatSave: ProjectSave<"/api/organization"> | null = null;
   setDialog = (value: typeof this.dialog) => {
+    const target = value?.agentId
+      ? { kind: "chat" as const, id: value.agentId }
+      : this.projectTarget(
+          value?.path || "",
+          value?.folder === "new" ? value.parentId : value?.folder,
+        );
+    const backend = this.services.owner(target);
+    this.projectNameSave =
+      value && !value.agentId
+        ? new ProjectSave(backend, "/api/projects", this.savedProject)
+        : null;
+    this.moveChatSave = value?.agentId
+      ? new ProjectSave(backend, "/api/organization", this.savedProject)
+      : null;
     this.dialog = value;
   };
   get canOrganizeProjects() {
@@ -409,8 +430,9 @@ export class SidebarListOwner {
     );
     return false;
   };
-  savedProject = async () => {
+  savedProject = () => {
     this.setDialog(null);
+    return Promise.resolve();
   };
   editProject = (
     project: NavigableProject,
@@ -445,30 +467,36 @@ export class SidebarListOwner {
   get projectKey() {
     return `codex-project-tree:${this.stateDir}`;
   }
-  collapsed: Record<string, boolean> = {};
+  get collapsed() {
+    return this.services.cache.saved<Record<string, boolean>>(
+      this.projectKey,
+      {},
+    );
+  }
   setCollapsed = (
     value:
       | Record<string, boolean>
       | ((previous: Record<string, boolean>) => Record<string, boolean>),
   ) => {
-    this.collapsed =
-      typeof value === "function" ? value(this.collapsed) : value;
+    const previous = this.collapsed;
+    const next = typeof value === "function" ? value(previous) : value;
+    this.services.cache.editPreference(this.projectKey, previous, next);
   };
   toggleTree = (key: string) => {
     const next = { ...this.collapsed, [key]: !this.collapsed[key] };
-    this.setCollapsed(
-      this.services.cache.editPreference(this.projectKey, this.collapsed, next),
-    );
+    this.setCollapsed(next);
   };
-  organize = async (id: string, data: OrganizationData) => {
+  organize = flow(function* (
+    this: SidebarListOwner,
+    id: string,
+    data: OrganizationData,
+  ) {
     if (!this.canEdit({ kind: "chat", id })) {
       this.notify("The sidebar server is offline or unavailable.");
       return false;
     }
     if (this.organizing !== null) return false;
-    runInAction(() => {
-      this.organizing = id;
-    });
+    this.organizing = id;
     const optimistic = Object.fromEntries(
       Object.entries(data).filter(
         ([key, value]) =>
@@ -478,24 +506,22 @@ export class SidebarListOwner {
     );
     const hasOptimistic = Object.keys(optimistic).length > 0;
     if (hasOptimistic)
-      runInAction(() =>
-        this.overrides.set(id, { ...this.overrides.get(id), ...optimistic }),
-      );
+      this.overrides.set(id, { ...this.overrides.get(id), ...optimistic });
     try {
-      await this.services
-        .owner({ kind: "chat", id })
-        .post("/api/organization", { id, ...data });
+      yield* flowValue(
+        this.services
+          .owner({ kind: "chat", id })
+          .post("/api/organization", { id, ...data }),
+      );
       return true;
     } catch (error) {
-      if (hasOptimistic) runInAction(() => this.overrides.delete(id));
+      if (hasOptimistic) this.overrides.delete(id);
       this.notify(errorText(error));
       return false;
     } finally {
-      runInAction(() => {
-        this.organizing = null;
-      });
+      this.organizing = null;
     }
-  };
+  });
   findRow = (id: string) => this.model.rows.find((row) => row.id === id);
   get grouped() {
     return new Set(
@@ -528,7 +554,6 @@ export class SidebarListOwner {
   get selectedFolder() {
     return this.findRow(this.selection.selectedId || "")?.projectFolder;
   }
-
   teamKey = (path: string, id: string) => JSON.stringify([path, "team", id]);
   middleDrop = (event: React.DragEvent<HTMLElement>) => {
     const title = (event.target as Element).closest(
@@ -595,11 +620,7 @@ export class SidebarListOwner {
               parent =
                 project.folders?.find((f) => f.id === parent?.parentId) || null;
             }
-            return this.services.cache.editPreference(
-              this.projectKey,
-              previous,
-              next,
-            );
+            return next;
           });
           this.setCompactProject(project.path, false);
           this.sorting.announce(
@@ -609,21 +630,24 @@ export class SidebarListOwner {
       },
       reorder,
     );
-  rename = async (e: React.FormEvent, id: string) => {
+  rename = flow(function* (
+    this: SidebarListOwner,
+    e: React.FormEvent,
+    id: string,
+  ) {
     e.preventDefault();
     try {
-      await this.renameChat(id, this.name);
-      runInAction(() => {
-        this.renaming = null;
-      });
-    } catch {
-      /* Keep the draft when the server rejects the name. */
-    }
-  };
+      yield* flowValue(this.renameChat(id, this.name));
+      this.renaming = null;
+    } catch {}
+  });
   get sharedProjectPaths() {
     return new Set(this.sharedRooms.map((room) => room.projectPath));
   }
   nowSeconds = Date.now() / 1000;
+  tick() {
+    this.nowSeconds = Date.now() / 1000;
+  }
   keptInCompact = (row: SidebarChatView) => row.compactVisible(this.nowSeconds);
   get viewChatCounts() {
     const counts = new Map<string, number>();
@@ -794,12 +818,8 @@ export class SidebarListOwner {
     };
   }
   start() {
-    this.nowSeconds = Date.now() / 1000;
+    this.tick();
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-    let releasePreferences = () => {};
-    const stopAliases = observeServerAliases(readServerAliases, (aliases) =>
-      runInAction(() => this.aliases.replace(Object.entries(aliases))),
-    );
     const stops = [
       reaction(
         () =>
@@ -812,10 +832,7 @@ export class SidebarListOwner {
           clearTimeout(expiryTimer);
           if (Number.isFinite(expiry))
             expiryTimer = setTimeout(
-              () =>
-                runInAction(() => {
-                  this.nowSeconds = Date.now() / 1000;
-                }),
+              () => this.tick(),
               Math.max(1, Math.ceil(expiry * 1000 - Date.now())),
             );
         },
@@ -841,33 +858,10 @@ export class SidebarListOwner {
           if (next && previous) this.revealSelected();
         },
       ),
-      reaction(
-        () => [this.compactKey, this.projectKey] as const,
-        (keys) => {
-          releasePreferences();
-          const subscribe = (
-            key: string,
-            set: (value: Record<string, boolean>) => void,
-          ) => {
-            const read = () => set(this.services.cache.saved(key, {}));
-            read();
-            return this.services.cache.subscribePreference(key, read);
-          };
-          const compact = subscribe(keys[0], this.setCompactProjects),
-            tree = subscribe(keys[1], this.setCollapsed);
-          releasePreferences = () => {
-            compact();
-            tree();
-          };
-        },
-        { fireImmediately: true },
-      ),
     ];
     return () => {
       clearTimeout(expiryTimer);
       stops.forEach((stop) => stop());
-      releasePreferences();
-      stopAliases();
     };
   }
   get selectionKey() {
@@ -909,7 +903,7 @@ export class SidebarListOwner {
     if (this.collapsed[this.projectTreeKey(path)])
       ancestors[this.projectTreeKey(path)] = false;
     if (Object.keys(ancestors).length)
-      this.collapsed = (
+      (
         this.services.cache.viewPreference || this.services.cache.editPreference
       )(this.projectKey, this.collapsed, { ...this.collapsed, ...ancestors });
   }

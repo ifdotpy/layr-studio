@@ -54,3 +54,22 @@ module because the schema determines their shape. After fixing findings, run
 review the baseline diff. This command removes fixed entries but cannot add new
 ones. Fingerprints use the lint and whitespace-normalized diagnostic span, with
 an occurrence index per file; changing a span is treated as a new finding.
+
+## React glue boundary
+
+`react-glue.ts` owns the five forbidden React hooks and syntax-only listener-set
+check for web production source. Tests, stories and fixtures are excluded.
+`react-glue-exceptions.json` is the sorted, one-entry-per-line exception owner,
+seeded from main 6a386746. Entries marked `pending E1–E5` are migration debt;
+after conversion only one-line DOM integration reasons may remain. Remove an
+entry when its final forbidden API disappears. Then regenerate the two Oxlint
+overrides with `node workspaces/tooling/apps/repository-checks/react-glue.ts`
+and format `.oxlintrc.json`. Generation preserves the network boundary.
+
+The network-boundary tests check the manifest ceiling, stale entries, new files,
+generated-config parity and negative import/listener witnesses in `test-fast`.
+The staged hook reads the complete source and manifest from the index and checks
+listener sets before running Oxlint. The TypeScript syntax check rejects literal
+`Set<() => void>` and named listener/subscriber/observer/callback sets in files
+with subscribe/notify implementations. It does not resolve callback type aliases
+or follow custom collection factories.

@@ -1,9 +1,16 @@
 import { ProviderKind } from "../../../generated/api.ts";
 // @vitest-environment happy-dom
-import { act, createElement, type ComponentProps, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  isValidElement,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
+import { flowResult } from "mobx";
 import { transientTestFixture } from "../../../sync/subscriptions/transientTestFixture.ts";
 import type { ResourceProgress } from "../../../sync/subscriptions/contracts.ts";
 
@@ -15,6 +22,12 @@ const fixture = vi.hoisted(() => ({
         >;
       })
     | undefined,
+  ui: {
+    codexFlow: null as import("./CodexAuthFlow.ts").CodexAuthFlow | null,
+    claudeFlow: null as import("./ClaudeAuthFlow.ts").ClaudeAuthFlow | null,
+  },
+  push: null as import("../SignInPushSettings/SignInPush.ts").SignInPush | null,
+  save: vi.fn(),
   post: vi.fn(),
   get: vi.fn(),
   retry: vi.fn(),
@@ -22,6 +35,8 @@ const fixture = vi.hoisted(() => ({
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
+    useServerServices: () =>
+      fixture.push ? { areas: { signInPush: fixture.push } } : null,
     useServerApi: () => ({
       get: fixture.get,
       post: fixture.post,
@@ -31,7 +46,7 @@ vi.mock(
         key.endsWith(":body")
           ? fallback
           : "login",
-      save() {},
+      save: fixture.save,
       stableRequestId: () => "http-request",
       clearStableRequestId() {},
     }),
@@ -42,12 +57,66 @@ vi.mock(
     }),
   }),
 );
+vi.mock("../../../app/ServerAreasProvider.tsx", () => ({
+  useServerAreas: () => ({ accountsUi: fixture.ui }),
+}));
+import { SignInPush } from "../SignInPushSettings/SignInPush.ts";
+import { SignInPushSettings } from "../SignInPushSettings/SignInPushSettings.tsx";
+import { CodexAuthFlow } from "./CodexAuthFlow.ts";
+import { ClaudeAuthFlow } from "./ClaudeAuthFlow.ts";
+import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
 import ClaudeSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
 import ClaudeAddSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
 
 async function mount(child: ReactNode) {
   vi.useFakeTimers();
+  const api = useServerApi();
+  if (
+    isValidElement<ComponentProps<typeof AccountSignIn>>(child) &&
+    child.type === AccountSignIn
+  ) {
+    fixture.ui.codexFlow = new CodexAuthFlow(
+      {
+        api,
+        store: fixture.services!.store,
+        resources: {
+          ...fixture.services!.subscriptions,
+          retryNow: fixture.retry,
+          watchTokenRateEvents: () => () => {},
+          watchLiveDeltas: () => () => {},
+          replaceStream() {},
+        },
+      },
+      {
+        scope: child.props.scope || "local",
+        ...(child.props.targetAccount
+          ? { accountKey: child.props.targetAccount.id }
+          : {}),
+        email: child.props.emailHint || "",
+        label: child.props.label || "",
+        ...(child.props.onConnected
+          ? { onReady: child.props.onConnected }
+          : {}),
+      },
+    );
+  } else if (
+    isValidElement<ComponentProps<typeof ClaudeSignIn>>(child) &&
+    child.type === ClaudeSignIn
+  ) {
+    fixture.ui.claudeFlow = new ClaudeAuthFlow(
+      api,
+      fixture.services!.store,
+      { ...fixture.services!.subscriptions, retryNow: fixture.retry },
+      {
+        scope: child.props.scope || "local",
+        ...(child.props.account ? { accountKey: child.props.account.id } : {}),
+        label: child.props.label || child.props.account?.label || "Claude Code",
+        email: child.props.email || child.props.account?.email || "",
+        ...(child.props.onReady ? { onReady: child.props.onReady } : {}),
+      },
+    );
+  }
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   window.matchMedia = vi.fn(() => ({
     matches: false,
@@ -70,6 +139,11 @@ async function mount(child: ReactNode) {
     async close() {
       await act(async () => root.unmount());
       host.remove();
+      fixture.ui.codexFlow?.dispose();
+      fixture.ui.claudeFlow?.dispose();
+      fixture.push = null;
+      fixture.ui.codexFlow = null;
+      fixture.ui.claudeFlow = null;
       fixture.services!.close();
       vi.useRealTimers();
       vi.unstubAllGlobals();
@@ -442,6 +516,47 @@ it("the mounted Claude add view locks a deferred start and renders its completed
         'a[href="https://claude.com/cai/oauth/authorize"]',
       ),
     ).not.toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+it("releases the sign-in lock if saving the request identity fails before sending", async () => {
+  fixture.services = transientTestFixture();
+  fixture.post.mockReset();
+  const f = await mount(createElement(AccountSignIn, { scope: "local" }));
+  try {
+    fixture.save.mockImplementationOnce(() => {
+      throw new Error("Storage unavailable");
+    });
+    const flow = fixture.ui.codexFlow!;
+    await act(async () => {
+      await expect(flowResult(flow.run("start"))).resolves.toBeUndefined();
+    });
+    expect(flow.error).toBe("Storage unavailable");
+    expect(flow.busy).toBe("");
+    expect(fixture.post).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
+});
+
+it("loads push settings only when its observer reads the state", async () => {
+  fixture.services = transientTestFixture();
+  fixture.get.mockResolvedValueOnce({
+    ready: false,
+    publicKey: "",
+    subscriptions: [],
+  } satisfies import("../../../api.ts").GetResult<"/api/web-push">);
+  fixture.push = new SignInPush(useServerApi());
+  expect(fixture.get).not.toHaveBeenCalled();
+  const f = await mount(createElement(SignInPushSettings, { active: true }));
+  try {
+    expect(fixture.get).toHaveBeenCalledExactlyOnceWith("/api/web-push");
+    expect(document.body.textContent).toContain(
+      "Studio sends push alerts only when remote access has an https address.",
+    );
+    expect(fixture.post).not.toHaveBeenCalled();
   } finally {
     await f.close();
   }

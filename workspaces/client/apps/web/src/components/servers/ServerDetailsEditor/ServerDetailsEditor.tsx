@@ -1,5 +1,5 @@
 import Disclosure from "../../ui/Disclosure/Disclosure.tsx";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { TextInput } from "@mantine/core";
 import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
 import { validateServerName } from "../../../servers/serverNames.ts";
@@ -22,26 +22,16 @@ export default function ServerDetailsEditor({
   saveName?: ((value: string) => Promise<boolean>) | undefined;
   saveAlias: (value: string) => Promise<boolean>;
 }) {
-  const [label, setLabel] = useState(name);
-  const [shortName, setShortName] = useState(alias);
-  const [savedName, setSavedName] = useState(name);
-  const [savedAlias, setSavedAlias] = useState(alias);
+  const nameField = useField(name),
+    aliasField = useField(alias);
+  const label = nameField.value,
+    shortName = aliasField.value;
   const [nameError, setNameError] = useState("");
   const [aliasError, setAliasError] = useState("");
-  const [nameSaved, setNameSaved] = useState(false);
-  const [aliasSaved, setAliasSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
-  useEffect(() => {
-    setLabel(name);
-    setSavedName(name);
-  }, [name]);
-  useEffect(() => {
-    setShortName(alias);
-    setSavedAlias(alias);
-  }, [alias]);
-  const nameDirty = !!saveName && label !== savedName;
-  const aliasDirty = shortName !== savedAlias;
+  const nameDirty = !!saveName && nameField.dirty;
+  const aliasDirty = aliasField.dirty;
   const save = async () => {
     if (lock.current || disabled || (!nameDirty && !aliasDirty)) return;
     let invalid = false;
@@ -73,8 +63,7 @@ export default function ServerDetailsEditor({
             setNameError("Check the server name or retry the saved request.");
             return;
           }
-          setSavedName(label);
-          setNameSaved(true);
+          nameField.confirm();
         } catch (error) {
           setNameError(errorText(error));
           return;
@@ -88,8 +77,7 @@ export default function ServerDetailsEditor({
             );
             return;
           }
-          setSavedAlias(shortName);
-          setAliasSaved(true);
+          aliasField.confirm();
         } catch (error) {
           setAliasError(errorText(error));
         }
@@ -118,12 +106,11 @@ export default function ServerDetailsEditor({
                 disabled={disabled || busy}
                 autoComplete="off"
                 onChange={(event) => {
-                  setLabel(event.currentTarget.value);
+                  nameField.change(event.currentTarget.value);
                   setNameError("");
-                  setNameSaved(false);
                 }}
               />
-              {nameSaved && !nameDirty && (
+              {nameField.saved && !nameDirty && (
                 <small role="status">Name saved.</small>
               )}
             </div>
@@ -137,12 +124,11 @@ export default function ServerDetailsEditor({
               disabled={disabled || busy}
               autoComplete="off"
               onChange={(event) => {
-                setShortName(event.currentTarget.value);
+                aliasField.change(event.currentTarget.value);
                 setAliasError("");
-                setAliasSaved(false);
               }}
             />
-            {aliasSaved && !aliasDirty && (
+            {aliasField.saved && !aliasDirty && (
               <small role="status">Alias saved.</small>
             )}
           </div>
@@ -158,4 +144,17 @@ export default function ServerDetailsEditor({
       </form>
     </Disclosure>
   );
+}
+
+/** A new confirmed source replaces only its field; another field keeps its draft. */
+function useField(source: string) {
+  const [edit, set] = useState({ source, value: source, saved: false });
+  const value = edit.source === source ? edit.value : source;
+  return {
+    value,
+    dirty: edit.source === source && !edit.saved && value !== source,
+    saved: edit.saved,
+    change: (value: string) => set({ source, value, saved: false }),
+    confirm: () => set({ source, value, saved: true }),
+  };
 }

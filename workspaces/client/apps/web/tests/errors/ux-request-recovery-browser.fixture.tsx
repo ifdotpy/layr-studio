@@ -74,6 +74,33 @@ const saved = async () => {
     throw Error("Snapshot unavailable");
   }
 };
+import { browserProjectSaves } from "../fixtures/owner-support.tsx";
+import { ProjectSave } from "../../src/app/projects/ProjectSave.ts";
+import { localSidebarBackend } from "../../src/components/sidebar/support/services.tsx";
+import { ClaudeSettingsStore } from "../../src/components/settings/ClaudeSettingsView/ClaudeSettingsStore.ts";
+import * as api from "../../src/servers/net/api.ts";
+const claude = new ClaudeSettingsStore(api, () => agent);
+import { autorun } from "mobx";
+const stopClaude =
+  mode === "claude" || mode === "deadline"
+    ? autorun(() => {
+        void claude.state;
+      })
+    : () => {};
+window.addEventListener(
+  "pagehide",
+  () => {
+    stopClaude();
+    claude.dispose();
+  },
+  { once: true },
+);
+const saves = browserProjectSaves(saved);
+const moveSave = new ProjectSave(
+  localSidebarBackend,
+  "/api/organization",
+  saved,
+);
 let body =
   mode === "picker" ? (
     <Picker
@@ -83,11 +110,11 @@ let body =
       }}
     />
   ) : mode === "claude" || mode === "deadline" ? (
-    <ClaudeSettings agent={agent} />
+    <ClaudeSettings agent={agent} model={claude} />
   ) : ["name", "confirmed", "rejected", "project-deadline"].includes(mode) ? (
-    <ProjectNameForm project={project} folder="new" saved={saved} />
+    <ProjectNameForm project={project} folder="new" save={saves.account} />
   ) : mode === "move" ? (
-    <MoveChatForm project={project} agent={agent} saved={saved} />
+    <MoveChatForm project={project} agent={agent} save={moveSave} />
   ) : mode === "project-account" || mode === "unready" ? (
     <ProjectAccount
       path={project.path!}
@@ -96,7 +123,7 @@ let body =
       }
       defaultAccountKey="ready"
       accounts={accounts}
-      saved={saved}
+      saves={saves}
     />
   ) : (
     <AccountTransferStatus

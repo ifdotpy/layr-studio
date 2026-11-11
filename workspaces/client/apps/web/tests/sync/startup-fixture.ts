@@ -1,9 +1,16 @@
 import { resourceData } from "../../src/store/runtime.ts";
 import { useEffect, useReducer, useState } from "react";
-import { reaction } from "mobx";
+import { reaction, flowResult } from "mobx";
 import { StartupOwner } from "../../src/app/startup/StartupOwner.ts";
 import { createServerViewServices } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ServerAreas } from "../../src/app/ServerAreasProvider.tsx";
+
+declare global {
+  interface Window {
+    startupFixtureFlowResult: typeof flowResult;
+  }
+}
+window.startupFixtureFlowResult = flowResult;
 
 /** Legacy recovery pages exercise the production startup lifecycle directly. */
 export function useStartupFixture() {
@@ -18,7 +25,11 @@ export function useStartupFixture() {
           store: services.store,
           screen: { active: false, channel: null },
         },
-        { canUpdateRenderer: () => false, acceptUiPreferences: () => {} },
+        {
+          canUpdateRenderer: () => false,
+          rendererBusy: () => false,
+          acceptUiPreferences: () => {},
+        },
       ),
   );
   const [, render] = useReducer((version: number) => version + 1, 0);

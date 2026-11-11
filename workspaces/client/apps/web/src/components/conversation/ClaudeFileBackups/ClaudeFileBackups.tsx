@@ -1,39 +1,16 @@
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { Button } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
-import { errorText, type PostResult } from "../../../api.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { observer } from "mobx-react-lite";
+import { ClaudeFileBackupsStore } from "./ClaudeFileBackupsStore.ts";
+export { ClaudeFileBackupsStore } from "./ClaudeFileBackupsStore.ts";
 
-type Usage = PostResult<"/api/claude/file-backups">;
-export default function ClaudeFileBackups({
-  agentId,
+export default observer(function ClaudeFileBackups({
+  store,
   onReleased,
 }: {
-  agentId: string;
+  store: ClaudeFileBackupsStore;
   onReleased: () => void;
 }) {
-  const { post } = useServerApi();
-  const [usage, setUsage] = useState<Usage | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const requestId = useRef<string | null>(null);
-  useEffect(() => {
-    let current = true;
-    post("/api/claude/file-backups", {
-      id: agentId,
-      release: false,
-      request_id: randomUUID(),
-    })
-      .then((value) => {
-        if (current) setUsage(value);
-      })
-      .catch((error) => {
-        if (current) setMessage(errorText(error));
-      });
-    return () => {
-      current = false;
-    };
-  }, [agentId, post]);
+  const { usage, busy, message } = store;
   return (
     <div>
       {usage && (
@@ -48,33 +25,11 @@ export default function ClaudeFileBackups({
       </p>
       <Button
         disabled={busy || !usage}
-        onClick={async () => {
-          setBusy(true);
-          requestId.current ||= randomUUID();
-          try {
-            const value = await post("/api/claude/file-backups", {
-              id: agentId,
-              release: true,
-              request_id: requestId.current,
-            });
-            requestId.current = null;
-            setUsage(value);
-            setMessage(
-              value.released
-                ? `Released ${value.released} backups.`
-                : "No completed backups can be released in this chat. Check other Claude chats.",
-            );
-            if (value.released) onReleased();
-          } catch (error) {
-            setMessage(errorText(error));
-          } finally {
-            setBusy(false);
-          }
-        }}
+        onClick={() => void store.release(onReleased)}
       >
         Release completed backups
       </Button>
       {message && <p role="status">{message}</p>}
     </div>
   );
-}
+});

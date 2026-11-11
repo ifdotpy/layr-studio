@@ -317,3 +317,44 @@ it("resets legacy room history after visiting a managed agent offline", () => {
   a.navigation.selectExternal("L", { requestId: "legacy-return" });
   expect(a.selected.history).not.toBe(session);
 });
+
+it("disposes request views on a conversation switch and never revives the previous owner", async () => {
+  const { approval } = await import("../../approvalFixtures.ts");
+  const { createRequestsMirror } =
+    await import("../../generated/observableResources.ts");
+  const { a } = fixture();
+  const requests = createRequestsMirror();
+  Object.defineProperty(a.scope.store, "requests", {
+    value: () => ({ current: { status: "live", data: requests.current } }),
+    configurable: true,
+  });
+  const publish = (id: string, agent: string) =>
+    requests.apply([
+      {
+        collection: "request",
+        id,
+        value: approval({
+          id,
+          agent,
+          request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+        }),
+      },
+    ]);
+  publish("request-A", "A");
+  // Select again so construction uses the fixture request projection.
+  a.navigation.selectExternal("B", { requestId: "prepare-requests" });
+  a.navigation.selectExternal("A", { requestId: "requests-A" });
+  const previous = a.selected.requestOwner;
+  expect(previous).toBeDefined();
+  const view = previous.views.get("request-A");
+  expect(view?.mounted).toBe(true);
+  a.navigation.selectExternal("B", { requestId: "requests-B" });
+  expect(a.selected.requestOwner).not.toBe(previous);
+  expect(view?.mounted).toBe(false);
+  expect(previous.views.size).toBe(0);
+  publish("request-B", "B");
+  expect(previous.views.size).toBe(0);
+  expect(
+    a.selected.requestOwner.list.requests.map((request) => request.id),
+  ).toEqual(["request-B"]);
+});

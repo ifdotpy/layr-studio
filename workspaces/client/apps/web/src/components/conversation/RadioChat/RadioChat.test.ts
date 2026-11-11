@@ -1,3 +1,5 @@
+import { observable, action } from "mobx";
+import { RoomHistory } from "../../../conversation/roomHistory.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import { required } from "../ComposerAttachments/componentTestFixtures.ts";
 // @vitest-environment happy-dom
@@ -31,12 +33,7 @@ vi.mock(
   },
 );
 
-const history = vi.hoisted(() =>
-  vi.fn(() => ({ items: [], loaded: true, before: null, reload() {} })),
-);
-vi.mock("../../../conversation/roomHistory.ts", () => ({
-  useRoomHistory: history,
-}));
+const history = vi.spyOn(RoomHistory.prototype, "start");
 vi.mock("../support/useConversationScroll.ts", () => ({
   useConversationScroll: () => ({
     scroll: { current: null },
@@ -91,7 +88,7 @@ it("renders controls from the room projection when raw radio status disagrees", 
           {},
           createElement(
             ConversationProvider,
-            { value: conversationActionsFixture() },
+            { value: conversationActionsFixture(undefined, f.store) },
             createElement(RadioChat, {
               room: required(
                 resourceData(f.store.state().current)?.rooms.get(room.id),
@@ -118,16 +115,9 @@ it("typing a radio draft does not render the screen or reacquire history", async
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  let draft = "";
-  const listeners = new Set<() => void>();
-  const actions = conversationActionsFixture();
-  actions.scope.services.drafts.getDraft = () => draft;
-  actions.scope.services.drafts.subscribeDraft = (_id, listener) => {
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  };
+  const draft = observable.box("");
+  const actions = conversationActionsFixture(undefined, f.store);
+  actions.scope.services.drafts.getDraft = () => draft.get();
   try {
     await act(async () =>
       root.render(
@@ -153,15 +143,13 @@ it("typing a radio draft does not render the screen or reacquire history", async
     const before = history.mock.calls.length;
     const input = host.querySelector("textarea");
     await act(async () => {
-      draft = "A new instruction";
-      listeners.forEach((listener) => listener());
+      action(() => draft.set("A new instruction"))();
     });
     expect(host.querySelector("textarea")).toBe(input);
-    expect(input?.value).toBe(draft);
+    expect(input?.value).toBe(draft.get());
     expect(history.mock.calls.length).toBe(before);
   } finally {
     await act(async () => root.unmount());
-    expect(listeners.size).toBe(0);
     f.store.dispose();
     host.remove();
     vi.unstubAllGlobals();
@@ -188,7 +176,7 @@ it.each([408, 409])(
       },
     };
     const f = fixture(value),
-      actions = conversationActionsFixture();
+      actions = conversationActionsFixture(undefined, f.store);
     actions.scope.services.drafts.getDraft = () => "instruction";
     const host = document.createElement("div");
     document.body.append(host);
@@ -236,3 +224,89 @@ it.each([408, 409])(
     }
   },
 );
+
+it("renders radio-turn requests and acts through the selected conversation request owner", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: new EventTarget(),
+  });
+  const { requestFixture } =
+    await import("../questions/support/requestFixtures.ts");
+  const { approval, question } = await import("../../../approvalFixtures.ts");
+  const f = requestFixture([
+    approval({
+      id: "radio-question",
+      agent: "speaker",
+      turn: "turn",
+      request: {
+        kind: "agent_question",
+        questions: [question("choice", "Radio answer?")],
+      },
+    }),
+  ]);
+  f.state.apply([
+    {
+      collection: "room",
+      id: room.id,
+      value: {
+        ...room,
+        radio: {
+          ...room.radio!,
+          active: {
+            agentId: "speaker",
+            turnId: "turn",
+            epoch: 1,
+            eventId: "event",
+            identity: [null, null, 1],
+            threadId: null,
+            through: 1,
+          },
+        },
+      },
+    },
+  ]);
+  const actions = conversationActionsFixture(() => {}, f.store);
+  actions.selected.requestOwner.start();
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            ConversationProvider,
+            { value: actions },
+            createElement(
+              (
+                await import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+              ).ServerStoreProvider,
+              { value: f.store },
+              createElement(RadioChat, {
+                room: f.state.current.rooms.get(room.id)!,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(
+      host.querySelector('[data-request="radio-question"]'),
+    ).not.toBeNull();
+    const view = actions.selected.requestOwner.views.get("radio-question")!;
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>("[data-answer]")!.click(),
+    );
+    expect(view.open).toBe(true);
+    expect(
+      host.querySelector('textarea[aria-label="Radio answer?"]'),
+    ).not.toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    actions.selected.closeConversation();
+    actions.scope.services.close();
+    f.store.dispose();
+  }
+});

@@ -1,12 +1,12 @@
+import { ProjectServerSelection } from "../../../app/projects/CreationOwner.ts";
 import {
   makeAutoObservable,
   computed,
-  observableStruct,
   compareStructural,
   flowResult,
   reaction,
+  when,
 } from "mobx";
-import type { DiscoveredServer } from "../../../servers/discoveryModel.ts";
 import { ShellSidebarSource } from "../../../app/startup/ShellSidebarSource.ts";
 import { ServerAreasProvider } from "../../shell/ServerAreasProvider/ServerAreasProvider.tsx";
 import { observer } from "mobx-react-lite";
@@ -38,7 +38,7 @@ import {
 import { orderPreferenceServers } from "../../../servers/preferenceServerOrder.ts";
 import { preferenceMemory } from "../../../servers/storage.ts";
 import { writePreferenceEdit } from "../../../sync/uiPreferenceStore.ts";
-import { useUiPreferenceSync } from "../../../servers/useUiPreferenceSync.ts";
+import { startUiPreferenceSync } from "../../../servers/useUiPreferenceSync.ts";
 import {
   StudioSettingsLayout,
   type StudioSettingsTab,
@@ -48,7 +48,7 @@ import {
   ServerSettingsContext,
   ServerManagementPanelContext,
 } from "../../../servers/ServerSettingsContext.tsx";
-import { useServerDiscovery } from "../../../servers/useServerDiscovery.ts";
+import { ServerDiscovery } from "../../../servers/useServerDiscovery.ts";
 import { modalSizes } from "../../../theme.ts";
 import {
   Button,
@@ -64,13 +64,7 @@ import {
   Settings,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import App from "../../shell/App/App.tsx";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "../../../servers/serverAliases.ts";
 import { CombinedSidebarOwner } from "../../../servers/CombinedServerSidebar.tsx";
@@ -119,6 +113,7 @@ const uiOnly =
   new URLSearchParams(location.search).get("studio-ui-only") === "1";
 export class ShellState {
   failure = "";
+  projectSelection: ProjectServerSelection | null = null;
   newChatDialog: {
     project: LocationProject;
     server: string;
@@ -151,13 +146,9 @@ export class ShellState {
   notificationState = new Map<string, { seen: Set<string>; started: number }>();
   screens = new Map<string, ScreenChannel>();
   pending = new Map<string, ServerCommand>();
-  readyScreens = new Set<string>();
-  readyWaiters = new Map<string, Set<() => void>>();
   serviceInstances = new Map<string, ServerServices>();
   revived: Record<string, number> = {};
   revivedSeen: Record<string, number> = {};
-  peers: DiscoveredServer[] = [];
-  discoveredAliases: Record<string, string> = {};
   readonly server = localServer();
   readonly selection = new ScreenSelection(
     this.servers.map((server) => server.id),
@@ -165,7 +156,11 @@ export class ShellState {
   readonly sidebar = new ShellSidebarSource(this.selection, (id) =>
     this.serviceInstances.get(id),
   );
-  constructor(localServices?: ServerServices) {
+  readonly localServices;
+  readonly discovery;
+  readonly combinedSidebar;
+  constructor(localServices = createServerServices(localServer())) {
+    this.localServices = localServices;
     this.serviceInstances = new Map(
       this.servers.map((server) => [
         server.id,
@@ -181,15 +176,32 @@ export class ShellState {
         selection: false,
         sidebar: false,
         screens: false,
-        // Discovery derives fresh objects per render; equal content must not re-render the shell.
-        peers: observableStruct,
-        discoveredAliases: observableStruct,
         servers: computed({ equals: compareStructural }),
         aliases: computed({ equals: compareStructural }),
       },
       { autoBind: true, deep: false },
     );
+    this.discovery = new ServerDiscovery(
+      localServices,
+      !uiOnly &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname),
+      !uiOnly,
+      () =>
+        Object.fromEntries(
+          this.servers.map((server) => [server.id, server.workspaceId]),
+        ),
+    );
+    localServices.shellSettings = this;
+    this.combinedSidebar = createCombinedSidebar(this, localServices);
   }
+  get directScreen() {
+    return (
+      !uiOnly &&
+      !this.paired.length &&
+      this.accountsServers.length === this.servers.length
+    );
+  }
+
   load(): StudioServer[] {
     try {
       return readServers();
@@ -207,15 +219,11 @@ export class ShellState {
       }),
     );
   }
-  setDiscovery(peers: DiscoveredServer[], aliases: Record<string, string>) {
-    this.peers = peers;
-    this.discoveredAliases = aliases;
-  }
   get aliases() {
     return Object.fromEntries(
       this.servers.map((server) => [
         server.id,
-        this.discoveredAliases[server.id] ||
+        this.discovery?.snapshot?.aliases?.[server.id] ||
           server.alias ||
           (server.id === "local"
             ? DEFAULT_LOCAL_SERVER_ALIAS
@@ -230,13 +238,41 @@ export class ShellState {
     return this.selection.current;
   }
   get accountsServers() {
-    return accountServers(this.servers, this.peers);
+    return accountServers(
+      this.servers,
+      this.discovery?.snapshot?.servers || [],
+    );
   }
   get sidebarVisible() {
     return !this.sidebar.hidden;
   }
 
   set(fields: Partial<ShellState>) {
+    if ("newChatDialog" in fields) {
+      this.projectSelection?.dispose();
+      const dialog = fields.newChatDialog;
+      this.projectSelection = dialog
+        ? new ProjectServerSelection(
+            dialog.project,
+            () =>
+              projectServerChoices(
+                this.servers,
+                this.sidebar.status,
+                Object.fromEntries(
+                  (this.discovery.snapshot?.servers || []).map((server) => [
+                    server.id,
+                    server.reachability,
+                  ]),
+                ),
+              ).map((row) => ({
+                ...row,
+                system: this.sidebar.navigation[row.id]?.system,
+              })),
+            dialog.server,
+            (id) => this.serviceInstances.get(id),
+          )
+        : null;
+    }
     Object.assign(this, fields);
   }
   setSettingsOpen(settingsOpen: boolean) {
@@ -279,7 +315,7 @@ export class ShellState {
   send(id: string, command: ServerCommand) {
     this.select(id);
     const screen = this.screens.get(id);
-    if (!screen?.ready || !this.readyScreens.has(id))
+    if (!screen?.ready || !this.sidebar.navigation[id]?.ready)
       this.pending.set(id, command);
     else
       void screen
@@ -287,7 +323,6 @@ export class ShellState {
         .catch((error) => this.set({ failure: String(error) }));
   }
   applyNavigation(id: string, value: ServerNavigation) {
-    if (value.ready) this.readyWaiters.get(id)?.forEach((resolve) => resolve());
     this.sidebar.setNavigation((old) => ({ ...old, [id]: value }));
     if (value.ready && value.alertsReady !== false) {
       const previous = this.notificationState.get(id);
@@ -342,21 +377,15 @@ export class ShellState {
   *executeCommand(owner: string, command: ServerCommand) {
     const screen = this.screens.get(owner);
     if (!screen) throw new Error("The server is no longer paired.");
-    if (!this.readyScreens.has(owner) || !screen.ready) {
-      yield new Promise<void>((resolve, reject) => {
-        const waiters = this.readyWaiters.get(owner) || new Set<() => void>();
-        const done = () => {
-          clearTimeout(timer);
-          waiters.delete(done);
-          resolve();
-        };
-        const timer = setTimeout(() => {
-          waiters.delete(done);
-          reject(new Error("The server screen is unavailable."));
-        }, 15000);
-        waiters.add(done);
-        this.readyWaiters.set(owner, waiters);
-      });
+    if (!this.sidebar.navigation[owner]?.ready || !screen.ready) {
+      try {
+        yield when(
+          () => !!this.sidebar.navigation[owner]?.ready && screen.ready,
+          { timeout: 15000 },
+        );
+      } catch {
+        throw new Error("The server screen is unavailable.");
+      }
     }
     if (this.screens.get(owner) !== screen)
       throw new Error(
@@ -366,12 +395,7 @@ export class ShellState {
   }
   screenEvents(id: string, data: ScreenMessage, channel: ScreenChannel) {
     if (this.screens.get(id) !== channel) return;
-    if (
-      data.kind === "studio-server-activity" &&
-      typeof data.busy === "boolean"
-    ) {
-      // Activity stays with the service; screen controllers remain mounted.
-    } else if (data.kind === "studio-open-new-chat") {
+    if (data.kind === "studio-open-new-chat") {
       this.sidebar.setMobileOpen(false);
       const view = this.sidebar.navigation[id];
       const project = view?.projects.find(
@@ -491,7 +515,6 @@ export class ShellState {
         !Array.isArray(value.chats)
       )
         return;
-      if (value.ready) this.readyScreens.add(id);
       this.applyNavigation(id, value);
     } else if (data.kind === "studio-server-accounts") {
       const accounts = readServerAccounts(data.accounts);
@@ -523,6 +546,39 @@ export class ShellState {
     } catch {}
   }
   start() {
+    const stopDiscovery = this.discovery.start();
+    const stopSidebarSource = this.sidebar.start();
+    const stopServices = reaction(
+      () => [this.servers, this.revived, this.directScreen],
+      () => this.connectServices(this.localServices, this.directScreen),
+      { fireImmediately: true },
+    );
+    let stopPreferences = () => {};
+    const stopRegistry = reaction(
+      () =>
+        JSON.stringify(
+          this.servers.map(({ id, origin, credentialId, workspaceId }) => [
+            id,
+            origin,
+            credentialId,
+            workspaceId,
+          ]),
+        ),
+      () => {
+        stopPreferences();
+        stopPreferences = startUiPreferenceSync(this.servers);
+      },
+      { fireImmediately: true },
+    );
+    let stopCombined = () => {};
+    const stopSidebar = reaction(
+      () => this.directScreen,
+      (direct) => {
+        stopCombined();
+        stopCombined = direct ? () => {} : this.combinedSidebar.start();
+      },
+      { fireImmediately: true },
+    );
     const stored = (event: Event) => {
       const key = (event as StorageEvent).key;
       if (key === SERVER_REGISTRY_KEY || key === null) this.reread();
@@ -552,6 +608,13 @@ export class ShellState {
       for (const [name, listener] of events)
         window.removeEventListener(name, listener);
       stopRevive();
+      stopDiscovery();
+      stopSidebarSource();
+      stopServices();
+      stopRegistry();
+      stopPreferences();
+      stopSidebar();
+      stopCombined();
       stopNavigate();
       this.close();
     };
@@ -578,7 +641,6 @@ export class ShellState {
       let channel =
         previous === service ? this.screens.get(server.id) : undefined;
       if (!channel) {
-        this.readyScreens.delete(server.id);
         const next = createScreenChannel(server.id, (message) =>
           this.screenEvents(server.id, message, next),
         );
@@ -590,6 +652,7 @@ export class ShellState {
         directScreen ? null : channel,
         () => this.selection.current === server.id,
       );
+      if (!service.areas.stops.length) service.areas.start();
     }
     for (const [id, previous] of this.serviceInstances) {
       const next = services.get(id);
@@ -606,6 +669,8 @@ export class ShellState {
     this.serviceInstances = services;
   }
   close() {
+    this.projectSelection?.dispose();
+    this.projectSelection = null;
     for (const channel of this.screens.values()) channel.close();
     for (const service of this.serviceInstances.values()) service.close();
     this.screens = new Map();
@@ -716,53 +781,70 @@ export class ShellState {
   }
 }
 
-export default function MultiServerApp() {
-  // Pairing changes the shell, but must keep the local database and transport owner.
-  const [localServices] = useState(() => createServerServices(localServer()));
-  const shell = <MultiServerShell localServices={localServices} />;
-  return localServices ? (
-    <ServerServicesProvider services={localServices}>
-      {shell}
-    </ServerServicesProvider>
-  ) : (
-    shell
+function createCombinedSidebar(
+  shell: ShellState,
+  localServices: ServerServices,
+) {
+  return new CombinedSidebarOwner(
+    shell.sidebar,
+    {
+      get backends() {
+        return shell.sidebar.backends;
+      },
+      get aliases() {
+        return shell.aliases;
+      },
+      online: shell.sidebar.online,
+      refreshOwner: (owner) => flowResult(shell.refreshSidebarOwner(owner)),
+      executeCommand: (owner, command) =>
+        flowResult(shell.executeCommand(owner, command)),
+      send: shell.send,
+      applyNavigation: shell.applyNavigation,
+      settings: shell.openManager,
+      search: () => shell.set({ searchOpen: true }),
+      notify: (failure: ShellState["failure"]) => shell.set({ failure }),
+    },
+    {
+      areas: localServices.areas,
+      get creation() {
+        const selected = shell.sidebar.navigation[shell.sidebar.current];
+        return (
+          (selected &&
+            shell.serviceInstances.get(shell.sidebar.current)?.areas
+              .creation) ||
+          localServices.areas.creation
+        );
+      },
+    },
   );
 }
 
+export function createShellState() {
+  const shell = new ShellState();
+  const stop = shell.start();
+  window.addEventListener("pagehide", (event) => !event.persisted && stop());
+  return shell;
+}
+export default function MultiServerApp({ shell }: { shell: ShellState }) {
+  return (
+    <ServerServicesProvider services={shell.localServices}>
+      <MultiServerShell shell={shell} />
+    </ServerServicesProvider>
+  );
+}
 const MultiServerShell = observer(function MultiServerShell({
-  localServices,
+  shell,
 }: {
-  localServices?: ServerServices | undefined;
+  shell: ShellState;
 }) {
-  const [shell] = useState(() => new ShellState(localServices));
+  const localServices = shell.localServices;
   const newChatDialog = shell.newChatDialog;
-  if (localServices) localServices.shellSettings = shell;
   const shellRef = useRef<HTMLDivElement>(null);
   const { setColorScheme } = useMantineColorScheme();
-  const discovery = useServerDiscovery(
-    !uiOnly && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname),
-    !uiOnly,
-    Object.fromEntries(
-      shell.servers.map((server) => [server.id, server.workspaceId]),
-    ),
-  );
-  useLayoutEffect(() => {
-    shell.setDiscovery(
-      discovery.snapshot?.servers || [],
-      discovery.snapshot?.aliases || {},
-    );
-  }, [discovery.snapshot]);
-  useUiPreferenceSync(shell.servers);
+  const discovery = shell.discovery;
   const services = shell.serviceInstances;
-  const directScreen =
-    !uiOnly &&
-    !shell.paired.length &&
-    shell.accountsServers.length === shell.servers.length;
-  useLayoutEffect(
-    () => shell.connectServices(localServices, directScreen),
-    [shell.servers, shell.revived, localServices, directScreen],
-  );
-  useEffect(() => shell.start(), [shell]);
+  const directScreen = shell.directScreen;
+  const combinedSidebar = shell.combinedSidebar;
   const mergedSidebar = shell.sidebar.model;
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -881,41 +963,7 @@ const MultiServerShell = observer(function MultiServerShell({
       </div>
     </Modal>
   );
-  const [combinedSidebar] = useState(
-    () =>
-      new CombinedSidebarOwner(
-        shell.sidebar,
-        {
-          get backends() {
-            return shell.sidebar.backends;
-          },
-          get aliases() {
-            return shell.aliases;
-          },
-          online: shell.sidebar.online,
-          refreshOwner: (owner) => flowResult(shell.refreshSidebarOwner(owner)),
-          executeCommand: (owner, command) =>
-            flowResult(shell.executeCommand(owner, command)),
-          send: shell.send,
-          applyNavigation: shell.applyNavigation,
-          settings: shell.openManager,
-          search: () => shell.set({ searchOpen: true }),
-          notify: (failure: ShellState["failure"]) => shell.set({ failure }),
-        },
-        {
-          areas: localServices!.areas,
-          get creation() {
-            const selected = shell.sidebar.navigation[shell.sidebar.current];
-            return (
-              (selected &&
-                shell.serviceInstances.get(shell.sidebar.current)?.areas
-                  .creation) ||
-              localServices!.areas.creation
-            );
-          },
-        },
-      ),
-  );
+
   useEffect(() => {
     const narrow = window.matchMedia(layoutQueries.navigationCompact);
     let observed: Element | null = null;
@@ -959,10 +1007,6 @@ const MultiServerShell = observer(function MultiServerShell({
     shell.servers.length,
     combinedSidebar.list.frame.aside,
   ]);
-  useEffect(
-    () => (directScreen ? undefined : combinedSidebar.start()),
-    [directScreen, combinedSidebar],
-  );
   if (directScreen)
     return (
       <ServerSettingsContext.Provider value={shell}>
@@ -1115,7 +1159,7 @@ const MultiServerShell = observer(function MultiServerShell({
       >
         {newChatDialog && (
           <ProjectServerCards
-            servicesFor={(id) => services.get(id)}
+            owner={shell.projectSelection!}
             project={newChatDialog.project}
             servers={projectServerChoices(
               shell.servers,
@@ -1130,7 +1174,6 @@ const MultiServerShell = observer(function MultiServerShell({
               ...row,
               system: shell.sidebar.navigation[row.id]?.system,
             }))}
-            lastServer={newChatDialog.server}
             onCancel={() => shell.set({ newChatDialog: null })}
             onAdd={(server) => {
               shell.send(newChatDialog.server, {

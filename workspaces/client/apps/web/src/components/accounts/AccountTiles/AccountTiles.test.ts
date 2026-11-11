@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createServerStore } from "../../../store/server.ts";
 import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
@@ -5,7 +6,8 @@ import {
   AccountStatus as GeneratedApiAccountStatus,
   ProviderKind,
 } from "../../../generated/api.ts";
-import { createElement } from "react";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
@@ -199,4 +201,70 @@ test("only a new server projection changes the shown remaining limit", () => {
     accountLimitView(account(), reading(), true, updated).remaining,
   ).toBeNull();
   vi.useRealTimers();
+});
+
+test("a provider round-trip invalidates the browsed tab and reveals the externally selected account", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  const store = createServerStore(
+    createSubscriptions({
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    }),
+  );
+  const accounts = [
+    {
+      id: "codex",
+      provider: ProviderKind.codex,
+      label: "Codex account",
+      home: "",
+      source: "fixture",
+      status: GeneratedApiAccountStatus.ready,
+    },
+    {
+      id: "claude",
+      provider: ProviderKind.claude,
+      label: "Claude account",
+      home: "",
+      source: "fixture",
+      status: GeneratedApiAccountStatus.ready,
+    },
+  ] satisfies Account[];
+  const render = (value: string) =>
+    root.render(
+      createElement(
+        MantineProvider,
+        { env: "test" },
+        createElement(
+          ServerStoreProvider,
+          { value: store },
+          createElement(AccountTiles, {
+            label: "Accounts",
+            accounts,
+            value,
+            onChange() {},
+          }),
+        ),
+      ),
+    );
+  try {
+    await act(async () => render("codex"));
+    const claude = host.querySelector<HTMLInputElement>(
+      'input[value="claude"]',
+    );
+    if (!claude) throw new Error("Missing Claude provider tab");
+    await act(async () => claude.click());
+    expect(host.querySelector('[data-account-key="claude"]')).not.toBeNull();
+    await act(async () => render("claude"));
+    await act(async () => render("codex"));
+    expect(
+      host.querySelector('[data-account-key="codex"][data-selected="true"]'),
+    ).not.toBeNull();
+    expect(host.querySelector('[data-account-key="claude"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    store.dispose();
+    vi.unstubAllGlobals();
+  }
 });

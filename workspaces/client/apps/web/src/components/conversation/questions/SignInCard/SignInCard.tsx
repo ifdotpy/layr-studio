@@ -1,6 +1,6 @@
 import { resourceData } from "../../../../store/runtime.ts";
 import { useServerStore } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { KeyRound } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -25,16 +25,7 @@ import {
   waitingChatsLabel,
 } from "./signInCardModel.ts";
 
-const TICK_MS = 15_000;
-
-function useNow() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-  return now;
-}
+import { now } from "../../../../clock.ts";
 
 /** A sign-in request of an agent. The link opens in
  * the system browser after the approval; a window that cannot hold the redirect port takes the
@@ -48,10 +39,9 @@ export default observer(function SignInCard({ view }: { view: RequestView }) {
   const serverName = services?.owner.alias || services?.owner.label;
   const store = useServerStore();
   const agents = resourceData(store.state().current)?.agents;
-  const now = useNow();
   const flow = signInFlow(details);
   const state = signInState(details, sending);
-  const timeLeft = timeLeftLabel(signInDeadline(details), now);
+  const timeLeft = timeLeftLabel(signInDeadline(details), now());
   const waiting = waitingChatsLabel(details.joined, {
     get: (id) => agents?.get(id)?.name || "",
   });

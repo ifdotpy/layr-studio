@@ -1,8 +1,8 @@
-import type { useAttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
-/** The renderer under test wrote this local document with useAttachmentDrafts. */
+import type { AttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
+/** The renderer under test wrote this local document with AttachmentDrafts. */
 export function readStoredAttachments(
   empty: "{}" | null = "{}",
-): ReturnType<typeof useAttachmentDrafts>[0] {
+): AttachmentDrafts["current"] {
   return JSON.parse(
     (localStorage.getItem("codex-agent-attachments:fixture") || empty)!,
   );

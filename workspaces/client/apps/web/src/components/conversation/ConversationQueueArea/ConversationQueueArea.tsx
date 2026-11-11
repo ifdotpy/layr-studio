@@ -3,19 +3,15 @@ import { observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
 import { errorText } from "../../../api.ts";
 import { isCyberPolicyRefusal } from "../../../nativeErrors.ts";
-import { providerSupports } from "../../../generated/providerKind.ts";
-import { mergeQueueOrder } from "../support/messageDelivery.ts";
 import MessageQueue from "../MessageQueue/MessageQueue.tsx";
 export function renderConversationQueueArea() {
   const control = useConversationStore();
-  const { actions, messageQueue, stateDir, opened } = control.context;
-  const { navigation, notices, startup, selected } = actions;
+  const { actions, messageQueue } = control.context;
+  const { navigation, notices, selected } = actions;
   const { selectedRoom: room, selectedAgent: agent } = navigation;
   const managed = control.managed;
-  const queueScope = `${stateDir}:${startup.workspaceId || ""}:${opened}`;
   const detail = selected.detail;
   if (room) return null;
-  const controls = { steer: providerSupports(agent?.provider, "steer") };
   return (
     <>
       {managed && (
@@ -35,29 +31,7 @@ export function renderConversationQueueArea() {
               </Button>
             </div>
           )}
-          <MessageQueue
-            loading={messageQueue.loading}
-            items={control.nextTurnQueue}
-            scope={queueScope}
-            onEdit={messageQueue.edit}
-            onCancel={messageQueue.cancel}
-            onSendNow={controls.steer ? messageQueue.sendNow : undefined}
-            onReorder={(ids) =>
-              messageQueue.reorder(
-                mergeQueueOrder(
-                  messageQueue.items.map((item) => item.id),
-                  control.nextTurnQueue.map((item) => item.id),
-                  ids,
-                ),
-              )
-            }
-            canReorder={
-              messageQueue.canReorder &&
-              !control.nextTurnQueue.some((item) => item.localDelivery)
-            }
-            refreshing={messageQueue.busy}
-            error={messageQueue.error}
-          />
+          <MessageQueue store={control.queueEditor} />
         </>
       )}
       {agent && isCyberPolicyRefusal(detail?.error) && (

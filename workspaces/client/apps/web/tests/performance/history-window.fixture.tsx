@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import "../../src/rendererStyles.ts";
 import { required } from "./performance-fixture.ts";
 import type { Message } from "../../src/types.ts";
@@ -57,17 +58,9 @@ const make = (start: number, count: number): Message[] =>
       },
     ];
   }).flat();
-const listeners = new Set<() => void>();
-let draft = "";
-const subscribe = (_id: string, listener: () => void) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
-const getDraft = () => draft;
-const setDraft = (value: string) => {
-  draft = value;
-  listeners.forEach((fn) => fn());
-};
+const draft = observable.box("");
+const getDraft = () => draft.get();
+const setDraft = action((value: string) => draft.set(value));
 window.renderedMessages = 0;
 window.renderedMessageIds = [];
 function PreviewMessage({ m }: { m: Message }) {
@@ -279,10 +272,9 @@ function Harness() {
       <PromptComposer
         session="fixture"
         getDraft={getDraft}
-        subscribeDraft={subscribe}
         onSubmit={(e) => {
           e.preventDefault();
-          setSent(draft);
+          setSent(draft.get());
           setDraft("");
         }}
       >

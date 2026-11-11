@@ -20,7 +20,9 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import App from "./components/shell/App/App.tsx";
 import { SidebarWarningsProvider } from "./components/sidebar/SidebarWarnings/SidebarWarnings.tsx";
-import MultiServerApp from "./components/servers/MultiServerApp/MultiServerApp.tsx";
+import MultiServerApp, {
+  createShellState,
+} from "./components/servers/MultiServerApp/MultiServerApp.tsx";
 import { isServerView } from "./servers/environment.ts";
 import { isRemoteServerView } from "./servers/environment.ts";
 import { isClassicServerView } from "./servers/environment.ts";
@@ -57,6 +59,13 @@ async function mount() {
     const services = isServerView
       ? createServerViewServices((scope) => new ServerAreas(scope))
       : null;
+    if (services) {
+      services.areas.start();
+      window.addEventListener("pagehide", (event) => {
+        if (!event.persisted) services.close();
+      });
+    }
+    const shell = services ? null : createShellState();
     createRoot(container).render(
       <UIErrorBoundary label="Studio" fullPage>
         <MantineProvider theme={theme} defaultColorScheme="auto">
@@ -69,7 +78,7 @@ async function mount() {
                   </ServerAreasProvider>
                 </ServerServicesProvider>
               ) : (
-                <MultiServerApp />
+                <MultiServerApp shell={shell!} />
               )}
             </SidebarWarningsProvider>
           </BottomInsetBand>

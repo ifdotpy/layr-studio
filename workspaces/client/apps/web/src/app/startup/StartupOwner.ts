@@ -1,4 +1,5 @@
-import { autorun, makeAutoObservable, reaction, runInAction } from "mobx";
+import { serverViewId, serverParentOrigin } from "../../servers/environment.ts";
+import { autorun, makeAutoObservable, reaction } from "mobx";
 import { errorText } from "../../api.ts";
 import { resourceData } from "../../store/runtime.ts";
 import type { UiPreferenceProjection } from "../../sync/entityContracts.ts";
@@ -11,6 +12,7 @@ import type { AppScope, Disposer } from "../contracts.ts";
 
 export interface StartupInputs {
   canUpdateRenderer(): boolean;
+  rendererBusy(): boolean;
   acceptUiPreferences(preferences: UiPreferenceProjection): void;
 }
 
@@ -25,7 +27,11 @@ export class StartupOwner {
   schemaMismatch = false;
   schemaMismatchNeedsRebuild = false;
   schemaUpdateError = "";
-  rendererBusy = false;
+  get rendererBusy() {
+    return (
+      this.inputs.rendererBusy() || this.scope.services.api.posting.count > 0
+    );
+  }
   generation = 0;
   startupExhausted = false;
   credentialRecovery = new ReadRecoveryBudget();
@@ -89,24 +95,22 @@ export class StartupOwner {
       this.scope.services.api.schemaUpdateFailedAfterReload();
     this.schemaMismatch = true;
   }
-  async retryUpdate() {
+  *retryUpdate() {
     this.schemaUpdateError = "";
     try {
-      await this.scope.services.api.updateRendererAndReload();
+      yield this.scope.services.api.updateRendererAndReload();
     } catch (error) {
       if (this.running)
-        runInAction(() => {
-          this.schemaUpdateError =
-            errorText(error) || "Studio update failed. Try again.";
-        });
+        this.schemaUpdateError =
+          errorText(error) || "Studio update failed. Try again.";
     }
   }
-  async refreshCredentials(resetRecovery = true): Promise<void> {
+  *refreshCredentials(resetRecovery = true): Generator<unknown, void, unknown> {
     if (resetRecovery) {
       this.startupExhausted = false;
       this.credentialRecovery = new ReadRecoveryBudget();
       if (!this.initialized) {
-        await this.restart();
+        yield this.restart();
         return;
       }
     }
@@ -114,12 +118,10 @@ export class StartupOwner {
     clearTimeout(this.credentialRetry);
     const request = ++this.generation;
     try {
-      await this.scope.services.api.refreshSession();
+      yield this.scope.services.api.refreshSession();
       if (!this.running || request !== this.generation) return;
       this.startupExhausted = false;
-      runInAction(() => {
-        this.startupError = "";
-      });
+      this.startupError = "";
     } catch (error) {
       if (!this.running || request !== this.generation) return;
       const delay = this.reportStartupFailure(error, this.credentialRecovery);
@@ -148,17 +150,17 @@ export class StartupOwner {
     this.startupError = errorText(reported);
     return delay;
   }
-  async initialize() {
+  *initialize() {
     if (!this.running || this.databaseRecovery.exhaustedError) return;
     const request = this.generation;
     try {
-      const storage = await this.scope.services.sync.syncDatabase();
+      const storage: Awaited<
+        ReturnType<AppScope["services"]["sync"]["syncDatabase"]>
+      > = yield this.scope.services.sync.syncDatabase();
       if (!this.running || request !== this.generation) return;
       this.initialized = true;
-      runInAction(() => {
-        this.workspaceId = storage.workspaceId;
-      });
-      await this.refreshCredentials(false);
+      this.workspaceId = storage.workspaceId;
+      yield this.refreshCredentials(false);
     } catch (error) {
       if (!this.running || request !== this.generation) return;
       const delay = this.reportStartupFailure(error, this.databaseRecovery);
@@ -166,37 +168,50 @@ export class StartupOwner {
         this.databaseRetry = setTimeout(this.initialize, delay);
     }
   }
-  async restart() {
-    clearTimeout(this.databaseRetry);
-    clearTimeout(this.credentialRetry);
+  *restart(): Generator<unknown, void, unknown> {
+    [this.databaseRetry, this.credentialRetry].forEach(clearTimeout);
     this.generation++;
     this.databaseRecovery = new ReadRecoveryBudget();
     this.credentialRecovery = new ReadRecoveryBudget();
     this.startupExhausted = false;
-    if (this.initialized) await this.refreshCredentials(false);
-    else await this.initialize();
+    if (this.initialized) yield this.refreshCredentials(false);
+    else yield this.initialize();
+  }
+  receiveTransportError(message: string) {
+    this.transportError = message;
+  }
+  receiveProjection(message: string, ready: boolean) {
+    this.projectionError = message;
+    if (ready && !this.startupExhausted) this.startupError = "";
+  }
+  receiveUpdateError(error: unknown) {
+    this.schemaUpdateError = errorText(error);
   }
   start(): Disposer {
     this.running = true;
-    const { api, resources, activity } = this.scope.services;
-    this.rendererBusy = activity.serverActivityActive();
+    const { api, resources } = this.scope.services;
     let interrupted = false;
     this.stops = [
       api.onApiSchemaMismatch(this.showSchemaMismatch),
-      activity.subscribeServerActivity(() =>
-        runInAction(() => {
-          this.rendererBusy = activity.serverActivityActive();
-        }),
+      reaction(
+        () => this.rendererBusy,
+        (busy) => {
+          if (serverViewId && window.parent !== window)
+            window.parent.postMessage(
+              { kind: "studio-server-activity", serverId: serverViewId, busy },
+              serverParentOrigin,
+            );
+        },
+        { fireImmediately: true },
       ),
       resources.watchResourceConnection((status, activity, detail) => {
-        runInAction(() => {
-          this.transportError =
-            status === "degraded" ||
+        this.receiveTransportError(
+          status === "degraded" ||
             status === "offline" ||
             activity === "offline"
-              ? selectMessageConnection(status, activity, detail).message
-              : "";
-        });
+            ? selectMessageConnection(status, activity, detail).message
+            : "",
+        );
         if (status === "degraded" || status === "offline") interrupted = true;
         if (status === "live" && interrupted) {
           interrupted = false;
@@ -206,14 +221,13 @@ export class StartupOwner {
       autorun(() => {
         const current = this.scope.store.state().current;
         const ready = this.isReady;
-        runInAction(() => {
-          this.projectionError =
-            current.status === "error" ||
+        this.receiveProjection(
+          current.status === "error" ||
             (current.status === "stale" && current.error)
-              ? errorText(current.error)
-              : "";
-          if (ready && !this.startupExhausted) this.startupError = "";
-        });
+            ? errorText(current.error)
+            : "",
+          ready,
+        );
       }),
       autorun(() => {
         const data = resourceData(this.scope.store.state().current);
@@ -253,9 +267,7 @@ export class StartupOwner {
             )
             .catch((error: unknown) => {
               if (!controller.signal.aborted && this.running)
-                runInAction(() => {
-                  this.schemaUpdateError = errorText(error);
-                });
+                this.receiveUpdateError(error);
             });
         },
         { fireImmediately: true },
@@ -268,11 +280,7 @@ export class StartupOwner {
   dispose() {
     this.running = false;
     this.generation++;
-    clearTimeout(this.credentialRetry);
-    clearTimeout(this.databaseRetry);
-    this.stops
-      .splice(0)
-      .reverse()
-      .forEach((stop) => stop());
+    [this.credentialRetry, this.databaseRetry].forEach(clearTimeout);
+    for (const stop of this.stops.splice(0).reverse()) stop();
   }
 }

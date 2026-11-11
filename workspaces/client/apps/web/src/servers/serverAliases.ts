@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 export const DEFAULT_LOCAL_SERVER_ALIAS = "LOC";
 export const ALIASES_EVENT = "studio-server-aliases";
 
@@ -36,23 +37,14 @@ export function defaultServerAlias(
   throw new Error("All server aliases are in use.");
 }
 
-let frameAliases: Record<string, string> | null = null;
-export function publishServerAliases(aliases: Record<string, string>) {
-  frameAliases = aliases;
-  window.dispatchEvent(new Event(ALIASES_EVENT));
-}
-export function observeServerAliases(
-  read: () => Record<string, string>,
-  accept: (aliases: Record<string, string>) => void,
-) {
-  const update = () => accept(frameAliases || read());
-  update();
-  window.addEventListener(ALIASES_EVENT, update);
-  window.addEventListener("studio-server-registry", update);
-  window.addEventListener("storage", update);
-  return () => {
-    window.removeEventListener(ALIASES_EVENT, update);
-    window.removeEventListener("studio-server-registry", update);
-    window.removeEventListener("storage", update);
-  };
-}
+const frameAliases = observable.box<Record<string, string> | null>(null, {
+  deep: false,
+});
+export const currentServerAliases = (read: () => Record<string, string>) =>
+  frameAliases.get() || read();
+export const publishServerAliases = action(
+  (aliases: Record<string, string>) => {
+    frameAliases.set(aliases);
+    window.dispatchEvent(new Event(ALIASES_EVENT));
+  },
+);

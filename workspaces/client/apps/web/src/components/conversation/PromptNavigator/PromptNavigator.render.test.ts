@@ -4,17 +4,17 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { observable, runInAction } from "mobx";
 import { expect, it, vi } from "vitest";
-import PromptNavigator from "./PromptNavigator.tsx";
+import PromptNavigator, { createPromptNavigation } from "./PromptNavigator.tsx";
 import { MessageSendStatus } from "../../../generated/api.ts";
 import type { Message } from "../../../types.ts";
 
-const probe = vi.hoisted(() => ({ renders: 0 }));
+const probe = vi.hoisted(() => ({ renders: 0, search: vi.fn() }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
-    useServerApi: () => {
+    useServerNet: () => {
       probe.renders++;
-      return { syncGet: vi.fn() };
+      return { reads: { transcriptSearch: probe.search } };
     },
   }),
 );
@@ -68,6 +68,7 @@ it("isolates transcript changes and scroll-active markers from the navigator", a
   document.body.append(host, transcript);
   const root = createRoot(host);
   const props = {
+    navigationStore: createPromptNavigation(messages),
     messages,
     container: { current: transcript },
     storageKey: "test",
@@ -162,6 +163,94 @@ it("isolates transcript changes and scroll-active markers from the navigator", a
     await act(async () => root.unmount());
     host.remove();
     transcript.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("observes transcript search only after the input debounce and hides older results", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.useFakeTimers();
+  probe.search.mockReset();
+  probe.search.mockReturnValue({
+    current: {
+      status: "live",
+      data: {
+        results: [{ id: "found", role: "assistant", text: "found result" }],
+        truncated: false,
+      },
+    },
+  });
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  document.body.append(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(PromptNavigator, {
+            messages: [{ id: "one", role: "user", text: "Question" }],
+            navigationStore: createPromptNavigation([
+              { id: "one", role: "user", text: "Question" },
+            ]),
+            container: { current: null },
+            storageKey: "search-test",
+            jump: vi.fn(),
+            agentId: "agent",
+          }),
+        ),
+      ),
+    );
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>("[aria-label='Browse prompts']")!
+        .click(),
+    );
+    const input = document.querySelector<HTMLInputElement>(
+      "input[aria-label='Search this chat']",
+    )!;
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!;
+    const type = async (text: string) =>
+      act(async () => {
+        setValue.call(input, text);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    await type("first");
+    expect(probe.search).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(249));
+    expect(probe.search).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(probe.search).toHaveBeenCalledWith({ id: "agent", q: "first" });
+    expect(document.body.textContent).toContain("found result");
+    await type("second");
+    expect(document.body.textContent).not.toContain("found result");
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(probe.search).toHaveBeenLastCalledWith({ id: "agent", q: "second" });
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>("[aria-label='Browse prompts']")!
+        .click(),
+    );
+    const calls = probe.search.mock.calls.length;
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(probe.search).toHaveBeenCalledTimes(calls);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   }
 });

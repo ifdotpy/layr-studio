@@ -1,54 +1,19 @@
 import type { AgentDetailEntityDto } from "../../../generated/observableResources.ts";
-import { useEffect, useState } from "react";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ClaudeRepairReportStore } from "./ClaudeRepairReportStore.ts";
 import type { Agent } from "../../../types.ts";
-import {
-  missingRepairEvidence,
-  repairReason,
-  type ClaudeRepairReport,
-} from "./claudeRepairModel.ts";
+import { missingRepairEvidence, repairReason } from "./claudeRepairModel.ts";
 
 /** Read saved evidence only. This component never starts a session repair or a turn. */
 export default function ClaudeRepairNotice({
   agent,
   detail = agent,
+  store,
 }: {
   agent: Agent;
+  store: ClaudeRepairReportStore;
   detail?: AgentDetailEntityDto | Agent | undefined;
 }) {
-  const { get } = useServerApi();
-  const [result, setResult] = useState<{
-    scope: string;
-    report?: ClaudeRepairReport;
-    error?: string;
-  }>();
-  const scope = JSON.stringify([
-    agent.id,
-    agent.threadId,
-    agent.epoch,
-    agent.accountKey,
-  ]);
-  const [refreshVersion, setRefreshVersion] = useState(0);
-  // A new scope hides old evidence below; reading it requires explicit refresh.
-  useEffect(() => {
-    let active = true;
-    if (!agent.threadId) return;
-    get("/api/claude/repair-report", { query: { id: agent.id } })
-      .then((report) => {
-        if (active) setResult({ scope, report });
-      })
-      .catch(() => {
-        if (active)
-          setResult({
-            scope,
-            error: "The saved repair report is unavailable.",
-          });
-      });
-    return () => {
-      active = false;
-    };
-  }, [get, refreshVersion, agent.id]);
-  const current = result?.scope === scope ? result : undefined;
+  const current = store.current;
   const repairRequired =
     /CLAUDE_SESSION_REPAIR_REQUIRED|needs repair|journal.*repair/i.test(
       JSON.stringify(detail.error || ""),
@@ -78,10 +43,7 @@ export default function ClaudeRepairNotice({
       </p>
       <details>
         <summary>Repair report</summary>
-        <button
-          type="button"
-          onClick={() => setRefreshVersion((value) => value + 1)}
-        >
+        <button type="button" onClick={() => void store.refresh()}>
           Refresh saved report
         </button>
         {report && report.status !== "none" ? (
@@ -127,3 +89,5 @@ export default function ClaudeRepairNotice({
     </aside>
   );
 }
+
+export { ClaudeRepairReportStore } from "./ClaudeRepairReportStore.ts";

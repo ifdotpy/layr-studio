@@ -1,3 +1,4 @@
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 const diffHunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)/;
 const diffPathPattern = / b\/(.*)$/;
 import {
@@ -27,7 +28,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   ApiError,
@@ -47,7 +48,7 @@ import { providerSupports } from "../../../generated/providerKind.ts";
 import { localDateTime } from "../../../local-time.ts";
 import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
 import { resourceData } from "../../../store/runtime.ts";
-import type { Agent, Json, JsonInput, JsonValue } from "../../../types.ts";
+import type { Agent, Json, JsonValue } from "../../../types.ts";
 import { modelProvider } from "../../accounts/support/accountPreference.ts";
 import { useWorkerModels } from "../../agents/support/WorkerModelPicker.tsx";
 import FilePreview, {
@@ -73,7 +74,7 @@ import type { SidebarAgent } from "../../sidebar/support/viewModel.ts";
 import { EmptyState } from "../../ui/EmptyState/EmptyState.tsx";
 import { PanelHeader } from "../../ui/PanelHeader/PanelHeader.tsx";
 import ErrorDescription from "../ErrorDescription/ErrorDescription.tsx";
-import { McpInventory } from "../McpInventory/McpInventory.tsx";
+import { McpInventory, isRecord } from "../McpInventory/McpInventory.tsx";
 import TeamChats from "../messages/TeamChats/TeamChats.tsx";
 import { SearchContent } from "../search/SearchContent/SearchContent.tsx";
 import Tasks from "../tasks/Tasks/Tasks.tsx";
@@ -86,7 +87,6 @@ import {
   type WorkspacePanelPresentationProps,
 } from "../WorkspacePanelHost/WorkspacePanelHost.tsx";
 import { useFormDraft } from "./useFormDraft.ts";
-import { useWorkspaceResource as useResource } from "./useWorkspaceResource.ts";
 
 type Props = WorkspacePanelPresentationProps & {
   initialSection?: string;
@@ -106,7 +106,6 @@ type Context = Props & {
   selected: SidebarAgent | undefined;
   run: WorkspaceAction;
   reload: () => void;
-  revision: number;
   preview: (target: PreviewTarget) => void;
   navigate: (section: string, agent?: string, item?: string) => void;
 };
@@ -154,21 +153,15 @@ const ResourceState = observer(function ResourceState({
     </div>
   ) : null;
 });
+const statusColors: Record<string, string> = {
+  accepted: "teal",
+  review: "orange",
+  failed: "red",
+  blocked: "red",
+};
 function Status({ value }: { value: string }) {
   return (
-    <Badge
-      size="xs"
-      variant="light"
-      color={
-        value === "accepted"
-          ? "teal"
-          : value === "review"
-            ? "orange"
-            : ["failed", "blocked"].includes(value)
-              ? "red"
-              : "gray"
-      }
-    >
+    <Badge size="xs" variant="light" color={statusColors[value] ?? "gray"}>
       {value.replaceAll("_", " ")}
     </Badge>
   );
@@ -180,6 +173,9 @@ export const Workspace = observer(function Workspace(props: Props) {
   const rootId = props.agent?.rootId || props.agent?.id;
   const agents = [...(state?.agents.values() ?? [])].filter(
     (agent) => !!rootId && (agent.id === rootId || agent.rootId === rootId),
+  );
+  const managedAgents = agents.filter(
+    (agent) => agent.source === GeneratedApiAgentSource.managed,
   );
   const members = new Set(agents.map((agent) => agent.id));
   const attention =
@@ -194,7 +190,6 @@ export const Workspace = observer(function Workspace(props: Props) {
 
   const [section, setSection] = useState(props.initialSection || "messages"),
     [agentId, setAgentId] = useState(props.agent?.id || ""),
-    [revision, setRevision] = useState(0),
     [preview, setPreview] = useFilePreview();
   const [pending, setPending] = useState(0),
     [filePath, setFilePath] = useState("");
@@ -231,41 +226,40 @@ export const Workspace = observer(function Workspace(props: Props) {
       }
     }
   }
-  const reload = useCallback(() => setRevision((value) => value + 1), []);
-  const run = useCallback(
-    async <Path extends ApiPostPath>(
-      path: Path,
-      body: PostBody<Path>,
-    ): Promise<PostResult<Path>> => {
-      setPending((n) => n + 1);
-      try {
-        const result = await post(path, body);
-        reload();
-        return result;
-      } catch (e) {
-        props.notify(errorText(e));
-        throw e;
-      } finally {
-        setPending((n) => n - 1);
-      }
-    },
-    [post, reload, props.notify],
-  );
-  const selected = agents.find(
-    (a) => a.id === agentId && a.source === GeneratedApiAgentSource.managed,
-  );
+  const { reload } = useServerAreas().workspace;
+  async function run<Path extends ApiPostPath>(
+    path: Path,
+    body: PostBody<Path>,
+  ): Promise<PostResult<Path>> {
+    setPending((n) => n + 1);
+    try {
+      const result = await post(path, body);
+      reload();
+      return result;
+    } catch (e) {
+      props.notify(errorText(e));
+      throw e;
+    } finally {
+      setPending((n) => n - 1);
+    }
+  }
+  const selected = managedAgents.find((a) => a.id === agentId);
+  const openSelected = () => {
+    if (selected) {
+      props.onSelect(selected.id);
+      props.onClose();
+    }
+  };
   const context: Context = {
     ...props,
     stateDir: state?.workspaces.values().next().value?.stateDir ?? "",
     selected,
     run,
     reload,
-    revision,
     preview: setPreview,
-    navigate: (section, agent, item) => {
+    navigate: (section, agent) => {
       setSection(section);
       if (agent) setAgentId(agent);
-      void item;
     },
   };
   const needAgent = [
@@ -348,41 +342,26 @@ export const Workspace = observer(function Workspace(props: Props) {
                       size="xs"
                       value={agentId}
                       onChange={(e) => setAgentId(e.target.value)}
-                    >
-                      <option value="">Select an agent</option>
-                      {agents
-                        .filter(
-                          (a) => a.source === GeneratedApiAgentSource.managed,
-                        )
-                        .map((a) => {
-                          const parent = a.parentId
-                            ? agents.find(
-                                (candidate) =>
-                                  candidate.id === a.parentId &&
-                                  candidate.source ===
-                                    GeneratedApiAgentSource.managed,
-                              )
-                            : undefined;
-                          return (
-                            <option key={a.id} value={a.id}>
-                              {a.isLead
-                                ? "Main agent · "
-                                : parent
-                                  ? `↳ ${parent.name} · `
-                                  : ""}
-                              {a.name}
-                            </option>
+                      data={[
+                        { value: "", label: "Select an agent" },
+                        ...managedAgents.map((a) => {
+                          const parent = managedAgents.find(
+                            (candidate) => candidate.id === a.parentId,
                           );
-                        })}
-                    </NativeSelect>
+                          const prefix = a.isLead
+                            ? "Main agent · "
+                            : parent
+                              ? `↳ ${parent.name} · `
+                              : "";
+                          return { value: a.id, label: prefix + a.name };
+                        }),
+                      ]}
+                    />
                     {selected && (
                       <Button
                         variant="subtle"
                         size="compact-xs"
-                        onClick={() => {
-                          props.onSelect(selected.id);
-                          props.onClose();
-                        }}
+                        onClick={openSelected}
                       >
                         Open chat <ChevronRight size={14} />
                       </Button>
@@ -396,12 +375,7 @@ export const Workspace = observer(function Workspace(props: Props) {
                   variant="subtle"
                   size="compact-sm"
                   disabled={!selected}
-                  onClick={() => {
-                    if (selected) {
-                      props.onSelect(selected.id);
-                      props.onClose();
-                    }
-                  }}
+                  onClick={openSelected}
                 >
                   Change plan in chat
                 </Button>
@@ -497,23 +471,10 @@ export const Workspace = observer(function Workspace(props: Props) {
 export default Workspace;
 
 const Changes = observer(function Changes(c: Context) {
-  const state = useResource("/api/changes", c.revision, {
-      query: {
-        ...(c.selected ? { agent: c.selected.id } : {}),
-        scope: "chat",
-      },
-    }),
-    comments = {
-      data: {
-        annotations: [
-          ...(resourceData(
-            useServerStore().state().current,
-          )?.annotations.values() ?? []),
-        ],
-      },
-      error: "",
-      loading: false,
-    };
+  const state = useServerAreas().workspace.reads["/api/changes"]({
+    ...(c.selected ? { agent: c.selected.id } : {}),
+    scope: "chat",
+  });
   const [comment, setComment] = useState<{
       path: string;
       line: number;
@@ -524,9 +485,10 @@ const Changes = observer(function Changes(c: Context) {
     [saving, setSaving] = useState(false);
   const report = state.data?.scope === "chat" ? state.data : null;
   const files = report?.files ?? [];
-  const annotations = (comments.data?.annotations || []).filter(
-    (entry) => entry.agent === c.selected?.id,
-  );
+  const annotations = [
+    ...(resourceData(useServerStore().state().current)?.annotations.values() ??
+      []),
+  ].filter((entry) => entry.agent === c.selected?.id);
   let line = 0,
     current = "",
     inHunk = false;
@@ -756,9 +718,9 @@ const Plan = observer(function Plan(c: Context) {
 });
 
 const Checkpoints = observer(function Checkpoints(c: Context) {
-  const state = useResource("/api/checkpoints", c.revision, {
-      query: c.selected ? { agent: c.selected.id } : {},
-    }),
+  const state = useServerAreas().workspace.reads["/api/checkpoints"](
+      c.selected ? { agent: c.selected.id } : {},
+    ),
     [label, setLabel] = useState(""),
     [preview, setPreview] = useState<CheckpointPreview | null>(null),
     [busy, setBusy] = useState(false),
@@ -911,12 +873,13 @@ type CheckpointPreview = Omit<
 > & { checkpoint: string; label: string };
 
 const Tools = observer(function Tools(c: Context) {
-  const { get, post } = useServerApi();
-  const state = useResource("/api/capabilities", c.revision, {
-      query: c.selected ? { agent: c.selected.id } : {},
-    }),
-    [query, setQuery] = useState("");
-  const managedTools = (state.data?.managed ?? []).filter(isRecord);
+  const { state, inventory } = useServerAreas().workspace.capabilities(
+    c.selected?.id ?? "",
+  );
+  const [query, setQuery] = useState("");
+  const managedTools = (state.data?.managed ?? []).filter((tool) =>
+    isRecord(tool),
+  );
   const observedNative = state.data?.observedNative ?? [];
   return (
     <>
@@ -1000,22 +963,7 @@ const Tools = observer(function Tools(c: Context) {
           <h3 className="workspace-section-title">Skills</h3>
           <Inventory value={state.data.skills} query={query} />
           <h3 className="workspace-section-title">Connected tools (MCP)</h3>
-          <McpInventory
-            key={c.selected?.id}
-            agent={c.selected?.id ?? ""}
-            initial={state.data}
-            query={query}
-            loadPage={(cursor) =>
-              get("/api/capabilities", {
-                query: {
-                  agent: c.selected?.id ?? "",
-                  fresh: true,
-                  ...(cursor ? { serversCursor: cursor } : {}),
-                },
-              })
-            }
-            reconnect={(body) => post("/api/mcp/reconnect", body)}
-          />
+          <McpInventory key={c.selected?.id} state={inventory} query={query} />
         </>
       )}
     </>
@@ -1045,21 +993,16 @@ function Inventory({ value, query }: { value: JsonValue[]; query: string }) {
   );
 }
 
-function isRecord(value: unknown): value is Record<string, JsonValue> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function inventoryName(value: unknown): string | undefined {
   if (!isRecord(value)) return;
-  for (const key of ["name", "cwd", "serverName"] as const) {
-    const candidate = value[key];
-    if (typeof candidate === "string" && candidate) return candidate;
-  }
-  return undefined;
+  return [value.name, value.cwd, value.serverName].find(
+    (candidate): candidate is string =>
+      typeof candidate === "string" && !!candidate,
+  );
 }
 
 const Profiles = observer(function Profiles(c: Context) {
-  const state = useResource("/api/profiles", c.revision),
+  const state = useServerAreas().workspace.reads["/api/profiles"](undefined),
     [draft, setDraft, clearDraft] = useFormDraft(
       `studio-profile-draft:${c.stateDir}`,
     ),
@@ -1339,9 +1282,9 @@ const Profiles = observer(function Profiles(c: Context) {
 });
 
 const Rules = observer(function Rules(c: Context) {
-  const state = useResource("/api/rules", c.revision, {
-      query: c.selected ? { agent: c.selected.id } : {},
-    }),
+  const state = useServerAreas().workspace.reads["/api/rules"](
+      c.selected ? { agent: c.selected.id } : {},
+    ),
     [draftValue, setDraftValue, clearDraft] = useFormDraft(
       `studio-rule-draft:${JSON.stringify([c.stateDir, c.selected?.id])}`,
     ),
@@ -1561,30 +1504,24 @@ const Rules = observer(function Rules(c: Context) {
             />
             {draft.kind === "low_workers" && (
               <>
-                <NumberInput
-                  label="Minimum active subagents"
-                  min={1}
-                  max={255}
-                  allowDecimal={false}
-                  allowNegative={false}
-                  required
-                  value={draft.minimumWorkers ?? 8}
-                  onChange={(value) =>
-                    setDraft({ ...draft, minimumWorkers: value })
-                  }
-                />
-                <NumberInput
-                  label="Duration (minutes)"
-                  min={1}
-                  max={525600}
-                  allowDecimal={false}
-                  allowNegative={false}
-                  required
-                  value={draft.durationMinutes ?? 30}
-                  onChange={(value) =>
-                    setDraft({ ...draft, durationMinutes: value })
-                  }
-                />
+                {(
+                  [
+                    ["minimumWorkers", "Minimum active subagents", 255, 8],
+                    ["durationMinutes", "Duration (minutes)", 525600, 30],
+                  ] as const
+                ).map(([key, label, max, fallback]) => (
+                  <NumberInput
+                    key={key}
+                    label={label}
+                    min={1}
+                    max={max}
+                    allowDecimal={false}
+                    allowNegative={false}
+                    required
+                    value={draft[key] ?? fallback}
+                    onChange={(value) => setDraft({ ...draft, [key]: value })}
+                  />
+                ))}
                 <p className="workspace-muted">
                   Alerts the main agent once when fewer subagents than the
                   minimum are active.
@@ -1734,32 +1671,30 @@ export function parseRuleDraft(value: Json | null): RuleDraft | null {
     !isRuleKind(value.kind)
   )
     return null;
-  const asNumberOrString = (
-    candidate: JsonInput | undefined,
-    fallback: number,
-  ) =>
-    typeof candidate === "number" || typeof candidate === "string"
-      ? candidate
+  const string = (key: string) =>
+    typeof value[key] === "string" ? value[key] : "";
+  const number = (key: string, fallback: number) =>
+    typeof value[key] === "number" || typeof value[key] === "string"
+      ? value[key]
       : fallback;
   return {
     id: value.id,
     isNew: value.isNew === true,
     name: value.name,
     kind: value.kind,
-    intervalSeconds: asNumberOrString(value.intervalSeconds, 60),
-    minimumWorkers: asNumberOrString(value.minimumWorkers, 8),
-    durationMinutes: asNumberOrString(value.durationMinutes, 30),
-    stallTimeoutSeconds: asNumberOrString(value.stallTimeoutSeconds, 1800),
-    at: typeof value.at === "string" ? value.at : "",
-    path: typeof value.path === "string" ? value.path : "",
+    intervalSeconds: number("intervalSeconds", 60),
+    minimumWorkers: number("minimumWorkers", 8),
+    durationMinutes: number("durationMinutes", 30),
+    stallTimeoutSeconds: number("stallTimeoutSeconds", 1800),
+    at: string("at"),
+    path: string("path"),
     event:
       typeof value.event === "string" && isRuleEvent(value.event)
         ? value.event
         : "worker_completed",
-    command: typeof value.command === "string" ? value.command : "",
-    livenessCommand:
-      typeof value.livenessCommand === "string" ? value.livenessCommand : "",
-    text: typeof value.text === "string" ? value.text : "",
+    command: string("command"),
+    livenessCommand: string("livenessCommand"),
+    text: string("text"),
   };
 }
 
@@ -1814,3 +1749,5 @@ export function ruleBodyFromDraft(
     text: draft.text,
   };
 }
+
+export { WorkspaceResources } from "./WorkspaceResources.ts";

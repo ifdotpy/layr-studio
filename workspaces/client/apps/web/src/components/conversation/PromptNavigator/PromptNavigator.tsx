@@ -1,19 +1,48 @@
 import { computedStruct, makeAutoObservable } from "mobx";
 import { Observer, observer } from "mobx-react-lite";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { writePreferenceEdit } from "../../../sync/uiPreferenceStore.ts";
 import { useSyncedVisualState } from "../../../sync/useSyncedVisualState.ts";
 import { ActionIcon, Button, Menu, Popover, TextInput } from "@mantine/core";
 import { Bookmark, ListTree, Search } from "lucide-react";
-import { useEffect, useMemo, useState, type RefObject } from "react";
-import { errorText, type GetResult } from "../../../api.ts";
+import { useEffect, useState, type RefObject } from "react";
+import { useDebouncedValue } from "@mantine/hooks";
+import { resourceData } from "../../../store/runtime.ts";
 import type { Message } from "../../../types.ts";
 import { isMessagePending } from "../../../messageSendStatus.ts";
 
 type PromptDescriptor = Pick<Message, "id" | "text" | "role" | "excerpt">;
 
-type TranscriptSearchResult =
-  GetResult<"/api/transcript/search">["results"][number];
+export function createPromptNavigation(source: Message[] | (() => Message[])) {
+  const messages = () => (typeof source === "function" ? source() : source);
+  return makeAutoObservable(
+    {
+      activeId: "",
+      get prompts(): PromptDescriptor[] {
+        return messages()
+          .filter((item) => item.role === "user" && !isMessagePending(item))
+          .map(({ id, text, role }) => ({ id, text, role }));
+      },
+      get ids(): Set<string> {
+        return new Set(this.prompts.map((prompt) => prompt.id));
+      },
+      get hasMessages() {
+        return !!messages().length;
+      },
+      get current(): PromptDescriptor | undefined {
+        return (
+          this.prompts.find((prompt) => prompt.id === this.activeId) ||
+          this.prompts[0]
+        );
+      },
+      setActiveId(id: string) {
+        this.activeId = id;
+      },
+    },
+    { prompts: computedStruct },
+    { autoBind: true },
+  );
+}
 
 export default observer(function PromptNavigator({
   messages,
@@ -25,7 +54,9 @@ export default observer(function PromptNavigator({
   agentId,
   loadOlder,
   loadingOlder = false,
+  navigationStore,
 }: {
+  navigationStore: ReturnType<typeof createPromptNavigation>;
   compact?: boolean;
   inMenu?: boolean | undefined;
   agentId?: string | undefined;
@@ -36,89 +67,26 @@ export default observer(function PromptNavigator({
   storageKey: string;
   jump: (id: string) => void;
 }) {
-  const { syncGet } = useServerApi();
+  const net = useServerNet();
 
-  const navigation = useMemo(
-    function PromptNavigation() {
-      return makeAutoObservable(
-        {
-          activeId: "",
-          get prompts(): PromptDescriptor[] {
-            return messages
-              .filter((item) => item.role === "user" && !isMessagePending(item))
-              .map(({ id, text, role }) => ({ id, text, role }));
-          },
-          get ids(): Set<string> {
-            return new Set(this.prompts.map((prompt) => prompt.id));
-          },
-          get hasMessages() {
-            return !!messages.length;
-          },
-          get current(): PromptDescriptor | undefined {
-            return (
-              this.prompts.find((prompt) => prompt.id === this.activeId) ||
-              this.prompts[0]
-            );
-          },
-          setActiveId(id: string) {
-            this.activeId = id;
-          },
-        },
-        { prompts: computedStruct },
-      );
-    },
-    [messages],
-  );
+  const navigation = navigationStore;
   const prompts = navigation.prompts;
   const ids = navigation.ids;
   const [opened, setOpened] = useState(false);
   const [query, setQuery] = useState("");
-  const [bookmarks, setBookmarks] = useSyncedVisualState<
-    Record<string, boolean>
-  >(storageKey, {});
+  const [bookmarks] = useSyncedVisualState<Record<string, boolean>>(
+    storageKey,
+    {},
+  );
   const [onlySaved, setOnlySaved] = useState(false);
-  const [search, setSearch] = useState<{
-    query: string;
-    results: TranscriptSearchResult[];
-    loading: boolean;
-    error: string;
-    truncated?: boolean;
-  }>({ query: "", results: [], loading: false, error: "" });
-  const [retry, setRetry] = useState(0);
   const searchQuery = query.trim();
-  useEffect(() => {
-    if (!opened || !agentId || !searchQuery || onlySaved) return;
-    let active = true;
-    setSearch({ query: searchQuery, results: [], loading: true, error: "" });
-    const timer = setTimeout(() => {
-      void syncGet("/api/transcript/search", {
-        query: { id: agentId, q: searchQuery },
-      })
-        .then((result) => {
-          if (active)
-            setSearch({
-              query: searchQuery,
-              results: result.results,
-              loading: false,
-              error: "",
-              truncated: result.truncated,
-            });
-        })
-        .catch((error) => {
-          if (active)
-            setSearch({
-              query: searchQuery,
-              results: [],
-              loading: false,
-              error: errorText(error),
-            });
-        });
-    }, 250);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [opened, agentId, searchQuery, onlySaved, retry]);
+  const [debouncedQuery] = useDebouncedValue(searchQuery, 250);
+  const read =
+    opened && agentId && debouncedQuery && !onlySaved
+      ? net.reads.transcriptSearch({ id: agentId, q: debouncedQuery })
+      : undefined;
+  const current = read?.current;
+  const search = current && resourceData(current);
   useEffect(() => {
     const root = container.current;
     if (!root) return;
@@ -154,13 +122,20 @@ export default observer(function PromptNavigator({
   if (!navigation.hasMessages && !inMenu) return null;
   const searching = !!searchQuery && !onlySaved;
   const searchPending =
-    searching && !!agentId && (search.query !== searchQuery || search.loading);
+    searching &&
+    !!agentId &&
+    (debouncedQuery !== searchQuery ||
+      !current ||
+      current.status === "absent" ||
+      current.status === "loading");
   const searchError =
-    searching && search.query === searchQuery ? search.error : "";
+    searching && debouncedQuery === searchQuery && current?.status === "error"
+      ? current.error.message
+      : "";
   const visible = searching
     ? agentId
-      ? search.query === searchQuery
-        ? search.results
+      ? debouncedQuery === searchQuery
+        ? (search?.results ?? [])
         : []
       : messages.filter(
           (message) =>
@@ -180,7 +155,7 @@ export default observer(function PromptNavigator({
     const next = { ...bookmarks };
     if (next[id]) delete next[id];
     else next[id] = true;
-    setBookmarks(writePreferenceEdit(storageKey, bookmarks, next));
+    writePreferenceEdit(storageKey, bookmarks, next);
   };
   return (
     <nav
@@ -273,7 +248,7 @@ export default observer(function PromptNavigator({
                 {searchError}{" "}
                 <button
                   type="button"
-                  onClick={() => setRetry((value) => value + 1)}
+                  onClick={() => void read?.read().catch(() => {})}
                 >
                   Retry search
                 </button>
@@ -343,7 +318,7 @@ export default observer(function PromptNavigator({
                     : "No matching prompts."}
               </p>
             )}
-            {searching && search.truncated && !searchPending && (
+            {searching && search?.truncated && !searchPending && (
               <p className="prompt-history-empty">
                 More results exist. Use a more specific search.
               </p>

@@ -1,5 +1,6 @@
+import { AgentsUi } from "../support/AgentsUi.ts";
 import { DEFAULT_SUBAGENT_CONCURRENCY } from "../../../generated/apiSchema.ts";
-import { flowResult } from "mobx";
+import { flowResult, action } from "mobx";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError } from "../../../api.ts";
 import { createApiStorage } from "../../../apiStorage.ts";
@@ -9,7 +10,10 @@ import {
   ProviderKind,
 } from "../../../generated/api.ts";
 import type { Agent } from "../../../types.ts";
-import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../../shell/integration-support/observableFixture.tsx";
 import { ConcurrencyStore } from "../SubagentConcurrencyControl/ConcurrencyStore.ts";
 
 const fixtures: ReturnType<typeof observableFixture>[] = [];
@@ -316,3 +320,52 @@ test.each([AgentMode["single"], AgentMode["multi"]])(
     expect(f.storage.getItem(key)).toBeNull();
   },
 );
+
+// Selection lifetime is owned by ServerAreas; no mounted component is needed.
+test("the server owner invalidates an in-flight settings receipt on selection change", () => {
+  const f = fixture();
+  const areas = conversationActionsFixture(undefined, f.owner.store);
+  try {
+    action(() => {
+      areas.navigation.selectedId = f.agent.id;
+    })();
+    const accept = areas.agentsUi.begin(
+      "settings",
+      "orchestrator",
+      () => "unchanged",
+    );
+    action(() => {
+      areas.navigation.selectedId = "other-chat";
+    })();
+    expect(accept({ ...f.agent, model: "gpt-6-luna" })).toBe(false);
+    areas.agentsUi.set("settings", "error", "pending");
+    areas.dispose();
+    expect(areas.agentsUi.fields.size).toBe(0);
+    expect(areas.agentsUi.concurrency.size).toBe(0);
+  } finally {
+    areas.dispose();
+  }
+});
+
+test("an older same-domain owner receipt cannot replace the latest acknowledgment", () => {
+  const owner = new AgentsUi();
+  try {
+    const first = owner.begin(
+      "settings",
+      "orchestrator",
+      () => "same projection",
+    );
+    const latest = owner.begin(
+      "settings",
+      "orchestrator",
+      () => "same projection",
+    );
+    expect(latest({ id: "lead", model: "latest" })).toBe(true);
+    expect(first({ id: "lead", model: "older" })).toBe(false);
+    expect(
+      owner.fields.get("settings")?.confirmed.orchestrator?.value.model,
+    ).toBe("latest");
+  } finally {
+    owner.dispose();
+  }
+});

@@ -1,3 +1,14 @@
+import {
+  GLUE_MANIFEST,
+  GLUE_MESSAGE,
+  REACT_GLUE_APIS,
+  WEB_SOURCE,
+  glueFiles,
+  glueManifestErrors,
+  glueOverrides,
+  glueUses,
+  isGlueSource,
+} from "../react-glue.ts";
 import ts from "typescript";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -19,9 +30,19 @@ const IMPORT_RULE = "eslint(no-restricted-imports)";
 type Config = {
   overrides: { files: string[]; rules: Record<string, unknown> }[];
 };
-const config: Config = JSON.parse(
+const fullConfig: Config = JSON.parse(
   readFileSync(path.join(root, ".oxlintrc.json"), "utf8"),
 );
+
+const config = {
+  ...fullConfig,
+  overrides: fullConfig.overrides.filter(
+    (item) =>
+      !JSON.stringify(item.rules["no-restricted-imports"] ?? null).includes(
+        GLUE_MESSAGE,
+      ),
+  ),
+};
 
 function lint(cwd: string, configFile: string, target: string) {
   const result = spawnSync(
@@ -49,8 +70,8 @@ test("network exceptions only shrink and every remaining entry still violates", 
   const exceptions = config.overrides.at(-1);
   assert.ok(exceptions);
   assert.deepEqual(exceptions.rules, { "no-restricted-imports": "off" });
-  // Owner: this ceiling counts grandfathered source files, never diagnostics.
-  const MAX_NETWORK_EXCEPTIONS = 72;
+  // Owner: maximum grandfathered network source files; only lower this ceiling.
+  const MAX_NETWORK_EXCEPTIONS = 50;
   assert.ok(
     exceptions.files.length <= MAX_NETWORK_EXCEPTIONS,
     "network exception count grew",
@@ -108,7 +129,7 @@ test("React network boundary rejects direct transports and permits store/owner u
   try {
     writeFileSync(
       path.join(temporary, ".oxlintrc.json"),
-      JSON.stringify(config),
+      JSON.stringify(fullConfig),
     );
     const imported = { [IMPORT_RULE]: 1 };
     const importedTwice = { [IMPORT_RULE]: 2 };
@@ -407,6 +428,149 @@ test("compiler graph follows transport imports through a barrel, dynamic import 
         transport,
       ),
     );
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("React glue imports are forbidden outside the shrink-only manifest", () => {
+  const manifest: Record<string, string> = JSON.parse(
+    readFileSync(path.join(root, GLUE_MANIFEST), "utf8"),
+  );
+  const entries = Object.keys(manifest);
+  assert.deepEqual(entries, [...new Set(entries)].sort());
+  assert.ok(entries.every(isGlueSource));
+  assert.ok(
+    Object.values(manifest).every(
+      (reason) => reason.trim() && !/[\r\n]/.test(reason),
+    ),
+  );
+  assert.deepEqual(
+    fullConfig.overrides.slice(-2),
+    glueOverrides(fullConfig, manifest),
+    "regenerate Oxlint overrides: node workspaces/tooling/apps/repository-checks/react-glue.ts",
+  );
+  assert.deepEqual(glueManifestErrors(root, glueFiles(root)), []);
+  const temporary = mkdtempSync(path.join(tmpdir(), "studio-react-glue-"));
+  try {
+    writeFileSync(
+      path.join(temporary, ".oxlintrc.json"),
+      JSON.stringify(fullConfig),
+    );
+    const targets = [
+      "components/GlueProbe.tsx",
+      "store/GlueProbe.ts",
+      "sync/GlueProbe.ts",
+      "app/GlueProbe.ts",
+      "components/GlueProbe.test.tsx",
+      "components/GlueProbe.stories.tsx",
+      "fixtures/GlueProbe.tsx",
+      "sync/eventHistory.testHelper.ts",
+    ];
+    for (const file of targets) {
+      const destination = path.join(temporary, WEB_SOURCE, file);
+      mkdirSync(path.dirname(destination), { recursive: true });
+      writeFileSync(
+        destination,
+        `import { ${REACT_GLUE_APIS.map((name) => name + " as alias" + name).join(", ")} } from "react";`,
+      );
+    }
+    const actual = lint(temporary, ".oxlintrc.json", WEB_SOURCE);
+    for (const file of targets)
+      assert.equal(
+        actual.filter(
+          (item) =>
+            item.filename === WEB_SOURCE + file && item.code === IMPORT_RULE,
+        ).length,
+        isGlueSource(WEB_SOURCE + file) ? REACT_GLUE_APIS.length : 0,
+        file,
+      );
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("listener check rejects callback sets and untyped subscribe/notify listener sets", () => {
+  for (const source of [
+    "const listeners = new Set<() => void>();",
+    "class Owner { listeners = new Set<() => void>(); }",
+    "const listeners = new Set(); function subscribe(cb) { listeners.add(cb); } function notify() { listeners.forEach(cb => cb()); }",
+  ])
+    assert.deepEqual(glueUses("probe.ts", source), ["listener pub-sub"]);
+  assert.deepEqual(
+    glueUses("probe.ts", 'import { useEffect as effect } from "react";'),
+    ["useEffect"],
+  );
+  assert.deepEqual(
+    glueUses(
+      "probe.ts",
+      'import type { useEffect } from "react"; const values = new Set<string>();',
+    ),
+    [],
+  );
+});
+
+test("React glue manifest rejects one more exception even with a real violation", () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), "studio-glue-growth-"));
+  try {
+    const manifest: Record<string, string> = JSON.parse(
+      readFileSync(path.join(root, GLUE_MANIFEST), "utf8"),
+    );
+    mkdirSync(path.dirname(path.join(temporary, GLUE_MANIFEST)), {
+      recursive: true,
+    });
+    const writeManifest = () =>
+      writeFileSync(
+        path.join(temporary, GLUE_MANIFEST),
+        JSON.stringify(manifest),
+      );
+    const writeViolation = (file: string) => {
+      mkdirSync(path.dirname(path.join(temporary, file)), { recursive: true });
+      writeFileSync(
+        path.join(temporary, file),
+        'import { useEffect } from "react";',
+      );
+    };
+    for (const file of Object.keys(manifest)) writeViolation(file);
+    writeManifest();
+    assert.deepEqual(glueManifestErrors(temporary, glueFiles(temporary)), []);
+    const extra = WEB_SOURCE + "components/ExtraGlueProbe.tsx";
+    manifest[extra] = "DOM integration.";
+    writeViolation(extra);
+    writeManifest();
+    assert.deepEqual(glueManifestErrors(temporary, glueFiles(temporary)), [
+      "React glue exception count grew",
+    ]);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("React glue manifest rejects missing and stale entries", () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), "studio-glue-manifest-"));
+  try {
+    const file = WEB_SOURCE + "Probe.ts";
+    mkdirSync(path.dirname(path.join(temporary, GLUE_MANIFEST)), {
+      recursive: true,
+    });
+    mkdirSync(path.dirname(path.join(temporary, file)), { recursive: true });
+    writeFileSync(path.join(temporary, GLUE_MANIFEST), "{}");
+    writeFileSync(
+      path.join(temporary, file),
+      "const listeners = new Set<() => void>();",
+    );
+    assert.equal(glueManifestErrors(temporary, [file]).length, 1);
+    writeFileSync(
+      path.join(temporary, GLUE_MANIFEST),
+      JSON.stringify({ [file]: "DOM input listeners." }),
+    );
+    assert.deepEqual(glueManifestErrors(temporary, [file]), []);
+    writeFileSync(path.join(temporary, file), "export {};");
+    assert.match(
+      glueManifestErrors(temporary, [file])[0] ?? "",
+      /remove stale/,
+    );
+    assert.match(glueManifestErrors(temporary, [])[0] ?? "", /remove stale/);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

@@ -1,3 +1,5 @@
+import { action, autorun, observable } from "mobx";
+import { createApiStorage } from "../../../../apiStorage.ts";
 // @vitest-environment happy-dom
 import { RoomKind } from "../../../../generated/api.ts";
 import { act, createElement } from "react";
@@ -36,31 +38,38 @@ vi.mock(
     };
   },
 );
-const history = vi.hoisted(() =>
-  vi.fn(() => ({
-    items: [],
-    loaded: true,
-    before: null,
-    after: null,
-    setPageAnchor() {},
-    showLatest() {},
-  })),
-);
-vi.mock("../../../../conversation/roomHistory.ts", async (original) => {
-  const actual =
-    await original<typeof import("../../../../conversation/roomHistory.ts")>();
-  return {
-    ...actual,
-    useRoomHistory: (...args: Parameters<typeof actual.useRoomHistory>) =>
-      realRoom.enabled ? actual.useRoomHistory(...args) : history(),
-  };
-});
+import { RoomHistory } from "../../../../conversation/roomHistory.ts";
 import TeamChats from "./TeamChats.tsx";
+import { createTeamChatsStore } from "./TeamChatsStore.ts";
+import { resourceData } from "../../../../store/runtime.ts";
+function messagesOwner(f: ReturnType<typeof observableFixture>) {
+  return createTeamChatsStore(
+    realRoom.enabled
+      ? f.store
+      : { ...f.store, room: () => ({ current: { status: "absent" } }) },
+    {
+      saved: (_key, fallback) => fallback,
+      save: realRoom.save,
+      syncGet: realRoom.syncGet,
+    },
+    "",
+    undefined,
+    () => ({
+      stateDir:
+        resourceData(f.store.state().current)?.workspaces.values().next().value
+          ?.stateDir || "",
+      leadId: "lead",
+    }),
+  );
+}
 
 it("room content updates isolate siblings and search never renders open detail", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const f = observableFixture();
   const actions = conversationActionsFixture();
+  const errors = vi.spyOn(console, "error");
+  const historyStart = vi.spyOn(RoomHistory.prototype, "start");
+  const owner = messagesOwner(f);
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -108,7 +117,10 @@ it("room content updates isolate siblings and search never renders open detail",
             createElement(
               ConversationProvider,
               { value: actions },
-              createElement(TeamChats, { leadId: "lead" }),
+              createElement(TeamChats, {
+                owner,
+                leadId: "lead",
+              }),
             ),
           ),
         ),
@@ -146,7 +158,8 @@ it("room content updates isolate siblings and search never renders open detail",
     await act(async () => room?.click());
     const detail = host.querySelector(".team-room-detail");
     counts.clear();
-    const before = history.mock.calls.length;
+    const activeHistory = owner.messages;
+    const before = historyStart.mock.calls.length;
     const input = host.querySelector<HTMLInputElement>(
       '[aria-label="Search chats"]',
     );
@@ -162,16 +175,31 @@ it("room content updates isolate siblings and search never renders open detail",
     expect(host.querySelector('[data-room="b"]')).toBeNull();
     expect(host.querySelector(".team-room-detail")).toBe(detail);
     expect(counts.get("team-detail:b") || 0).toBe(0);
-    expect(history.mock.calls.length).toBe(before);
+    expect(owner.messages).toBe(activeHistory);
+    expect(historyStart).toHaveBeenCalledTimes(before);
     expect(
       serverLocalStorage.getItem("codex-chat-seen:messages-isolation"),
     ).toBeNull();
+    vi.stubGlobal("innerWidth", 600);
+    await act(async () => owner.back());
+    vi.stubGlobal("innerWidth", 1000);
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(host.querySelector(".team-room-detail h2")?.textContent).toBe(
+      "For you",
+    );
+    expect(owner.messages).not.toBe(activeHistory);
   } finally {
     await act(async () => root.unmount());
+    const renderWarnings = errors.mock.calls.filter((args) =>
+      args.some((arg) => String(arg).includes("Cannot update a component")),
+    );
+    errors.mockRestore();
+    historyStart.mockRestore();
     f.store.dispose();
     host.remove();
     delete window.__studioMessageRenderProbe;
     vi.unstubAllGlobals();
+    expect(renderWarnings).toEqual([]);
   }
 });
 
@@ -253,7 +281,10 @@ it("can request an older page after selecting another room and returning", async
             createElement(
               ConversationProvider,
               { value: conversationActionsFixture() },
-              createElement(TeamChats, { leadId: "lead" }),
+              createElement(TeamChats, {
+                owner: messagesOwner(f),
+                leadId: "lead",
+              }),
             ),
           ),
         ),
@@ -321,7 +352,10 @@ it("failed room history leaves its unread position unacknowledged", async () => 
             createElement(
               ConversationProvider,
               { value: conversationActionsFixture() },
-              createElement(TeamChats, { leadId: "lead" }),
+              createElement(TeamChats, {
+                owner: messagesOwner(f),
+                leadId: "lead",
+              }),
             ),
           ),
         ),
@@ -426,7 +460,10 @@ it("acknowledges only loaded rows inside the viewport as the room scrolls", asyn
             createElement(
               ConversationProvider,
               { value: conversationActionsFixture() },
-              createElement(TeamChats, { leadId: "lead" }),
+              createElement(TeamChats, {
+                owner: messagesOwner(f),
+                leadId: "lead",
+              }),
             ),
           ),
         ),
@@ -467,5 +504,128 @@ it("acknowledges only loaded rows inside the viewport as the room scrolls", asyn
     f.store.dispose();
     host.remove();
     vi.unstubAllGlobals();
+  }
+});
+
+it("resets every presentation choice when the scope changes on one store", async () => {
+  const f = observableFixture();
+  const storage = createApiStorage(serverLocalStorage);
+  const scope = observable({ stateDir: "team-a", leadId: "lead-a" });
+  f.apply(
+    ["a", "b"].map((id) => ({
+      collection: "room",
+      id,
+      value: {
+        id,
+        name: id === "a" ? "Alpha" : "Beta",
+        kind: "broadcast",
+        rootId: "lead-" + id,
+      },
+    })),
+  );
+  storage.save("codex-chat-seen:team-b", { b: 2 });
+  const chats = createTeamChatsStore(
+    f.store,
+    storage,
+    "",
+    undefined,
+    () => scope,
+  );
+  const stop = autorun(() => {
+    void chats.current;
+  });
+  try {
+    await Promise.resolve();
+    chats.search("Alpha");
+    chats.more();
+    chats.choose("a");
+    expect(chats.detail).toBe(true);
+    action(() => {
+      scope.stateDir = "team-b";
+      scope.leadId = "lead-b";
+    })();
+    expect({
+      query: chats.query,
+      detail: chats.detail,
+      limit: chats.limit,
+    }).toEqual({ query: "", detail: false, limit: 60 });
+    expect(chats.selected).toBe("you");
+    expect(chats.filtered.map((room) => room.id)).toEqual(["b"]);
+    expect([...chats.seen]).toEqual([["b", 2]]);
+  } finally {
+    stop();
+    f.store.dispose();
+  }
+});
+
+it("renders personal-feed requests and acts through the selected conversation request owner", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: new EventTarget(),
+  });
+  const { requestFixture } =
+    await import("../../../conversation/questions/support/requestFixtures.ts");
+  const { approval, question } =
+    await import("../../../../approvalFixtures.ts");
+  const { ServerStoreProvider } =
+    await import("../../../servers/ServerServicesProvider/ServerServicesProvider.tsx");
+  const f = requestFixture([
+    approval({
+      id: "feed-question",
+      agent: "lead",
+      request: {
+        kind: "agent_question",
+        questions: [question("choice", "Feed answer?")],
+      },
+    }),
+  ]);
+  const actions = conversationActionsFixture(() => {}, f.store);
+  actions.selected.requestOwner.start();
+  const owner = createTeamChatsStore(
+    f.store,
+    {
+      saved: (_key, fallback) => fallback,
+      save() {},
+      syncGet: realRoom.syncGet.mockResolvedValue({ room: null, messages: [] }),
+    },
+    "feed",
+    undefined,
+  );
+  owner.choose("you");
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            ServerStoreProvider,
+            { value: f.store },
+            createElement(
+              ConversationProvider,
+              { value: actions },
+              createElement(TeamChats, { owner }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(host.querySelector('[data-request="feed-question"]')).not.toBeNull();
+    const view = actions.selected.requestOwner.views.get("feed-question")!;
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>("[data-answer]")!.click(),
+    );
+    expect(view.open).toBe(true);
+    expect(
+      host.querySelector('textarea[aria-label="Feed answer?"]'),
+    ).not.toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    actions.selected.closeConversation();
+    actions.scope.services.close();
+    f.store.dispose();
   }
 });

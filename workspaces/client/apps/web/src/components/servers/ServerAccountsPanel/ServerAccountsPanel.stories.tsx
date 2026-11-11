@@ -1,6 +1,5 @@
 import { ProviderKind, AccountStatus } from "../../../generated/api.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useEffect, useMemo } from "react";
 import { expect, userEvent, within, waitFor } from "storybook/test";
 import ServerAccountsPanel from "./ServerAccountsPanel.tsx";
 import { createServerServices } from "../../../servers/serverServices.ts";
@@ -58,21 +57,21 @@ const accounts: (Account & {
     })),
 ] satisfies (Account & { isDefault: boolean })[];
 
+let services: ReturnType<typeof createServerServices>;
+function createFixtureServices() {
+  const value = createServerServices({
+    id: "local",
+    label: "Workstation",
+    origin: window.location.origin,
+  });
+  value.resources.watchResourceChanges = (_resource, changed) => {
+    changed();
+    return () => {};
+  };
+  value.resources.watchResourceConnection = () => () => {};
+  return value;
+}
 function ServerAccountsFixture() {
-  const services = useMemo(() => {
-    const value = createServerServices({
-      id: "local",
-      label: "Workstation",
-      origin: window.location.origin,
-    });
-    value.resources.watchResourceChanges = (_resource, changed) => {
-      changed();
-      return () => {};
-    };
-    value.resources.watchResourceConnection = () => () => {};
-    return value;
-  }, []);
-  useEffect(() => () => services.close(), [services]);
   return (
     <div style={{ maxWidth: "var(--studio-form-max)" }}>
       <ServerServicesProvider services={services}>
@@ -146,7 +145,9 @@ const meta = {
       }
       return original(input, init);
     };
+    services = createFixtureServices();
     return () => {
+      services.close();
       window.fetch = original;
     };
   },

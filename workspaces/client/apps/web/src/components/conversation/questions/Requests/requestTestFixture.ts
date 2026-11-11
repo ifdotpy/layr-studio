@@ -1,8 +1,13 @@
-import { act, createElement, type ComponentProps, type ReactNode } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, vi } from "vitest";
-import { RequestArea } from "./Requests.tsx";
+import {
+  RequestArea,
+  RequestAreaOwner,
+  type RequestCommands,
+  type RequestDependencies,
+} from "../RequestArea/RequestArea.tsx";
 
 export function requestTestEnvironment() {
   beforeEach(() => {
@@ -28,27 +33,38 @@ export function requestTestEnvironment() {
   });
 }
 
-export function requestTestRoot(dispose: () => void) {
+export function requestTestRoot(
+  dispose: () => void,
+  dependencies: () => RequestDependencies,
+) {
+  let owner: RequestAreaOwner | undefined;
+  let current: RequestCommands;
   const root = createRoot(
     document.body.appendChild(document.createElement("div")),
   );
   return {
-    async render(
-      children: ReactNode,
-      commands: Omit<ComponentProps<typeof RequestArea>, "children">,
-    ) {
+    async render(children: ReactNode, commands: RequestCommands) {
+      if (owner && current.scope !== commands.scope) {
+        owner.dispose();
+        owner = undefined;
+      }
+      current = commands;
+      owner ??= new RequestAreaOwner(dependencies(), () => current);
+      owner.start();
+      const selected = owner;
       await act(async () =>
         root.render(
           createElement(
             MantineProvider,
             null,
-            createElement(RequestArea, commands, children),
+            createElement(RequestArea, { owner: selected }, children),
           ),
         ),
       );
     },
     async close() {
       await act(async () => root.unmount());
+      owner?.dispose();
       dispose();
     },
   };

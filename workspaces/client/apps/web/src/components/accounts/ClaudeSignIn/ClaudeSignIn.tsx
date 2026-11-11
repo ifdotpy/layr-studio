@@ -1,25 +1,16 @@
 import { observer } from "mobx-react-lite";
-import { useEffect, useRef, useState } from "react";
 import { Button, Group, Modal, Stack, TextInput } from "@mantine/core";
-import {
-  useServerApi,
-  useServerStore,
-  useServerResources,
-} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import type { Account } from "../support/Accounts.tsx";
-import { ClaudeAuthFlow } from "../support/ClaudeAuthFlow.ts";
 import { ClaudeAuthorizationCodeForm } from "../ClaudeAuthorizationCodeForm/ClaudeAuthorizationCodeForm.tsx";
 
 /** New-profile and saved-profile Claude sign-ins share one concrete subscription flow. */
 export default observer(function ClaudeSignIn({
   account,
-  scope = "local",
-  label = account?.label || "Claude Code",
   email = account?.email || "",
   serverLabel,
   opened = true,
   onClose,
-  onReady,
 }: {
   account?: Account | undefined;
   scope?: string | undefined;
@@ -30,22 +21,8 @@ export default observer(function ClaudeSignIn({
   onClose: () => void;
   onReady?: () => unknown;
 }) {
-  const api = useServerApi(),
-    store = useServerStore(),
-    resources = useServerResources();
-  const ready = useRef(onReady);
-  ready.current = onReady;
-  const [flow] = useState(
-    () =>
-      new ClaudeAuthFlow(api, store, resources, {
-        scope,
-        ...(account ? { accountKey: account.id } : {}),
-        label,
-        email,
-        onReady: () => ready.current?.(),
-      }),
-  );
-  useEffect(flow.startWatching, [flow]);
+  const flow = useServerAreas().accountsUi.claudeFlow;
+  if (!flow) return null;
   const { receipt, busy, requestId, url } = flow;
   return (
     <Modal

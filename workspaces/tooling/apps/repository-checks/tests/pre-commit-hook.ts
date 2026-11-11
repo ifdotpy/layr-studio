@@ -85,7 +85,7 @@ function fixture() {
     path.join(path.dirname(checkSource), "javascript-exceptions.json"),
     path.join(path.dirname(checkerPath), "javascript-exceptions.json"),
   );
-  for (const name of ["ast-grep.ts", "ratchet.ts"]) {
+  for (const name of ["ast-grep.ts", "ratchet.ts", "react-glue.ts"]) {
     copyFileSync(
       path.join(path.dirname(checkSource), name),
       path.join(path.dirname(checkerPath), name),
@@ -107,6 +107,10 @@ function fixture() {
   symlinkSync(
     path.join(repositoryRoot, "node_modules", ".bin", "ast-grep"),
     path.join(root, "node_modules", ".bin", "ast-grep"),
+  );
+  writeFileSync(
+    path.join(path.dirname(checkerPath), "react-glue-exceptions.json"),
+    "{}\n",
   );
   for (const config of [".oxlintrc.json", ".oxfmtrc.json"]) {
     copyFileSync(path.join(repositoryRoot, config), path.join(root, config));
@@ -134,6 +138,7 @@ function fixture() {
     ".oxlintrc.json",
     ".oxfmtrc.json",
     "workspaces/tooling/apps/repository-checks/javascript-exceptions.json",
+    "workspaces/tooling/apps/repository-checks/react-glue-exceptions.json",
     "workspaces/tooling/apps/repository-checks/ratchet-baseline.json",
   );
   git(root, "commit", "--quiet", "-m", "fixture tooling baseline");
@@ -650,6 +655,19 @@ try {
     assert.match(
       wholeRejected.stdout + wholeRejected.stderr,
       /import and use Reason/,
+    );
+  }
+  {
+    const root = fixture();
+    const file = "workspaces/client/apps/web/src/components/GlueProbe.ts";
+    stage(root, file, "export const listeners = new Set<() => void>();\n");
+    // The working tree is clean; the staged source must still be rejected.
+    writeFileSync(path.join(root, file), "export const listeners = [];\n");
+    const rejected = runHook(root);
+    assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr);
+    assert.match(
+      rejected.stdout + rejected.stderr,
+      /Use MobX owners\/reactions/,
     );
   }
   console.log("Pre-commit staged-content fixtures passed.");

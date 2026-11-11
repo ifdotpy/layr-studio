@@ -1,6 +1,9 @@
 import { agentId } from "../../../generated/observableResources.ts";
 import { resourceData } from "../../../store/runtime.ts";
-import { workerCatalog } from "../support/WorkerModelPicker.tsx";
+import {
+  workerCatalogKey,
+  loadingCatalog,
+} from "../support/WorkerModelPicker.tsx";
 import { observer } from "mobx-react-lite";
 
 import { AgentSource } from "../../../generated/api.ts";
@@ -54,7 +57,8 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
     root?.accountKey ||
     (agent ? "default" : accounts?.defaultAccountKey) ||
     "default";
-  const catalog = workerCatalog(store, services.modelReader, key);
+  const catalog =
+    areas.agentsUi.workerCatalogs.get(workerCatalogKey(key)) ?? loadingCatalog;
   const account = [
     ...(accounts?.accounts || []),
     ...(accounts?.archivedAccounts || []),
@@ -80,11 +84,13 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
                 <section aria-label="Team">
                   <div className="execution-team-fields">
                     <SubagentConcurrencyControl
+                      agentsUi={areas.agentsUi}
                       lead={root}
                       stateDir={services.owner.id}
                       workspaceId={areas.startup.workspaceId}
                     />
                     <DelegationSettings
+                      agentsUi={areas.agentsUi}
                       settingsRow
                       input={{
                         kind: "agent",
@@ -102,6 +108,7 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
                   {agent?.source === AgentSource.managed &&
                     agent.provider === ProviderKind.Codex && (
                       <ExecutionPermissions
+                        agentsUi={areas.agentsUi}
                         settingsRow
                         input={{ kind: "agent", summary: agent, detail }}
                         catalog={catalog}
@@ -111,6 +118,8 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
                     <Suspense fallback={null}>
                       <ClaudeSettings
                         key={agent.id}
+                        model={areas.settingsModels.claude}
+                        fileBackups={areas.settingsModels.fileBackups}
                         agent={agent}
                         account={account}
                         onSignIn={onSignIn}

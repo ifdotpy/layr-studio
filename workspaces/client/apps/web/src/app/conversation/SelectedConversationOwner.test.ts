@@ -1,3 +1,9 @@
+import { ScreenSelection } from "../startup/ScreenOwner.ts";
+import { createRecordingStorage } from "../../dictation/storage.ts";
+import type { Recording } from "../../dictation/storage.ts";
+import type { RecordingValue } from "../../unsent/store.ts";
+import type { Recognition } from "../../components/conversation/BrowserDictation/BrowserDictation.tsx";
+import { RoomHistory } from "../../conversation/roomHistory.ts";
 // @vitest-environment happy-dom
 import { autorun, runInAction } from "mobx";
 import { expect, it, vi } from "vitest";
@@ -8,6 +14,7 @@ import { agentId } from "../../generated/observableResources.ts";
 import { serializeStateCollections } from "../../generated/observableResources.ts";
 import { projectedLimits } from "../../usage/accountLimits.fixture.ts";
 import {
+  RadioStatus,
   AccountStatus,
   ProviderKind,
   Overage,
@@ -480,5 +487,275 @@ it("a superseding Unread stream settles a lost Read and confirms an idempotent l
     f.dispose();
     vi.restoreAllMocks();
     vi.useRealTimers();
+  }
+});
+
+it("starts the selected radio room history in its existing owner", () => {
+  const f = ownerFixture();
+  f.models.apply([
+    ...serializeStateCollections(f.models.mirror.current),
+    {
+      collection: "room",
+      id: "radio",
+      value: {
+        id: "radio",
+        radio: {
+          teamId: "lead",
+          revision: 1,
+          status: RadioStatus.idle,
+          speaker: null,
+          next: [],
+          active: null,
+          error: null,
+          controls: {
+            busy: false,
+            inputBlocked: false,
+            canPass: true,
+            stopping: false,
+            speaking: false,
+          },
+        },
+      },
+    },
+  ]);
+  f.areas.navigation.selectExternal("radio", { requestId: "open-radio" });
+  const start = vi
+    .spyOn(RoomHistory.prototype, "start")
+    .mockReturnValue(() => {});
+  const stop = f.selected.start();
+  try {
+    expect(start).toHaveBeenCalledOnce();
+  } finally {
+    stop();
+    f.dispose();
+    vi.restoreAllMocks();
+  }
+});
+
+it("derives renderer blocking directly from overlapping dictation and upload sources", () => {
+  const f = ownerFixture();
+  const stop = f.selected.start();
+  const control = f.selected.conversation;
+  if (!control) throw new Error("Conversation owner did not create its store.");
+  const { dictation, uploadRecovery } = control.context;
+  const seen: boolean[] = [];
+  const observe = autorun(() => seen.push(f.areas.startup.rendererBusy));
+  try {
+    expect(seen.at(-1)).toBe(false);
+    dictation.update({ active: true, storageFailed: true });
+    expect(seen.at(-1)).toBe(true);
+    dictation.update({ active: false });
+    expect(f.areas.startup.isRendererUpdateSafe).toBe(false);
+    dictation.update({ storageFailed: false });
+    expect(seen.at(-1)).toBe(false);
+    uploadRecovery.include([
+      {
+        id: "recover",
+        workspace: "workspace",
+        stateDir: "/fixture",
+        agent: "another-chat",
+        name: "saved.txt",
+        size: 1,
+        mime: "text/plain",
+        created: 1,
+      },
+    ]);
+    dictation.update({ busy: "transcribing" });
+    uploadRecovery.update([]);
+    expect(seen.at(-1)).toBe(true);
+    dictation.update({ busy: "" });
+    expect(seen.at(-1)).toBe(false);
+  } finally {
+    observe();
+    stop();
+    f.dispose();
+  }
+});
+
+function dictationOwnerFixture(native: boolean) {
+  const f = ownerFixture();
+  const selection = new ScreenSelection(["server-a", "server-b"]);
+  f.services.screen.connect(null, () => selection.current === "server-a");
+  Object.defineProperty(f.areas.scope, "screen", { value: f.services.screen });
+  const values = new Map<string, RecordingValue>();
+  const recordings = createRecordingStorage("dictation-owner", {
+    put: async (key, value) => {
+      values.set(key, value);
+    },
+    putChunk: async (key, value, chunkKey, chunk) => {
+      values.set(key, value);
+      values.set(chunkKey, chunk);
+    },
+    delete: async (key) => {
+      values.delete(key);
+    },
+    loadAll: async () => [...values],
+  });
+  Object.defineProperty(f.services, "recordings", { value: recordings });
+  const stopped = vi.fn(async () => {});
+  vi.spyOn(f.services.audio, "captureAudio").mockResolvedValue({
+    sampleRate: 16000,
+    stop: stopped,
+  });
+  vi.spyOn(f.services.audio, "dictationBridge").mockReturnValue(
+    native
+      ? {
+          requestMicrophone: async () => true,
+          prepareTranscription: async () => "permit",
+          transcribeAudio: async () => ({
+            text: "spoken text",
+            provider: "fixture",
+            onDevice: true,
+          }),
+          cancelTranscription: async () => true,
+          onTranscriptionProgress: () => () => {},
+        }
+      : undefined,
+  );
+  return { ...f, selection, recordings, stopped };
+}
+
+it("stops native microphone capture when switching away from its server screen", async () => {
+  const f = dictationOwnerFixture(true);
+  const stop = f.selected.start();
+  try {
+    const control = f.selected.conversation?.context.nativeDictation;
+    if (!control) throw new Error("Native dictation owner missing");
+    await control.start();
+    expect(control.state.active).toBe(true);
+    f.selection.select("server-b");
+    expect(f.areas.scope.screen.active).toBe(false);
+    expect(f.stopped).toHaveBeenCalledOnce();
+    expect(f.selected.conversation).toBeUndefined();
+    f.selection.select("server-a");
+    expect(f.selected.conversation?.context.dictation.active).toBe(false);
+  } finally {
+    stop();
+    f.dispose();
+    vi.restoreAllMocks();
+  }
+});
+
+it("aborts active browser recognition when switching away from its server screen", () => {
+  const aborted = vi.fn();
+  class SpeechRecognition implements Recognition {
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    onresult: Recognition["onresult"] = null;
+    onerror: Recognition["onerror"] = null;
+    onstart: Recognition["onstart"] = null;
+    onend: Recognition["onend"] = null;
+    start() {}
+    stop() {}
+    abort() {
+      aborted();
+    }
+  }
+  vi.stubGlobal("SpeechRecognition", SpeechRecognition);
+  vi.stubGlobal("isSecureContext", true);
+  const f = dictationOwnerFixture(false);
+  const stop = f.selected.start();
+  try {
+    const control = f.selected.conversation?.context.browserDictation;
+    if (!control) throw new Error("Browser dictation owner missing");
+    control.start();
+    expect(control.state.active).toBe(true);
+    f.selection.select("server-b");
+    expect(f.areas.scope.screen.active).toBe(false);
+    expect(aborted).toHaveBeenCalledOnce();
+    expect(f.selected.conversation).toBeUndefined();
+    f.selection.select("server-a");
+    expect(f.selected.conversation?.context.dictation.active).toBe(false);
+  } finally {
+    stop();
+    f.dispose();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("loads existing recordings and undo entries with their composite workspace and chat key", async () => {
+  const f = dictationOwnerFixture(true);
+  const saved = {
+    id: "saved",
+    chatId: "/fixture:lead",
+    created: 1,
+    sampleRate: 16000,
+    samples: 1,
+    state: "ready",
+  } satisfies Recording;
+  await f.recordings.saveRecording(saved);
+  await f.recordings.saveRecording({ ...saved, id: "deleted", deletedAt: 1 });
+  const stop = f.selected.start();
+  try {
+    const control = f.selected.conversation?.context.nativeDictation;
+    if (!control) throw new Error("Native dictation owner missing");
+    await control.load();
+    expect(control.recordings.map(({ row }) => row.id)).toEqual(["saved"]);
+    expect(control.state.deleted.map((row) => row.id)).toEqual(["deleted"]);
+  } finally {
+    stop();
+    f.dispose();
+    vi.restoreAllMocks();
+  }
+});
+
+it("keeps a completing upload attached after switching servers and returning to another chat", async () => {
+  const f = dictationOwnerFixture(false);
+  const row = {
+    id: "switch-upload",
+    workspace: "workspace",
+    stateDir: "/fixture",
+    agent: "lead",
+    name: "saved.txt",
+    size: 1,
+    mime: "text/plain",
+    created: 1,
+  };
+  const asset = {
+    id: row.id,
+    name: row.name,
+    size: row.size,
+    mime: row.mime,
+    image: false,
+  };
+  let pending: (typeof row)[] = [];
+  const completion = Promise.withResolvers<typeof asset>();
+  vi.spyOn(f.services.uploads, "pendingUploads").mockImplementation(
+    async () => pending,
+  );
+  vi.spyOn(f.services.uploads, "queueUploads").mockImplementation(
+    async () => (pending = [row]),
+  );
+  const deliver = vi
+    .spyOn(f.services.uploads, "deliverUpload")
+    .mockReturnValue(completion.promise);
+  const finish = vi
+    .spyOn(f.services.uploads, "finishUpload")
+    .mockImplementation(async () => {
+      pending = [];
+    });
+  const stop = f.selected.start();
+  try {
+    await vi.waitFor(() =>
+      expect(f.selected.conversation?.context.uploadRecovery.busy).toBe(false),
+    );
+    const control = f.selected.conversation!;
+    await control.addFiles([new File(["saved"], row.name, { type: row.mime })]);
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
+    f.selection.select("server-b");
+    f.navigation.selectedId = "other";
+    f.selection.select("server-a");
+    expect(f.selected.conversation?.context.uploadRecovery).toBe(
+      control.context.uploadRecovery,
+    );
+    completion.resolve(asset);
+    await vi.waitFor(() => expect(finish).toHaveBeenCalledWith(row.id));
+    expect(f.selected.attachmentDrafts.current.lead).toEqual([asset]);
+  } finally {
+    completion.resolve(asset);
+    stop();
+    f.dispose();
   }
 });

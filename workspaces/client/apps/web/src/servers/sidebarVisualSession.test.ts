@@ -1,3 +1,4 @@
+import { reaction } from "mobx";
 import { withSidebarCollections } from "./sidebarSourceFixture.ts";
 import assert from "node:assert/strict";
 import { expect, it, vi } from "vitest";
@@ -61,7 +62,6 @@ function setup() {
           values.set(key, next);
           return next;
         },
-        subscribePreference: () => () => {},
       };
       return [item.id, backend] as const;
     }),
@@ -220,4 +220,32 @@ it("ignores saved project collapse from the home and remote owners", () => {
   ).toBeUndefined();
   expect(model.collapsed[field]).toBeUndefined();
   expect(writes).not.toHaveBeenCalled();
+});
+
+it("invalidates direct saved reads for offline toggles and selection-only expansion", () => {
+  const { writes, wrap } = setup();
+  const { model, backend } = wrap();
+  const field = model.mapTreeKey(
+    "remote",
+    JSON.stringify(["/remote", "folder", "folder"]),
+  );
+  const key = `codex-project-tree:${model.sidebar.stateDir}`;
+  const seen: boolean[] = [];
+  const read = () => backend.saved<Record<string, boolean>>(key, {});
+  const stop = reaction(
+    () => !!read()[field],
+    (value) => seen.push(value),
+    { fireImmediately: true },
+  );
+  try {
+    const previous = read();
+    backend.editPreference(key, previous, { ...previous, [field]: false });
+    if (!backend.viewPreference)
+      throw new Error("Missing fixture viewPreference");
+    backend.viewPreference(key, read(), { ...read(), [field]: true });
+    expect(seen).toEqual([true, false, true]);
+    expect(writes).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
 });

@@ -10,11 +10,9 @@ import type { Agent } from "../../../../types.ts";
 export default observer(function ConversationSettings({
   agent,
   lead,
-  openRequest,
 }: {
   agent: Agent;
   lead?: Agent | undefined;
-  openRequest: number;
 }) {
   const actions = useConversationActions();
   const { agents } = useAgentCatalog();
@@ -34,7 +32,6 @@ export default observer(function ConversationSettings({
         lead={lead}
         team={agents}
         catalog={catalog}
-        openRequest={openRequest}
         renderTrigger={({
           agent,
           detail,
