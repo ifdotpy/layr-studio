@@ -20,7 +20,9 @@ export interface StartupInputs {
 export class StartupOwner {
   readonly scope: AppScope;
   readonly inputs: StartupInputs;
-  workspaceId = "";
+  get workspaceId() {
+    return this.scope.services.sync.currentScope?.workspaceId || "";
+  }
   startupError = "";
   projectionError = "";
   transportError = "";
@@ -33,6 +35,7 @@ export class StartupOwner {
     );
   }
   generation = 0;
+  credentialGeneration = 0;
   startupExhausted = false;
   credentialRecovery = new ReadRecoveryBudget();
   databaseRecovery = new ReadRecoveryBudget();
@@ -45,6 +48,12 @@ export class StartupOwner {
   constructor(scope: AppScope, inputs: StartupInputs) {
     this.scope = scope;
     this.inputs = inputs;
+    this.stops.push(
+      scope.services.api.setMutationReadiness(
+        () =>
+          this.isReady && this.scope.store.state().current.status === "live",
+      ),
+    );
     makeAutoObservable(
       this,
       {
@@ -56,6 +65,7 @@ export class StartupOwner {
         databaseRetry: false,
         stops: false,
         generation: false,
+        credentialGeneration: false,
         startupExhausted: false,
         initialized: false,
         running: false,
@@ -77,6 +87,9 @@ export class StartupOwner {
   }
   get isReady() {
     return this.scope.services.sync.projectionMetadata.ready;
+  }
+  get mutationReady() {
+    return this.scope.services.api.mutationReady();
   }
   get isSchemaGateVisible() {
     return this.schemaMismatch;
@@ -116,19 +129,19 @@ export class StartupOwner {
     }
     if (!this.running || this.credentialRecovery.exhaustedError) return;
     clearTimeout(this.credentialRetry);
-    const request = ++this.generation;
+    const request = ++this.credentialGeneration;
     try {
       yield this.scope.services.api.refreshSession();
-      if (!this.running || request !== this.generation) return;
+      if (!this.running || request !== this.credentialGeneration) return;
       this.startupExhausted = false;
       this.startupError = "";
     } catch (error) {
-      if (!this.running || request !== this.generation) return;
+      if (!this.running || request !== this.credentialGeneration) return;
       const delay = this.reportStartupFailure(error, this.credentialRecovery);
       if (delay !== undefined && !document.hidden && navigator.onLine !== false)
         this.credentialRetry = setTimeout(() => {
           if (
-            request === this.generation &&
+            request === this.credentialGeneration &&
             !document.hidden &&
             navigator.onLine !== false
           )
@@ -154,13 +167,9 @@ export class StartupOwner {
     if (!this.running || this.databaseRecovery.exhaustedError) return;
     const request = this.generation;
     try {
-      const storage: Awaited<
-        ReturnType<AppScope["services"]["sync"]["syncDatabase"]>
-      > = yield this.scope.services.sync.syncDatabase();
+      yield this.scope.services.sync.syncDatabase();
       if (!this.running || request !== this.generation) return;
       this.initialized = true;
-      this.workspaceId = storage.workspaceId;
-      yield this.refreshCredentials(false);
     } catch (error) {
       if (!this.running || request !== this.generation) return;
       const delay = this.reportStartupFailure(error, this.databaseRecovery);
@@ -174,8 +183,9 @@ export class StartupOwner {
     this.databaseRecovery = new ReadRecoveryBudget();
     this.credentialRecovery = new ReadRecoveryBudget();
     this.startupExhausted = false;
-    if (this.initialized) yield this.refreshCredentials(false);
-    else yield this.initialize();
+    const credentials = this.refreshCredentials(false);
+    if (!this.initialized) yield this.initialize();
+    yield credentials;
   }
   receiveTransportError(message: string) {
     this.transportError = message;
@@ -191,7 +201,7 @@ export class StartupOwner {
     this.running = true;
     const { api, resources } = this.scope.services;
     let interrupted = false;
-    this.stops = [
+    this.stops.push(
       api.onApiSchemaMismatch(this.showSchemaMismatch),
       reaction(
         () => this.rendererBusy,
@@ -241,7 +251,7 @@ export class StartupOwner {
             : undefined,
         });
       }),
-    ];
+    );
     let update: AbortController | undefined;
     this.stops.push(
       reaction(
@@ -274,6 +284,7 @@ export class StartupOwner {
       ),
       () => update?.abort(),
     );
+    void this.refreshCredentials(false);
     void this.initialize();
     return this.dispose;
   }

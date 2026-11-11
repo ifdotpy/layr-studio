@@ -70,6 +70,10 @@ vi.mock("../servers/net/eventSource.ts", () => ({
   },
 }));
 vi.mock("../servers/net/api.ts", () => ({
+  getToken: () => "",
+  getStreamSession: () => undefined,
+  onProjectionSession: () => () => {},
+  rejectSession: async () => {},
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   get: mocks.syncGet,
@@ -736,7 +740,20 @@ it("reloads a scoped projection before exposing its resume cursor", async () => 
       api: {
         syncGet: mocks.syncGet,
         syncPost: vi.fn(),
-        saved: (_key, fallback) => fallback,
+        saved: vi
+          .fn()
+          .mockImplementation((key, fallback) =>
+            key === "codex-sync-cache-scope"
+              ? {
+                  serverId: "local",
+                  credentialId: "",
+                  tokenFingerprint: "fixture",
+                  workspaceId: f.workspaceId,
+                }
+              : key === "codex-sync-workspace"
+                ? f.workspaceId
+                : fallback,
+          ),
         save: vi.fn(),
         setWorkspace: vi.fn(),
         isApiSchemaMismatch: () => false,
@@ -988,7 +1005,20 @@ it("heals a truncated ready cache on reload and recovers the missing chat", asyn
     api: {
       syncGet: mocks.syncGet,
       syncPost: vi.fn(),
-      saved: (_key, fallback) => fallback,
+      saved: vi
+        .fn()
+        .mockImplementation((key, fallback) =>
+          key === "codex-sync-cache-scope"
+            ? {
+                serverId: "local",
+                credentialId: "",
+                tokenFingerprint: "fixture",
+                workspaceId: f.workspaceId,
+              }
+            : key === "codex-sync-workspace"
+              ? f.workspaceId
+              : fallback,
+        ),
       save: vi.fn(),
       setWorkspace: vi.fn(),
       isApiSchemaMismatch: () => false,
@@ -1217,6 +1247,7 @@ it.each([false, true])(
     source.emit("api-schema", { hash: API_SCHEMA_HASH });
     source.emit("session", {
       sessionId: "quiet-work-session",
+      workspaceId: f.workspaceId,
       cachePolicies: [],
     });
     const frame = (seq: number, snapshot: boolean): ResourceChangeEvent => ({
@@ -1563,6 +1594,7 @@ it.each(["burst", "inline removal", "staged removal"])(
     let finish!: () => void;
     source.emit("session", {
       sessionId: "quiet-work-discard-session",
+      workspaceId: f.workspaceId,
       cachePolicies: [],
     });
     const gate = new Promise<void>((resolve) => {
@@ -1726,7 +1758,20 @@ it("discards a slow old stream policy after a reset and applies NoCache", async 
     api: {
       syncGet: vi.fn().mockImplementation(() => identity.promise),
       syncPost: vi.fn(),
-      saved: (_key, fallback) => fallback,
+      saved: vi
+        .fn()
+        .mockImplementation((key, fallback) =>
+          key === "codex-sync-cache-scope"
+            ? {
+                serverId: "local",
+                credentialId: "",
+                tokenFingerprint: "fixture",
+                workspaceId: f.workspaceId,
+              }
+            : key === "codex-sync-workspace"
+              ? f.workspaceId
+              : fallback,
+        ),
       save: vi.fn(),
       setWorkspace: vi.fn(),
       isApiSchemaMismatch: () => false,
@@ -1779,6 +1824,7 @@ it("sends only applied live receipt rows to the outbox", async () => {
     onFreshReceipts,
   };
   const client = f.client.createSyncClient(options);
+  await client.syncDatabase();
   const frame = f.frame(1);
   frame.resourceVersions[0]!.entityChanges!.documents = [
     {

@@ -22,6 +22,7 @@ export const team = {
 export function accountsFixture() {
   const models = observableFixture();
   const areas = conversationActionsFixture(undefined, models.store);
+  areas.scope.services.api.setMutationReadiness(() => true);
   const post = vi.fn().mockResolvedValue({});
   areas.scope.services.api.post = post;
   const publish = (value: AccountsState) =>

@@ -318,7 +318,7 @@ export class SelectedConversationOwner {
   get canSend() {
     const { navigation, startup } = this.areas;
     return (
-      !startup.schemaMismatch &&
+      startup.mutationReady &&
       !nativeThreadError(navigation.selectedAgent, this.detail) &&
       (!!this.detail?.canSend ||
         !!navigation.selectedLegacyChat ||

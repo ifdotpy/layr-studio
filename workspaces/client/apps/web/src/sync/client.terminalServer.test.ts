@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
 }));
 vi.mock("../servers/net/api.ts", () => ({
+  getToken: () => "",
+  getStreamSession: () => undefined,
+  onProjectionSession: () => () => {},
+  rejectSession: async () => {},
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   syncPost: vi.fn(),

@@ -1,5 +1,8 @@
 import { observable, action } from "mobx";
-import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
+import {
+  setStartupFixture,
+  setStartupWorkspace,
+} from "../../components/shell/integration-support/observableFixture.tsx";
 import { vi } from "vitest";
 import { AgentSource } from "../../generated/api.ts";
 import {
@@ -55,7 +58,7 @@ export function ownerFixture() {
       stateDir: "/fixture",
     }),
   );
-  areas.startup.workspaceId = "workspace";
+  setStartupWorkspace(areas, "workspace");
   areas.navigation.selectedId = "lead";
   areas.layout.geometry.viewport.width = 1280;
   areas.notices.notify = notify;

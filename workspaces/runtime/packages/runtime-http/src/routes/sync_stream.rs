@@ -4491,7 +4491,7 @@ mod tests {
             let ack = document_bytes(&ack);
             assert_eq!(ack["gen"], generation);
             if !interest {
-                assert_eq!(ack["cachePolicies"][0]["policy"], "noCache");
+                assert_eq!(ack["cachePolicies"][0]["policy"], "cache");
                 let resource = body.next().await.expect("added resource").expect("bytes");
                 assert!(String::from_utf8_lossy(&resource).starts_with("event: resources\n"));
                 rates = floating_test_rates(2);

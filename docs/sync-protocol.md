@@ -19,16 +19,23 @@ forbidden.
 Local storage and IndexedDB may contain device keys, credentials and pairing
 secrets, the monitor input journal, outbox request identities, unsent user input (drafts,
 reply and answer text, form and queue edits, pending uploads, and unsent
-recordings) until the server confirms it, and the remote frontend's subscription
+recordings) until the server confirms it, and the frontend's subscription
 cache. Secret answer fields remain in memory only. The cache is never used to decide whether to send or retry a command.
 
-A remote frontend stores one IndexedDB record per cacheable subscription, with
+A frontend stores one IndexedDB record per cacheable subscription, with
 its data and cursor together. It writes at most once per five seconds and when
-the page becomes hidden. The server decides locality and cacheability; local
-frontends and subscriptions without provable row ownership start with snapshots
+the page becomes hidden. The server decides cacheability from the subscription's
+row ownership, equally for local and remote frontends. Subscriptions without provable row ownership start with snapshots
 after a reload. All subscriptions may resume from an in-memory cursor after a
-stream reconnect. A corrupt or unknown record is discarded and recovered with a snapshot. A browser
-on the server machine that pairs as a remote device is treated as remote.
+stream reconnect. A corrupt or unknown record is discarded and recovered with a snapshot.
+
+Subscription snapshots are bound to the view's credential identity and a hash of
+its confirmed session token. Credential replacement, token changes, and a
+session or sync authorization refusal discard persisted snapshots and hydrated
+rows, including pending hydration. A successful identity or stream session
+replaces a saved workspace identity; an older identity request cannot overwrite
+a newer session. Cached screens remain read-only until their state subscription
+is live. Command dispatch and HTTP mutations share that readiness check.
 
 Drafts, uploads, recordings, and unconfirmed sends share one IndexedDB input
 buffer. Input is written immediately and removed on server confirmation. Old

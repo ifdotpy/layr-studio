@@ -1447,7 +1447,7 @@ async fn a_paired_window_reaches_the_ordinary_api_with_signed_requests() {
         .expect("session")
         .1;
     assert_eq!(session["locality"], "local");
-    assert_eq!(session["cachePolicies"][0]["policy"], "noCache");
+    assert_eq!(session["cachePolicies"][0]["policy"], "cache");
     let entry = &owner
         .iter()
         .find(|(event, _)| event == "resources")

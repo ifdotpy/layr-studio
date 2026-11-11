@@ -56,6 +56,34 @@ const response = (value: unknown, hash = API_SCHEMA_HASH) =>
   });
 
 describe("concurrent servers in one interface", () => {
+  it("invalidates a rejected session but retains projections after a resource permission refusal", async () => {
+    const api = scope(
+      "refused",
+      async () =>
+        new Response(JSON.stringify({ error: "refused" }), {
+          status: 403,
+          headers: {
+            [API_SCHEMA_HASH_HEADER]: API_SCHEMA_HASH,
+            "Content-Type": "application/json",
+          },
+        }),
+      memory(),
+    );
+    const invalidated = vi.fn();
+    api.onProjectionSession(invalidated);
+    await expect(api.get("/api/limits")).rejects.toThrow();
+    expect(invalidated).not.toHaveBeenCalled();
+    await expect(api.refreshSession()).rejects.toThrow();
+    expect(invalidated).toHaveBeenCalledWith({ kind: "rejected" });
+  });
+  it("refuses commands before allocating a mutation identity while projection state is stale", async () => {
+    const fetch = vi.fn(async () => response({}));
+    const api = scope("stale", fetch, memory());
+    api.setMutationReadiness(() => false);
+    expect(api.mutationReady()).toBe(false);
+    await expect(api.command.stop("lead", true)).rejects.toThrow("syncing");
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("adopts the stream session without a bootstrap request and rejects workspace changes", async () => {
     const requests: Request[] = [];
     const api = scope(
@@ -84,20 +112,18 @@ describe("concurrent servers in one interface", () => {
     await api.post("/api/organization", { id: "chat" });
     expect(requests[0]?.headers.get("X-Canvas-Token")).toBe("owner");
     expect(requests[0]?.headers.get("X-Canvas-Workspace")).toBe("a".repeat(32));
-    expect(() =>
-      api.receiveStreamSession({
-        routes: [],
-        locality: FrontendLocality.local,
-        cachePolicies: [],
-        sessionId: "two",
-        workspaceId: "b".repeat(32),
-      }),
-    ).toThrow();
-    expect(api.getStreamSession()?.sessionId).toBe("one");
+    api.receiveStreamSession({
+      routes: [],
+      locality: FrontendLocality.local,
+      cachePolicies: [],
+      sessionId: "two",
+      workspaceId: "b".repeat(32),
+    });
+    expect(api.getStreamSession()?.sessionId).toBe("two");
     expect(requests).toHaveLength(1);
     api.clearStreamSession("older");
-    expect(api.getStreamSession()?.sessionId).toBe("one");
-    api.clearStreamSession("one");
+    expect(api.getStreamSession()?.sessionId).toBe("two");
+    api.clearStreamSession("two");
     expect(api.getStreamSession()).toBeUndefined();
   });
   it("versions disposable caches without changing request identity storage", () => {

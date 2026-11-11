@@ -33,7 +33,6 @@ import { theme } from "./theme.ts";
 import { initializeNativeClose } from "./native/close.ts";
 
 async function mount() {
-  await initializeNativeClose();
   const nativeCredentials = nativeCredentialBridge();
   setServerCredentialAdapter(
     nativeCredentials
@@ -65,6 +64,7 @@ async function mount() {
       });
     }
     const shell = services ? null : createShellState();
+    await initializeNativeClose();
     createRoot(container).render(
       <UIErrorBoundary label="Studio" fullPage>
         <MantineProvider theme={theme} defaultColorScheme="auto">

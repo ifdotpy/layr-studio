@@ -29,6 +29,8 @@ type Peer = Pick<
 > & { invitation: Invitation };
 type SyncFixture = Parameters<typeof handleEntitySyncFixtureRequest>[2];
 export type MultiServerFixtureOptions = {
+  cachePolicies?: components["schemas"]["SubscriptionCacheDecision"][];
+  transcriptSnapshot?: SyncFixture["transcriptSnapshot"];
   workspaceId?: string;
   serverPreferenceFields?: PreferenceFields;
   accounts?: FixtureAccount[];
@@ -369,6 +371,10 @@ export async function fixture(
     }
     if (
       handleEntitySyncFixtureRequest(request, response, {
+        cachePolicies: options.cachePolicies,
+        ...(options.transcriptSnapshot
+          ? { transcriptSnapshot: options.transcriptSnapshot }
+          : {}),
         discoverySnapshot: accessSnapshot,
         additionalEntities: () =>
           options.serverPreferenceFields

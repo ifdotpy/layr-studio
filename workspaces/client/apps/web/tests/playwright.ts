@@ -2232,6 +2232,9 @@ export function handleEntitySyncFixtureRequest(
   request: import("node:http").IncomingMessage,
   response: import("node:http").ServerResponse,
   fixture: {
+    cachePolicies?:
+      | import("../src/generated/api.ts").components["schemas"]["SubscriptionCacheDecision"][]
+      | undefined;
     snapshot: EntityFixtureState;
     workspaceId: string;
     unixSocket?: boolean | undefined;
@@ -2460,7 +2463,17 @@ export function handleEntitySyncFixtureRequest(
       "X-Accel-Buffering": "no",
     });
     const sessionId = randomUUID();
-    response.write(syncSessionSse(sessionId, identity.workspaceId));
+    response.write(
+      fixture.cachePolicies
+        ? protocol3SseEvent("session", {
+            sessionId,
+            workspaceId: identity.workspaceId,
+            routes: [],
+            locality: FrontendLocality.local,
+            cachePolicies: fixture.cachePolicies,
+          })
+        : syncSessionSse(sessionId, identity.workspaceId),
+    );
     response.write(apiSchemaHandshakeSse());
 
     const writeFrame = (

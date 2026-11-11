@@ -17,6 +17,8 @@ const subscriptions = createSubscriptions(
   ),
 );
 export const {
+  rejectAuthorization,
+  retryNow,
   watchResourceChanges,
   watchResourceConnection,
   watchTokenRateEvents,

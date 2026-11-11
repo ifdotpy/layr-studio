@@ -237,6 +237,10 @@ export type ApiScopeOptions = {
   beginMutation: typeof beginServerMutation;
   requestStatus?: { begin(): (error?: unknown) => void } | undefined;
 };
+export type ProjectionSessionEvent =
+  | { kind: "token"; token: string }
+  | { kind: "rejected" }
+  | { kind: "workspace"; workspaceId: string };
 export function createApiScope(options: ApiScopeOptions) {
   const { localStorage: storage, sessionStorage, requestStatus } = options;
   const apiOrigin = () => options.origin;
@@ -269,6 +273,42 @@ export function createApiScope(options: ApiScopeOptions) {
   let confirmedSession: { generation: number; token: string } | undefined;
 
   let workspace = "";
+  const sessionObservers = new Set<
+    (event: ProjectionSessionEvent) => void | Promise<void>
+  >();
+  function onProjectionSession(
+    accept: (event: ProjectionSessionEvent) => void | Promise<void>,
+  ) {
+    sessionObservers.add(accept);
+    return () => {
+      sessionObservers.delete(accept);
+    };
+  }
+  function projectionSession(event: ProjectionSessionEvent) {
+    return Promise.all(
+      [...sessionObservers].map((accept) => accept(event)),
+    ).then(() => {});
+  }
+  function rejectSession() {
+    token = "";
+    manualTokenGeneration = ++sessionGeneration;
+    successfulSession = undefined;
+    confirmedSession = undefined;
+    activeStreamSession = undefined;
+    return projectionSession({ kind: "rejected" });
+  }
+  let projectionReady = () => true;
+  const mutationReady = () => !schemaMismatch && projectionReady();
+  function assertMutationReady() {
+    if (!mutationReady())
+      throw new Error("Studio is syncing. Wait before changing server state.");
+  }
+  function setMutationReadiness(ready: () => boolean) {
+    projectionReady = ready;
+    return () => {
+      if (projectionReady === ready) projectionReady = () => false;
+    };
+  }
 
   let latestStreamSession: components["schemas"]["SyncSessionEvent"];
   let activeStreamSession:
@@ -284,8 +324,10 @@ export function createApiScope(options: ApiScopeOptions) {
   ) {
     if (!/^[a-f0-9]{32}$/.test(event.workspaceId))
       throw new Error("Invalid workspace identity");
-    if (workspace && workspace !== event.workspaceId)
-      throw new Error("The server workspace changed. Reload to synchronize.");
+    void projectionSession({
+      kind: "workspace",
+      workspaceId: event.workspaceId,
+    });
     workspace = event.workspaceId;
     if (event.token !== undefined) setToken(event.token);
     latestStreamSession = event;
@@ -474,6 +516,13 @@ export function createApiScope(options: ApiScopeOptions) {
     const headers = new Headers(request.headers);
     headers.set(API_SCHEMA_HASH_HEADER, API_SCHEMA_HASH);
     const response = await serverFetch(new Request(request, { headers }));
+    if (
+      (response.status === 401 || response.status === 403) &&
+      ["/api/session", "/api/sync/identity", "/api/sync/stream"].includes(
+        new URL(request.url).pathname,
+      )
+    )
+      await rejectSession();
     const serverHash = response.headers.get(API_SCHEMA_HASH_HEADER);
     if (isApiSchemaMismatchResponse(response, request)) {
       markApiSchemaMismatch(serverHash);
@@ -531,6 +580,7 @@ export function createApiScope(options: ApiScopeOptions) {
     | PostResult<"/api/multi-server">
   > {
     const [method, body, timeoutMs, sessionToken] = args;
+    if (method === "POST") assertMutationReady();
     const controller = requestController({}, timeoutMs ?? 15000);
     const finishRequest = requestStatus?.begin();
     let failure: unknown;
@@ -589,10 +639,12 @@ export function createApiScope(options: ApiScopeOptions) {
   }
 
   function setToken(value: string) {
+    if (token && token !== value) void rejectSession();
     manualTokenGeneration = ++sessionGeneration;
     successfulSession = undefined;
     confirmedSession = undefined;
     token = value;
+    void projectionSession({ kind: "token", token: value });
   }
 
   async function performGet<Path extends PathsFor<"get">>(
@@ -671,6 +723,7 @@ export function createApiScope(options: ApiScopeOptions) {
     options: PostOptions = {},
   ): Promise<PostResult<Path>> {
     if (schemaMismatch) throw new ApiSchemaMismatchError();
+    if (!path.startsWith("/api/sync/")) assertMutationReady();
     const targetWorkspaceId = options.workspaceId ?? workspace;
     const sessionToken = options.sessionToken ?? token;
     const mutation = await beginServerMutation(path, body, options.requestId);
@@ -834,6 +887,7 @@ export function createApiScope(options: ApiScopeOptions) {
     storage,
     (body, options) => syncPost("/api/commands", body, options),
     pending,
+    assertMutationReady,
   );
 
   async function refreshSession(): Promise<GetResult<"/api/session">> {
@@ -861,6 +915,7 @@ export function createApiScope(options: ApiScopeOptions) {
       }
     }
     // A delayed response cannot replace a newer confirmed server credential.
+    await projectionSession({ kind: "token", token });
     if (confirmedSession && confirmedSession.generation > generation)
       return { ...session, token: confirmedSession.token };
     return session;
@@ -905,6 +960,10 @@ export function createApiScope(options: ApiScopeOptions) {
       : "unknown";
   }
   return {
+    onProjectionSession,
+    rejectSession,
+    mutationReady,
+    setMutationReadiness,
     pendingMonitorInput,
     checkMonitorInputReceipt,
     isApiSchemaMismatch,
@@ -952,6 +1011,10 @@ const defaultApi = createApiScope({
   requestStatus: defaultNetStatus,
 });
 export const {
+  onProjectionSession,
+  rejectSession,
+  mutationReady,
+  setMutationReadiness,
   posting,
   pendingMonitorInput,
   checkMonitorInputReceipt,

@@ -105,6 +105,7 @@ const ManagedActions = observer(function ManagedActions() {
       {selected.canStopTeam && (
         <Menu.Item
           data-action="stop-team"
+          disabled={!area.startup.mutationReady}
           color="red"
           leftSection={<Square size={14} />}
           onClick={selected.stopTeam}
@@ -116,7 +117,9 @@ const ManagedActions = observer(function ManagedActions() {
         <Menu.Item
           data-action="switch-to-layr"
           leftSection={<Layers size={14} />}
-          disabled={selected.isWorkspaceSwitchBlocked}
+          disabled={
+            !area.startup.mutationReady || selected.isWorkspaceSwitchBlocked
+          }
           onClick={selected.switchToLayr}
         >
           Switch to Layr

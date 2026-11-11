@@ -15,10 +15,12 @@ export const NativeModelActions = observer(function NativeModelActions({
 }) {
   const actions = useConversationActions();
   const store = useServerStore();
-  const disabled = nativeActionDisabled(
-    agent,
-    resourceData(store.agentDetail(resourceAgentId(agent.id)).current),
-  );
+  const disabled =
+    !actions.startup.mutationReady ||
+    nativeActionDisabled(
+      agent,
+      resourceData(store.agentDetail(resourceAgentId(agent.id)).current),
+    );
   return (
     <>
       {(

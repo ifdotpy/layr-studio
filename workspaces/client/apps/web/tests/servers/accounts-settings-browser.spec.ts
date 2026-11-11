@@ -951,6 +951,11 @@ test("accounts settings show per-server state and provider choices", async ({
       exact: true,
     }),
   ).toBeVisible();
+  const heldRecovery = fixtureBarrier();
+  await page.route("**/api/sync/stream*", async (route) => {
+    await heldRecovery.promise;
+    await route.continue();
+  });
   await page.clock.pauseAt(new Date(pageClockStart.getTime() + 60_000));
   releaseUnknownStatus();
   await unknownSignInResponse;
@@ -962,8 +967,20 @@ test("accounts settings show per-server state and provider choices", async ({
   await expect(startAgain).not.toBeVisible();
   await page.clock.fastForward(1);
   await expect(startAgain).toBeVisible();
-  await startAgain.click();
+  await expect(startAgain).toBeDisabled();
+  await expect(secondClaudeSignIn).toContainText(
+    "Syncing. Sign-in will be available when sync finishes.",
+  );
+  expect(addStarts).toHaveLength(3);
+  heldRecovery.resolve();
   await page.clock.resume();
+  // The clock jump also expires the stream watchdog; finish its recovery
+  // before starting a mutation that requires the live state baseline.
+  await expect(
+    page.getByRole("status", { name: "Projection sync" }),
+  ).toBeHidden();
+  await expect(startAgain).toBeEnabled();
+  await startAgain.click();
   await expect(
     secondClaudeSignIn.getByRole("link", { name: "Open sign-in page" }),
   ).toBeVisible();

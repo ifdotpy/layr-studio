@@ -72,11 +72,25 @@ const AppWorkspace = observer(function AppWorkspace() {
       data-show-message-avatars={preferences.value.showMessageAvatars}
     >
       <SupervisorRecoveryNotice />
+      <ProjectionSyncNotice />
       {!layout.railGeometry && <ConversationHeader />}
       <AppNotices />
       <AppAccountNotices />
       <ManagedConversationRoot />
     </main>
+  );
+});
+
+const ProjectionSyncNotice = observer(function ProjectionSyncNotice() {
+  const { scope } = useServerAreas();
+  return scope.store.state().current.status === "live" ? null : (
+    <p
+      role="status"
+      aria-label="Projection sync"
+      className="studio-recovery-banner"
+    >
+      Syncing…
+    </p>
   );
 });
 

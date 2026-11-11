@@ -1,4 +1,5 @@
-import { autorun } from "mobx";
+import { autorun, untracked } from "mobx";
+import { CacheScopeOwner, type CacheScope } from "./cacheScope.ts";
 import {
   TRANSIENT_RESOURCE_KINDS,
   createProjectionMetadataMirror,
@@ -29,6 +30,9 @@ import {
   saved,
   save,
   setWorkspace,
+  onProjectionSession,
+  getToken,
+  getStreamSession,
   isApiSchemaMismatch,
 } from "../servers/net/api.ts";
 
@@ -48,6 +52,8 @@ import {
 import {
   watchResourceChanges,
   watchResourceConnection,
+  rejectAuthorization,
+  retryNow,
   replaceStream,
   type ResourceRef,
   type ResourceVersion,
@@ -69,6 +75,8 @@ import type { components } from "../generated/api.ts";
 import { withEntityProjectionWrite } from "./localCollection.ts";
 
 import { entityProjectionDatabaseName } from "./entityCacheStorage.ts";
+import { subscriptionCacheStorage } from "./subscriptionCacheStorage.ts";
+import { serverViewId } from "../servers/environment.ts";
 
 export type SyncDocument = EntityRow;
 
@@ -113,11 +121,21 @@ export type SyncClientOptions = {
     | "save"
     | "setWorkspace"
     | "isApiSchemaMismatch"
-  >;
+  > &
+    Partial<
+      Pick<
+        import("../servers/net/api.ts").ServerApi,
+        "onProjectionSession" | "getToken" | "getStreamSession"
+      >
+    >;
   resources: Pick<
     typeof import("./subscriptions/events.ts"),
     "watchResourceChanges" | "watchResourceConnection"
-  > & { replaceStream?: () => void };
+  > & {
+    replaceStream?: () => void;
+    rejectAuthorization?: () => void;
+    retryNow?: () => void;
+  };
   sequences: Pick<
     ReturnType<typeof import("./entitySequence.ts").createEntitySequenceScope>,
     "getEntitySequenceCheckpoint" | "setEntitySequenceProjection"
@@ -148,7 +166,116 @@ export function createSyncClient(options: SyncClientOptions) {
 
   let pending: ReturnType<typeof open> | undefined;
   let subscriptionCache: ReturnType<typeof createSubscriptionCache> | undefined;
-  let cachePolicySession = {};
+  let active:
+    | { db: { projections: LocalCollection }; readonly workspaceId: string }
+    | undefined;
+  const serverId = options.cacheStorage?.serverId || "local";
+  const credentialId = options.cacheStorage?.credentialId || "";
+  const hint = saved<CacheScope | null>("codex-sync-cache-scope", null);
+  const initial =
+    hint?.serverId === serverId && hint.credentialId === credentialId
+      ? hint
+      : {
+          serverId,
+          credentialId,
+          tokenFingerprint: "",
+          workspaceId: saved<string>("codex-sync-workspace", ""),
+        };
+  const cacheScope = new CacheScopeOwner(initial, options.cacheStorage, () => {
+    for (const row of active?.db.projections.all() ?? [])
+      if (row.id.startsWith("transcript:") && row.id.split(":").length === 2)
+        clearTranscript(
+          metadata.current.workspaceId,
+          row.id.slice("transcript:".length),
+        );
+    subscriptionCache?.stop();
+    subscriptionCache = undefined;
+    active?.db.projections.clear();
+    const workspaceId = cacheScope.current?.workspaceId || "";
+    metadata.apply({
+      workspaceId,
+      ready: false,
+      complete: false,
+      projectSequences: {},
+    });
+    setWorkspace(workspaceId);
+    setEntitySequenceProjection(workspaceId, API_SCHEMA_HASH);
+    save("codex-sync-workspace", workspaceId);
+    save("codex-sync-cache-scope", cacheScope.current);
+    if (active) startCache();
+    options.resources.replaceStream?.();
+  });
+  const capture = (current: () => boolean = () => true) => {
+    const valid = cacheScope.capture();
+    return () => valid() && current();
+  };
+  function startCache() {
+    const storage = cacheScope.scopedStorage();
+    if (!storage || !active) return;
+    subscriptionCache = createSubscriptionCache(
+      storage,
+      active.db.projections,
+      cacheScope.current?.workspaceId || "",
+      { isCurrent: cacheScope.capture() },
+    );
+    void subscriptionCache.load({ kind: "state" });
+  }
+  async function acceptToken(token: string) {
+    if (!token) return;
+    const isCurrent = cacheScope.capture(false);
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(token),
+    );
+    if (
+      !isCurrent() ||
+      (options.api.getToken && options.api.getToken() !== token)
+    )
+      return;
+    const fingerprint = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+    const previous = cacheScope.current;
+    const next = {
+      ...(previous || {
+        serverId,
+        credentialId,
+        workspaceId: options.api.getStreamSession?.()?.workspaceId || "",
+      }),
+      tokenFingerprint: fingerprint,
+    };
+    const changed = cacheScope.replace(next);
+    const adopted = cacheScope.capture();
+    await changed;
+    if (adopted()) {
+      const stop = watchResourceConnection((_status, activity, detail) => {
+        if (activity === "stopped" && detail.failure === "auth-rejected")
+          options.resources.retryNow?.();
+      });
+      stop();
+    }
+  }
+  function acceptWorkspace(workspaceId: string) {
+    if (!cacheScope.current) return Promise.resolve();
+    return cacheScope.replace({
+      ...(cacheScope.current || {
+        serverId,
+        credentialId,
+        tokenFingerprint: "",
+      }),
+      workspaceId,
+    });
+  }
+  const stopSession = options.api.onProjectionSession?.((event) => {
+    if (event.kind === "workspace") return acceptWorkspace(event.workspaceId);
+    if (event.kind === "token") return acceptToken(event.token);
+    options.resources.rejectAuthorization?.();
+    return cacheScope.replace(null);
+  });
+  const stopCredential = options.cacheStorage?.onInvalidation?.(() => {
+    options.resources.rejectAuthorization?.();
+    void cacheScope.replace(null);
+  });
   async function freshReceipts(
     workspaceId: string,
     documents: components["schemas"]["SyncEntity"][],
@@ -162,6 +289,8 @@ export function createSyncClient(options: SyncClientOptions) {
   }
 
   async function open() {
+    if (cacheScope.closed) throw new Error("Sync client is closed.");
+    const identityCurrent = cacheScope.capture();
     const cached = saved<string>("codex-sync-workspace", "");
     const hasCache = /^[a-f0-9]{32}$/.test(cached);
     const identify = async () => {
@@ -175,9 +304,22 @@ export function createSyncClient(options: SyncClientOptions) {
     const initialIdentity = identify();
     let identity: Awaited<ReturnType<typeof identify>> | null = null;
     // Cached display opens at once; every applied stream interval fences workspace identity.
-    if (hasCache) initialIdentity.catch(() => {});
+    if (hasCache)
+      initialIdentity
+        .then((identity) => {
+          if (identityCurrent())
+            return acceptWorkspace(
+              options.api.getStreamSession?.()?.workspaceId ||
+                identity.workspaceId,
+            );
+          return undefined;
+        })
+        .catch(() => {});
     else identity = await initialIdentity;
-    const workspaceId = identity?.workspaceId || cached;
+    if (identity && identityCurrent())
+      await acceptWorkspace(identity.workspaceId);
+    if (cacheScope.closed) throw new Error("Sync client is closed.");
+    const workspaceId = cacheScope.current?.workspaceId || "";
     setEntitySequenceProjection(workspaceId, API_SCHEMA_HASH);
     if (identity) save("codex-sync-workspace", workspaceId);
     setWorkspace(workspaceId);
@@ -189,14 +331,16 @@ export function createSyncClient(options: SyncClientOptions) {
           API_SCHEMA_HASH,
           serverDatabaseSuffix,
         ),
+        () => cacheScope.epoch,
       ),
     };
-    if (options.cacheStorage)
-      subscriptionCache = createSubscriptionCache(
-        options.cacheStorage,
-        db.projections,
-        workspaceId,
-      );
+    const storage = {
+      db,
+      get workspaceId() {
+        return cacheScope.current?.workspaceId || "";
+      },
+    };
+    active = storage;
     db.projections.$.subscribe((event) => {
       const doc = event.documentData;
       if (doc.id === "state:entities:ready") {
@@ -218,15 +362,22 @@ export function createSyncClient(options: SyncClientOptions) {
         else projectSequences[id] = doc.seq;
         metadata.apply({ ...metadata.current, projectSequences });
       }
-      if (doc.id.startsWith("transcript:") && doc.id.split(":").length === 2)
+      if (
+        event.context !== "reset" &&
+        doc.id.startsWith("transcript:") &&
+        doc.id.split(":").length === 2
+      )
         cacheStoredTranscriptAfterWrite(
           db.projections,
-          workspaceId,
+          storage.workspaceId,
           doc.id,
           doc,
+          capture(),
         );
     });
-    return { db, workspaceId };
+    // Display cached state independently of SSE resume-cursor preparation.
+    startCache();
+    return storage;
   }
 
   function syncDatabase() {
@@ -237,13 +388,17 @@ export function createSyncClient(options: SyncClientOptions) {
   }
 
   async function readSubscriptionCursor(resource: ResourceRef) {
+    const isCurrent = capture();
     if (TRANSIENT_RESOURCE_KINDS.has(resource.kind)) return undefined;
     await syncDatabase();
+    if (!isCurrent()) return undefined;
     await subscriptionCache?.load(resource);
+    if (!isCurrent()) return undefined;
     return readAppliedSubscriptionCursor(resource);
   }
 
   async function readAppliedSubscriptionCursor(resource: ResourceRef) {
+    const isCurrent = capture();
     const { db, workspaceId } = await syncDatabase();
     if (resource.kind === "state") {
       // A completed state interval owns this checkpoint and its baseline markers.
@@ -261,6 +416,7 @@ export function createSyncClient(options: SyncClientOptions) {
       const ready = rows.find((row) => row.id === "state:entities:ready");
       const complete = rows.find((row) => row.id === "state:entities:complete");
       if (
+        isCurrent() &&
         checkpoint &&
         !checkpoint._deleted &&
         Number.isSafeInteger(checkpoint.seq) &&
@@ -286,21 +442,20 @@ export function createSyncClient(options: SyncClientOptions) {
       if (!base || base.seq !== cursor.seq || !readTranscriptMeta(base.payload))
         return undefined;
     }
-    return cursor;
+    return isCurrent() ? cursor : undefined;
   }
 
   async function cacheSubscription(resource: ResourceRef) {
+    const isCurrent = capture();
     const cache = subscriptionCache;
     if (!cache || !cache.canSave(resource)) return;
     const { db } = await syncDatabase();
     await withEntityProjectionWrite(db.projections.database.name, async () => {
       const cursor = await readAppliedSubscriptionCursor(resource);
-      if (!cursor) return;
-      cache.save(
-        resource,
-        cursor,
-        await subscriptionRows(resource, db.projections),
-      );
+      if (!isCurrent() || !cursor) return;
+      const rows = await subscriptionRows(resource, db.projections);
+      if (!isCurrent()) return;
+      cache.save(resource, cursor, rows);
     });
   }
 
@@ -309,14 +464,20 @@ export function createSyncClient(options: SyncClientOptions) {
     cursor: components["schemas"]["SubscriptionCursor"],
     isCurrent: () => boolean,
   ) {
+    isCurrent = capture(isCurrent);
     const { db, workspaceId } = await syncDatabase();
     if (!isCurrent() || workspaceId !== cursor.workspaceId) return;
     if (resource.kind === "state") return;
-    await persistProjection(db.projections, {
-      id: await cursorDocumentId(resource),
-      payload: JSON.stringify(cursor),
-      seq: cursor.seq,
-    });
+    await persistProjection(
+      db.projections,
+      {
+        id: await cursorDocumentId(resource),
+        payload: JSON.stringify(cursor),
+        seq: cursor.seq,
+      },
+      false,
+      isCurrent,
+    );
   }
 
   async function persistScopedEntities(
@@ -324,6 +485,7 @@ export function createSyncClient(options: SyncClientOptions) {
     entry: components["schemas"]["ResourceRevisionEntry"],
     isCurrent: () => boolean,
   ) {
+    isCurrent = capture(isCurrent);
     const cursor = entry.cursor;
     const changes = entry.entityChanges;
     if (!cursor || !changes) return false;
@@ -441,26 +603,41 @@ export function createSyncClient(options: SyncClientOptions) {
       await persistProjectionBatch(db.projections, rows, isCurrent);
       if (!isCurrent()) return;
       if (resource.kind === "state") {
-        await persistProjection(db.projections, {
-          id: "state:entities:checkpoint",
-          payload: "{}",
-          seq: cursor.seq,
-        });
+        await persistProjection(
+          db.projections,
+          {
+            id: "state:entities:checkpoint",
+            payload: "{}",
+            seq: cursor.seq,
+          },
+          false,
+          isCurrent,
+        );
         if (entry.replyKind === SubscriptionReplyKind.snapshot) {
           const [ready] = await db.projections.getRows(
             ["state:entities:ready"],
             true,
           );
-          await persistProjection(db.projections, {
-            id: "state:entities:complete",
-            payload: "complete",
-            seq: Date.now(),
-          });
-          await persistProjection(db.projections, {
-            id: "state:entities:ready",
-            payload: "ready",
-            seq: (ready?.seq ?? 0) + 1,
-          });
+          await persistProjection(
+            db.projections,
+            {
+              id: "state:entities:complete",
+              payload: "complete",
+              seq: Date.now(),
+            },
+            false,
+            isCurrent,
+          );
+          await persistProjection(
+            db.projections,
+            {
+              id: "state:entities:ready",
+              payload: "ready",
+              seq: (ready?.seq ?? 0) + 1,
+            },
+            false,
+            isCurrent,
+          );
         }
       }
       await persistSubscriptionCursor(resource, cursor, isCurrent);
@@ -474,6 +651,7 @@ export function createSyncClient(options: SyncClientOptions) {
     interval: import("./entityTransfer.ts").StagedEntityInterval,
     isCurrent: () => boolean,
   ) {
+    isCurrent = capture(isCurrent);
     if (interval.resourceEntry) {
       await persistResourceEntityChanges(
         {
@@ -608,26 +786,41 @@ export function createSyncClient(options: SyncClientOptions) {
       }
       if (!isCurrent()) return;
       if (resource.kind === "state") {
-        await persistProjection(db.projections, {
-          id: "state:entities:checkpoint",
-          payload: "{}",
-          seq: interval.cursor.seq,
-        });
+        await persistProjection(
+          db.projections,
+          {
+            id: "state:entities:checkpoint",
+            payload: "{}",
+            seq: interval.cursor.seq,
+          },
+          false,
+          isCurrent,
+        );
         if (interval.replyKind === SubscriptionReplyKind.snapshot) {
           const [ready] = await db.projections.getRows(
             ["state:entities:ready"],
             true,
           );
-          await persistProjection(db.projections, {
-            id: "state:entities:complete",
-            payload: "complete",
-            seq: Date.now(),
-          });
-          await persistProjection(db.projections, {
-            id: "state:entities:ready",
-            payload: "ready",
-            seq: (ready?.seq ?? 0) + 1,
-          });
+          await persistProjection(
+            db.projections,
+            {
+              id: "state:entities:complete",
+              payload: "complete",
+              seq: Date.now(),
+            },
+            false,
+            isCurrent,
+          );
+          await persistProjection(
+            db.projections,
+            {
+              id: "state:entities:ready",
+              payload: "ready",
+              seq: (ready?.seq ?? 0) + 1,
+            },
+            false,
+            isCurrent,
+          );
         }
       }
       await persistSubscriptionCursor(resource, interval.cursor, isCurrent);
@@ -644,6 +837,7 @@ export function createSyncClient(options: SyncClientOptions) {
     event: import("./subscriptions/events.ts").ResourceChangeEvent,
     isCurrent: () => boolean,
   ) {
+    isCurrent = capture(isCurrent);
     // Hints participate in delivery ordering but have no durable projection data.
     if (
       !event.resourceVersions.some(
@@ -741,6 +935,7 @@ export function createSyncClient(options: SyncClientOptions) {
                 seq: appliedCursor.seq,
               },
               resource.kind === "terminal-output",
+              isCurrent,
             );
             entry.cursor = appliedCursor;
             entry.viewSnapshot = snapshot;
@@ -882,16 +1077,18 @@ export function createSyncClient(options: SyncClientOptions) {
     collection: LocalCollection,
     incoming: SyncDocument,
     replaceObsoleteTranscript = false,
+    isCurrent: () => boolean = cacheScope.capture(),
   ) {
     await collection.applyBatch([incoming], {
       replace: replaceObsoleteTranscript,
+      isCurrent,
     });
   }
 
   async function persistProjectionBatch(
     collection: LocalCollection,
     documents: SyncDocument[],
-    isCurrent: () => boolean = () => true,
+    isCurrent: () => boolean = cacheScope.capture(),
   ) {
     await collection.applyBatch(documents, { isCurrent });
   }
@@ -925,7 +1122,9 @@ export function createSyncClient(options: SyncClientOptions) {
     workspaceId: string,
     scope: string,
     doc: SyncDocument,
+    isCurrent: () => boolean = capture(),
   ) {
+    if (!isCurrent()) return;
     const id = scope.slice("transcript:".length);
     if (doc._deleted) {
       cacheTranscriptValue(workspaceId, id, null, doc.seq, 0);
@@ -940,6 +1139,7 @@ export function createSyncClient(options: SyncClientOptions) {
           true,
         )
       : [];
+    if (!isCurrent()) return;
     const byId = new Map(rows.map((row) => [row.id, row]));
     const items = meta.order.flatMap((itemId) => {
       const row = byId.get(transcriptItemId(scope, itemId));
@@ -960,11 +1160,18 @@ export function createSyncClient(options: SyncClientOptions) {
     workspaceId: string,
     scope: string,
     doc: SyncDocument,
+    isCurrent: () => boolean,
   ) {
-    setTimeout(
-      () => void cacheStoredTranscript(collection, workspaceId, scope, doc),
-      0,
-    );
+    setTimeout(() => {
+      if (isCurrent())
+        void cacheStoredTranscript(
+          collection,
+          workspaceId,
+          scope,
+          doc,
+          isCurrent,
+        );
+    }, 0);
   }
 
   async function persistTranscriptProjection(
@@ -978,6 +1185,7 @@ export function createSyncClient(options: SyncClientOptions) {
     epoch: string | undefined,
     cursor: components["schemas"]["SubscriptionCursor"],
   ) {
+    isCurrent = capture(isCurrent);
     return withEntityProjectionWrite(collection.database.name, async () => {
       if (!isCurrent()) return;
       const [previous] = await collection.getRows([scope], true);
@@ -1120,7 +1328,7 @@ export function createSyncClient(options: SyncClientOptions) {
             (!document._deleted && !isDelta && !!previous && !base),
         },
       );
-      if (!committed) return;
+      if (!isCurrent() || !committed) return;
       if (epochChanged || !isDelta) clearTranscript(workspaceId, id);
       if (incoming !== null && !isDelta) {
         cacheTranscriptValue(
@@ -1151,6 +1359,7 @@ export function createSyncClient(options: SyncClientOptions) {
             workspaceId,
             scope,
             metaDocument,
+            isCurrent,
           );
       } else {
         cacheTranscriptValue(workspaceId, id, null, document.seq, 0);
@@ -1166,42 +1375,68 @@ export function createSyncClient(options: SyncClientOptions) {
     resource?: Extract<ResourceRef, { kind: "transcript" }>,
   ) {
     const { db, workspaceId } = await syncDatabase();
-    const release =
-      localOnly && !resource
-        ? () => {}
-        : watchTranscriptInvalidations(
-            scope.slice("transcript:".length),
-            (version) => {
-              if (version?.cursor) fail(null);
-              else if (!options.api.isApiSchemaMismatch())
-                options.resources.replaceStream?.();
-            },
-            resource,
-          );
-    void subscriptionCache?.load(
-      resource ?? {
-        kind: "transcript",
-        agentId: scope.slice("transcript:".length),
-      },
-    );
-    const id = scope.slice("transcript:".length);
-    const stopCache = subscribeTranscript(workspaceId, id, (entry) =>
-      accept(entry.payload),
-    );
-    const subscription = db.projections.findOne(scope).$.subscribe((doc) => {
-      if (doc)
-        cacheStoredTranscriptAfterWrite(
-          db.projections,
-          workspaceId,
-          scope,
-          doc,
+    const attach = () => {
+      const isCurrent = capture();
+      const release =
+        localOnly && !resource
+          ? () => {}
+          : watchTranscriptInvalidations(
+              scope.slice("transcript:".length),
+              (version) => {
+                if (!isCurrent()) return;
+                if (version?.cursor) fail(null);
+                else if (!options.api.isApiSchemaMismatch())
+                  options.resources.replaceStream?.();
+              },
+              resource,
+            );
+      if (cacheScope.current)
+        void subscriptionCache?.load(
+          resource ?? {
+            kind: "transcript",
+            agentId: scope.slice("transcript:".length),
+          },
         );
-      else if (!peekTranscript(workspaceId, id)) accept(null);
-    });
+      const id = scope.slice("transcript:".length);
+      const stopCache = subscribeTranscript(workspaceId, id, (entry) => {
+        if (isCurrent()) accept(entry.payload);
+      });
+      const subscription = db.projections.findOne(scope).$.subscribe((doc) => {
+        if (!isCurrent()) return;
+        if (doc)
+          cacheStoredTranscriptAfterWrite(
+            db.projections,
+            workspaceId,
+            scope,
+            doc,
+            isCurrent,
+          );
+        else if (!peekTranscript(workspaceId, id)) accept(null);
+      });
+      const dispose = () => {
+        if (subscription.closed) return;
+        subscription.unsubscribe();
+        stopCache();
+        void release();
+      };
+      return dispose;
+    };
+    let dispose = () => {};
+    // Let the old cache reaction finish disposal before attaching its replacement.
+    const stopScope = autorun(
+      () => {
+        const isCurrent = capture();
+        dispose();
+        dispose =
+          isCurrent() && cacheScope.current?.workspaceId === workspaceId
+            ? untracked(attach)
+            : () => {};
+      },
+      { scheduler: queueMicrotask },
+    );
     return () => {
-      subscription.unsubscribe();
-      stopCache();
-      void release();
+      stopScope();
+      dispose();
     };
   }
 
@@ -1330,6 +1565,12 @@ export function createSyncClient(options: SyncClientOptions) {
     );
   }
   return {
+    get currentScope() {
+      return cacheScope.current;
+    },
+    get scopeEpoch() {
+      return cacheScope.epoch;
+    },
     get projectionMetadata() {
       return metadata.current;
     },
@@ -1340,9 +1581,9 @@ export function createSyncClient(options: SyncClientOptions) {
     setCachePolicies(
       decisions: components["schemas"]["SubscriptionCacheDecision"][],
     ) {
-      const session = cachePolicySession;
+      const current = capture();
       const apply = () => {
-        if (session !== cachePolicySession) return;
+        if (!current()) return;
         for (const decision of decisions)
           void subscriptionCache
             ?.setPolicy(decision.resource, decision.policy)
@@ -1355,10 +1596,14 @@ export function createSyncClient(options: SyncClientOptions) {
           .catch(() => {});
     },
     clearCachePolicies() {
-      cachePolicySession = {};
       subscriptionCache?.clearPolicies();
     },
-    disposeCache: () => subscriptionCache?.stop(),
+    disposeCache: () => {
+      cacheScope.close();
+      stopSession?.();
+      stopCredential?.();
+      subscriptionCache?.stop();
+    },
     persistResourceEntityChanges,
     persistStagedEntityTransfer,
     readSubscriptionCursor,
@@ -1368,15 +1613,26 @@ export function createSyncClient(options: SyncClientOptions) {
   };
 }
 export const defaultSyncClient = createSyncClient({
+  cacheStorage: subscriptionCacheStorage(
+    serverViewId || "local",
+    new URLSearchParams(
+      typeof location === "undefined" ? "" : location.search,
+    ).get("studio-credential") || "",
+  ),
   api: {
     syncGet,
     syncPost,
     saved,
     save,
     setWorkspace,
+    onProjectionSession: (accept) => onProjectionSession(accept),
+    getToken: () => getToken(),
+    getStreamSession: () => getStreamSession(),
     isApiSchemaMismatch,
   },
   resources: {
+    rejectAuthorization: () => rejectAuthorization(),
+    retryNow: () => retryNow(),
     watchResourceChanges: (...args: Parameters<typeof watchResourceChanges>) =>
       watchResourceChanges(...args),
     watchResourceConnection: (

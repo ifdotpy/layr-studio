@@ -1,4 +1,5 @@
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { invalidateSubscriptionCache } from "../../sync/subscriptionCacheStorage.ts";
 import {
   browserDatabases,
   browserIndexedDB,
@@ -294,6 +295,7 @@ export class BrowserServerCredentials implements ServerCredentialAdapter {
     );
   }
   async forget(server: StudioServer) {
+    await invalidateSubscriptionCache(server.id);
     const rows = await record<Credential[]>("readonly", (store) =>
       store.getAll(),
     );

@@ -10,6 +10,7 @@ vi.mock("../../servers/serverNames.ts", () => ({
 import {
   observableFixture,
   setStartupFixture,
+  setStartupWorkspace,
 } from "../../components/shell/integration-support/observableFixture.tsx";
 import { LocalCollection } from "../../sync/localCollection.ts";
 // @vitest-environment happy-dom
@@ -85,6 +86,7 @@ function fixture(
     scope: owner.scope,
   } as import("../ServerAreasProvider.tsx").ServerAreas;
   setStartupFixture(areas, null);
+  setStartupWorkspace(areas, "workspace");
   cleanup.push(owner.dispose);
   return {
     services,
@@ -99,6 +101,58 @@ function fixture(
       setStartupFixture(areas, data),
   };
 }
+it("starts the credential exchange while database initialization is pending", async () => {
+  const f = fixture();
+  const storage =
+    Promise.withResolvers<Awaited<ReturnType<typeof f.database>>>();
+  f.database.mockReturnValue(storage.promise);
+  f.owner.start();
+  expect(f.session).toHaveBeenCalledOnce();
+  expect(f.owner.initialized).toBe(false);
+  storage.resolve({
+    workspaceId: "workspace",
+    db: { projections: new LocalCollection("parallel-startup") },
+  });
+  await f.owner.initialize();
+  expect(f.owner.initialized).toBe(true);
+  expect(f.session).toHaveBeenCalledOnce();
+});
+
+it("accepts the pending database after a credential retry succeeds", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const storage =
+    Promise.withResolvers<Awaited<ReturnType<typeof f.database>>>();
+  f.database.mockReturnValue(storage.promise);
+  f.session.mockRejectedValueOnce(new TypeError("unreachable"));
+  f.owner.start();
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(f.session).toHaveBeenCalledTimes(2);
+  storage.resolve({
+    workspaceId: "workspace",
+    db: { projections: new LocalCollection("credential-retry") },
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.owner.initialized).toBe(true);
+  expect(f.owner.workspaceId).toBe("workspace");
+});
+
+it("reads workspace replacement from the sync owner after initialization", async () => {
+  const f = fixture();
+  f.owner.start();
+  await f.owner.initialize();
+  Object.defineProperty(f.services.sync, "currentScope", {
+    configurable: true,
+    get: () => ({
+      serverId: "same",
+      credentialId: "first",
+      tokenFingerprint: "token",
+      workspaceId: "replacement",
+    }),
+  });
+  expect(f.owner.workspaceId).toBe("replacement");
+});
+
 it.each(["session", "database"] as const)(
   "bounds %s retries, then recovers only on explicit retry or reconnect",
   async (boundary) => {
@@ -196,6 +250,64 @@ it("composes separate selection and dialogs for colliding server identities and 
   first.dispose();
   expect(a.services.areas).not.toBe(first);
   expect(second.scope.services.owner.credentialId).toBe("b");
+});
+
+it("renders cached state before a live baseline and keeps the loader for a cold start", async () => {
+  const { act, createElement } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { MantineProvider } = await import("@mantine/core");
+  const { default: App } = await import("../../components/shell/App/App.tsx");
+  const { ServerAreas } = await import("../ServerAreasProvider.tsx");
+  const {
+    ServerServicesProvider,
+    ServerStoreProvider,
+    ServerAreasContextProvider,
+  } =
+    await import("../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx");
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const f = fixture();
+  const areas = new ServerAreas({
+    services: f.services,
+    store: f.models.store,
+    screen: { active: true, channel: null },
+  });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(MantineProvider, {
+          children: createElement(ServerServicesProvider, {
+            services: f.services,
+            children: createElement(ServerStoreProvider, {
+              value: f.models.store,
+              children: createElement(ServerAreasContextProvider, {
+                value: areas,
+                children: createElement(App),
+              }),
+            }),
+          }),
+        }),
+      ),
+    );
+    expect(host.querySelector('[aria-label="Studio startup"]')).not.toBeNull();
+    await act(async () => {
+      setStartupFixture(
+        areas,
+        Object.assign(snapshotFixture(), { token: "", stateDir: "/cached" }),
+      );
+      vi.spyOn(f.models.store, "state").mockReturnValue({
+        current: { status: "stale", data: f.models.mirror.current },
+      });
+    });
+    expect(host.querySelector('[aria-label="Studio startup"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Projection sync"]')).not.toBeNull();
+  } finally {
+    act(() => root.unmount());
+    areas.dispose();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
 });
 
 it("shows a generated state query failure before its first value and reload recovers the real App", async () => {

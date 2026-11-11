@@ -50,6 +50,30 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it("preserves the saved attempt when starting a replacement is refused during sync", async () => {
+  const { current } = flow();
+  current.persist({
+    requestId: "previous",
+    startRequestId: "previous-start",
+    label: "Profile",
+    email: "person@example.test",
+    createdAt: Date.now(),
+  });
+  const previous = current.flow;
+  const api = owner.areas.scope.services.api;
+  api.setMutationReadiness(() => false);
+  owner.post.mockImplementationOnce(async () => {
+    if (!api.mutationReady()) throw new Error("Studio is syncing");
+    return receipt(current);
+  });
+  await flowResult(current.start("replacement@example.test", true));
+  expect(current.flow).toBe(previous);
+  expect(api.saved(current.storageKey, "")).toBe("previous");
+  expect(flow().current.flow).toEqual(previous);
+  expect(owner.post).not.toHaveBeenCalled();
+  expect(current.mutationReady).toBe(false);
+});
+
 it("locks start synchronously and retries the identical saved add payload after uncertainty and reload", async () => {
   const { current } = flow();
   let reject!: (reason: Error) => void;

@@ -23,6 +23,8 @@ vi.mock("../servers/net/eventSource.ts", () => ({
 }));
 vi.mock("./client.ts", () => ({
   syncDatabase,
+  setCachePolicies: vi.fn(),
+  clearCachePolicies: vi.fn(),
   readSubscriptionCursor: vi.fn(async () => undefined),
   persistResourceEntityChanges: vi.fn(async () => {}),
 }));

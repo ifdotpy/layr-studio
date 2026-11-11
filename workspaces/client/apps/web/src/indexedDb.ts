@@ -23,8 +23,9 @@ export function indexedDb(
       throw error;
     }));
   }
-  async function put(key: string, value: unknown) {
+  async function put(key: string, value: unknown, isCurrent = () => true) {
     const db = await open();
+    if (!isCurrent()) return;
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(storeName, "readwrite");
       tx.objectStore(storeName).put(value, key);
@@ -32,8 +33,9 @@ export function indexedDb(
       tx.onabort = tx.onerror = () => reject(tx.error);
     });
   }
-  async function remove(key: IDBValidKey) {
+  async function remove(key: IDBValidKey, isCurrent = () => true) {
     const db = await open();
+    if (!isCurrent()) return;
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(storeName, "readwrite");
       tx.objectStore(storeName).delete(key);

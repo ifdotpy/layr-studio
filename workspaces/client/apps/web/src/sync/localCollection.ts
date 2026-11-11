@@ -69,6 +69,7 @@ const inRange = (range: Range, id: string) =>
   id < range.lt;
 
 export class LocalCollection {
+  private readonly scopeEpoch: () => number;
   readonly database: { name: string };
   readonly $: {
     subscribe: (observer: Observer<Change>) => { unsubscribe(): void };
@@ -77,7 +78,8 @@ export class LocalCollection {
   private readonly docs = new WeakMap<Row, Doc>();
   private readonly listeners = new Set<Listener>();
 
-  constructor(name: string) {
+  constructor(name: string, scopeEpoch: () => number = () => 0) {
+    this.scopeEpoch = scopeEpoch;
     this.database = { name };
     this.$ = {
       subscribe: (observer) => {
@@ -119,6 +121,12 @@ export class LocalCollection {
     const change = { id: row.id, documentData: row, context };
     for (const listener of this.listeners) listener(change);
   }
+  /** Revoke the entire displayed projection, including readiness markers. */
+  clear() {
+    const previous = [...this.rows.values()];
+    this.rows.clear();
+    for (const row of previous) this.emit({ ...row, _deleted: true }, "reset");
+  }
 
   /** Compare and publish one typed batch without an awaited read or a CAS retry. */
   async applyBatch(
@@ -149,7 +157,10 @@ export class LocalCollection {
       this.rows.set(stored.id, stored);
       added.push(stored);
     }
-    for (const row of added) this.emit(row, hydrate ? "cache" : "projection");
+    for (const row of added) {
+      if (!isCurrent()) return false;
+      this.emit(row, hydrate ? "cache" : "projection");
+    }
     return true;
   }
 
@@ -210,7 +221,12 @@ export class LocalCollection {
           try {
             do {
               again = false;
+              const epoch = this.scopeEpoch();
               const value = await load();
+              if (epoch !== this.scopeEpoch()) {
+                again = true;
+                continue;
+              }
               if (!stopped) next(value);
             } while (again && !stopped);
           } catch (error) {

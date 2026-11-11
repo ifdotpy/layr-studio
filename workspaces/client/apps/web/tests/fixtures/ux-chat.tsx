@@ -133,8 +133,10 @@ function Fixture() {
   area.scope.services.drafts.getDraft = getDraft;
   runInAction(() => {
     setStartupFixture(area, data);
-    area.startup.workspaceId =
-      window.__uxChatSyncIdentity?.workspaceId || "workspace";
+    setStartupWorkspace(
+      area,
+      window.__uxChatSyncIdentity?.workspaceId || "workspace",
+    );
     area.navigation.selectedId = id;
     area.navigation.jumpTarget = jumpTarget
       ? { ...jumpTarget, chatId: id }
@@ -186,4 +188,7 @@ function Fixture() {
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);
 
-import { setStartupFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import {
+  setStartupFixture,
+  setStartupWorkspace,
+} from "../../src/components/shell/integration-support/observableFixture.tsx";

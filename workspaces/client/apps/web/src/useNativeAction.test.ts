@@ -1,4 +1,7 @@
-import { setStartupFixture } from "./components/shell/integration-support/observableFixture.tsx";
+import {
+  setStartupFixture,
+  setStartupWorkspace,
+} from "./components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { componentSnapshot as snapshotFixture } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { conversationActionsFixture } from "./components/shell/integration-support/observableFixture.tsx";
@@ -33,7 +36,7 @@ it("retries a native action saved before schema-hashed keys with the same identi
     ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
     stateDir: "workspace",
   });
-  area.startup.workspaceId = "workspace";
+  setStartupWorkspace(area, "workspace");
   const request = {
     id: "chat",
     action: "compact",
@@ -79,7 +82,7 @@ it("retries an uncertain action with its original request and server after anoth
       ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
       stateDir: "/same/path",
     });
-    area.startup.workspaceId = "same-workspace";
+    setStartupWorkspace(area, "same-workspace");
     return area.native;
   };
   const a = makeOwner(postA),
@@ -120,7 +123,7 @@ it("a late receipt settles its original workspace after disposal and preserves t
     ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
     stateDir: "first",
   });
-  area.startup.workspaceId = "first";
+  setStartupWorkspace(area, "first");
   area.notices.notify = notify;
   const owner = area.native;
   const stop = owner.start();
@@ -136,7 +139,7 @@ it("a late receipt settles its original workspace after disposal and preserves t
     ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
     stateDir: "second",
   });
-  area.startup.workspaceId = "second";
+  setStartupWorkspace(area, "second");
   await expect(owner.submit(agent, "review")).rejects.toThrow("reply lost");
   const newer = owner.pending(agent.id);
   stop();

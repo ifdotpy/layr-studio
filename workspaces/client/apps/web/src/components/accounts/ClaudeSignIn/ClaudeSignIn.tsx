@@ -22,7 +22,7 @@ export default observer(function ClaudeSignIn({
     loading = false,
   ) => (
     <Button
-      disabled={!!busy}
+      disabled={!!busy || !flow.mutationReady}
       loading={loading && busy === "start"}
       onClick={() => void flow.start(email, forceNew)}
     >
@@ -45,6 +45,11 @@ export default observer(function ClaudeSignIn({
         </p>
       ) : (
         flow.displayEmail && <p>Sign in as {flow.displayEmail}.</p>
+      )}
+      {!flow.mutationReady && (
+        <p role="status">
+          Syncing. Sign-in will be available when sync finishes.
+        </p>
       )}
       {receipt?.status === "ready" ? (
         <p role="status">
@@ -119,7 +124,7 @@ export default observer(function ClaudeSignIn({
           {!account && flow.wrong && receipt?.email && (
             <Button
               variant="default"
-              disabled={!!busy}
+              disabled={!!busy || !flow.mutationReady}
               onClick={() => void flow.start(receipt.email || "", true)}
             >
               Keep {receipt.email}

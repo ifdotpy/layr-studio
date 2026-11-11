@@ -305,7 +305,10 @@ function publishQueue(revision: string, text: string | null) {
   ]);
 }
 
-import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
+import {
+  conversationActionsFixture,
+  setStartupWorkspace,
+} from "../../shell/integration-support/observableFixture.tsx";
 import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { QueueOptions } from "../../../servers/net/queue.ts";
 function useMessageQueue(options: QueueOptions) {
@@ -369,7 +372,7 @@ function selectedReceipts(workspaceId = "") {
   ]);
   const area = conversationActionsFixture(() => {}, nativeStore);
   Object.assign(area.scope.screen, { active: false });
-  area.startup.workspaceId = workspaceId;
+  setStartupWorkspace(area, workspaceId);
   area.navigation.selectedId = "lead";
   const state = nativeStore.state;
   Object.assign(area.scope.store, {

@@ -1,5 +1,8 @@
 import { mountConversationFixture } from "../../components/conversation/ConversationView/ConversationView.fixture.tsx";
-import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
+import {
+  setStartupFixture,
+  setStartupWorkspace,
+} from "../../components/shell/integration-support/observableFixture.tsx";
 import { AgentSource } from "../../generated/api.ts";
 import { runInAction } from "mobx";
 import { enableStaticRendering } from "mobx-react-lite";
@@ -28,7 +31,7 @@ it("the app retains offline diagnostics until delivery settles and suppresses on
       stateDir: "/fixture",
     }),
   );
-  areas.startup.workspaceId = "workspace";
+  setStartupWorkspace(areas, "workspace");
   areas.navigation.selectedId = "lead";
   areas.delivery.entries = [
     {

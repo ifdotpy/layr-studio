@@ -374,6 +374,29 @@ it("deletes a record and refuses writes when the server marks it NoCache", async
   cache.stop();
 });
 
+it("keeps an initial cache read alive while a stream resets its policy decisions", async () => {
+  const pending = Promise.withResolvers<unknown>();
+  const storage = {
+    get: vi.fn(() => pending.promise),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const collection = new LocalCollection("fixture");
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  const loading = cache.load(ref);
+  cache.clearPolicies();
+  pending.resolve({
+    version: SUBSCRIPTION_CACHE_VERSION,
+    contractHash: API_SCHEMA_HASH,
+    subscription: subscriptionKey(ref),
+    cursor,
+    data: [cachedRow],
+  });
+  expect(await loading).toEqual(cursor);
+  expect(collection.all()).not.toEqual([]);
+  cache.stop();
+});
+
 it("does not hydrate a delayed cache load after the server says NoCache", async () => {
   const pending = Promise.withResolvers<unknown>();
   const storage = {

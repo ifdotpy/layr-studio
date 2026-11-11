@@ -221,7 +221,11 @@ async function fixture(
   await vi.advanceTimersByTimeAsync(0);
   const source = follower ? ({ emit: peer } as Source) : sources[0]!;
   if (!follower && session)
-    source.emit("session", { sessionId: "session-one", cachePolicies: [] });
+    source.emit("session", {
+      sessionId: "session-one",
+      workspaceId: "workspace",
+      cachePolicies: [],
+    });
   if (!follower) source.emit("api-schema", { hash: API_SCHEMA_HASH });
   if (baseline)
     source.emit("resources", {
@@ -403,6 +407,7 @@ it("publishes and clears the current stream session as the source changes", asyn
   const f = await fixture();
   expect(f.receiveSession).toHaveBeenCalledWith({
     sessionId: "session-one",
+    workspaceId: "workspace",
     cachePolicies: [],
   });
   f.source.onerror?.();
@@ -786,7 +791,11 @@ it("queues interests on an opening stream until its session arrives", async () =
     false,
   );
 
-  f.source.emit("session", { sessionId: "session-one", cachePolicies: [] });
+  f.source.emit("session", {
+    sessionId: "session-one",
+    workspaceId: "workspace",
+    cachePolicies: [],
+  });
   await vi.advanceTimersToNextTimerAsync();
   expect(f.source.closed).toBe(false);
   expect(f.sources).toHaveLength(1);
@@ -1399,7 +1408,11 @@ it("reopens a terminal from its durable cursor after its reset write fails", asy
     since: cursor,
   });
   const resumed = f.sources.at(-1)!;
-  resumed.emit("session", { sessionId: "session-two", cachePolicies: [] });
+  resumed.emit("session", {
+    sessionId: "session-two",
+    workspaceId: "workspace",
+    cachePolicies: [],
+  });
   resumed.emit("api-schema", { hash: API_SCHEMA_HASH });
   resumed.emit("resources", { ...frame(12, "new", 3), reason: "reconnect" });
   await vi.advanceTimersByTimeAsync(0);

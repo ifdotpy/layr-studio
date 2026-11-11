@@ -1,4 +1,7 @@
-import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
+import {
+  setStartupFixture,
+  setStartupWorkspace,
+} from "../../components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { autorun, runInAction } from "mobx";
@@ -84,7 +87,7 @@ function fixture(nativeB = false) {
       ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
       chats: [{ id: "L" }],
     });
-    a.startup.workspaceId = "workspace";
+    setStartupWorkspace(a, "workspace");
   });
   a.navigation.selectExternal("A", { requestId: "initial-A" });
   const stop = a.selected.start();
@@ -164,10 +167,10 @@ it("evicts the oldest history after twelve retained chats and resets at workspac
   expect(a.selected.history).not.toBe(original);
   const current = a.selected.history;
   runInAction(() => {
-    a.startup.workspaceId = "other-workspace";
+    setStartupWorkspace(a, "other-workspace");
   });
   runInAction(() => {
-    a.startup.workspaceId = "workspace";
+    setStartupWorkspace(a, "workspace");
   });
   expect(a.selected.history).not.toBe(current);
 });
@@ -280,7 +283,7 @@ it.each(cacheDependencies)(
         });
       } else if (dependency === "syncWorkspaceId") {
         runInAction(() => {
-          a.startup.workspaceId = "different-sync-workspace";
+          setStartupWorkspace(a, "different-sync-workspace");
         });
       } else if (dependency === "enabled") {
         a.selected.suspendReaders(new Set([id]));

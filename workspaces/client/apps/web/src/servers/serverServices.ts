@@ -38,7 +38,7 @@ import type { StudioServer } from "./registry.ts";
 import { createServerTransport } from "./net/serverTransport.ts";
 import { serverCredentialAdapter } from "./net/transport.ts";
 import { scopedSessionOutbox } from "../browserPersistence.ts";
-import { indexedDb } from "../indexedDb.ts";
+import { subscriptionCacheStorage } from "../sync/subscriptionCacheStorage.ts";
 
 /** Services belong to a server, never to the currently visible chat. */
 export function createServerServices(
@@ -56,10 +56,9 @@ export function createServerServices(
   const localNativeClient = () =>
     transport.owner.id === "local" && hasNativeClient();
   const sequences = createEntitySequenceScope();
-  const cacheStorage = indexedDb(
-    `studio-subscription-cache:${transport.owner.id}`,
-    "subscriptions",
-    1,
+  const cacheStorage = subscriptionCacheStorage(
+    transport.owner.id,
+    transport.owner.credentialId,
   );
   const netStatus = new NetStatus();
   const api = createApiScope({

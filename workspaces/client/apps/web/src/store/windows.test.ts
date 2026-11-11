@@ -30,6 +30,9 @@ vi.mock("../servers/net/api.ts", () => ({
   save: vi.fn(),
   setWorkspace: vi.fn(),
   isApiSchemaMismatch: () => false,
+  onProjectionSession: () => () => {},
+  getToken: () => null,
+  getStreamSession: () => null,
 }));
 vi.mock("../sync/subscriptions/events.ts", () => ({
   watchResourceChanges: () => () => {},

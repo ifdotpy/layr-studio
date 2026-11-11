@@ -33,6 +33,7 @@ import {
   post,
   receiveStreamSession,
   clearStreamSession,
+  rejectSession,
 } from "../servers/net/api.ts";
 
 import {
@@ -40,6 +41,8 @@ import {
   persistStagedEntityTransfer,
   readSubscriptionCursor,
   syncDatabase,
+  setCachePolicies,
+  clearCachePolicies,
 } from "./client.ts";
 import { subscriptionKey } from "./subscriptions/cursors.ts";
 import { hasAppliedResourceBaseline } from "./subscriptions/contracts.ts";
@@ -146,7 +149,7 @@ export type ResourceEventsOptions = {
     Partial<
       Pick<
         import("../servers/net/api.ts").ServerApi,
-        "receiveStreamSession" | "clearStreamSession"
+        "receiveStreamSession" | "clearStreamSession" | "rejectSession"
       >
     >;
   sync: Pick<
@@ -1602,6 +1605,7 @@ export function createResourceEvents(options: ResourceEventsOptions) {
           if (!Array.isArray(event.cachePolicies))
             throw new TypeError("Invalid cache policies");
           sessionId = event.sessionId;
+          workspaceId = event.workspaceId;
           options.api.receiveStreamSession?.(event);
           options.onCachePolicies?.(event.cachePolicies);
           if (Array.isArray(event.routes)) options.onRoutes?.(event.routes);
@@ -1691,16 +1695,8 @@ export function createResourceEvents(options: ResourceEventsOptions) {
         if (source !== connected) return;
         const status = (event as { status?: number } | undefined)?.status;
         if (status === 401 || status === 403) {
-          // A refused device waits for a wakeup. A timer would repeat the refusal.
-          requireBaselineReconciliation();
-          closeSource("auth-rejected");
-          awaitingWakeup = true;
-          setConnection({
-            phase: "reconnecting",
-            attempt: retryAttempts + 1,
-            cause: "auth-rejected",
-            activity: "stopped",
-          });
+          void options.api.rejectSession?.();
+          rejectAuthorization();
           return;
         }
         if (connectionOpened && !schemaHandshakeReceived) {
@@ -2118,7 +2114,20 @@ export function createResourceEvents(options: ResourceEventsOptions) {
   configureTokenRateStream(watchTokenRateEvents);
 
   const stopMismatch = onApiSchemaMismatch(stopCoordinator);
+  /** A refused device waits for a wakeup; it never retries the refusal on a timer. */
+  function rejectAuthorization() {
+    requireBaselineReconciliation();
+    closeSource("auth-rejected");
+    awaitingWakeup = true;
+    setConnection({
+      phase: "reconnecting",
+      attempt: retryAttempts + 1,
+      cause: "auth-rejected",
+      activity: "stopped",
+    });
+  }
   return {
+    rejectAuthorization,
     watchResourceChanges,
     watchResourceConnection,
     watchTokenRateEvents,
@@ -2143,6 +2152,8 @@ export function createResourceEvents(options: ResourceEventsOptions) {
   };
 }
 const defaultResourceEvents = createResourceEvents({
+  onCachePolicies: (policies) => setCachePolicies(policies),
+  onCachePoliciesReset: () => clearCachePolicies(),
   api: {
     clearSchemaUpdateAttemptAfterMatch,
     get,
@@ -2153,6 +2164,7 @@ const defaultResourceEvents = createResourceEvents({
     post,
     receiveStreamSession,
     clearStreamSession,
+    rejectSession: () => rejectSession(),
   },
   sync: {
     readSubscriptionCursor: (resource) => readSubscriptionCursor(resource),
@@ -2172,6 +2184,7 @@ const defaultResourceEvents = createResourceEvents({
   openEvents: openServerEvents,
 });
 export const {
+  rejectAuthorization,
   retryNow,
   dispose,
   watchResourceChanges,

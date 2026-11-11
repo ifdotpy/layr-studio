@@ -38,8 +38,16 @@ type RecordValue = {
 };
 export type SubscriptionCacheStorage = {
   get(key: string): Promise<unknown>;
-  put(key: string, value: unknown): Promise<void>;
-  delete(key: string): Promise<void>;
+  put(key: string, value: unknown, isCurrent?: () => boolean): Promise<void>;
+  delete(key: string, isCurrent?: () => boolean): Promise<void>;
+  serverId?: string;
+  credentialId?: string;
+  clearScope?: (
+    credentialId: string,
+    isCurrent: () => boolean,
+  ) => Promise<void>;
+  clear?: () => Promise<void>;
+  onInvalidation?: (accept: () => void) => () => void;
 };
 
 type IndexEntry = { bytes: number; use: number };
@@ -260,7 +268,10 @@ export function createSubscriptionCache(
   storage: SubscriptionCacheStorage,
   collection: LocalCollection,
   workspace: string,
-  { maxBytes = SUBSCRIPTION_CACHE_MAX_BYTES }: { maxBytes?: number } = {},
+  {
+    maxBytes = SUBSCRIPTION_CACHE_MAX_BYTES,
+    isCurrent = () => true,
+  }: { maxBytes?: number; isCurrent?: () => boolean } = {},
 ) {
   const key = (ref: ResourceRef) =>
     JSON.stringify([workspace, subscriptionKey(ref)]);
@@ -279,6 +290,7 @@ export function createSubscriptionCache(
     return run;
   }
   async function writeRecord(index: Index, id: string, value: RecordValue) {
+    if (!isCurrent()) return;
     const bytes = byteLength(value);
     if (bytes > maxBytes) {
       await storage.delete(id);
@@ -299,6 +311,7 @@ export function createSubscriptionCache(
   const writeRecords = (values: [string, RecordValue][]) =>
     indexed(async () => {
       const index = readIndex(await storage.get(SUBSCRIPTION_CACHE_INDEX_KEY));
+      if (!isCurrent()) return;
       for (const [id, value] of values)
         await writeRecord(index, id, value).catch(() => {});
       await storage.put(SUBSCRIPTION_CACHE_INDEX_KEY, index);
@@ -306,7 +319,7 @@ export function createSubscriptionCache(
   const touch = (id: string, bytes: number) =>
     indexed(async () => {
       const index = readIndex(await storage.get(SUBSCRIPTION_CACHE_INDEX_KEY));
-      index[id] = { bytes, use: nextUse(index) };
+      if (isCurrent()) index[id] = { bytes, use: nextUse(index) };
       await storage.put(SUBSCRIPTION_CACHE_INDEX_KEY, index);
     });
   async function flush() {
@@ -323,19 +336,21 @@ export function createSubscriptionCache(
     document.addEventListener("visibilitychange", hide);
   return {
     load(ref: ResourceRef): Promise<Cursor | undefined> {
+      if (!isCurrent()) return Promise.resolve(undefined);
       const id = key(ref);
       const previous = loaded.get(id);
       if (previous) return previous;
       const result: Promise<Cursor | undefined> = (async () => {
         try {
           const raw = await storage.get(id);
-          if (raw === undefined) return undefined;
+          if (!isCurrent() || raw === undefined) return undefined;
           const value = decode(raw, ref, workspace);
           if (!value) {
             await storage.delete(id);
             return undefined;
           }
           const cursorId = await cursorDocumentId(ref);
+          if (!isCurrent()) return undefined;
           const markers: Row[] =
             ref.kind === "state"
               ? [
@@ -365,12 +380,14 @@ export function createSubscriptionCache(
           const applied = await collection.hydrate(
             [...value.rows, ...markers],
             () =>
+              isCurrent() &&
               loaded.get(id) === result &&
               policies.get(id) !== SubscriptionCachePolicy.noCache,
             ref.kind === "state" ? "state:entities:complete" : cursorId,
           );
+          if (!isCurrent()) return undefined;
           if (applied) await touch(id, byteLength(raw)).catch(() => {});
-          return applied ? value.cursor : undefined;
+          return isCurrent() && applied ? value.cursor : undefined;
         } catch {
           return undefined;
         }
@@ -396,10 +413,13 @@ export function createSubscriptionCache(
     clearPolicies() {
       policies.clear();
       pending.clear();
-      loaded.clear();
     },
     save(ref: ResourceRef, cursor: Cursor, data: Row[]) {
-      if (policies.get(key(ref)) !== SubscriptionCachePolicy.cache) return;
+      if (
+        !isCurrent() ||
+        policies.get(key(ref)) !== SubscriptionCachePolicy.cache
+      )
+        return;
       const encoded = encode(ref, cursor, data);
       if (!encoded) return;
       pending.set(key(ref), {
@@ -413,6 +433,8 @@ export function createSubscriptionCache(
     },
     stop() {
       clearTimeout(timer);
+      pending.clear();
+      loaded.clear();
       if (typeof document !== "undefined")
         document.removeEventListener("visibilitychange", hide);
     },

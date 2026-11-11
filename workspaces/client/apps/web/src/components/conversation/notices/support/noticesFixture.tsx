@@ -5,6 +5,7 @@ import * as api from "../../../../servers/net/api.ts";
 import {
   conversationActionsFixture,
   observableFixture,
+  setStartupWorkspace,
 } from "../../../shell/integration-support/observableFixture.tsx";
 import { serializeStateCollections } from "../../../../generated/observableResources.ts";
 import { useConversationActions } from "../../support/navigation.ts";
@@ -69,7 +70,7 @@ export function ConversationWarningsFixture(source: WarningsSource) {
         value: { stateDir: source.scope, nativeNotices: source.notices || [] },
       },
     ]);
-    areas.startup.workspaceId = source.scope;
+    setStartupWorkspace(areas, source.scope);
     areas.navigation.selectedId = "warnings";
     areas.selected.history.items = source.messages;
     return areas;

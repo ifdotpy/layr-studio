@@ -137,6 +137,9 @@ export class ClaudeAuthFlow {
   get requestId() {
     return this.flow?.requestId || "";
   }
+  get mutationReady() {
+    return this.#api.mutationReady();
+  }
   get observed() {
     return this.requestId
       ? this.#store.authProgress(resourceRequestId(this.requestId)).current
@@ -286,7 +289,7 @@ export class ClaudeAuthFlow {
     email = this.expectedEmail,
     forceNew = false,
   ): Generator<Promise<Receipt>, void, Receipt> {
-    if (this.busy) return;
+    if (this.busy || !this.mutationReady) return;
     this.busy = "start";
     this.error = "";
     const previous = this.flow;

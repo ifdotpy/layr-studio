@@ -38,6 +38,7 @@ vi.mock(
     useServerServices: () =>
       fixture.push ? { areas: { signInPush: fixture.push } } : null,
     useServerApi: () => ({
+      mutationReady: () => true,
       get: fixture.get,
       post: fixture.post,
       saved: (key: string, fallback: unknown) =>
@@ -86,6 +87,7 @@ async function mount(child: ReactNode) {
           watchTokenRateEvents: () => () => {},
           watchLiveDeltas: () => () => {},
           replaceStream() {},
+          rejectAuthorization() {},
         },
       },
       {

@@ -458,15 +458,9 @@ resource_handlers! {
 /// Only subscriptions whose projection rows are owned by their cursor can resume.
 pub(super) fn cache_policy(
     resource: &ResourceRef,
-    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
+    _locality: studio_runtime_schema::sync_protocol::FrontendLocality,
 ) -> crate::generated::SubscriptionCachePolicy {
-    use crate::generated::SubscriptionCachePolicy;
-    use studio_runtime_schema::sync_protocol::FrontendLocality;
-    if matches!(locality, FrontendLocality::Remote) {
-        registered_cache_policy(resource)
-    } else {
-        SubscriptionCachePolicy::NoCache
-    }
+    registered_cache_policy(resource)
 }
 
 pub(super) fn handler(
@@ -799,7 +793,7 @@ mod tests {
         );
         assert_eq!(
             cache_policy(&list, FrontendLocality::Local),
-            SubscriptionCachePolicy::NoCache
+            SubscriptionCachePolicy::Cache
         );
     }
 

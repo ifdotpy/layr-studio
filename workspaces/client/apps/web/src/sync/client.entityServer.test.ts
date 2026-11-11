@@ -43,6 +43,10 @@ const mocks = vi.hoisted(() => ({
   invalidations: new Set<(version?: ResourceVersion) => void>(),
 }));
 vi.mock("../servers/net/api.ts", () => ({
+  getToken: () => "",
+  getStreamSession: () => undefined,
+  onProjectionSession: () => () => {},
+  rejectSession: async () => {},
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   syncPost: vi.fn(),
@@ -399,7 +403,11 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
     removeEventListener: vi.fn(),
     matchMedia: vi.fn(() => ({ matches: false })),
   });
-  vi.stubGlobal("document", { hidden: true });
+  vi.stubGlobal("document", {
+    hidden: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
   vi.stubGlobal("navigator", {
     onLine: true,
     locks: {
@@ -555,7 +563,11 @@ it("revives moved rows after inline and staged local eviction in either scope or
     removeEventListener: vi.fn(),
     matchMedia: vi.fn(() => ({ matches: false })),
   });
-  vi.stubGlobal("document", { hidden: true });
+  vi.stubGlobal("document", {
+    hidden: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
   vi.stubGlobal("navigator", {
     onLine: true,
     locks: {
@@ -685,7 +697,11 @@ it("preserves an existing oversized Work result and >512 history rows, then stre
     removeEventListener: vi.fn(),
     matchMedia: vi.fn(() => ({ matches: false })),
   });
-  vi.stubGlobal("document", { hidden: true });
+  vi.stubGlobal("document", {
+    hidden: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
   vi.stubGlobal("navigator", {
     onLine: true,
     locks: {
@@ -858,7 +874,11 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     removeEventListener: vi.fn(),
     matchMedia: vi.fn(() => ({ matches: false })),
   });
-  vi.stubGlobal("document", { hidden: true });
+  vi.stubGlobal("document", {
+    hidden: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
   vi.stubGlobal("navigator", {
     onLine: true,
     locks: {

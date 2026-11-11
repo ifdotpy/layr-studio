@@ -139,7 +139,7 @@ setStartupFixture(area, {
   stateDir: "/state",
 });
 const stopSelection = autorun(() => {
-  area.startup.workspaceId = selection.workspace;
+  setStartupWorkspace(area, selection.workspace);
   area.navigation.selectedId = selection.opened;
 });
 area.notices.notify = (text) => {
@@ -272,4 +272,7 @@ appRoot.render(
   </ServerStoreProvider>,
 );
 
-import { setStartupFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import {
+  setStartupFixture,
+  setStartupWorkspace,
+} from "../../src/components/shell/integration-support/observableFixture.tsx";

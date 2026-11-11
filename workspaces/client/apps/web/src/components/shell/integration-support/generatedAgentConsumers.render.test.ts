@@ -703,6 +703,9 @@ it("updates settings, context usage and native actions when the owning detail sl
       },
     }),
   };
+  // This test covers detail-slot updates of a live server, so mutations are ready.
+  const liveActions = conversationActionsFixture();
+  liveActions.scope.services.api.mutationReady = () => true;
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -730,7 +733,7 @@ it("updates settings, context usage and native actions when the owning detail sl
             }),
             createElement(
               ConversationProvider,
-              { value: conversationActionsFixture() },
+              { value: liveActions },
               createElement(
                 Menu,
                 { opened: true, withinPortal: false },

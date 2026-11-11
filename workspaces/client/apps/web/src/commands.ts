@@ -135,6 +135,7 @@ export function createCommandClient(
   storage: Storage,
   post: CommandPost,
   pending?: PendingCommands,
+  assertReady: () => void = () => {},
 ) {
   const memory: { state?: ClientState } = {};
   /** Build a command with a new id and the next number. Keep it to retry the same command. */
@@ -156,6 +157,7 @@ export function createCommandClient(
   }
   /** Show the expected result at once, then send. A retry sends the same object. */
   async function run(command: CommandRequest, options?: CommandOptions) {
+    assertReady();
     // These owner actions have no pending chat entry.
     if (
       command.kind === "lead_message" ||

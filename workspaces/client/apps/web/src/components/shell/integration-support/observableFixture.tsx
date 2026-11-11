@@ -198,6 +198,7 @@ export function conversationActionsFixture(
       watchLiveDeltas: () => () => {},
       acknowledgeEntitySequences() {},
       replaceStream() {},
+      rejectAuthorization() {},
       retryNow() {},
       dispose() {},
     });
@@ -215,6 +216,7 @@ export function conversationActionsFixture(
     }),
     configurable: true,
   });
+  startupProjection(services.sync);
   const areas = new ServerAreas({
     services,
     store,
@@ -262,23 +264,39 @@ const startupMetadata = new WeakMap<
   ReturnType<typeof createProjectionMetadataMirror>
 >();
 
-/** Drive startup identity through the same native models as production. */
-export function setStartupFixture<T extends { stateDir: string }>(
-  areas: ServerAreas,
-  data: T | null,
-) {
-  const sync = areas.scope.services.sync;
-  const previous = sync.projectionMetadata;
+function startupProjection(sync: ServerServices["sync"]) {
   let metadata = startupMetadata.get(sync);
   if (!metadata) {
-    metadata = createProjectionMetadataMirror(previous);
+    metadata = createProjectionMetadataMirror(sync.projectionMetadata);
     startupMetadata.set(sync, metadata);
     const current = metadata;
     Object.defineProperty(sync, "projectionMetadata", {
       get: () => current.current,
       configurable: true,
     });
+    Object.defineProperty(sync, "currentScope", {
+      get: () => ({
+        serverId: "fixture",
+        credentialId: "",
+        tokenFingerprint: "fixture",
+        workspaceId: current.current.workspaceId,
+      }),
+      configurable: true,
+    });
   }
+  return metadata;
+}
+export function setStartupWorkspace(areas: ServerAreas, workspaceId: string) {
+  const metadata = startupProjection(areas.scope.services.sync);
+  metadata.apply({ ...metadata.current, workspaceId });
+}
+
+/** Drive startup identity through the same native models as production. */
+export function setStartupFixture<T extends { stateDir: string }>(
+  areas: ServerAreas,
+  data: T | null,
+) {
+  const metadata = startupProjection(areas.scope.services.sync);
   metadata.apply({ ...metadata.current, ready: data !== null });
   const state = resourceData(areas.scope.store.state().current);
   const mirror = state && fixtureMirrors.get(state);

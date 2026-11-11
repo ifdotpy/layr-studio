@@ -31,6 +31,39 @@ import {
 } from "../../generated/api.ts";
 import { MessageSendStatus } from "../../generated/api.ts";
 
+it("keeps sending disabled while the displayed state is cached", () => {
+  const f = ownerFixture();
+  try {
+    f.models.details.get("lead")?.apply({ id: "lead", canSend: true });
+    expect(f.selected.canSend).toBe(true);
+    vi.spyOn(f.models.store, "state").mockReturnValue({
+      current: { status: "stale", data: f.models.mirror.current },
+    });
+    expect(f.selected.canSend).toBe(false);
+  } finally {
+    f.dispose();
+  }
+});
+
+it("refuses Stop team while cached state is shown", async () => {
+  const f = ownerFixture();
+  const stop = vi.spyOn(f.services.api.command, "stop");
+  try {
+    f.models.details.get("lead")?.apply({ id: "lead", canSend: true });
+    vi.spyOn(f.models.store, "state").mockReturnValue({
+      current: { status: "stale", data: f.models.mirror.current },
+    });
+    expect(f.areas.startup.mutationReady).toBe(false);
+    await expect(f.services.api.command.stop("lead", true)).rejects.toThrow(
+      "syncing",
+    );
+    expect(f.post).not.toHaveBeenCalled();
+  } finally {
+    stop.mockRestore();
+    f.dispose();
+  }
+});
+
 it("observed selected leaves receive live detail and processes with one subscription each", async () => {
   vi.useFakeTimers();
   const f = ownerFixture();
