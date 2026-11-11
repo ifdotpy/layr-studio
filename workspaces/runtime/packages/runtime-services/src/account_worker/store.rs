@@ -1974,13 +1974,10 @@ fn resolve_unbound_completion(
     Ok(UnboundCompletion::Error)
 }
 
-// TaskRecord::new owns the key: "{agent}:{itemId}". Look up that PK for
-// each deleted actor instead of parsing every task in its history. Keep the
-// payload checks, including unary + so a numeric agent cannot match a TEXT ID.
-const DELETED_COMMAND_IDS_SQL: &str = "SELECT t.id FROM runtime_agents a CROSS JOIN runtime_tasks t ON t.id=a.id||':'||?2 \
-    WHERE a.account_key=?1 AND json_extract(t.record,'$.itemId')=?2 \
-    AND json_extract(t.record,'$.turnId')=?3 AND +a.id=json_extract(t.record,'$.agent') \
-    AND a.deleted_at IS NOT NULL LIMIT 2";
+// Find the item/turn first, then its owner by PK, rather than visiting every
+// deleted actor of the account. TaskRecord::new owns "{agent}:{itemId}"; retain
+// that key check and unary + so a numeric payload agent cannot match a TEXT ID.
+use studio_runtime_store::writer_queries::DeletedCommandIds;
 
 /// Admit only a terminal report for the exact prior-epoch command of a deleted actor.
 fn complete_deleted_command(
@@ -2004,12 +2001,14 @@ fn complete_deleted_command(
     {
         return Ok(false);
     }
-    let mut statement = tx.prepare_cached(DELETED_COMMAND_IDS_SQL)?;
-    let ids = statement
-        .query_map(params![account, item_id, turn], |row| {
-            row.get::<_, String>(0)
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let ids = studio_runtime_store::peer_update_settings::canvas_read(tx).collect(
+        &DeletedCommandIds::QUERY,
+        &DeletedCommandIds {
+            account: account.into(),
+            item: item_id.into(),
+            turn: turn.into(),
+        },
+    )?;
     let [id] = ids.as_slice() else {
         return Ok(false);
     };
@@ -4821,7 +4820,9 @@ mod pending_thread_start_tests {
 
 #[cfg(test)]
 mod deleted_command_query_tests {
-    use super::DELETED_COMMAND_IDS_SQL;
+    fn deleted_command_ids_sql() -> &'static str {
+        studio_runtime_store::writer_queries::DeletedCommandIds::QUERY.sql()
+    }
     use rusqlite::StatementStatus;
 
     #[test]
@@ -4830,8 +4831,11 @@ mod deleted_command_query_tests {
         db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, account_key TEXT, deleted_at INTEGER);
             CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at);
             CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE INDEX runtime_task_item_turn ON runtime_tasks(json_extract(record,'$.itemId'),json_extract(record,'$.turnId'));
             CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC);
-            INSERT INTO runtime_agents VALUES('deleted','account',1);").unwrap();
+            INSERT INTO runtime_agents VALUES('deleted','account',1);
+            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000)
+            INSERT INTO runtime_agents SELECT 'unrelated-'||i,'account',1 FROM n;").unwrap();
         let tx = db.transaction().unwrap();
         for n in 0..10_000 {
             tx.execute("INSERT INTO runtime_tasks VALUES(?1,?2)", rusqlite::params![
@@ -4853,12 +4857,12 @@ mod deleted_command_query_tests {
         };
         for item in ["missing", "item-0", "item-9999"] {
             let (before, old_steps) = measure(old_sql, item);
-            let (after, steps) = measure(DELETED_COMMAND_IDS_SQL, item);
+            let (after, steps) = measure(deleted_command_ids_sql(), item);
             assert_eq!(before, after);
             eprintln!("deleted-command history=10000 item={item} vm_steps={old_steps}->{steps}");
             assert!(
                 steps < 100,
-                "item must use one task key lookup, got {steps} VM steps"
+                "item must not visit unrelated account agents, got {steps} VM steps"
             );
             assert!(steps * 100 < old_steps);
         }
@@ -4871,6 +4875,7 @@ mod deleted_command_query_tests {
             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, account_key TEXT, deleted_at INTEGER);
             CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at);
             CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE INDEX runtime_task_item_turn ON runtime_tasks(json_extract(record,'$.itemId'),json_extract(record,'$.turnId'));
             CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC);
             INSERT INTO runtime_agents VALUES('live','account',NULL),('deleted','account',1),('1','account',1),('deleted2','account',1),('other','other',1);
             INSERT INTO runtime_tasks VALUES
@@ -4883,7 +4888,7 @@ mod deleted_command_query_tests {
             ('other:item','{"agent":"other","itemId":"item","turnId":"turn"}');
         "#).unwrap();
         let query = |item: &str| -> Vec<String> {
-            db.prepare(DELETED_COMMAND_IDS_SQL)
+            db.prepare(deleted_command_ids_sql())
                 .unwrap()
                 .query_map(["account", item, "turn"], |row| row.get(0))
                 .unwrap()
@@ -4896,17 +4901,23 @@ mod deleted_command_query_tests {
         assert_eq!(query("duplicate").len(), 2);
         assert_eq!(query("numeric"), Vec::<String>::new());
         let plan: Vec<String> = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {DELETED_COMMAND_IDS_SQL}"))
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", deleted_command_ids_sql()))
             .unwrap()
             .query_map(["account", "item", "turn"], |row| row.get(3))
             .unwrap()
             .map(Result::unwrap)
             .collect();
         assert!(
-            plan.iter().any(|step| step
-                .contains("SEARCH t USING INDEX sqlite_autoindex_runtime_tasks_1 (id=?)")),
+            plan.iter()
+                .any(|step| step.contains("SEARCH t USING INDEX runtime_task_item_turn")),
             "{plan:?}"
         );
+        assert!(
+            plan.iter().any(|step| step
+                .contains("SEARCH a USING INDEX sqlite_autoindex_runtime_agents_1 (id=?)")),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|step| step.contains("SCAN ")), "{plan:?}");
     }
 }
 

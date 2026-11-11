@@ -50,6 +50,7 @@ fn canvas(connection: &Connection) -> crate::StoreResult<()> {
         ))?;
     }
     crate::entity_scopes::install(connection)?;
+    crate::migrations::install_writer_receipt_indexes(connection)?;
     Ok(())
 }
 

@@ -167,6 +167,127 @@ export const REVIEWED_CALLBACK_SQL_ALLOWANCES: readonly Allowance[] = [
   },
 ];
 
+// index for writer-lock fix P1
+const WRITER_INDEX_SQL_ALLOWANCES: readonly Allowance[] = [
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_query_indexes.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "d8802fe8721bbb12",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_query_indexes.rs",
+    api: "rust::sql-template",
+    fingerprint: "c2502a84b87981e4",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_query_indexes.rs",
+    api: "rusqlite::Connection::execute_batch",
+    fingerprint: "d8802fe8721bbb12",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_query_indexes.rs",
+    api: "rust::sql-template",
+    fingerprint: "e449b775cb0060ae",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/planning_work.rs",
+    api: "rust::sql-template",
+    fingerprint: "864872e49eeeca85",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/item_monitor_terminal.rs",
+    api: "rust::sql-template",
+    fingerprint: "c8c00033c56a6da5",
+  },
+];
+// Exact reviewed migration and test SQL; no path-wide exception.
+export const REVIEWED_P2_SQL_ALLOWANCES = [
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_receipt_indexes.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "94e304b9ff1d5218",
+    reason: "index for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_receipt_indexes.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "971f990d6571813d",
+    reason: "index for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_receipt_indexes.sql",
+    api: "sqlite::schema",
+    fingerprint: "0fce40104670560e",
+    reason: "index for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "typescript::sqlite-driver",
+    fingerprint: "98325e2380e80fda",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "401d116ce06c0057",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "93257283d7679769",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "b564311bb380ef92",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "56fe9ab559d73be3",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "51adaca39bdda069",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "bfd6ecc5113b230f",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "df99dfb61073406a",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "0f35e5a7f9735ef8",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
+    api: "embedded::sql",
+    fingerprint: "5c631ed33ad8ed90",
+    reason: "query-plan/equality witness for writer-lock fix P2",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_11_writer_receipt_indexes.rs",
+    api: "rusqlite::Connection::execute_batch",
+    fingerprint: "971f990d6571813d",
+    reason: "index for writer-lock fix P2",
+  },
+] satisfies (Allowance & { reason: string })[];
+
 function counts(rows: readonly Allowance[]): Map<string, number> {
   const found = new Map<string, number>();
   for (const row of rows)
@@ -184,7 +305,11 @@ export function checkSqlRatchet(
   baseline: Allowance[],
 ): string[] {
   const remaining = counts(baseline);
-  const reviewed = counts(REVIEWED_CALLBACK_SQL_ALLOWANCES);
+  const reviewed = counts([
+    ...REVIEWED_CALLBACK_SQL_ALLOWANCES,
+    ...WRITER_INDEX_SQL_ALLOWANCES,
+    ...REVIEWED_P2_SQL_ALLOWANCES,
+  ]);
   return actual
     .filter((site) => !consume(remaining, site) && !consume(reviewed, site))
     .map(

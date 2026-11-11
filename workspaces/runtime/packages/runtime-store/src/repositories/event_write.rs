@@ -57,14 +57,6 @@ impl EventWriteRepository {
         agent_id: &str,
         retry_id: &str,
     ) -> StoreResult<Option<bool>> {
-        let exists: bool = transaction.query_row_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_capacity_retries')",
-            [],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            return Ok(None);
-        }
         let raw = transaction
             .query_row_cached(
                 "SELECT record FROM runtime_capacity_retries WHERE id=?1 AND agent=?2",

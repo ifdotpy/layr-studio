@@ -1227,16 +1227,22 @@ struct MonitorGroup {
 
 /// Unix seconds of the start of the latest successful run of `rule` that
 /// started at or after `since`.
+use studio_runtime_store::writer_queries::LastRuleSuccess;
+
 fn last_rule_success(
     tx: &Transaction<'_>,
     rule: &str,
     since: f64,
 ) -> Result<Option<f64>, StoreError> {
-    Ok(tx.query_row(
-        "SELECT MAX(json_extract(record,'$.created')) FROM runtime_monitors WHERE json_extract(record,'$.status')='completed' AND json_extract(record,'$.created')>=?1 AND json_extract(record,'$.ruleId')=?2",
-        rusqlite::params![since, rule],
-        |row| row.get::<_, Option<f64>>(0),
-    )?)
+    Ok(
+        studio_runtime_store::peer_update_settings::canvas_read(tx).named(
+            &LastRuleSuccess::QUERY,
+            &LastRuleSuccess {
+                since,
+                rule: rule.into(),
+            },
+        )?,
+    )
 }
 
 /// Dismissed row ids, each with the Unix seconds of its latest dismissal.
@@ -1290,6 +1296,25 @@ pub fn dismiss_many(tx: &Transaction<'_>, ids: &[String], now: f64) -> Result<Va
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn rule_success_query_uses_rule_index() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path())).await?;
+        store
+            .transaction(|tx| {
+                let plan: String = tx.query_row(
+                    &format!("EXPLAIN QUERY PLAN {}", LastRuleSuccess::QUERY.sql()),
+                    rusqlite::params![0.0, "rule"],
+                    |row| row.get(3),
+                )?;
+                assert!(plan.contains("runtime_monitor_rule_success"), "{plan}");
+                assert!(!plan.contains("SCAN "), "{plan}");
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
     #[tokio::test]
     async fn owner_fixture_document_matches_the_complete_record_read() {
         let dir = tempfile::tempdir().expect("isolated state");

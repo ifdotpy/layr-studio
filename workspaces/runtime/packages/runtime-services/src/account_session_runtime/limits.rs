@@ -273,6 +273,15 @@ fn commit(
     Ok((Some(value), true))
 }
 
+// LimitAgent owns the consumed fields. JSON tokens preserve their stored types;
+// null and absent optional fields both have no value in the limit projection.
+const LIMIT_AGENTS_SQL: &str = "SELECT id,json_object(
+    'id',record->'$.id','accountKey',record->'$.accountKey','epoch',record->'$.epoch',
+    'deletedAt',record->'$.deletedAt','model',record->'$.model','provider',record->'$.provider',
+    'error',record->'$.error','usageResume',record->'$.usageResume',
+    'threadId',record->'$.threadId','lastCompletedTurn',record->'$.lastCompletedTurn')
+    FROM runtime_agents WHERE account_key IN (?1,CASE WHEN ?1='default' THEN '' ELSE ?1 END) ORDER BY rowid";
+
 pub(crate) fn populate_agents(
     tx: &studio_runtime_store::Transaction<'_>,
     view: &mut studio_runtime_schema::usage_limits::RateLimitView,
@@ -283,9 +292,7 @@ pub(crate) fn populate_agents(
     // AGENT_COLUMNS in runtime-store/src/agent_columns.rs owns this STORED
     // generated account_key: missing/null becomes default; empty stays empty.
     // Include empty keys for default, matching the projection normalization below.
-    let mut statement = tx.prepare_cached(
-        "SELECT id,record FROM runtime_agents WHERE account_key IN (?1,CASE WHEN ?1='default' THEN '' ELSE ?1 END) ORDER BY rowid",
-    )?;
+    let mut statement = tx.prepare_cached(LIMIT_AGENTS_SQL)?;
     #[cfg(test)]
     statement.reset_status(rusqlite::StatementStatus::VmStep);
     let mut rows = statement.query([limits.account_key()])?;
@@ -623,19 +630,20 @@ mod tests {
                 ("deleted", "default", Some(1.0)),
                 ("other", "other", None),
             ] {
-                let raw = studio_json::json!({"id":id,"accountKey":account,"epoch":0,"provider":"codex","deletedAt":deleted}).to_string();
+                let raw = studio_json::json!({"id":id,"accountKey":account,"epoch":0,"provider":"codex","deletedAt":deleted,"unrelated":"x".repeat(100_000)}).to_string();
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id,raw])?;
             }
             for (account, expected_decodes) in [("default", 4), ("other", 1), ("missing", 0)] {
                 let response = UsageLimitsResponse { account_key: account.into(), at: Some(1.0), ..Default::default() };
                 let mut expected = RateLimitView::from_observation(response.clone(), 1.0);
                 let limits = crate::usage_resume::LimitsObservation::from_response(response.clone());
-                let mut statement = tx.prepare("SELECT id,record FROM runtime_agents ORDER BY rowid")?;
-                let mut rows = statement.query([])?;
+                let mut statement = tx.prepare(LIMIT_AGENTS_SQL)?;
+                let mut rows = statement.query([account])?;
                 AGENT_DECODES.set(0);
                 while let Some(row) = rows.next()? {
                     let id: String = row.get(0)?;
                     let raw: String = row.get(1)?;
+                    assert!(raw.len() < 1024, "limit projection must not copy unrelated agent fields: {} bytes", raw.len());
                     let agent = decode_limit_agent(&id, &raw)?;
                     let key = if agent.account_key.is_empty() { "default" } else { &agent.account_key };
                     if key == account && !agent.deleted_at.is_some_and(|at| at != 0.0) {

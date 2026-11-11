@@ -342,21 +342,13 @@ fn resolve_raw(
     actor: &str,
     id: &str,
 ) -> Result<Selection, ToolRequestError> {
-    if !records::exists(tx, TABLE)? {
-        return Ok(Selection::Missing);
-    }
     let get = |key: &str| -> Result<Option<String>, ToolRequestError> {
         Ok(tx.query_row("SELECT record FROM runtime_tool_requests WHERE id=?1 AND json_extract(record,'$.agent')=?2", params![key, actor], |row| row.get(0)).optional()?)
     };
     if let Some(raw) = get(id)? {
         return Ok(Selection::Found(id.to_owned(), raw));
     }
-    let mut statement = tx.prepare_cached(
-        "SELECT id FROM runtime_tool_requests WHERE agent=?1 AND EXISTS(SELECT 1 FROM json_each(record,'$.aliases') WHERE value=?2) LIMIT 2",
-    )?;
-    let aliases = statement
-        .query_map(params![actor, id], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let aliases = records::tool_request_aliases(tx, actor, id)?;
     if aliases.len() > 1 {
         return Ok(Selection::Ambiguous);
     }
@@ -620,9 +612,6 @@ fn reconcile_effect_source(
     record: &EffectSource<'_>,
     actor: &Value,
 ) -> Result<(), StoreError> {
-    if !records::exists(tx, "runtime_execution_effects")? {
-        return Ok(());
-    }
     let key = format!("{}:{}", kind.as_str(), record.id());
     let old = records::get(tx, "runtime_execution_effects", &key)?;
     let mut run = old
@@ -833,27 +822,23 @@ mod admission_lookup_tests {
 
     #[test]
     fn direct_and_alias_lookup_preserve_ownership_and_ambiguity() {
-        let db = studio_runtime_store::Connection::open_in_memory().unwrap();
+        let db = studio_runtime_store::test_canvas();
         assert!(
             resolve_admission(&db, "agent", "missing")
                 .unwrap()
                 .is_none()
         );
-        db.execute_batch(
-            "CREATE TABLE runtime_tool_requests(id TEXT PRIMARY KEY, agent TEXT, record TEXT)",
-        )
-        .unwrap();
         for (id, agent, aliases) in [
             ("one", "agent", "[\"shared\",\"unique\"]"),
             ("two", "agent", "[\"shared\",\"one\"]"),
             ("other", "other", "[\"unique\"]"),
         ] {
             let raw = format!(
-                r#"{{"id":"{id}","agent":"{agent}","aliases":{aliases},"admitted":{{"id":"admitted-{id}","signature":"sig","created":1}}}}"#
+                r#"{{"id":"{id}","agent":"{agent}","kind":"managed_tool","aliases":{aliases},"admitted":{{"id":"admitted-{id}","signature":"sig","created":1}}}}"#
             );
             db.execute(
-                "INSERT INTO runtime_tool_requests VALUES(?1,?2,?3)",
-                params![id, agent, raw],
+                "INSERT INTO runtime_tool_requests(id,record) VALUES(?1,?2)",
+                params![id, raw],
             )
             .unwrap();
         }

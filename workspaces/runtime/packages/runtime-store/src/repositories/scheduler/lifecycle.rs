@@ -3002,12 +3002,7 @@ pub(super) fn recovering(agent: &AgentRecord, epoch: i64) -> bool {
 }
 
 pub(super) fn mark_timing(tx: &Transaction<'_>, ids: &str, field: &str) -> StoreResult<()> {
-    let exists: bool = tx.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='runtime_event_meta')",
-        [],
-        |r| r.get(0),
-    )?;
-    if exists {
+    {
         let path = format!("$.timing.{field}");
         tx.execute_cached("INSERT INTO runtime_event_meta(id,record) SELECT value,json_set('{}',?1,?2) FROM json_each(?3) WHERE 1 ON CONFLICT(id) DO UPDATE SET record=json_set(runtime_event_meta.record,?1,?2)",params![path,timestamp(),ids])?;
     }
@@ -3215,14 +3210,6 @@ impl SchedulerRepository {
         event_ids: &[String],
         status: &str,
     ) -> StoreResult<()> {
-        let messages_table_exists: bool = transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_chat_messages')",
-        [],
-        |row| row.get(0),
-    )?;
-        if !messages_table_exists {
-            return Ok(());
-        }
         for event_id in event_ids {
             let Some(event) = crate::QueueEventRepository::get(
                 transaction,

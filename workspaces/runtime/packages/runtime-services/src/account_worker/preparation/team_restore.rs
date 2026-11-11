@@ -77,14 +77,6 @@ pub(super) fn snapshot(tx: &Transaction<'_>, actor: &Value) -> Result<Option<Val
     let mut monitors = Vec::new();
     // Native background commands and managed monitors both survive compaction.
     for table in ["runtime_monitors", "runtime_tasks"] {
-        let exists: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            continue;
-        }
         monitors.extend(rows(tx, &format!(
             "SELECT json_object('id',m.id,'kind','{table}','agent',json_extract(m.record,'$.agent'),
                 'status',json_extract(m.record,'$.status'),'command',json_extract(m.record,'$.command'))

@@ -1137,6 +1137,7 @@ export function gateSteps(root: string, name: string): GateStep[] {
         "workspaces/client/apps/desktop/recovery-helper-witness.test.ts",
       ]),
       nodeTest("sql-ratchet", "SQL inventory and raw SQL ratchet", [
+        "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
         "workspaces/tooling/apps/repository-checks/tests/sql-ratchet.test.ts",
       ]),
       nodeTest("sse-policy", "SSE and browser persistence ratchet", [

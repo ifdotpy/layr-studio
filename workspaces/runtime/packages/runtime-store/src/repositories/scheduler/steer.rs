@@ -386,11 +386,7 @@ fn pending_steer_events(
     agent_id: &str,
     epoch: i64,
 ) -> StoreResult<(Vec<QueueEvent>, BTreeMap<String, Value>)> {
-    let metadata_column = if table_exists(connection, "runtime_event_meta")? {
-        "(SELECT m.record FROM runtime_event_meta m WHERE m.id=e.id)"
-    } else {
-        "NULL"
-    };
+    let metadata_column = "(SELECT m.record FROM runtime_event_meta m WHERE m.id=e.id)";
     let mut statement = connection.prepare_cached(&format!(
         "SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,{metadata_column} \
          FROM runtime_events e WHERE e.agent=?1 AND e.epoch=?2 AND e.status='pending' \

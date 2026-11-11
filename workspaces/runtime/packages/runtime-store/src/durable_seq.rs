@@ -292,10 +292,13 @@ pub fn leave_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult
 
 /// The ids in window `tbl`.
 pub fn window_members(connection: &Connection, tbl: &str) -> StoreResult<Vec<String>> {
-    Ok(connection
-        .prepare_cached("SELECT id FROM durable_rows WHERE tbl=?1 AND deleted=0")?
-        .query_map([tbl], |row| row.get(0))?
-        .collect::<Result<_, _>>()?)
+    use crate::clock_schema::DurableRows;
+    Ok(studio_db_api::db_query!(
+        crate::peer_update_settings::canvas_read(connection),
+        DurableRows,
+        scalars(DurableRows::ID),
+        filter(DurableRows::TBL.eq_ref(tbl), DurableRows::DELETED.eq(&0))
+    )?)
 }
 
 /// Whether `id` is in window `tbl`.

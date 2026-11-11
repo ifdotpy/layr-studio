@@ -12,6 +12,7 @@ import path from "node:path";
 import {
   checkSqlRatchet,
   REVIEWED_CALLBACK_SQL_ALLOWANCES,
+  REVIEWED_P2_SQL_ALLOWANCES,
   fingerprint,
   formatSqlBaseline,
   ownerFor,
@@ -28,8 +29,11 @@ import {
   QUERY_CONSTRUCTOR_OWNER,
 } from "../sql-ratchet.ts";
 
-test("reviewed callback SQL remains limited to its exact sites and counts", () => {
-  for (const allowance of REVIEWED_CALLBACK_SQL_ALLOWANCES) {
+test("reviewed SQL remains limited to its exact sites and counts", () => {
+  for (const allowance of [
+    ...REVIEWED_CALLBACK_SQL_ALLOWANCES,
+    ...REVIEWED_P2_SQL_ALLOWANCES,
+  ]) {
     const site = { ...allowance, symbol: "reviewed callback lookup" };
     assert.deepEqual(checkSqlRatchet([site], []), []);
     assert.equal(checkSqlRatchet([site, site], []).length, 1);

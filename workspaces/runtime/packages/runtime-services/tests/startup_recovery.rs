@@ -431,11 +431,12 @@ async fn malformed_monitor_row_is_skipped_while_other_rows_are_recovered() {
     fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
     store
         .transaction(move |tx| {
-            // The production expression index rejects malformed JSON on insert;
-            // remove it in this isolated fixture to witness row-level isolation.
+            // Production expression indexes reject malformed JSON on insert;
+            // remove them in this isolated fixture to witness row-level isolation.
             tx.execute_batch(
                 "DROP INDEX runtime_monitor_agent_status;
-                 DROP INDEX runtime_monitor_status",
+                 DROP INDEX runtime_monitor_status;
+                 DROP INDEX runtime_monitor_rule_success",
             )?;
             studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
                 tx.execute(

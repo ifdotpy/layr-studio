@@ -20,6 +20,7 @@ pub mod project_grants;
 mod publication_collection;
 pub mod publication_payload;
 mod publication_schema;
+pub mod writer_queries;
 pub use cached_sql::{CachedSql, STATEMENT_CACHE_CAPACITY};
 pub use entity_publication::{EntityPublisher, PendingEntities, StudioErrorSources};
 mod feature_schema;

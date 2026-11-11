@@ -52,9 +52,6 @@ fn decode_row(connection: &Connection, table: &str, id: &str, raw: &str) -> Stor
 pub use crate::schema::table_exists as exists;
 
 pub fn get(connection: &Connection, table: &'static str, id: &str) -> StoreResult<Option<Value>> {
-    if !exists(connection, table)? {
-        return Ok(None);
-    }
     let column = "record";
     let raw: Option<String> = connection
         .query_row(
@@ -68,9 +65,6 @@ pub fn get(connection: &Connection, table: &'static str, id: &str) -> StoreResul
 }
 
 pub fn all(connection: &Connection, table: &'static str) -> StoreResult<Vec<Value>> {
-    if !exists(connection, table)? {
-        return Ok(Vec::new());
-    }
     let mut statement =
         connection.prepare_cached(&format!("SELECT id,record FROM {table} ORDER BY rowid"))?;
     statement
@@ -91,9 +85,6 @@ pub fn owned_by(
     table: &'static str,
     agents: &[&str],
 ) -> StoreResult<Vec<Value>> {
-    if !exists(connection, table)? {
-        return Ok(Vec::new());
-    }
     let mut statement = connection.prepare_cached(&format!(
         "SELECT id,record FROM {table} WHERE json_extract(record,'$.agent')=?1 ORDER BY rowid"
     ))?;
@@ -113,9 +104,6 @@ pub fn owned_by(
 /// has no `deletedAt`; the `runtime_agent_live_root_v2` partial index serves the
 /// predicate, so tombstones are neither read nor parsed.
 pub fn live_agents(connection: &Connection) -> StoreResult<Vec<Value>> {
-    if !exists(connection, "runtime_agents")? {
-        return Ok(Vec::new());
-    }
     let mut statement = connection.prepare_cached(
         "SELECT id,record FROM runtime_agents INDEXED BY runtime_agent_live_root_v2 \
          WHERE deleted_at IS NULL ORDER BY rowid",
@@ -148,3 +136,61 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     bootstrap_connection_functions: &[],
 };
 inventory::submit! {crate::repositories::SchemaRegistration{repository:"system_reads",requirements:&REQUIREMENTS}}
+
+/// Exact string aliases of one actor; two rows preserve the ambiguity fence.
+/// The startup migration and receipt triggers exclusively maintain this index.
+pub fn tool_request_aliases(
+    connection: &Connection,
+    agent: &str,
+    alias: &str,
+) -> StoreResult<Vec<String>> {
+    use crate::queue_schema::ToolRequestAliasIndex;
+    Ok(studio_db_api::db_query!(
+        crate::peer_update_settings::canvas_read(connection),
+        ToolRequestAliasIndex,
+        scalars(ToolRequestAliasIndex::REQUEST_ID),
+        filter(
+            ToolRequestAliasIndex::AGENT.eq_ref(agent),
+            ToolRequestAliasIndex::ALIAS.eq_ref(alias)
+        ),
+        limit(2)
+    )?)
+}
+
+#[cfg(test)]
+mod writer_tests {
+    use super::*;
+    thread_local! {
+        static SCHEMA_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+    #[test]
+    fn system_receipt_writer_reads_do_not_probe_schema() {
+        let mut db = crate::test_canvas();
+        db.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Stmt(statement, _) = event {
+                    let sql = statement.sql().to_ascii_lowercase();
+                    if sql.contains("sqlite_master") || sql.contains("sqlite_schema") {
+                        SCHEMA_READS.with(|count| count.set(count.get() + 1));
+                    }
+                }
+            }),
+        );
+        SCHEMA_READS.with(|count| count.set(0));
+        let tx = db.transaction().unwrap();
+        assert!(
+            get(&tx, "runtime_tool_requests", "missing")
+                .unwrap()
+                .is_none()
+        );
+        assert!(all(&tx, "runtime_tool_requests").unwrap().is_empty());
+        assert!(
+            owned_by(&tx, "runtime_tool_requests", &["agent"])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(live_agents(&tx).unwrap().is_empty());
+        assert_eq!(SCHEMA_READS.with(std::cell::Cell::get), 0);
+    }
+}

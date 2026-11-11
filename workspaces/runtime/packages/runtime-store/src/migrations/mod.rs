@@ -8,6 +8,8 @@ mod m2026_11_09_retired_objects;
 mod m2026_11_11_remove_account_throttle;
 mod m2026_11_11_retired_agent_keys;
 mod m2026_11_11_strict_native_review;
+mod m2026_11_11_writer_query_indexes;
+mod m2026_11_11_writer_receipt_indexes;
 
 use crate::{StoreError, StoreResult};
 use baseline_manifest::RETIRED;
@@ -138,7 +140,38 @@ static CATALOG: &[SqlMigration] = &[
         },
         apply: m2026_11_11_retired_agent_keys::apply,
     },
+    SqlMigration {
+        definition: MigrationDefinition {
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 11,
+            },
+            ..definition(
+                "2026-11-11-writer-receipt-indexes",
+                "Window reads and receipt aliases without covering indexes",
+            )
+        },
+        apply: m2026_11_11_writer_receipt_indexes::apply,
+    },
+    SqlMigration {
+        definition: MigrationDefinition {
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 11,
+            },
+            ..definition(
+                "2026-11-11-writer-query-indexes",
+                "Writer lookups without item/turn and successful-rule indexes",
+            )
+        },
+        apply: m2026_11_11_writer_query_indexes::apply,
+    },
 ];
+#[cfg(test)]
+pub(crate) use m2026_11_11_writer_receipt_indexes::install as install_writer_receipt_indexes;
+
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
     CATALOG
         .iter()

@@ -1174,7 +1174,11 @@ fn application_table_snapshot(store: &RuntimeStore) -> Vec<(String, Vec<String>)
     for name in names {
         // Callback ingress necessarily persists its idempotency/result receipt.
         // The tested operation must leave every other row byte-for-byte stable.
-        if matches!(name.as_str(), "runtime_tool_requests" | "request_results") {
+        // Receipt admission and its trigger-owned alias index are outside domain effects.
+        if matches!(
+            name.as_str(),
+            "runtime_tool_requests" | "runtime_tool_request_alias_index" | "request_results"
+        ) {
             continue;
         }
         let quoted = name.replace('"', "\"\"");

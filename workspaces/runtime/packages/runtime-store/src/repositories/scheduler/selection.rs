@@ -1035,24 +1035,14 @@ impl SchedulerRepository {
         }
 
         let prefix = limit;
-        let has_metadata = table_exists(transaction, "runtime_event_meta")?;
         let sql = if single_event.is_some() {
-            if has_metadata {
-                "SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,m.record \
-                 FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id \
-                 WHERE e.id=?1 AND e.agent=?2 AND e.epoch=?3 AND e.status='pending'"
-            } else {
-                "SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,NULL \
-                 FROM runtime_events e WHERE e.id=?1 AND e.agent=?2 AND e.epoch=?3 AND e.status='pending'"
-            }
-        } else if has_metadata {
+            "SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,m.record \
+             FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id \
+             WHERE e.id=?1 AND e.agent=?2 AND e.epoch=?3 AND e.status='pending'"
+        } else {
             "SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,m.record \
              FROM runtime_events e LEFT JOIN runtime_event_meta m ON m.id=e.id \
              WHERE e.agent=?1 AND e.epoch=?2 AND e.status='pending' \
-             ORDER BY e.created,e.rowid LIMIT ?3"
-        } else {
-            "SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,NULL \
-             FROM runtime_events e WHERE e.agent=?1 AND e.epoch=?2 AND e.status='pending' \
              ORDER BY e.created,e.rowid LIMIT ?3"
         };
         let mut statement = transaction.prepare_cached(sql)?;
@@ -1403,14 +1393,7 @@ pub(super) fn replay_claim(
         return Err(invalid_agent(&agent.id.0));
     }
     let identity = saved_identity(saved)?;
-    let has_metadata: bool = tx.query_row_cached("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_event_meta')", [], |r| r.get(0))?;
-    let metadata_column = if has_metadata { "m.record" } else { "NULL" };
-    let metadata_join = if has_metadata {
-        "LEFT JOIN runtime_event_meta m ON m.id=e.id"
-    } else {
-        ""
-    };
-    let mut statement = tx.prepare_cached(&format!("SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,{metadata_column} FROM json_each(?1) j JOIN runtime_events e ON e.id=json_extract(j.value,'$.id') {metadata_join} ORDER BY j.key"))?;
+    let mut statement = tx.prepare_cached("SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,m.record FROM json_each(?1) j JOIN runtime_events e ON e.id=json_extract(j.value,'$.id') LEFT JOIN runtime_event_meta m ON m.id=e.id ORDER BY j.key")?;
     let mut events = Vec::new();
     let mut metadata = BTreeMap::new();
     for row in statement.query_map([studio_json::to_string(&identity)?], |r| {
@@ -1500,9 +1483,6 @@ impl SchedulerRepository {
         agent: &str,
         epoch: i64,
     ) -> StoreResult<BTreeMap<String, String>> {
-        if !table_exists(connection, "runtime_event_meta")? {
-            return Ok(BTreeMap::new());
-        }
         let mut statement = connection.prepare_cached("SELECT e.id,e.agent,e.kind,e.text,e.status,e.created,e.epoch,e.turn_id,e.error,m.record FROM runtime_events e JOIN runtime_event_meta m ON m.id=e.id WHERE e.agent=?1 AND e.epoch=?2 AND e.status='pending' ORDER BY e.created,e.rowid")?;
         let rows = statement.query_map(params![agent, epoch], |row| {
             Ok((
@@ -1558,14 +1538,6 @@ pub(super) fn invalid_object(table: &str, id: &str) -> StoreError {
     }
 }
 
-pub(super) fn table_exists(transaction: &Connection, table: &str) -> StoreResult<bool> {
-    Ok(transaction.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-        [table],
-        |row| row.get(0),
-    )?)
-}
-
 pub(super) fn load_policy_records(
     transaction: &Transaction<'_>,
     agent: &AgentRecord,
@@ -1573,7 +1545,7 @@ pub(super) fn load_policy_records(
 ) -> StoreResult<(BTreeMap<String, Value>, BTreeMap<String, Value>)> {
     let mut complaints = BTreeMap::new();
     let mut work = BTreeMap::new();
-    if table_exists(transaction, "runtime_complaints")? {
+    {
         for event in events.iter().filter(|event| event.kind == "complaint") {
             for id in complaint_ids(&event.text).unwrap_or_default() {
                 if complaints.contains_key(&id) {
@@ -1604,7 +1576,7 @@ pub(super) fn load_policy_records(
             }
         }
     }
-    if table_exists(transaction, "runtime_work")? {
+    {
         for event in events.iter().filter(|event| event.kind == "work_review") {
             let Some((id, _)) = work_review_ids(event) else {
                 continue;
@@ -1867,11 +1839,6 @@ pub(super) fn apply_preparation(
         }
     }
     if !prepared.metadata_updates.is_empty() {
-        if !table_exists(transaction, "runtime_event_meta")? {
-            return Err(StoreError::SchemaMismatch(
-                "scheduler progress preparation requires runtime_event_meta".to_owned(),
-            ));
-        }
         for (id, value) in &prepared.metadata_updates {
             transaction.execute_cached(
                 "INSERT OR REPLACE INTO runtime_event_meta(id,record) VALUES(?1,?2)",
@@ -1891,7 +1858,7 @@ pub(super) fn obsolete_work_review_ids(
     agent: &AgentRecord,
     events: &[QueueEvent],
 ) -> StoreResult<BTreeSet<String>> {
-    if !table_exists(transaction, "runtime_work")? {
+    if !events.iter().any(|event| event.kind == "work_review") {
         return Ok(BTreeSet::new());
     }
     let ids = studio_json::to_string(

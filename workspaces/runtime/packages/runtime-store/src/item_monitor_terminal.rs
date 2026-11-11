@@ -123,6 +123,9 @@ pub struct ItemFulltextRow {
     legacy_index = "CREATE INDEX runtime_monitor_idle_agent ON runtime_monitors(agent) WHERE monitor_status IN ('running','starting','approval')"
 )]
 #[db(state_check = crate::state_check::check_legacy_json::<MonitorRecord>)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_monitor_rule_success ON runtime_monitors(json_extract(record,'$.ruleId'),json_extract(record,'$.created')) WHERE json_extract(record,'$.status')='completed'"
+)]
 pub struct MonitorsRow {
     #[db(key)]
     pub id: String,
@@ -358,6 +361,7 @@ mod tests {
                     "runtime_monitor_startup_active",
                     "runtime_monitor_idle_account",
                     "runtime_monitor_idle_agent",
+                    "runtime_monitor_rule_success",
                 ][..],
             ),
             (

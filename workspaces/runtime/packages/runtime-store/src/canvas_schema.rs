@@ -16,8 +16,9 @@ pub(crate) fn install(
     Ok(())
 }
 
-pub(crate) fn registry() -> [studio_db_api::Registration; 115] {
+pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
     db_schema![Canvas;
+        crate::queue_schema::ToolRequestAliasIndex,
         crate::agent_tables::AgentsStorageRow,
         crate::agent_tables::AgentVolatileStorageRow,
         crate::agent_tables::AgentMovesStorageRow,

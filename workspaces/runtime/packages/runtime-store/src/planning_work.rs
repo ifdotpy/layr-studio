@@ -115,6 +115,9 @@ fn check_runtime_rules(row: &RuleRow) -> StoreResult<()> {
     legacy_index = "CREATE INDEX runtime_task_agent_updated_id ON runtime_tasks(\n                    json_extract(record,'$.agent'),\n                    CASE WHEN COALESCE(json_extract(record,'$.finished'),0) > COALESCE(json_extract(record,'$.created'),0)\n                         THEN json_extract(record,'$.finished') ELSE json_extract(record,'$.created') END,\n                    id)",
     legacy_index = "CREATE INDEX runtime_task_history ON runtime_tasks(json_extract(record,'$.created') DESC, json_extract(record,'$.agent')) WHERE json_extract(record,'$.status')!='running'",
     legacy_index = "CREATE INDEX runtime_task_status ON runtime_tasks(json_extract(record,'$.status'), json_extract(record,'$.created'))")]
+#[db(
+    legacy_index = "CREATE INDEX runtime_task_item_turn ON runtime_tasks(json_extract(record,'$.itemId'),json_extract(record,'$.turnId'))"
+)]
 pub struct TaskRow {
     #[db(key)]
     pub id: String,

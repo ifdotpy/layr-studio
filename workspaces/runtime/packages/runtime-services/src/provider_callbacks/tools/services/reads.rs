@@ -263,12 +263,7 @@ fn native_request_alias(
     agent: &str,
     call: &str,
 ) -> Result<Option<String>, CallbackError> {
-    let aliases = tx
-        .prepare_cached(
-            "SELECT id FROM runtime_tool_requests WHERE agent=?1 AND EXISTS(SELECT 1 FROM json_each(record,'$.aliases') WHERE value=?2) LIMIT 2",
-        )?
-        .query_map([agent, call], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let aliases = records::tool_request_aliases(tx, agent, call)?;
     if aliases.len() > 1 {
         return Err(CallbackError::Invalid(
             "Output reference is ambiguous. Use the canonical request id.",
@@ -317,15 +312,13 @@ fn event(
         .ok_or(CallbackError::Invalid(
             "Event reference is not owned by this agent",
         ))?;
-    let meta = if records::exists(tx, "runtime_event_meta")? {
+    let meta = {
         tx.query_row(
             "SELECT record FROM runtime_event_meta WHERE id=?1",
             [id],
             |r| r.get::<_, String>(0),
         )
         .optional()?
-    } else {
-        None
     };
     authorize_event(
         tx,

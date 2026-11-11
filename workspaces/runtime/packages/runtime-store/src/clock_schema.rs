@@ -17,6 +17,7 @@ pub struct DurableFloor {
 #[db(state_check = crate::state_check::count_legacy_rows::<DurableRows>)]
 #[db(table = "durable_rows", database = Canvas, legacy_ddl = "CREATE TABLE durable_rows (\n        tbl TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,\n        deleted INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0, scope TEXT,\n        PRIMARY KEY(tbl, id))")]
 #[db(legacy_index = "CREATE INDEX durable_rows_seq ON durable_rows(seq)")]
+#[db(legacy_index = "CREATE INDEX durable_rows_window_members ON durable_rows(tbl,deleted,id)")]
 #[db(legacy_index = "CREATE INDEX durable_rows_tombstone_at ON durable_rows(at) WHERE deleted=1")]
 #[db(
     legacy_index = "CREATE INDEX durable_rows_task_window_live\n                ON durable_rows(id) WHERE tbl='task_window' AND deleted=0"

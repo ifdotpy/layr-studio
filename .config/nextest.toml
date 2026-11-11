@@ -81,6 +81,8 @@ inherits = "ci"
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & (test(limits_commit_decodes_only_its_account_and_preserves_projection) | test(deleted_command_query_tests::) | test(rule_success_query_uses_rule_index))) |
+    (package(=studio-runtime-store) & test(system_receipt_writer_reads_do_not_probe_schema)) |
     (package(=studio-runtime-services) & kind(lib) & test(host_worker_create::tests::creation_)) |
     (package(=studio-codex-protocol) & kind(lib) & test(=generated::generated_fixtures::every_vendor_method_sample_decodes)) |
     (package(=studio-runtime-providers) & kind(lib) & test(codec::codex_protocol_tests::)) |

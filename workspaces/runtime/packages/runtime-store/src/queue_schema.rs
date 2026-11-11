@@ -206,6 +206,19 @@ pub struct ProcessActionsRow {
     pub record: LazyJson<crate::ProcessActionRecord>,
 }
 
+/// Trigger-owned lookup index; receipts retain all admission authority.
+#[derive(DbTable)]
+#[db(table = "runtime_tool_request_alias_index", database = Canvas, without_rowid,
+    index(name = "runtime_tool_request_alias_index_owner", columns(agent,request_id)))]
+pub struct ToolRequestAliasIndex {
+    #[db(key)]
+    pub agent: String,
+    #[db(key)]
+    pub alias: String,
+    #[db(key)]
+    pub request_id: String,
+}
+
 #[derive(DbTable)]
 #[db(table = "runtime_tool_requests", database = Canvas, legacy_ddl = "CREATE TABLE runtime_tool_requests (id TEXT PRIMARY KEY, record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN CASE record->>'$.kind' WHEN 'managed_tool' THEN record->>'$.agent' WHEN 'provider_callback' THEN record->>'$.payload.identity.context.agent' END END) VIRTUAL, kind TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.kind' END) VIRTUAL CHECK(\"kind\" IN ('managed_tool','provider_callback','unrecognized')), status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN CASE record->>'$.kind' WHEN 'managed_tool' THEN record->>'$.stage' WHEN 'provider_callback' THEN record->>'$.status' END END) VIRTUAL CHECK(\"status\" IN ('queued','running','cancelled','interrupted','failed','unknown','completed')), request_id TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN CASE record->>'$.kind' WHEN 'managed_tool' THEN record->>'$.admitted.id' WHEN 'provider_callback' THEN record->>'$.id' END END) VIRTUAL, origin_key TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.originKey' END) VIRTUAL, updated INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.updated' END) VIRTUAL)")]
 #[db(state_check = check_runtime_tool_requests)]
@@ -513,7 +526,14 @@ mod tests {
             ],
             "runtime_tool_requests historical index order"
         );
-        assert!(order("runtime_tool_requests", "trigger").is_empty());
+        assert_eq!(
+            order("runtime_tool_requests", "trigger"),
+            [
+                "runtime_tool_request_alias_index_insert",
+                "runtime_tool_request_alias_index_update",
+                "runtime_tool_request_alias_index_delete"
+            ]
+        );
     }
     #[test]
     fn queue_historical_feature_install_defers_migrated_column_indexes() {

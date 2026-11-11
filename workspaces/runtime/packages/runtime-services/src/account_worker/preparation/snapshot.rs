@@ -406,23 +406,13 @@ pub(super) fn invalid(location: &str) -> WorkerError {
 pub(super) fn agent(tx: &Transaction<'_>, id: &str) -> Result<AgentRecord, WorkerError> {
     AgentRepository::get(tx, &AgentId::from(id))?.ok_or_else(|| invalid(id))
 }
-fn table_exists(tx: &rusqlite::Connection, table: &str) -> Result<bool, WorkerError> {
-    Ok(tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1 AND type='table')",
-        [table],
-        |r| r.get::<_, bool>(0),
-    )?)
-}
-/// One `id,record` row of an optional feature table.
+/// One `id,record` row of a startup-installed feature table.
 fn record_by_id(
     tx: &rusqlite::Connection,
     table: &'static str,
     id: &str,
 ) -> Result<Option<String>, WorkerError> {
     use rusqlite::OptionalExtension;
-    if !table_exists(tx, table)? {
-        return Ok(None);
-    }
     Ok(tx
         .prepare_cached(&format!("SELECT record FROM {table} WHERE id=?1"))?
         .query_row([id], |r| r.get(0))
@@ -433,9 +423,6 @@ fn record_by_id(
 const LEAD_COMPLAINTS_SQL: &str =
     "SELECT record FROM runtime_complaints WHERE json_extract(record,'$.leadId')=?1 ORDER BY id";
 fn lead_complaints(tx: &rusqlite::Connection, lead: &str) -> Result<Vec<String>, WorkerError> {
-    if !table_exists(tx, "runtime_complaints")? {
-        return Ok(Vec::new());
-    }
     Ok(tx
         .prepare_cached(LEAD_COMPLAINTS_SQL)?
         .query_map([lead], |r| r.get(0))?
@@ -448,13 +435,7 @@ pub(super) fn records_by_ids(
     ids: &std::collections::BTreeSet<String>,
 ) -> Result<BTreeMap<String, String>, WorkerError> {
     let mut rows = BTreeMap::new();
-    if ids.is_empty()
-        || !db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1 AND type='table')",
-            [table],
-            |r| r.get::<_, bool>(0),
-        )?
-    {
+    if ids.is_empty() {
         return Ok(rows);
     }
     let mut query = db.prepare_cached(&format!("SELECT record FROM {table} WHERE id=?1"))?;
@@ -1687,7 +1668,7 @@ mod resource_tests {
     #[test]
     fn authorization_projects_exclude_destructive_removal_fences() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
-        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
             INSERT INTO runtime_projects VALUES('/deleted','{\"id\":\"/deleted\",\"removal\":{\"reason\":\"delete\",\"sequence\":1,\"requestId\":\"remove\",\"deletedAt\":1}}');
             INSERT INTO runtime_projects VALUES('/active','{\"id\":\"/active\",\"path\":\"/active\",\"peerTeams\":[]}');")
             .expect("project rows");
