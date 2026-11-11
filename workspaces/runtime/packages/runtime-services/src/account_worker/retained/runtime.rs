@@ -106,6 +106,42 @@ impl Worker {
             Ok(Replay::Retry(ticket)) => Some(ticket),
         };
         let control = self.control.clone();
+        if call.method == Method::OperationStatus {
+            // This is a Studio supervisor read, never a vendor protocol request.
+            // Use the same scoped transport identity as the original command.
+            let operation = call.params["operationId"].as_str().ok_or_else(|| {
+                WorkerError::PreparationRefused("monitor/invalid-operation-status".into())
+            })?;
+            let operation = OperationId(Call::operation_key(&call.scope.account, operation));
+            let deadline = tokio::time::Instant::from_std(request.deadline);
+            let status = self
+                .drive(async {
+                    tokio::time::timeout_at(deadline, control.operation_status(operation))
+                        .await
+                        .unwrap_or(Err(SessionTaskError::Closed))
+                })
+                .await;
+            use studio_runtime_providers::supervisor_protocol::ProviderOperationState;
+            let native_id = status
+                .ok()
+                .filter(|status| status.state == ProviderOperationState::Written)
+                .and_then(|status| status.native_id)
+                .and_then(|id| id.rpc())
+                .and_then(|id| u64::try_from(id).ok());
+            let result = if let Some(native_id) = native_id {
+                json!({"accepted":true,"nativeId":native_id})
+            } else {
+                // No proof is not permission to replay or retry indefinitely.
+                json!({"accepted":false,"reason":studio_runtime_schema::studio_errors::MonitorRecoveryReason::RetainedExitUnavailable.code()})
+            };
+            let ticket = RequestTicket {
+                generation: call.scope.generation,
+                id: RequestId::String(key),
+                method: call.method,
+            };
+            let _ignored = reply.send(Ok(call.receipt(ticket, RequestResult::Reply(result))));
+            return Ok(());
+        }
         let journal_actor_id: Option<String> = None;
         let remaining = tokio::time::Instant::from_std(request.deadline)
             .saturating_duration_since(tokio::time::Instant::now());

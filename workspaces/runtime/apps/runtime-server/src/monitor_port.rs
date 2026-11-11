@@ -1576,6 +1576,11 @@ impl MonitorPort for RetainedMonitorPort {
                 .await
             {
                 Ok(receipt) => receipt,
+                Err(AccountSessionError::Unknown) => {
+                    return Ok(ReattachOutcome::Gone(
+                        MonitorRecoveryReason::RetainedExitUnavailable.code().into(),
+                    ));
+                }
                 Err(_) => return Ok(ReattachOutcome::Pending),
             };
             if receipt.certainty() != RequestCertainty::Written {
@@ -3766,6 +3771,112 @@ mod tests {
         assert_eq!(watch.value()["status"], "lost");
         assert_eq!(owner.status, studio_runtime_store::AgentStatus::Queued);
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn monitor_status_receipt_timeout_finishes_recovery_once() {
+        struct DeadlineSession(std::sync::atomic::AtomicUsize);
+        impl AccountSessionPort for DeadlineSession {
+            fn current_scope(
+                &self,
+                account: &str,
+            ) -> Option<studio_runtime_services::account_session_runtime::ConnectionScope>
+            {
+                Some(
+                    studio_runtime_services::account_session_runtime::ConnectionScope {
+                        account: account.into(),
+                        connection: "new".into(),
+                        generation: 185,
+                    },
+                )
+            }
+            fn provider_request<'a>(
+                &'a self,
+                request: ProviderRequest,
+            ) -> studio_runtime_services::account_session_runtime::AccountSessionFuture<
+                'a,
+                SessionReceipt,
+            > {
+                Box::pin(async move {
+                    assert_eq!(
+                        request.method,
+                        Method::OperationStatus,
+                        "recovery never replays a command"
+                    );
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    // The receipt waiter wins the shared deadline while the supervisor is stalled.
+                    assert!(
+                        tokio::time::timeout_at(
+                            tokio::time::Instant::from_std(request.deadline),
+                            std::future::pending::<()>()
+                        )
+                        .await
+                        .is_err()
+                    );
+                    Err(AccountSessionError::Unknown)
+                })
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
+        let actor = owner(root.path(), true);
+        let mut watch = starting_watch(root.path(), "watch");
+        watch["status"] = json!("running");
+        watch["operation"] = json!(Operation {
+            agent: "owner".to_owned().try_into().unwrap(),
+            epoch: 0.try_into().unwrap(),
+            account_key: "default".to_owned().try_into().unwrap(),
+            connection_id: "old".to_owned().try_into().unwrap(),
+            evidence: Default::default()
+        });
+        store
+            .transaction(move |tx| {
+                AgentRepository::put(tx, &AgentRecord::from_value(actor)?)?;
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
+                    studio_runtime_store::MonitorRecord,
+                >(watch)?)?;
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
+        studio_runtime_services::monitor_runtime::recover_on_startup(&store, 2.0)
+            .await
+            .unwrap();
+        let session = Arc::new(DeadlineSession(std::sync::atomic::AtomicUsize::new(0)));
+        let port = RetainedMonitorPort::new(store.clone(), session.clone());
+        let runtime = studio_runtime_services::monitor_runtime_wiring::MonitorRuntime::new(
+            store.clone(),
+            port,
+            Arc::new(Notify::new()),
+        );
+        runtime.tick(2.0).await.unwrap();
+        runtime.tick(3.0).await.unwrap();
+        let (watch, event) = store
+            .read_async("test/status-timeout-outcome", |tx| {
+                Ok::<_, studio_runtime_store::StoreError>((
+                    MonitorsRepository::get(tx, "watch")?.unwrap().value(),
+                    studio_runtime_store::QueueEventRepository::get(tx, &"monitor:watch".into())?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            watch["status"], "lost",
+            "a timed-out status cannot remain Pending"
+        );
+        assert_eq!(
+            watch["reattachRecovery"]["proof"],
+            MonitorRecoveryReason::RetainedExitUnavailable.code()
+        );
+        assert_eq!(
+            session.0.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "one status attempt, including later ticks"
+        );
+        assert_eq!(
+            event.expect("one explicit exit notice").kind,
+            "monitor_exit"
+        );
     }
 
     #[tokio::test]

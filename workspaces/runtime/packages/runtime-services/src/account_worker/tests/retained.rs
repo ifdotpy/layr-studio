@@ -4818,3 +4818,202 @@ async fn thread_unload_ends_a_running_turn_as_interrupted() {
         "the running turn is not sent again"
     );
 }
+
+#[tokio::test]
+async fn typed_codex_monitor_status_routes_to_supervisor_without_vendor_write() {
+    use studio_runtime_providers::supervisor_protocol::{NativeId, ProviderOperationState};
+    use studio_runtime_store::supervisor_journal::SupervisorJournal;
+    struct StatusFactory {
+        inner: Arc<dyn ProviderTaskFactory>,
+        journal: Arc<SupervisorJournal>,
+        queries: Arc<Mutex<Vec<(String, String)>>>,
+    }
+    impl ProviderTaskFactory for StatusFactory {
+        fn open(
+            &self,
+            handle: ProviderHandle,
+            options: OpenOptions,
+            stop: Shutdown,
+        ) -> OpenFuture<'_> {
+            self.inner.open(handle, options, stop)
+        }
+        fn operation_status(
+            &self,
+            handle: ProviderHandle,
+            operation: OperationId,
+            _: Shutdown,
+        ) -> studio_runtime_process::provider_seam::StatusFuture<'_> {
+            self.queries
+                .lock()
+                .unwrap()
+                .push((handle.as_str().to_owned(), operation.0.clone()));
+            let status = self
+                .journal
+                .provider_operation_status(handle.as_str(), &operation.0)
+                .expect("real supervisor status lookup");
+            Box::pin(async move { Ok(status) })
+        }
+    }
+    let state = State::new().await;
+    retained_schema(&state).await;
+    let root = tempfile::tempdir().unwrap();
+    let journal = Arc::new(SupervisorJournal::open(root.path()).unwrap());
+    let handle = "account:default";
+    let key = |operation: &str| {
+        studio_runtime_schema::provider_call_contract::transport_key("default", operation)
+    };
+    journal.reserve(handle, "fixture", 1.0).unwrap();
+    journal
+        .opened(handle, "fixture", 41, "linux:fixture", Some(149))
+        .unwrap();
+    let legacy = key("monitor:legacy");
+    journal
+        .accept(
+            handle,
+            &legacy,
+            Some(&NativeId::Integer(41)),
+            &json!({"id":41,"method":"command/exec","params":{"processId":"legacy"}}),
+            2.0,
+        )
+        .unwrap();
+    journal.mark_written(handle, &legacy).unwrap();
+    assert_eq!(
+        journal
+            .provider_operation_status(handle, &legacy)
+            .unwrap()
+            .state,
+        ProviderOperationState::Written
+    );
+    journal
+        .opened(handle, "fixture", 42, "linux:replacement", Some(185))
+        .unwrap();
+    assert_eq!(
+        journal
+            .provider_operation_status(handle, &legacy)
+            .unwrap()
+            .state,
+        ProviderOperationState::Unknown,
+        "149 cannot prove an operation on generation185"
+    );
+    let known = key("monitor:known");
+    journal
+        .accept(
+            handle,
+            &known,
+            Some(&NativeId::Integer(42)),
+            &json!({"id":42,"method":"command/exec","params":{"processId":"known"}}),
+            3.0,
+        )
+        .unwrap();
+    journal.mark_written(handle, &known).unwrap();
+    let text = key("monitor:text-id");
+    journal
+        .accept(
+            handle,
+            &text,
+            Some(&NativeId::Text("remote".into())),
+            &json!({"id":"remote","method":"command/exec","params":{"processId":"text"}}),
+            4.0,
+        )
+        .unwrap();
+    journal.mark_written(handle, &text).unwrap();
+    // Legacy response identities are legal journal values but cannot prove a monitor RPC.
+    let negative = key("monitor:negative-id");
+    journal
+        .accept(
+            handle,
+            &negative,
+            Some(&NativeId::Integer(-1)),
+            &json!({"id":-1,"result":{}}),
+            5.0,
+        )
+        .unwrap();
+    journal.mark_written(handle, &negative).unwrap();
+    assert_eq!(
+        journal
+            .provider_operation_status(handle, &text)
+            .unwrap()
+            .native_id,
+        Some(NativeId::Text("remote".into()))
+    );
+    assert_eq!(
+        journal
+            .provider_operation_status(handle, &negative)
+            .unwrap()
+            .native_id,
+        Some(NativeId::Integer(-1))
+    );
+    let mut peer = Peer::identity("default", 185, None);
+    peer.codec = studio_runtime_process::provider_seam::ProviderCodec::codex();
+    let queries = Arc::new(Mutex::new(Vec::new()));
+    peer.factory = Arc::new(StatusFactory {
+        inner: peer.factory.clone(),
+        journal,
+        queries: queries.clone(),
+    });
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let port = worker.retained_session();
+    for operation in [
+        "monitor:legacy",
+        "monitor:known",
+        "monitor:text-id",
+        "monitor:negative-id",
+    ] {
+        let mut call = request(&state, &port, &format!("monitor-status:{operation}"));
+        call.actor = None;
+        call.method = Method::OperationStatus;
+        call.params = json!({"operationId":operation});
+        let identity = call.operation.clone();
+        let receipt = port
+            .request(call)
+            .await
+            .expect("supervisor read resolves outside vendor codec");
+        assert_eq!(receipt.scope, *port.scope());
+        assert_eq!(receipt.operation, identity);
+        let expected = if operation == "monitor:known" {
+            json!({"accepted":true,"nativeId":1})
+        } else {
+            json!({"accepted":false,"reason":studio_runtime_schema::studio_errors::MonitorRecoveryReason::RetainedExitUnavailable.code()})
+        };
+        assert_eq!(receipt.result, RequestResult::Reply(expected));
+    }
+    assert_eq!(
+        *queries.lock().unwrap(),
+        [
+            "monitor:legacy",
+            "monitor:known",
+            "monitor:text-id",
+            "monitor:negative-id"
+        ]
+        .map(|operation| (handle.into(), key(operation)))
+    );
+    let mut refused = request(&state, &port, "monitor-status:refused");
+    refused.method = Method::OperationStatus;
+    refused.params = json!({"operationId":"monitor:legacy"});
+    assert!(
+        matches!(port.request(refused.clone()).await, Err(PortError::Invalid)),
+        "actor-bound monitor reads are not authorized"
+    );
+    refused.actor = None;
+    refused.expected_scope = Some(ConnectionScope {
+        generation: 186,
+        ..port.scope().clone()
+    });
+    assert!(matches!(
+        port.request(refused).await,
+        Err(PortError::ScopeMismatch)
+    ));
+    assert_eq!(
+        queries.lock().unwrap().len(),
+        4,
+        "denied reads never reach the supervisor"
+    );
+    assert!(
+        matches!(
+            peer.writes.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ),
+        "status never enters provider stdin"
+    );
+    worker.shutdown().await.unwrap();
+}
