@@ -1085,7 +1085,7 @@ impl AccountRegistry {
                 AccountPageDispatch::Exhausted
             });
         }
-        use studio_runtime_services::account_start_gate::AgentStartWait;
+        use studio_runtime_schema::agent_progress::AgentStartWait;
         // The registry owns provider startup, before a worker can claim input.
         if !self.workers.contains_key(account) {
             let waits = agents
@@ -1100,7 +1100,7 @@ impl AccountRegistry {
                     )
                 })
                 .collect();
-            studio_runtime_services::account_start_gate::show_blocked(&self.store, waits).await?;
+            studio_runtime_services::agent_start_wait::show_blocked(&self.store, waits).await?;
         }
         if let Err(error) = self.start(account).await {
             session_start_failed(
@@ -1359,7 +1359,7 @@ impl AccountRegistry {
             .get(&account)
             .filter(|retry_at| **retry_at > tokio::time::Instant::now())
         {
-            use studio_runtime_services::account_start_gate::AgentStartWait;
+            use studio_runtime_schema::agent_progress::AgentStartWait;
             let until = event_time()
                 + retry_at
                     .saturating_duration_since(tokio::time::Instant::now())
@@ -1377,7 +1377,7 @@ impl AccountRegistry {
                     (agent.clone(), wait)
                 })
                 .collect();
-            studio_runtime_services::account_start_gate::show_blocked(&self.store, waits).await?;
+            studio_runtime_services::agent_start_wait::show_blocked(&self.store, waits).await?;
             return Ok(());
         }
         self.worker_retry_at.remove(&account);

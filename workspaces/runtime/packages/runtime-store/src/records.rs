@@ -4432,17 +4432,6 @@ mod agent_projection_tests {
     use studio_json::json;
 
     #[test]
-    fn stored_agent_rejects_legacy_start_wait_shapes() {
-        {
-            let wait = r#"{"reason":"slot","epoch":1,"runningTurns":null}"#;
-            let raw = format!(
-                r#"{{"id":"a","rootId":"a","epoch":1,"status":"queued","accountKey":"default","compactions":0,"startWait":{wait}}}"#
-            );
-            assert!(super::parse_agent_record("a", &raw).is_err());
-        }
-    }
-
-    #[test]
     fn stored_agent_reads_typed_volatile_columns() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")

@@ -19,13 +19,14 @@ import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import FilePreview, { useFilePreview } from "../FilePreview/FilePreview.tsx";
 import DirectoryField from "../../projects/DirectoryField/DirectoryField.tsx";
-import { useSkillAutocomplete } from "../prompt-composer/PromptInput/useSkillAutocomplete.ts";
+import { SkillAutocomplete } from "./SkillAutocomplete.ts";
 import Analytics, {
   type AnalyticsSelection,
 } from "../../shell/Analytics/Analytics.tsx";
 import { useReadView } from "../../ui/support/useReadView.ts";
 import {
   useServerApi,
+  useServerNet,
   useServerStore,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
@@ -429,21 +430,22 @@ it("analytics renews the time range on period and scope changes while pagination
 
 const Skills = observer(function Skills({ agent }: { agent: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
-  const skills = useSkillAutocomplete({
-    enabled: true,
-    agentId: agent,
-    workspace: "workspace",
-    account: "account",
-    cwd: "/project",
-    provider: "codex",
-    draft: "",
-    input,
-    insert: () => {},
-  });
+  const [skills] = useState(() => new SkillAutocomplete());
+  const net = useServerNet();
+  const read = net.reads.skills(
+    { agent },
+    {
+      workspace: "workspace",
+      account: "account",
+      cwd: "/project",
+      provider: "codex",
+    },
+  );
+  const updateRange = () => skills.updateRange(true, read, input.current);
   return h(
     "div",
     null,
-    h("textarea", { ref: input, onKeyUp: skills.updateRange }),
+    h("textarea", { ref: input, onKeyUp: updateRange }),
     h("span", null, skills.matches.map((skill) => skill.name).join(",")),
   );
 });

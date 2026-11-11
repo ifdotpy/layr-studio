@@ -5,8 +5,8 @@ import { writePreferenceEdit } from "../../../sync/uiPreferenceStore.ts";
 import { useSyncedVisualState } from "../../../sync/useSyncedVisualState.ts";
 import { ActionIcon, Button, Menu, Popover, TextInput } from "@mantine/core";
 import { Bookmark, ListTree, Search } from "lucide-react";
-import { useEffect, useState, type RefObject } from "react";
-import { useDebouncedValue } from "@mantine/hooks";
+import { useEffect, type RefObject } from "react";
+import { reached } from "../../../clock.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import type { Message } from "../../../types.ts";
 import { isMessagePending } from "../../../messageSendStatus.ts";
@@ -18,6 +18,26 @@ export function createPromptNavigation(source: Message[] | (() => Message[])) {
   return makeAutoObservable(
     {
       activeId: "",
+      opened: false,
+      query: "",
+      onlySaved: false,
+      queryChangedAt: 0,
+      get searchQuery() {
+        return this.query.trim();
+      },
+      get debouncedQuery() {
+        return reached(this.queryChangedAt + 250) ? this.searchQuery : "";
+      },
+      setOpened(value: boolean) {
+        this.opened = value;
+      },
+      setQuery(value: string) {
+        this.query = value;
+        this.queryChangedAt = Date.now();
+      },
+      toggleSaved() {
+        this.onlySaved = !this.onlySaved;
+      },
       get prompts(): PromptDescriptor[] {
         return messages()
           .filter((item) => item.role === "user" && !isMessagePending(item))
@@ -72,15 +92,19 @@ export default observer(function PromptNavigator({
   const navigation = navigationStore;
   const prompts = navigation.prompts;
   const ids = navigation.ids;
-  const [opened, setOpened] = useState(false);
-  const [query, setQuery] = useState("");
+  const {
+    opened,
+    setOpened,
+    query,
+    setQuery,
+    onlySaved,
+    searchQuery,
+    debouncedQuery,
+  } = navigation;
   const [bookmarks] = useSyncedVisualState<Record<string, boolean>>(
     storageKey,
     {},
   );
-  const [onlySaved, setOnlySaved] = useState(false);
-  const searchQuery = query.trim();
-  const [debouncedQuery] = useDebouncedValue(searchQuery, 250);
   const read =
     opened && agentId && debouncedQuery && !onlySaved
       ? net.reads.transcriptSearch({ id: agentId, q: debouncedQuery })
@@ -232,7 +256,7 @@ export default observer(function PromptNavigator({
               variant={onlySaved ? "light" : "subtle"}
               aria-label="Show bookmarked prompts"
               aria-pressed={onlySaved}
-              onClick={() => setOnlySaved(!onlySaved)}
+              onClick={() => navigation.toggleSaved()}
             >
               <Bookmark size={15} />
             </ActionIcon>

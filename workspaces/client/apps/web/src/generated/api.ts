@@ -277,23 +277,6 @@ export interface paths {
     patch?: never | undefined;
     trace?: never | undefined;
   };
-  "/api/accounts/throttle": {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    get?: never | undefined;
-    put?: never | undefined;
-    /** Account Throttle */
-    post: operations["account_throttle_api_accounts_throttle_post"];
-    delete?: never | undefined;
-    options?: never | undefined;
-    head?: never | undefined;
-    patch?: never | undefined;
-    trace?: never | undefined;
-  };
   "/api/action": {
     parameters: {
       query?: never | undefined;
@@ -2540,11 +2523,6 @@ export interface components {
       provider: components["schemas"]["ProviderKind"];
       /** Source */
       source: string;
-      /** @default null */
-      startThrottle?:
-        | components["schemas"]["AccountStartThrottle"]
-        | null
-        | undefined;
       status: components["schemas"]["AccountStatus"];
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
@@ -2988,56 +2966,6 @@ export interface components {
       supportsDisconnect: boolean;
     };
     /**
-     * AccountStartThrottle
-     * @description Turn start throttle of one account, the same for every provider.
-     *
-     *     Studio starts at most `burst` turns at once, then waits `pauseSeconds` after the
-     *     `burst`-th start,
-     *     and keeps at most `maxRunningTurns` turns running. A turn over a limit waits and
-     *     starts later. Studio limits turn starts only, not the provider's own requests
-     *     inside a turn. Bounds: codex_shared_values.ACCOUNT_START_* and ACCOUNT_RUNNING_TURNS_*.
-     */
-    AccountStartThrottle: {
-      /**
-       * Burst
-       * @description Turn starts per burst.
-       */
-      burst: number;
-      /**
-       * Maxrunningturns
-       * @description Turns that may run at once on this account.
-       */
-      maxRunningTurns: number;
-      /**
-       * Pauseseconds
-       * @description Seconds after the start that ends a burst before the next start.
-       */
-      pauseSeconds: number;
-    };
-    /**
-     * AccountStartThrottleRequest
-     * @description Replace one account's turn start throttle. Repeating a request sets the same values.
-     */
-    AccountStartThrottleRequest: {
-      /** Account Key */
-      account_key: string;
-      /**
-       * Burst
-       * @description Turn starts per burst.
-       */
-      burst: number;
-      /**
-       * Maxrunningturns
-       * @description Turns that may run at once on this account.
-       */
-      maxRunningTurns: number;
-      /**
-       * Pauseseconds
-       * @description Seconds after the start that ends a burst before the next start.
-       */
-      pauseSeconds: number;
-    };
-    /**
      * AccountStatus
      * @enum {string}
      */
@@ -3433,7 +3361,6 @@ export interface components {
       closing?: boolean | undefined;
       /** @description Why the worker state is missing: unavailable (no live worker) or unresponsive (the worker did not answer in time). */
       error?: string | undefined;
-      gate?: components["schemas"]["StartGateDiagnostics"] | undefined;
       /** @description Agents with a pending wait for a catalog refresh, a disk recheck or agent-row changes. */
       preparationWaits?: string[] | undefined;
       /** @description Agents with a turn preparation in flight. */
@@ -4164,43 +4091,8 @@ export interface components {
         | null
         | undefined;
     };
-    /**
-     * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
-     *
-     *     ```compile_fail
-     *     use studio_runtime_schema::agent_progress::AgentStartWait;
-     *     let _ = AgentStartWait::Slot { epoch: 1 };
-     *     ```
-     *     ```compile_fail
-     *     use studio_runtime_schema::agent_progress::AgentStartWait;
-     *     let _ = AgentStartWait::Pause { epoch: 1 };
-     *     ```
-     */
+    /** @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds. */
     AgentEntityStartWaitDto:
-      | {
-          /** Format: int64 */
-          epoch: number;
-          /** Format: uint64 */
-          maxRunningTurns: number;
-          /** @constant */
-          reason: "slot";
-          /** Format: uint64 */
-          runningTurns: number;
-        }
-      | {
-          /** Format: int64 */
-          epoch: number;
-          /** @constant */
-          reason: "pause";
-          /** Format: double */
-          until: number;
-        }
-      | {
-          /** Format: int64 */
-          epoch: number;
-          /** @constant */
-          reason: "start_queue";
-        }
       | {
           /** Format: int64 */
           epoch: number;
@@ -14009,27 +13901,6 @@ export interface components {
     };
     /** @enum {string} */
     FrontendLocality: "local" | "remote";
-    GateAdmitDiagnostics: {
-      ageMs: number;
-      agent: string;
-      /** @description true when the claim made the turn in flight; false when the admitted slot was dropped unclaimed. */
-      claimed: boolean;
-    };
-    GateSlotDiagnostics: {
-      ageMs: number;
-      agent: string;
-      /** @description The claim made the turn in flight; false while the start is only admitted. */
-      claimed: boolean;
-    };
-    GateWaiterDiagnostics: {
-      ageMs: number;
-      agent: string;
-      /**
-       * @description queued: no decision yet; slot: every running slot is taken; pause: the burst pause runs; behind: free to start, behind an earlier start.
-       * @enum {string}
-       */
-      wait: "queued" | "slot" | "pause" | "behind";
-    };
     GitCommit: string;
     GitRef: string;
     GlobalStateResource: unknown;
@@ -22254,14 +22125,6 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
-    /** @description The account's turn start throttle: admitted slots, queued starts and the latest admit outcomes. */
-    StartGateDiagnostics: {
-      /** @description The latest admits, newest first. */
-      recentAdmits: components["schemas"]["GateAdmitDiagnostics"][];
-      running: components["schemas"]["GateSlotDiagnostics"][];
-      /** @description Queued starts in arrival order; only the first may be admitted. */
-      waiters: components["schemas"]["GateWaiterDiagnostics"][];
-    };
     /** StartModelSettingsRecordResponse */
     StartModelSettingsRecordResponse: {
       /**
@@ -22301,9 +22164,6 @@ export interface components {
     };
     /** @enum {string} */
     StartWaitReason:
-      | "slot"
-      | "pause"
-      | "start_queue"
       | "disk"
       | "model_catalog"
       | "provider_session"
@@ -22313,43 +22173,8 @@ export interface components {
       | "native_failure"
       | "account_transfer"
       | "workspace_copy";
-    /**
-     * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
-     *
-     *     ```compile_fail
-     *     use studio_runtime_schema::agent_progress::AgentStartWait;
-     *     let _ = AgentStartWait::Slot { epoch: 1 };
-     *     ```
-     *     ```compile_fail
-     *     use studio_runtime_schema::agent_progress::AgentStartWait;
-     *     let _ = AgentStartWait::Pause { epoch: 1 };
-     *     ```
-     */
+    /** @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds. */
     StartWaitRecordResponse:
-      | {
-          /** Format: int64 */
-          epoch: number;
-          /** Format: uint64 */
-          maxRunningTurns: number;
-          /** @constant */
-          reason: "slot";
-          /** Format: uint64 */
-          runningTurns: number;
-        }
-      | {
-          /** Format: int64 */
-          epoch: number;
-          /** @constant */
-          reason: "pause";
-          /** Format: double */
-          until: number;
-        }
-      | {
-          /** Format: int64 */
-          epoch: number;
-          /** @constant */
-          reason: "start_queue";
-        }
       | {
           /** Format: int64 */
           epoch: number;
@@ -29310,71 +29135,6 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": components["schemas"]["RegisterAccountRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          "Access-Control-Allow-Origin": components["headers"]["AccessControlAllowOrigin"];
-          "Access-Control-Expose-Headers": components["headers"]["AccessControlExposeHeaders"];
-          "Cache-Control": components["headers"]["CacheControl"];
-          "Content-Encoding": components["headers"]["ContentEncoding"];
-          "Content-Length": components["headers"]["ContentLength"];
-          "Content-Security-Policy": components["headers"]["ContentSecurityPolicy"];
-          "Content-Type": components["headers"]["ContentType"];
-          "Referrer-Policy": components["headers"]["ReferrerPolicy"];
-          "Server-Timing": components["headers"]["ServerTiming"];
-          Vary: components["headers"]["Vary"];
-          "X-Content-Type-Options": components["headers"]["XContentTypeOptions"];
-          "X-Studio-API-Schema": components["headers"]["StudioApiSchema"];
-          "X-Studio-Server": components["headers"]["StudioServer"];
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AccountsResponse"];
-        };
-      };
-      /** @description Bad Request */
-      400: components["responses"]["ApiError400"];
-      /** @description Unauthorized */
-      401: components["responses"]["ApiError401"];
-      /** @description Forbidden */
-      403: components["responses"]["ApiError403"];
-      /** @description Not Found */
-      404: components["responses"]["ApiError404"];
-      /** @description Request Timeout */
-      408: components["responses"]["ApiError408"];
-      /** @description Conflict */
-      409: components["responses"]["ApiError409"];
-      /** @description Gone */
-      410: components["responses"]["ApiError410"];
-      /** @description Content Too Large */
-      413: components["responses"]["ApiError413"];
-      /** @description Unsupported Media Type */
-      415: components["responses"]["ApiError415"];
-      /** @description Upgrade Required */
-      426: components["responses"]["ApiError426"];
-      /** @description Too Many Requests */
-      429: components["responses"]["ApiError429"];
-      /** @description Internal Server Error */
-      500: components["responses"]["ApiError500"];
-      /** @description Bad Gateway */
-      502: components["responses"]["ApiError502"];
-      /** @description Service Unavailable */
-      503: components["responses"]["ApiError503"];
-    };
-  };
-  account_throttle_api_accounts_throttle_post: {
-    parameters: {
-      query?: never | undefined;
-      header?: never | undefined;
-      path?: never | undefined;
-      cookie?: never | undefined;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["AccountStartThrottleRequest"];
       };
     };
     responses: {
@@ -38236,9 +37996,6 @@ export const SqliteTransactionState = {
 export type SqliteTransactionState =
   components["schemas"]["SqliteTransactionState"];
 export const StartWaitReason = {
-  slot: "slot",
-  pause: "pause",
-  start_queue: "start_queue",
   disk: "disk",
   model_catalog: "model_catalog",
   provider_session: "provider_session",

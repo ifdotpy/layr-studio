@@ -6,7 +6,7 @@ import {
   answerList,
   type AnswerValues,
 } from "../AnswerFields/AnswerFields.tsx";
-import { elicitationSchema } from "../support/requestData.ts";
+import { elicitationSchema } from "./requestData.ts";
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }

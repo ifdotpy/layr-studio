@@ -2106,23 +2106,17 @@ class AgentDetailEntityDtoModel {
 }
 type AgentEntityStartWaitDtoVariant0Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "slot" }
+  { reason: "disk" }
 >;
 class AgentEntityStartWaitDtoVariant0Model {
   epoch: AgentEntityStartWaitDtoVariant0Dto["epoch"];
-  maxRunningTurns: AgentEntityStartWaitDtoVariant0Dto["maxRunningTurns"];
   reason: AgentEntityStartWaitDtoVariant0Dto["reason"];
-  runningTurns: AgentEntityStartWaitDtoVariant0Dto["runningTurns"];
   constructor(dto: AgentEntityStartWaitDtoVariant0Dto) {
     this.epoch = dto.epoch;
-    this.maxRunningTurns = dto.maxRunningTurns;
     this.reason = dto.reason;
-    this.runningTurns = dto.runningTurns;
     makeObservable(this, {
       epoch: observableRef,
-      maxRunningTurns: observableRef,
       reason: observableRef,
-      runningTurns: observableRef,
       apply: action,
     });
   }
@@ -2132,36 +2126,25 @@ class AgentEntityStartWaitDtoVariant0Model {
       if (this.epoch !== next) this.epoch = next;
     }
     {
-      const next = dto.maxRunningTurns;
-      if (this.maxRunningTurns !== next) this.maxRunningTurns = next;
-    }
-    {
       const next = dto.reason;
       if (this.reason !== next) this.reason = next;
-    }
-    {
-      const next = dto.runningTurns;
-      if (this.runningTurns !== next) this.runningTurns = next;
     }
     return this;
   }
 }
 type AgentEntityStartWaitDtoVariant1Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "pause" }
+  { reason: "model_catalog" }
 >;
 class AgentEntityStartWaitDtoVariant1Model {
   epoch: AgentEntityStartWaitDtoVariant1Dto["epoch"];
   reason: AgentEntityStartWaitDtoVariant1Dto["reason"];
-  until: AgentEntityStartWaitDtoVariant1Dto["until"];
   constructor(dto: AgentEntityStartWaitDtoVariant1Dto) {
     this.epoch = dto.epoch;
     this.reason = dto.reason;
-    this.until = dto.until;
     makeObservable(this, {
       epoch: observableRef,
       reason: observableRef,
-      until: observableRef,
       apply: action,
     });
   }
@@ -2174,151 +2157,33 @@ class AgentEntityStartWaitDtoVariant1Model {
       const next = dto.reason;
       if (this.reason !== next) this.reason = next;
     }
-    {
-      const next = dto.until;
-      if (this.until !== next) this.until = next;
-    }
-    return this;
-  }
-}
-type AgentEntityStartWaitDtoVariant10Dto = Extract<
-  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "account_transfer" }
->;
-class AgentEntityStartWaitDtoVariant10Model {
-  epoch: AgentEntityStartWaitDtoVariant10Dto["epoch"];
-  reason: AgentEntityStartWaitDtoVariant10Dto["reason"];
-  constructor(dto: AgentEntityStartWaitDtoVariant10Dto) {
-    this.epoch = dto.epoch;
-    this.reason = dto.reason;
-    makeObservable(this, {
-      epoch: observableRef,
-      reason: observableRef,
-      apply: action,
-    });
-  }
-  apply(dto: AgentEntityStartWaitDtoVariant10Dto): this {
-    {
-      const next = dto.epoch;
-      if (this.epoch !== next) this.epoch = next;
-    }
-    {
-      const next = dto.reason;
-      if (this.reason !== next) this.reason = next;
-    }
-    return this;
-  }
-}
-type AgentEntityStartWaitDtoVariant11Dto = Extract<
-  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "workspace_copy" }
->;
-class AgentEntityStartWaitDtoVariant11Model {
-  epoch: AgentEntityStartWaitDtoVariant11Dto["epoch"];
-  progress: AgentEntityStartWaitDtoVariant11_progressModel;
-  reason: AgentEntityStartWaitDtoVariant11Dto["reason"];
-  constructor(dto: AgentEntityStartWaitDtoVariant11Dto) {
-    this.epoch = dto.epoch;
-    this.progress = new AgentEntityStartWaitDtoVariant11_progressModel(
-      dto.progress,
-    );
-    this.reason = dto.reason;
-    makeObservable(this, {
-      epoch: observableRef,
-      progress: observableRef,
-      reason: observableRef,
-      apply: action,
-    });
-  }
-  apply(dto: AgentEntityStartWaitDtoVariant11Dto): this {
-    {
-      const next = dto.epoch;
-      if (this.epoch !== next) this.epoch = next;
-    }
-    {
-      const next = this.progress.apply(dto.progress);
-      if (this.progress !== next) this.progress = next;
-    }
-    {
-      const next = dto.reason;
-      if (this.reason !== next) this.reason = next;
-    }
-    return this;
-  }
-}
-type AgentEntityStartWaitDtoVariant11_progressDto = NonNullable<
-  AgentEntityStartWaitDtoVariant11Dto["progress"]
->;
-class AgentEntityStartWaitDtoVariant11_progressModel {
-  done: AgentEntityStartWaitDtoVariant11_progressDto["done"];
-  phase: AgentEntityStartWaitDtoVariant11_progressDto["phase"];
-  total:
-    | NonNullable<AgentEntityStartWaitDtoVariant11_progressDto["total"]>
-    | null
-    | undefined;
-  unit: AgentEntityStartWaitDtoVariant11_progressDto["unit"];
-  constructor(dto: AgentEntityStartWaitDtoVariant11_progressDto) {
-    this.done = dto.done;
-    this.phase = dto.phase;
-    this.total =
-      dto.total === undefined
-        ? undefined
-        : dto.total === null
-          ? null
-          : dto.total;
-    this.unit = dto.unit;
-    makeObservable(this, {
-      done: observableRef,
-      phase: observableRef,
-      total: observableRef,
-      unit: observableRef,
-      apply: action,
-    });
-  }
-  apply(dto: AgentEntityStartWaitDtoVariant11_progressDto): this {
-    {
-      const next = dto.done;
-      if (this.done !== next) this.done = next;
-    }
-    {
-      const next = dto.phase;
-      if (this.phase !== next) this.phase = next;
-    }
-    {
-      const next =
-        dto.total === undefined
-          ? undefined
-          : this.total === undefined
-            ? dto.total === null
-              ? null
-              : dto.total
-            : dto.total === null
-              ? null
-              : this.total === null
-                ? dto.total
-                : dto.total;
-      if (this.total !== next) this.total = next;
-    }
-    {
-      const next = dto.unit;
-      if (this.unit !== next) this.unit = next;
-    }
     return this;
   }
 }
 type AgentEntityStartWaitDtoVariant2Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "start_queue" }
+  { reason: "provider_session" }
 >;
 class AgentEntityStartWaitDtoVariant2Model {
   epoch: AgentEntityStartWaitDtoVariant2Dto["epoch"];
   reason: AgentEntityStartWaitDtoVariant2Dto["reason"];
+  until:
+    | NonNullable<AgentEntityStartWaitDtoVariant2Dto["until"]>
+    | null
+    | undefined;
   constructor(dto: AgentEntityStartWaitDtoVariant2Dto) {
     this.epoch = dto.epoch;
     this.reason = dto.reason;
+    this.until =
+      dto.until === undefined
+        ? undefined
+        : dto.until === null
+          ? null
+          : dto.until;
     makeObservable(this, {
       epoch: observableRef,
       reason: observableRef,
+      until: observableRef,
       apply: action,
     });
   }
@@ -2331,12 +2196,27 @@ class AgentEntityStartWaitDtoVariant2Model {
       const next = dto.reason;
       if (this.reason !== next) this.reason = next;
     }
+    {
+      const next =
+        dto.until === undefined
+          ? undefined
+          : this.until === undefined
+            ? dto.until === null
+              ? null
+              : dto.until
+            : dto.until === null
+              ? null
+              : this.until === null
+                ? dto.until
+                : dto.until;
+      if (this.until !== next) this.until = next;
+    }
     return this;
   }
 }
 type AgentEntityStartWaitDtoVariant3Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "disk" }
+  { reason: "dependency" }
 >;
 class AgentEntityStartWaitDtoVariant3Model {
   epoch: AgentEntityStartWaitDtoVariant3Dto["epoch"];
@@ -2364,7 +2244,7 @@ class AgentEntityStartWaitDtoVariant3Model {
 }
 type AgentEntityStartWaitDtoVariant4Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "model_catalog" }
+  { reason: "dispatch_pending" }
 >;
 class AgentEntityStartWaitDtoVariant4Model {
   epoch: AgentEntityStartWaitDtoVariant4Dto["epoch"];
@@ -2392,28 +2272,17 @@ class AgentEntityStartWaitDtoVariant4Model {
 }
 type AgentEntityStartWaitDtoVariant5Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "provider_session" }
+  { reason: "paused" }
 >;
 class AgentEntityStartWaitDtoVariant5Model {
   epoch: AgentEntityStartWaitDtoVariant5Dto["epoch"];
   reason: AgentEntityStartWaitDtoVariant5Dto["reason"];
-  until:
-    | NonNullable<AgentEntityStartWaitDtoVariant5Dto["until"]>
-    | null
-    | undefined;
   constructor(dto: AgentEntityStartWaitDtoVariant5Dto) {
     this.epoch = dto.epoch;
     this.reason = dto.reason;
-    this.until =
-      dto.until === undefined
-        ? undefined
-        : dto.until === null
-          ? null
-          : dto.until;
     makeObservable(this, {
       epoch: observableRef,
       reason: observableRef,
-      until: observableRef,
       apply: action,
     });
   }
@@ -2426,27 +2295,12 @@ class AgentEntityStartWaitDtoVariant5Model {
       const next = dto.reason;
       if (this.reason !== next) this.reason = next;
     }
-    {
-      const next =
-        dto.until === undefined
-          ? undefined
-          : this.until === undefined
-            ? dto.until === null
-              ? null
-              : dto.until
-            : dto.until === null
-              ? null
-              : this.until === null
-                ? dto.until
-                : dto.until;
-      if (this.until !== next) this.until = next;
-    }
     return this;
   }
 }
 type AgentEntityStartWaitDtoVariant6Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "dependency" }
+  { reason: "native_failure" }
 >;
 class AgentEntityStartWaitDtoVariant6Model {
   epoch: AgentEntityStartWaitDtoVariant6Dto["epoch"];
@@ -2474,7 +2328,7 @@ class AgentEntityStartWaitDtoVariant6Model {
 }
 type AgentEntityStartWaitDtoVariant7Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "dispatch_pending" }
+  { reason: "account_transfer" }
 >;
 class AgentEntityStartWaitDtoVariant7Model {
   epoch: AgentEntityStartWaitDtoVariant7Dto["epoch"];
@@ -2502,16 +2356,21 @@ class AgentEntityStartWaitDtoVariant7Model {
 }
 type AgentEntityStartWaitDtoVariant8Dto = Extract<
   DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "paused" }
+  { reason: "workspace_copy" }
 >;
 class AgentEntityStartWaitDtoVariant8Model {
   epoch: AgentEntityStartWaitDtoVariant8Dto["epoch"];
+  progress: AgentEntityStartWaitDtoVariant8_progressModel;
   reason: AgentEntityStartWaitDtoVariant8Dto["reason"];
   constructor(dto: AgentEntityStartWaitDtoVariant8Dto) {
     this.epoch = dto.epoch;
+    this.progress = new AgentEntityStartWaitDtoVariant8_progressModel(
+      dto.progress,
+    );
     this.reason = dto.reason;
     makeObservable(this, {
       epoch: observableRef,
+      progress: observableRef,
       reason: observableRef,
       apply: action,
     });
@@ -2522,36 +2381,72 @@ class AgentEntityStartWaitDtoVariant8Model {
       if (this.epoch !== next) this.epoch = next;
     }
     {
+      const next = this.progress.apply(dto.progress);
+      if (this.progress !== next) this.progress = next;
+    }
+    {
       const next = dto.reason;
       if (this.reason !== next) this.reason = next;
     }
     return this;
   }
 }
-type AgentEntityStartWaitDtoVariant9Dto = Extract<
-  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
-  { reason: "native_failure" }
+type AgentEntityStartWaitDtoVariant8_progressDto = NonNullable<
+  AgentEntityStartWaitDtoVariant8Dto["progress"]
 >;
-class AgentEntityStartWaitDtoVariant9Model {
-  epoch: AgentEntityStartWaitDtoVariant9Dto["epoch"];
-  reason: AgentEntityStartWaitDtoVariant9Dto["reason"];
-  constructor(dto: AgentEntityStartWaitDtoVariant9Dto) {
-    this.epoch = dto.epoch;
-    this.reason = dto.reason;
+class AgentEntityStartWaitDtoVariant8_progressModel {
+  done: AgentEntityStartWaitDtoVariant8_progressDto["done"];
+  phase: AgentEntityStartWaitDtoVariant8_progressDto["phase"];
+  total:
+    | NonNullable<AgentEntityStartWaitDtoVariant8_progressDto["total"]>
+    | null
+    | undefined;
+  unit: AgentEntityStartWaitDtoVariant8_progressDto["unit"];
+  constructor(dto: AgentEntityStartWaitDtoVariant8_progressDto) {
+    this.done = dto.done;
+    this.phase = dto.phase;
+    this.total =
+      dto.total === undefined
+        ? undefined
+        : dto.total === null
+          ? null
+          : dto.total;
+    this.unit = dto.unit;
     makeObservable(this, {
-      epoch: observableRef,
-      reason: observableRef,
+      done: observableRef,
+      phase: observableRef,
+      total: observableRef,
+      unit: observableRef,
       apply: action,
     });
   }
-  apply(dto: AgentEntityStartWaitDtoVariant9Dto): this {
+  apply(dto: AgentEntityStartWaitDtoVariant8_progressDto): this {
     {
-      const next = dto.epoch;
-      if (this.epoch !== next) this.epoch = next;
+      const next = dto.done;
+      if (this.done !== next) this.done = next;
     }
     {
-      const next = dto.reason;
-      if (this.reason !== next) this.reason = next;
+      const next = dto.phase;
+      if (this.phase !== next) this.phase = next;
+    }
+    {
+      const next =
+        dto.total === undefined
+          ? undefined
+          : this.total === undefined
+            ? dto.total === null
+              ? null
+              : dto.total
+            : dto.total === null
+              ? null
+              : this.total === null
+                ? dto.total
+                : dto.total;
+      if (this.total !== next) this.total = next;
+    }
+    {
+      const next = dto.unit;
+      if (this.unit !== next) this.unit = next;
     }
     return this;
   }
@@ -18269,38 +18164,29 @@ type AgentEntityStartWaitDtoModel =
   | AgentEntityStartWaitDtoVariant5Model
   | AgentEntityStartWaitDtoVariant6Model
   | AgentEntityStartWaitDtoVariant7Model
-  | AgentEntityStartWaitDtoVariant8Model
-  | AgentEntityStartWaitDtoVariant9Model
-  | AgentEntityStartWaitDtoVariant10Model
-  | AgentEntityStartWaitDtoVariant11Model;
+  | AgentEntityStartWaitDtoVariant8Model;
 function createAgentEntityStartWaitDto(
   dto: DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
 ): AgentEntityStartWaitDtoModel {
   switch (dto.reason) {
-    case "slot":
-      return new AgentEntityStartWaitDtoVariant0Model(dto);
-    case "pause":
-      return new AgentEntityStartWaitDtoVariant1Model(dto);
-    case "start_queue":
-      return new AgentEntityStartWaitDtoVariant2Model(dto);
     case "disk":
-      return new AgentEntityStartWaitDtoVariant3Model(dto);
+      return new AgentEntityStartWaitDtoVariant0Model(dto);
     case "model_catalog":
-      return new AgentEntityStartWaitDtoVariant4Model(dto);
+      return new AgentEntityStartWaitDtoVariant1Model(dto);
     case "provider_session":
-      return new AgentEntityStartWaitDtoVariant5Model(dto);
+      return new AgentEntityStartWaitDtoVariant2Model(dto);
     case "dependency":
-      return new AgentEntityStartWaitDtoVariant6Model(dto);
+      return new AgentEntityStartWaitDtoVariant3Model(dto);
     case "dispatch_pending":
-      return new AgentEntityStartWaitDtoVariant7Model(dto);
+      return new AgentEntityStartWaitDtoVariant4Model(dto);
     case "paused":
-      return new AgentEntityStartWaitDtoVariant8Model(dto);
+      return new AgentEntityStartWaitDtoVariant5Model(dto);
     case "native_failure":
-      return new AgentEntityStartWaitDtoVariant9Model(dto);
+      return new AgentEntityStartWaitDtoVariant6Model(dto);
     case "account_transfer":
-      return new AgentEntityStartWaitDtoVariant10Model(dto);
+      return new AgentEntityStartWaitDtoVariant7Model(dto);
     case "workspace_copy":
-      return new AgentEntityStartWaitDtoVariant11Model(dto);
+      return new AgentEntityStartWaitDtoVariant8Model(dto);
   }
 }
 function updateAgentEntityStartWaitDto(
@@ -18308,54 +18194,42 @@ function updateAgentEntityStartWaitDto(
   dto: DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
 ): AgentEntityStartWaitDtoModel {
   switch (dto.reason) {
-    case "slot":
-      return data.reason === "slot"
-        ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant0Model(dto);
-    case "pause":
-      return data.reason === "pause"
-        ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant1Model(dto);
-    case "start_queue":
-      return data.reason === "start_queue"
-        ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant2Model(dto);
     case "disk":
       return data.reason === "disk"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant3Model(dto);
+        : new AgentEntityStartWaitDtoVariant0Model(dto);
     case "model_catalog":
       return data.reason === "model_catalog"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant4Model(dto);
+        : new AgentEntityStartWaitDtoVariant1Model(dto);
     case "provider_session":
       return data.reason === "provider_session"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant5Model(dto);
+        : new AgentEntityStartWaitDtoVariant2Model(dto);
     case "dependency":
       return data.reason === "dependency"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant6Model(dto);
+        : new AgentEntityStartWaitDtoVariant3Model(dto);
     case "dispatch_pending":
       return data.reason === "dispatch_pending"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant7Model(dto);
+        : new AgentEntityStartWaitDtoVariant4Model(dto);
     case "paused":
       return data.reason === "paused"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant8Model(dto);
+        : new AgentEntityStartWaitDtoVariant5Model(dto);
     case "native_failure":
       return data.reason === "native_failure"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant9Model(dto);
+        : new AgentEntityStartWaitDtoVariant6Model(dto);
     case "account_transfer":
       return data.reason === "account_transfer"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant10Model(dto);
+        : new AgentEntityStartWaitDtoVariant7Model(dto);
     case "workspace_copy":
       return data.reason === "workspace_copy"
         ? data.apply(dto)
-        : new AgentEntityStartWaitDtoVariant11Model(dto);
+        : new AgentEntityStartWaitDtoVariant8Model(dto);
   }
 }
 type AgentOperationalStatusModel =

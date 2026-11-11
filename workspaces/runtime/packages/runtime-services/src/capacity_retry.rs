@@ -1,5 +1,5 @@
 //! Capacity retry transitions. A claim queues one follow-up input; the ordinary
-//! queued start path (start gate, auth gate, admission) starts it like any other
+//! queued start path (authentication and admission) starts it like any other
 //! input. A claim is never permission to resend an unknown turn.
 use crate::continuation::{
     CapacityDraft, ContinuationError, ContinuationUpdate as U, Decision, Effect, ProposedAgent,
@@ -309,7 +309,7 @@ pub fn transition(
                     ));
                 }
                 // The follow-up input waits in the queue like any other input:
-                // the start gate, auth gate and admission of the ordinary
+                // authentication and admission on the ordinary
                 // start path decide when it starts, and the input is never
                 // claimed twice. The failure hold ends with the claim.
                 r.update(U::Status("starting"));

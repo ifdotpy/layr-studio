@@ -240,54 +240,6 @@ fn shared_values_ts() -> String {
                 "IDLE_SESSION_UNLOAD_MAX_MINUTES",
                 values::IDLE_SESSION_UNLOAD_MAX_MINUTES.to_string(),
             ),
-            (
-                "ACCOUNT_START_BURST_DEFAULT_CODEX",
-                values::ACCOUNT_START_BURST_DEFAULT_CODEX.to_string(),
-            ),
-            (
-                "ACCOUNT_START_BURST_DEFAULT_CLAUDE",
-                values::ACCOUNT_START_BURST_DEFAULT_CLAUDE.to_string(),
-            ),
-            (
-                "ACCOUNT_START_BURST_MIN",
-                values::ACCOUNT_START_BURST_MIN.to_string(),
-            ),
-            (
-                "ACCOUNT_START_BURST_MAX",
-                values::ACCOUNT_START_BURST_MAX.to_string(),
-            ),
-            (
-                "ACCOUNT_START_PAUSE_DEFAULT_SECONDS_CODEX",
-                values::ACCOUNT_START_PAUSE_DEFAULT_SECONDS_CODEX.to_string(),
-            ),
-            (
-                "ACCOUNT_START_PAUSE_DEFAULT_SECONDS_CLAUDE",
-                values::ACCOUNT_START_PAUSE_DEFAULT_SECONDS_CLAUDE.to_string(),
-            ),
-            (
-                "ACCOUNT_START_PAUSE_MIN_SECONDS",
-                values::ACCOUNT_START_PAUSE_MIN_SECONDS.to_string(),
-            ),
-            (
-                "ACCOUNT_START_PAUSE_MAX_SECONDS",
-                values::ACCOUNT_START_PAUSE_MAX_SECONDS.to_string(),
-            ),
-            (
-                "ACCOUNT_RUNNING_TURNS_DEFAULT_CODEX",
-                values::ACCOUNT_RUNNING_TURNS_DEFAULT_CODEX.to_string(),
-            ),
-            (
-                "ACCOUNT_RUNNING_TURNS_DEFAULT_CLAUDE",
-                values::ACCOUNT_RUNNING_TURNS_DEFAULT_CLAUDE.to_string(),
-            ),
-            (
-                "ACCOUNT_RUNNING_TURNS_MIN",
-                values::ACCOUNT_RUNNING_TURNS_MIN.to_string(),
-            ),
-            (
-                "ACCOUNT_RUNNING_TURNS_MAX",
-                values::ACCOUNT_RUNNING_TURNS_MAX.to_string(),
-            ),
             ("ACCOUNT_GROUPS_MAX", values::ACCOUNT_GROUPS_MAX.to_string()),
             (
                 "ACCOUNT_GROUP_PATTERN",

@@ -1565,15 +1565,6 @@ mod tests {
             .expect("enable queued owner");
         use studio_runtime_schema::agent_progress::AgentStartWait;
         for wait in [
-            AgentStartWait::Pause {
-                epoch: 4,
-                until: 5.0,
-            },
-            AgentStartWait::Slot {
-                epoch: 4,
-                running_turns: 2,
-                max_running_turns: 3,
-            },
             AgentStartWait::Disk { epoch: 4 },
             AgentStartWait::ModelCatalog { epoch: 4 },
             AgentStartWait::ProviderSession {
@@ -1582,7 +1573,7 @@ mod tests {
             },
             AgentStartWait::Dependency { epoch: 4 },
         ] {
-            crate::account_start_gate::show_blocked(&store, vec![("queued".into(), wait.clone())])
+            crate::agent_start_wait::show_blocked(&store, vec![("queued".into(), wait.clone())])
                 .await
                 .expect("owner publishes wait");
             let status = model_directory(&store, "lead", 3, &json!({}), 103.0)
@@ -1602,7 +1593,7 @@ mod tests {
             assert_eq!(view["startWait"], json!(wait));
         }
         // A stale owner cannot replace the current epoch's blocker.
-        crate::account_start_gate::show_blocked(
+        crate::agent_start_wait::show_blocked(
             &store,
             vec![("queued".into(), AgentStartWait::Disk { epoch: 3 })],
         )

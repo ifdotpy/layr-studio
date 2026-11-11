@@ -288,23 +288,9 @@ it("does not block another chat while the previous page is pending", async () =>
 it("does not follow after a latest request completes for a different chat", async () => {
   const pending = Promise.withResolvers<void>();
   h.showLatest.mockImplementationOnce(() => pending.promise);
-  const first = elements(renderConversation(propsFixture)).find((node) => {
-    const type: unknown = node.type;
-    return (
-      typeof type === "object" &&
-      type !== null &&
-      "type" in type &&
-      typeof type.type === "function" &&
-      type.type.name === "FollowLatest"
-    );
-  });
-  if (
-    !first ||
-    !("onClick" in first.props) ||
-    typeof first.props.onClick !== "function"
-  )
-    throw new Error("Expected the observed FollowLatest action");
-  first.props.onClick();
+  renderConversation(propsFixture);
+  const first = selectedAreas!.selected.conversation!;
+  void first.returnToLatest();
   renderConversation({ ...propsFixture, id: "other" });
   pending.resolve();
   await pending.promise;

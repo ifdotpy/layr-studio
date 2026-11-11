@@ -15,7 +15,9 @@
   },
   "overrides": [
     {
-      "files": ["workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts"],
+      "files": [
+        "workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts"
+      ],
       "rules": {
         "typescript/ban-ts-comment": [
           "error",
@@ -52,7 +54,9 @@
       }
     },
     {
-      "files": ["workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"],
+      "files": [
+        "workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"
+      ],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -131,19 +135,25 @@
               },
               {
                 "regex": "(^|/)(servers/)?combinedSidebarServices(\\.[jt]sx?)?$",
-                "importNames": ["useCombinedSidebarServices"],
+                "importNames": [
+                  "useCombinedSidebarServices"
+                ],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(servers/)?sidebarServices(\\.[jt]sx?)?$",
-                "importNames": ["createMergedSidebarServices"],
+                "importNames": [
+                  "createMergedSidebarServices"
+                ],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(components/agents/)?WorkerModelPicker(\\.[jt]sx?)?$",
-                "importNames": ["useModelCatalogReader"],
+                "importNames": [
+                  "useModelCatalogReader"
+                ],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
@@ -180,7 +190,12 @@
         "no-restricted-globals": [
           "error",
           {
-            "globals": ["fetch", "EventSource", "XMLHttpRequest", "WebSocket"],
+            "globals": [
+              "fetch",
+              "EventSource",
+              "XMLHttpRequest",
+              "WebSocket"
+            ],
             "checkGlobalObject": true
           }
         ],
@@ -264,7 +279,6 @@
         "workspaces/client/apps/web/src/app/conversation/delivery/removeSendingMessages.ts",
         "workspaces/client/apps/web/src/app/projects/newChatSettings.ts",
         "workspaces/client/apps/web/src/components/accounts/AccountGroup/AccountGroup.tsx",
-        "workspaces/client/apps/web/src/components/accounts/AccountStartThrottle/AccountStartThrottle.tsx",
         "workspaces/client/apps/web/src/components/accounts/SignInPushSettings/SignInPushSettings.tsx",
         "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
         "workspaces/client/apps/web/src/components/agents/UnifiedAgentSettings/UnifiedAgentSettings.tsx",
@@ -316,7 +330,9 @@
       }
     },
     {
-      "files": ["workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"],
+      "files": [
+        "workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"
+      ],
       "excludeFiles": [
         "**/*.test.*",
         "**/*.spec.*",
@@ -334,14 +350,12 @@
         "workspaces/client/apps/web/src/app/settings/useAppPreferences.ts",
         "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
         "workspaces/client/apps/web/src/components/conversation/ComposerAutocomplete/ComposerAutocomplete.tsx",
-        "workspaces/client/apps/web/src/components/conversation/ConversationHeaderTools/ConversationHeaderTools.tsx",
         "workspaces/client/apps/web/src/components/conversation/FilePreview/FilePreview.tsx",
         "workspaces/client/apps/web/src/components/conversation/MessageQueue/MessageQueue.tsx",
         "workspaces/client/apps/web/src/components/conversation/PreviewModal/PreviewModal.tsx",
         "workspaces/client/apps/web/src/components/conversation/PromptNavigator/PromptNavigator.tsx",
         "workspaces/client/apps/web/src/components/conversation/TokenRate/TokenRate.tsx",
         "workspaces/client/apps/web/src/components/conversation/prompt-composer/PromptInput/PromptInput.tsx",
-        "workspaces/client/apps/web/src/components/conversation/questions/AnswerFields/AnswerFields.tsx",
         "workspaces/client/apps/web/src/components/conversation/questions/RequestCard/RequestCard.tsx",
         "workspaces/client/apps/web/src/components/conversation/support/useChatReadState.ts",
         "workspaces/client/apps/web/src/components/conversation/transcript/HistoryWindow/HistoryWindow.tsx",
@@ -446,19 +460,25 @@
               },
               {
                 "regex": "(^|/)(servers/)?combinedSidebarServices(\\.[jt]sx?)?$",
-                "importNames": ["useCombinedSidebarServices"],
+                "importNames": [
+                  "useCombinedSidebarServices"
+                ],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(servers/)?sidebarServices(\\.[jt]sx?)?$",
-                "importNames": ["createMergedSidebarServices"],
+                "importNames": [
+                  "createMergedSidebarServices"
+                ],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(components/agents/)?WorkerModelPicker(\\.[jt]sx?)?$",
-                "importNames": ["useModelCatalogReader"],
+                "importNames": [
+                  "useModelCatalogReader"
+                ],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
@@ -544,7 +564,6 @@
         "workspaces/client/apps/web/src/app/conversation/delivery/removeSendingMessages.ts",
         "workspaces/client/apps/web/src/app/projects/newChatSettings.ts",
         "workspaces/client/apps/web/src/components/accounts/AccountGroup/AccountGroup.tsx",
-        "workspaces/client/apps/web/src/components/accounts/AccountStartThrottle/AccountStartThrottle.tsx",
         "workspaces/client/apps/web/src/components/accounts/SignInPushSettings/SignInPushSettings.tsx",
         "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
         "workspaces/client/apps/web/src/components/agents/UnifiedAgentSettings/UnifiedAgentSettings.tsx",
@@ -608,14 +627,12 @@
         "workspaces/client/apps/web/src/app/settings/useAppPreferences.ts",
         "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
         "workspaces/client/apps/web/src/components/conversation/ComposerAutocomplete/ComposerAutocomplete.tsx",
-        "workspaces/client/apps/web/src/components/conversation/ConversationHeaderTools/ConversationHeaderTools.tsx",
         "workspaces/client/apps/web/src/components/conversation/FilePreview/FilePreview.tsx",
         "workspaces/client/apps/web/src/components/conversation/MessageQueue/MessageQueue.tsx",
         "workspaces/client/apps/web/src/components/conversation/PreviewModal/PreviewModal.tsx",
         "workspaces/client/apps/web/src/components/conversation/PromptNavigator/PromptNavigator.tsx",
         "workspaces/client/apps/web/src/components/conversation/TokenRate/TokenRate.tsx",
         "workspaces/client/apps/web/src/components/conversation/prompt-composer/PromptInput/PromptInput.tsx",
-        "workspaces/client/apps/web/src/components/conversation/questions/AnswerFields/AnswerFields.tsx",
         "workspaces/client/apps/web/src/components/conversation/questions/RequestCard/RequestCard.tsx",
         "workspaces/client/apps/web/src/components/conversation/support/useChatReadState.ts",
         "workspaces/client/apps/web/src/components/conversation/transcript/HistoryWindow/HistoryWindow.tsx",

@@ -1,3 +1,12 @@
+import { AnswerSelection } from "../support/AnswerSelection.ts";
+import { CopyFeedback } from "../../../../stores/CopyFeedback.ts";
+import { pasteBody, RESULT_SENT_NOTE } from "../support/signInCardModel.ts";
+import { elicitationSchema } from "../support/requestData.ts";
+import { answerList } from "../AnswerFields/AnswerFields.tsx";
+import {
+  questionAnswer,
+  savedAnswer as serializeAnswer,
+} from "../support/answerData.ts";
 import { createRef, type ReactNode } from "react";
 import { reaction, flowResult, makeAutoObservable, observable } from "mobx";
 import { ApiError, errorText } from "../../../../api.ts";
@@ -160,6 +169,55 @@ function createRequestView(area: RequestAreaOwner, request: RequestModel) {
   let stop: () => void;
   const value = {
     request,
+    answerSelection: new AnswerSelection(),
+    signInCopy: new CopyFeedback(),
+    signInAddress: "",
+    setSignInAddress(address: string) {
+      this.signInAddress = address;
+    },
+    *pasteSignIn() {
+      try {
+        const text: string = yield navigator.clipboard.readText();
+        if (text) {
+          this.signInAddress = text.trim();
+          return true;
+        }
+      } catch {
+        /* The field remains available for a manual paste. */
+      }
+      return false;
+    },
+    *sendSignIn(): Generator<Promise<boolean>, void, boolean> {
+      const body = pasteBody(this.signInAddress);
+      if (body && !this.disabled && (yield this.post(body))) {
+        this.signInAddress = "";
+        this.notify(RESULT_SENT_NOTE);
+      }
+    },
+    get answerReady() {
+      const elicitation = request.request.kind === "elicitation";
+      const required = new Set(elicitationSchema(request)?.required);
+      return (
+        [...required].every((id) => this.questions.some((q) => q.id === id)) &&
+        (elicitation || this.questions.length > 0) &&
+        this.questions
+          .filter((q) => !elicitation || required.has(q.id))
+          .every((q) =>
+            answerList(q, this.values[q.id]).some((answer) => answer.trim()),
+          )
+      );
+    },
+    submitAnswer() {
+      if (this.disabled || !this.answerReady) return;
+      try {
+        void this.post(
+          questionAnswer(this, this.values),
+          serializeAnswer(this, this.values),
+        );
+      } catch (error) {
+        this.notify(errorText(error));
+      }
+    },
     card: createRef<HTMLDivElement>(),
     trigger: createRef<HTMLButtonElement>(),
     open: false,

@@ -58,10 +58,7 @@ import { waitForFixturePort } from "../fixture-readiness.ts";
 import { createInterface } from "node:readline";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  ACCOUNT_RUNNING_TURNS_MAX,
-  ACCOUNT_START_BURST_MAX,
-} from "../../src/generated/sharedValues.ts";
+import {} from "../../src/generated/sharedValues.ts";
 
 type SyncEntity = components["schemas"]["SyncEntity"];
 type SyncPullResponse = components["schemas"]["SyncPullResponse"];
@@ -632,14 +629,6 @@ async function main() {
       `studio-runtime-server exited code=${code} signal=${signal}\n`,
       () => process.exit(code ?? 1),
     );
-  });
-  // The default start throttle spaces turn starts 30 seconds apart after a
-  // burst of 16 and cap running turns; seeded agents and wake-ups would wait.
-  await backend.post("/api/accounts/throttle", {
-    account_key: "default",
-    burst: ACCOUNT_START_BURST_MAX,
-    pauseSeconds: 0,
-    maxRunningTurns: ACCOUNT_RUNNING_TURNS_MAX,
   });
   const cwd = fixtureProjectDirectory(scratch);
   const lead: PostResult<"/api/agents"> & {

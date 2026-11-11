@@ -5,6 +5,7 @@ mod m2026_11_09_immutable_entity_scopes;
 pub(crate) mod m2026_11_09_online_keys;
 mod m2026_11_09_repair_invalid_entity_scopes;
 mod m2026_11_09_retired_objects;
+mod m2026_11_11_remove_account_throttle;
 
 use crate::{StoreError, StoreResult};
 use baseline_manifest::RETIRED;
@@ -93,9 +94,28 @@ static CATALOG: &[SqlMigration] = &[
         },
         apply: m2026_11_09_retired_objects::analytics,
     },
+    SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-11-remove-account-throttle",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 11,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Per-account throttle waits on agent records",
+            remove_when: "Supported installations and backups no longer contain account throttle waits",
+        },
+        apply: m2026_11_11_remove_account_throttle::apply,
+    },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
-    CATALOG.iter().map(SqlMigration::definition)
+    CATALOG
+        .iter()
+        .map(SqlMigration::definition)
+        .chain(std::iter::once(
+            m2026_11_11_remove_account_throttle::REGISTRY_DEFINITION,
+        ))
 }
 
 /// Position in the currently migrating source, measured in SQLite rowids.
@@ -239,7 +259,9 @@ pub(crate) fn verify_baseline(root: &Path) -> StoreResult<()> {
     let registry = root.join("accounts/registry.json");
     match std::fs::read(registry) {
         Ok(bytes) => {
-            let (_, _, registry) = crate::account_registry::decode_registry_typed(&bytes)
+            let migrated = m2026_11_11_remove_account_throttle::registry_destination(&bytes)?;
+            let bytes = migrated.as_deref().unwrap_or(&bytes);
+            let (_, _, registry) = crate::account_registry::decode_registry_typed(bytes)
                 .map_err(|_| too_old("account-registry", "2026-10-26-account-registry"))?;
             if registry.accounts.contains_key("claude-local") {
                 return Err(too_old(
@@ -333,6 +355,7 @@ pub(crate) fn run(
     root: &Path,
     _progress: Option<&(dyn Fn(MigrationProgress) + Send + Sync)>,
 ) -> StoreResult<()> {
+    m2026_11_11_remove_account_throttle::registry(root)?;
     let mut analytics = crate::open_database(
         &root.join("analytics.sqlite3"),
         OpenFlags::SQLITE_OPEN_READ_WRITE,

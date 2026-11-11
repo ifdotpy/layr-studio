@@ -7,7 +7,7 @@ export const WEB_SOURCE = "workspaces/client/apps/web/src/";
 export const GLUE_MANIFEST =
   "workspaces/tooling/apps/repository-checks/react-glue-exceptions.json";
 // Owner: maximum grandfathered React glue source files; only lower this ceiling.
-const MAX_REACT_GLUE_EXCEPTIONS = 36;
+const MAX_REACT_GLUE_EXCEPTIONS = 34;
 export const REACT_GLUE_APIS = [
   "useEffect",
   "useLayoutEffect",

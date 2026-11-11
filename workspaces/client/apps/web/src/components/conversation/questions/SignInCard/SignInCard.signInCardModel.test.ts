@@ -13,7 +13,7 @@ import {
   timeLeftLabel,
   verificationPage,
   waitingChatsLabel,
-} from "./signInCardModel.ts";
+} from "../support/signInCardModel.ts";
 import { approval, browserOpen } from "../../../../approvalFixtures.ts";
 import { browserOpenDetails } from "../support/requestData.ts";
 

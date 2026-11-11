@@ -1137,34 +1137,6 @@ The setting is independent of provider availability and an explicit
 operator resource ceiling. Those constraints can reduce actual
 parallelism; the queue reports their blockers.
 
-### Account turn start limits
-
-Providers limit requests per account, so each account has three turn start
-settings, the same for Codex and Claude: turn starts per burst, the pause after
-a burst (seconds), and running turns at once. While fewer turns run than the
-limit and no pause is active, turns start at once, up to one burst. The last
-start of a burst begins the pause; the next start waits until the pause ends.
-A full set of running turns only makes a start wait for a slot. Root agents
-(leads and user-facing chats) are queued ahead of workers, and still count
-against the burst and running limits; a direct user message does not bypass them.
-A burst is starts close together: a start at least one pause after the previous
-start begins a new burst, so occasional starts never wait.
-A turn over a limit is not failed: its message stays queued, the agent shows
-"Waiting for an account slot (8/8)" or "Waiting for the account pause", and it
-starts later exactly once. This applies to first and follow-up turns of leads
-and workers. Studio counts turn starts only, not the provider's requests inside
-a running turn.
-
-The settings are stored with the account and edited under "Turn start limits"
-on its account card; a change applies to waiting turns at once. A new account
-takes its provider's defaults. The bounds, the defaults, and the measurements
-behind them belong to the
-[shared values](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs)
-(`ACCOUNT_START_*`, `ACCOUNT_RUNNING_TURNS_*`); the gate is
-[`account_start_gate`](../workspaces/runtime/packages/runtime-services/src/account_start_gate.rs).
-A worker spawned without an account uses the Automatic selection policy
-described above; its active-agent estimate is separate from this turn-start gate.
-
 ## Terminal control
 
 No terminal command controls agents. The Python `codex-control` command was removed
@@ -1497,13 +1469,12 @@ change with both options. Cross-machine Claude cache reuse remains unverified.
 ## Why an agent waits
 
 1. The admission owner records one [typed `startWait`](../workspaces/runtime/packages/runtime-schema/src/agent_progress.rs) for the current agent epoch.
-2. Account starts report a running-turn slot, burst pause deadline, or earlier start.
-3. Disk admission, model preparation, and provider startup report their own blockers.
-4. Other preparation dependencies report a dependency wait; input keeps its identity.
-5. Sync and `orchestration_status` use the same projection; `queued[].reasons` contains that wait object.
-6. The UI shows its reason. `until`, when present, is a retry deadline in Unix seconds.
-7. A claim clears gate waits; submission clears preparation waits. Other epochs and settled turns cannot display them.
-8. A dispatch handoff has no gate blocker yet; it is distinct from an owner holding work.
+2. Disk admission, model preparation, and provider startup report their own blockers.
+3. Other preparation dependencies report a dependency wait; input keeps its identity.
+4. Sync and `orchestration_status` use the same projection; `queued[].reasons` contains that wait object.
+5. The UI shows its reason. `until`, when present, is a retry deadline in Unix seconds.
+6. A claim clears gate waits; submission clears preparation waits. Other epochs and settled turns cannot display them.
+7. A dispatch handoff has no gate blocker yet; it is distinct from an owner holding work.
 
 ### History observer lock boundaries
 

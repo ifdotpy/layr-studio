@@ -1,9 +1,9 @@
-import { action } from "mobx";
+import { action, makeAutoObservable } from "mobx";
 import { useConversationStore } from "../support/ConversationStore.ts";
 import { observer } from "mobx-react-lite";
 import { Button, ActionIcon } from "@mantine/core";
 import { Trash2 } from "lucide-react";
-import { useCallback, useMemo, useRef } from "react";
+import { useRef } from "react";
 import { currentCapacityRetry } from "../../../capacityRetry.ts";
 import { nativeThreadError } from "../../../nativeErrors.ts";
 import { resourceData } from "../../../store/runtime.ts";
@@ -61,7 +61,6 @@ export function renderConversationTranscript() {
     visibleMessages,
     history: historySession,
     detail,
-    planType,
     removed,
   } = selected;
   const { loaded, historical, after, connection, notice } = historySession;
@@ -98,55 +97,7 @@ export function renderConversationTranscript() {
     visibleMessages.at(-1)?.role === "reasoning" &&
     typeof visibleMessages.at(-1)?.reasoningSince === "number";
   const managed = agent?.source === AgentSource.managed;
-  const questionCards = useCallback(
-    (item: Message) => selected.requestArea.cards(item),
-    [selected],
-  );
-  const inlineRequestIds = new Set(
-    [...control.inlineRequests.values()].flatMap((request) =>
-      request ? [request.id] : [],
-    ),
-  );
-  const renderTranscriptMessage = useCallback(
-    (item: Message) =>
-      item.idleCompaction ? (
-        <IdleCompactionNotice key={item.id} text={item.text} />
-      ) : item.nativeNotice ? (
-        isNonBlockingWarning(item) ? null : (
-          <ObservedNativeNotice key={item.id} item={item} planType={planType} />
-        )
-      ) : (
-        <MessageRow key={messageRenderKey(item)} item={item} />
-      ),
-    [planType],
-  );
-  const inlineRequests = control.inlineRequests;
-  const requestCards = useMemo(
-    () =>
-      new Map(
-        [...inlineRequests].map(([messageId, request]) => [
-          messageId,
-          request && (
-            <RequestCard
-              key={request.id}
-              request={request}
-              messageId={messageId}
-              showDates={!!room}
-            />
-          ),
-        ]),
-      ),
-    [inlineRequests, room],
-  );
-  const transcriptActions = useMemo(
-    () => ({
-      renderMessage: renderTranscriptMessage,
-      questionCards,
-      requestCards,
-      jumpToMessage: control.jumpToPrompt,
-    }),
-    [renderTranscriptMessage, questionCards, requestCards, control],
-  );
+  const inlineRequestIds = control.inlineRequestIds;
   const phase = (
     <LiveAgentPhase
       agentId={agent?.id}
@@ -157,7 +108,7 @@ export function renderConversationTranscript() {
     />
   );
   const transcript = (
-    <TranscriptProvider value={transcriptActions}>
+    <TranscriptProvider value={control.transcriptActions}>
       {managed && !room && agent?.provider === ProviderKind.Claude && (
         <ObservedClaudeRepairNotice
           agent={agent}
@@ -286,6 +237,49 @@ export function renderConversationTranscript() {
         </div>
       </RequestArea>
     </div>
+  );
+}
+
+/** Stable transcript callbacks belong to the selected conversation store. */
+export function createTranscriptActions(
+  control: ReturnType<typeof useConversationStore>,
+) {
+  return makeAutoObservable(
+    {
+      renderMessage: (item: Message) =>
+        item.idleCompaction ? (
+          <IdleCompactionNotice key={item.id} text={item.text} />
+        ) : item.nativeNotice ? (
+          isNonBlockingWarning(item) ? null : (
+            <ObservedNativeNotice
+              key={item.id}
+              item={item}
+              planType={control.context.actions.selected.planType}
+            />
+          )
+        ) : (
+          <MessageRow key={messageRenderKey(item)} item={item} />
+        ),
+      questionCards: (item: Message) =>
+        control.context.actions.selected.requestArea.cards(item),
+      get requestCards() {
+        return new Map(
+          [...control.inlineRequests].map(([messageId, request]) => [
+            messageId,
+            request && (
+              <RequestCard
+                key={request.id}
+                request={request}
+                messageId={messageId}
+                showDates={!!control.context.actions.navigation.selectedRoom}
+              />
+            ),
+          ]),
+        );
+      },
+      jumpToMessage: control.jumpToPrompt,
+    },
+    { renderMessage: false, questionCards: false, jumpToMessage: false },
   );
 }
 

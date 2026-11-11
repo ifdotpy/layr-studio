@@ -198,6 +198,7 @@ export function renderConversationComposerArea() {
           <>
             {transferChip}
             <PromptInput
+              autocomplete={control.autocomplete}
               value={draft}
               draftResetVersion={
                 delivery.draftResetVersions.get(opened || "new") ?? 0

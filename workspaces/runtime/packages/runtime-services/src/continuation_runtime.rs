@@ -104,7 +104,7 @@ pub trait WakePort: Send + Sync {
 
 /// Why a due capacity retry waits instead of queueing its follow-up: its agent
 /// still has a turn in flight, or an ancestor stopped. Slots, budget and the
-/// account's start throttle belong to the ordinary start path.
+/// account's authentication checks belong to the ordinary start path.
 fn capacity_claim_wait(snapshot: &Snapshot) -> Option<&'static str> {
     let agent = &snapshot.agent;
     if flag(agent, "inFlight")

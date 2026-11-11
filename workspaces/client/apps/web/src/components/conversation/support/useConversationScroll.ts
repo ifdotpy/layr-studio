@@ -16,6 +16,7 @@ export function shouldFollowTranscriptTail(
 /** Time, in milliseconds, for which wheel, touch, or key input is recent. */
 const RECENT_INPUT_MS = 600;
 
+// integration: TeamChats, RadioChat and transcriptWindow fixture must own createConversationScroll.
 export function useConversationScroll(
   _id: string,
   ready: boolean,

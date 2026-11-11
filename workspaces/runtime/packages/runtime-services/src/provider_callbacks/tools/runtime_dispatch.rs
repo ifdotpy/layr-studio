@@ -146,9 +146,8 @@ fn validate_selected_account(
     Ok(())
 }
 
-/// Ready, usable accounts that the chat and project allow: those below their
-/// running-turn limit (start throttle) first, then least loaded. Ties break on
-/// the account key so the order is deterministic.
+/// Ready, usable accounts ordered by account group, then active-agent count.
+/// Ties break on the account key so the order is deterministic.
 fn ordered_worker_account_candidates<'a>(
     listing: &'a crate::provider_callbacks::ManagedCreationAccountListing,
     excluded: &[String],
@@ -171,11 +170,8 @@ fn ordered_worker_account_candidates<'a>(
         .collect::<Vec<_>>();
     ordered.sort_by_key(|row| {
         let active = active_agents.get(&row.account_key).copied().unwrap_or(0);
-        let full = u64::try_from(active).unwrap_or(0) >= row.max_running_turns;
-        // A full account sorts after every account with a free slot; then the
-        // project's account order; then the least loaded account.
         let rank = crate::account_preference::group_rank(row.group.as_deref(), groups);
-        (full, rank, active, row.account_key.as_str())
+        (rank, active, row.account_key.as_str())
     });
     ordered
 }
@@ -1352,7 +1348,6 @@ mod account_identity_tests {
             disconnected: false,
             deleted: false,
             duplicate: false,
-            max_running_turns: studio_runtime_schema::shared_values::ACCOUNT_RUNNING_TURNS_MAX,
             group: None,
         }
     }
@@ -1477,7 +1472,7 @@ mod account_identity_tests {
     }
 
     /// Workers prefer the project's account order (or the default order) over
-    /// load; a full or unavailable preferred account falls back to the next one.
+    /// load; an unavailable preferred account falls back to the next one.
     #[test]
     fn implicit_selection_follows_the_account_order_and_falls_back() {
         use ProviderKind::Codex;
@@ -1488,7 +1483,6 @@ mod account_identity_tests {
         ]);
         listing.0.accounts[0].group = Some("own".to_owned());
         listing.0.accounts[1].group = Some("work".to_owned());
-        listing.0.accounts[0].max_running_turns = 2;
         listing.0.default_account_groups = vec!["own".to_owned(), "work".to_owned()];
         let pick = |project: Option<&[String]>,
                     counts: &Counts,
@@ -1520,9 +1514,9 @@ mod account_identity_tests {
         // A project order replaces the default order.
         let work = ["work".to_owned()];
         assert_eq!(pick(Some(&work), &busy, &mut |_| true), "work");
-        // A full preferred account falls back to the next group.
-        let full = Counts::from([("own".to_owned(), 2)]);
-        assert_eq!(pick(None, &full, &mut |_| true), "work");
+        // Account group priority also applies when the preferred account is busy.
+        let busy = Counts::from([("own".to_owned(), 64)]);
+        assert_eq!(pick(None, &busy, &mut |_| true), "own");
         // An account without the model falls back to the next group.
         assert_eq!(pick(None, &busy, &mut |key| key != "own"), "work");
         // Accounts outside the order stay available.
@@ -1530,17 +1524,14 @@ mod account_identity_tests {
     }
 
     #[test]
-    fn implicit_selection_prefers_an_account_below_its_running_turn_limit() {
+    fn implicit_selection_prefers_the_least_loaded_account() {
         use ProviderKind::{Claude, Codex};
         for (provider, model) in [(Codex, "gpt-5"), (Claude, "sonnet")] {
-            let mut listing = accounts(&[("big", provider, true), ("small", provider, true)]);
-            listing.0.accounts[1].max_running_turns = 2;
-            listing.0.accounts[0].max_running_turns = 16;
+            let listing = accounts(&[("big", provider, true), ("small", provider, true)]);
             let counts = Counts::from([("big".to_owned(), 3), ("small".to_owned(), 2)]);
             assert_eq!(
-                select(&listing, model, None, &counts, &mut |_| true).expect("big"),
-                "big",
-                "the less loaded account has no free slot"
+                select(&listing, model, None, &counts, &mut |_| true).expect("small"),
+                "small"
             );
             let counts = Counts::from([("big".to_owned(), 3), ("small".to_owned(), 1)]);
             assert_eq!(

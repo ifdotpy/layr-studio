@@ -1,14 +1,13 @@
 import type { AccountSource } from "../../../servers/ServerAccountLimits.tsx";
 import type { ReactNode } from "react";
-import AccountStartThrottle from "../../accounts/AccountStartThrottle/AccountStartThrottle.tsx";
 import AccountGroup from "../../accounts/AccountGroup/AccountGroup.tsx";
 import type { Account } from "../../accounts/support/Accounts.tsx";
 import { ServerServicesProvider } from "../ServerServicesProvider/ServerServicesProvider.tsx";
 import type { ServerServices } from "../../../servers/serverServices.ts";
 
-/** Turn start limits and the account group are settings of one Studio server,
+/** Account groups are settings of one Studio server,
  * stored on that server's account, so the request goes to that server. */
-export function ServerTurnStartLimits({
+export function ServerAccountGroup({
   source,
   onSaved,
 }: {
@@ -17,11 +16,6 @@ export function ServerTurnStartLimits({
 }) {
   return (
     <ServerScope services={source.services}>
-      <AccountStartThrottle
-        account={source.account}
-        serverLabel={source.serverLabel}
-        onSaved={(state) => onSaved(state.accounts)}
-      />
       <AccountGroup
         account={source.account}
         serverLabel={source.serverLabel}

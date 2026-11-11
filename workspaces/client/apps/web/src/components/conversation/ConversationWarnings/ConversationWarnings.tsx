@@ -80,19 +80,30 @@ export default observer(function ConversationWarnings() {
           <Tabs.Panel value="notices" pt="md">
             <div className="conversation-warning-list">
               {noticeCount === 0 && <Text size="sm">No notices.</Text>}
-              {accountNotices.map((notice) => (
-                <article key={`account:${notice.id}`}>
-                  <h3>
-                    {isInfoNotice(notice)
-                      ? notice.id.startsWith("provider-update:")
-                        ? "Provider update available"
-                        : "Information"
-                      : warningTitle(notice.message, "Account notice")}
-                  </h3>
+              {[
+                ...accountNotices.map((notice) => ({
+                  key: `account:${notice.id}`,
+                  title: isInfoNotice(notice)
+                    ? notice.id.startsWith("provider-update:")
+                      ? "Provider update available"
+                      : "Information"
+                    : warningTitle(notice.message, "Account notice"),
+                  message: notice.message,
+                  details: "details" in notice ? notice.details : undefined,
+                })),
+                ...chatWarnings.map((message) => ({
+                  key: `chat:${message.id}`,
+                  title: warningTitle(message.text, "Conversation warning"),
+                  message: message.text,
+                  details: "details" in message ? message.details : undefined,
+                })),
+              ].map((notice) => (
+                <article key={notice.key}>
+                  <h3>{notice.title}</h3>
                   <p>
                     <ErrorDescription value={notice.message} role="status" />
                   </p>
-                  {"details" in notice && notice.details != null && (
+                  {notice.details != null && (
                     <details>
                       <summary>Details</summary>
                       <pre>{errorDetails(notice.details)}</pre>
@@ -100,24 +111,6 @@ export default observer(function ConversationWarnings() {
                   )}
                 </article>
               ))}
-              {chatWarnings.map((message) => {
-                return (
-                  <article key={`chat:${message.id}`}>
-                    <h3>
-                      {warningTitle(message.text, "Conversation warning")}
-                    </h3>
-                    <p>
-                      <ErrorDescription value={message.text} role="status" />
-                    </p>
-                    {"details" in message && message.details != null && (
-                      <details>
-                        <summary>Details</summary>
-                        <pre>{errorDetails(message.details)}</pre>
-                      </details>
-                    )}
-                  </article>
-                );
-              })}
             </div>
           </Tabs.Panel>
           <Tabs.Panel value="errors" pt="md">

@@ -74,8 +74,6 @@ pub(super) enum Unclaimed {
 /// behind other agents' submissions in the account worker.
 pub(super) struct Wake {
     pub bridge: StoreBridge,
-    /// The account registry, for the live start throttle; fixtures have none.
-    pub driver: Option<Arc<crate::account_driver::AccountDriver>>,
     pub account: String,
     pub agent_id: String,
     pub epoch: i64,
@@ -165,7 +163,6 @@ pub(super) async fn commit(
 async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError> {
     let Wake {
         bridge,
-        driver,
         account,
         agent_id,
         epoch,
@@ -220,14 +217,14 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
     {
         return Ok(Err(Unclaimed::Nothing));
     }
-    // A wake can outlive the state that scheduled it. Do not spend an
-    // account start on a failed or held agent that cannot claim input.
+    // A wake can outlive the state that scheduled it. Check eligibility
+    // before preparing or claiming its queued input.
     let (owner, owner_account) = (agent_id.clone(), account.clone());
-    let (eligible, deferred, legacy_disk) = bridge
+    let (eligible, deferred) = bridge
         .store
-        .read_async("runtime-services/start-gate-eligibility", move |db| {
+        .read_async("runtime-services/wake-eligibility", move |db| {
             let Some(agent) = AgentRepository::get(db, &AgentId::from(owner.as_str()))? else {
-                return Ok::<_, WorkerError>((false, None, None));
+                return Ok::<_, WorkerError>((false, None));
             };
             let deferred = agent.start_attempt.as_ref().and_then(|attempt| {
                 (agent.epoch == epoch
@@ -272,12 +269,6 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
                         && (agent.start_outcome_hold.is_none() || receipt_continued)
                 },
                 deferred,
-                match agent.start_wait {
-                    Some(studio_runtime_schema::agent_progress::AgentStartWait::Disk {
-                        epoch: wait_epoch,
-                    }) if wait_epoch == epoch => Some(wait_epoch),
-                    _ => None,
-                },
             ))
         })
         .await?;
@@ -343,49 +334,6 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
         }
         return Ok(Err(Unclaimed::Nothing));
     }
-    // Account admission replaces startWait, so settle a legacy disk wait first.
-    if legacy_disk.is_some() {
-        match crate::disk_space::hold_agent_turn(
-            &bridge.store,
-            agent_id,
-            epoch,
-            #[cfg(test)]
-            bridge.disk_gate.as_deref(),
-        )
-        .await?
-        {
-            crate::disk_space::TurnStorageAdmission::Ready => {}
-            crate::disk_space::TurnStorageAdmission::Waiting => {
-                return Ok(Err(Unclaimed::DiskWait(epoch)));
-            }
-            crate::disk_space::TurnStorageAdmission::Failed
-            | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
-        }
-    }
-    // A new turn waits for the account's start throttle before its claim, so
-    // its input stays queued meanwhile; a slot not claimed below is freed. A
-    // host without an account registry (fixtures; production hosts always
-    // have one) has no throttle settings, as for the auth gate.
-    let slot = match (driver, deferred.is_some()) {
-        (Some(driver), false) => Some(
-            stage(
-                "turn_preparation.start_gate",
-                bridge.start_gates.gate(account).admit(
-                    agent_id,
-                    epoch,
-                    crate::account_start_gate::StartSources {
-                        store: Arc::clone(&bridge.store),
-                        agent_changes: bridge.agent_changes(),
-                        driver: Arc::clone(driver),
-                        account: account.clone(),
-                    },
-                ),
-            )
-            .await
-            .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?,
-        ),
-        _ => None,
-    };
     match crate::disk_space::hold_agent_turn(
         &bridge.store,
         agent_id,
@@ -415,9 +363,6 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
             .await
         {
             Ok(Some(intent)) => {
-                if let Some(slot) = slot {
-                    slot.claimed();
-                }
                 return Ok(Ok(intent));
             }
             Ok(None) => {
@@ -714,7 +659,6 @@ mod future_size_tests {
         );
         let wake = Wake {
             bridge,
-            driver: None,
             account: "default".into(),
             agent_id: "agent".into(),
             epoch: 0,

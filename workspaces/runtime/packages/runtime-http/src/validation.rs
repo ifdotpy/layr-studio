@@ -93,7 +93,6 @@ const TYPED_BODIES: &[(&str, &str)] = &[
     ("POST", "/api/accounts/name"),
     ("POST", "/api/accounts/group"),
     ("POST", "/api/accounts/default-groups"),
-    ("POST", "/api/accounts/throttle"),
     ("POST", "/api/accounts/register"),
     ("POST", "/api/accounts/login/cancel"),
     ("POST", "/api/agents/account"),

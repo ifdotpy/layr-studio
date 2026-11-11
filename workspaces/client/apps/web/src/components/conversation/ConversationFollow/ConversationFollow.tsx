@@ -18,18 +18,14 @@ export function renderConversationFollow() {
         />
       )}
 
-      <FollowLatest onClick={control.returnToLatest} />
+      <FollowLatest />
     </>
   );
 }
 
 export const ConversationFollow = observer(renderConversationFollow);
 
-const FollowLatest = observer(function FollowLatest({
-  onClick,
-}: {
-  onClick: () => void;
-}) {
+const FollowLatest = observer(function FollowLatest() {
   const control = useConversationStore();
   const following = control.context.scrolling.getFollow();
   return following ? null : (
@@ -40,7 +36,7 @@ const FollowLatest = observer(function FollowLatest({
         variant="default"
         radius="xl"
         leftSection={<ArrowDown size={14} />}
-        onClick={onClick}
+        onClick={control.returnToLatest}
       >
         Latest
       </Button>

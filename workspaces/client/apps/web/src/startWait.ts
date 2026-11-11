@@ -2,7 +2,9 @@ import { AgentStatus, StartWaitReason } from "./generated/api.ts";
 import type { Agent } from "./types.ts";
 
 /** Render the server's epoch-scoped wait, shared with orchestration_status. */
-export function startWaitLabel(agent: Agent): string | null {
+export function startWaitLabel(
+  agent: Pick<Agent, "status" | "epoch" | "startWait">,
+): string | null {
   const wait = agent.startWait;
   if (
     !wait ||
@@ -12,12 +14,6 @@ export function startWaitLabel(agent: Agent): string | null {
   )
     return null;
   switch (wait.reason) {
-    case StartWaitReason.slot:
-      return `Waiting for an account slot (${wait.runningTurns}/${wait.maxRunningTurns})`;
-    case StartWaitReason.pause:
-      return "Waiting for the account pause";
-    case StartWaitReason.start_queue:
-      return "Waiting behind an earlier account start";
     case StartWaitReason.disk:
       return "Waiting for free disk space";
     case StartWaitReason.model_catalog:

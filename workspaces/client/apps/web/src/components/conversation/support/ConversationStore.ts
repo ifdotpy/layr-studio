@@ -1,3 +1,6 @@
+import { createTranscriptActions } from "../ConversationTranscript/ConversationTranscript.tsx";
+import { SkillAutocomplete } from "./SkillAutocomplete.ts";
+import { LimitRefresh } from "../../../usage/useLimitRefresh.ts";
 import { createUsageView } from "../Usage/Usage.tsx";
 import {
   createMessageQueueStore,
@@ -73,6 +76,9 @@ export type ConversationContext = ReturnType<typeof createConversationContext>;
 
 export class ConversationStore {
   context: ConversationContext;
+  readonly autocomplete = new SkillAutocomplete();
+  readonly limitRefresh;
+  readonly transcriptActions;
   readonly voice;
   readonly promptNavigation;
   readonly repairReport;
@@ -215,6 +221,7 @@ export class ConversationStore {
   toolsExpanded = false;
   constructor(context: ConversationContext) {
     this.context = context;
+    this.limitRefresh = new LimitRefresh(context.api.get);
     this.usageStore = createUsageView(
       context.api,
       context.actions.scope.store,
@@ -246,6 +253,9 @@ export class ConversationStore {
       this,
       {
         context: false,
+        transcriptActions: false,
+        autocomplete: false,
+        limitRefresh: false,
         voice: false,
         promptNavigation: false,
         repairReport: false,
@@ -256,6 +266,7 @@ export class ConversationStore {
       },
       { autoBind: true, deep: false },
     );
+    this.transcriptActions = createTranscriptActions(this);
   }
   start() {
     this.usageStore.start();
@@ -443,6 +454,13 @@ export class ConversationStore {
             : { source: "server", status: entry.status },
         })),
     ].filter((message) => !removed.hidden(message));
+  }
+  get inlineRequestIds() {
+    return new Set(
+      [...this.inlineRequests.values()].flatMap((request) =>
+        request ? [request.id] : [],
+      ),
+    );
   }
   get inlineRequests() {
     const { selected, navigation } = this.context.actions;

@@ -1,5 +1,7 @@
+import { observer } from "mobx-react-lite";
+import { Owned } from "../../../ui/Owned/Owned.tsx";
+import { AnswerSelection } from "../support/AnswerSelection.ts";
 import { Checkbox, TextInput, Textarea, UnstyledButton } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
 
 export type AnswerQuestion = {
   id: string;
@@ -31,74 +33,41 @@ export function answerList(
 }
 
 export type AnswerFieldsProps = {
+  selection?: AnswerSelection;
   questions: AnswerQuestion[];
   values: AnswerValues;
   disabled?: boolean;
   onChange: (id: string, value: AnswerValue) => void;
 };
 
-export default function AnswerFields({
+export default function AnswerFields(props: AnswerFieldsProps) {
+  if (props.selection)
+    return <AnswerFieldsView {...props} selection={props.selection} />;
+  return (
+    <Owned create={() => new AnswerSelection(props.questions[0]?.id)}>
+      {(selection) => <AnswerFieldsView {...props} selection={selection} />}
+    </Owned>
+  );
+}
+const AnswerFieldsView = observer(function AnswerFieldsView({
+  selection,
   questions,
   values,
   disabled = false,
   onChange,
-}: AnswerFieldsProps) {
-  const fields = useRef<HTMLFieldSetElement>(null);
-  const [activeQuestion, setActiveQuestion] = useState(questions[0]?.id);
-  const select = (question: AnswerQuestion, label: string) => {
-    const value = answerParts(values[question.id]);
-    onChange(
-      question.id,
-      question.multiSelect
-        ? {
-            ...value,
-            selected: value.selected.includes(label)
-              ? value.selected.filter((entry) => entry !== label)
-              : [...value.selected, label],
-          }
-        : { selected: [label], other: "" },
-    );
-  };
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        disabled ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.repeat ||
-        !(target instanceof HTMLElement) ||
-        target.closest(
-          'textarea, input:not([type="checkbox"]):not([type="radio"]), [contenteditable="true"]',
-        ) ||
-        !fields.current?.closest("form")?.contains(target) ||
-        !/^[1-9]$/.test(event.key)
-      )
-        return;
-      const question = questions.find((entry) => entry.id === activeQuestion);
-      const option = question?.options?.[Number(event.key) - 1];
-      if (!question || !option) return;
-      event.preventDefault();
-      select(question, option.label);
-    };
-    document.addEventListener("keydown", keydown);
-    return () => document.removeEventListener("keydown", keydown);
-  });
+}: AnswerFieldsProps & { selection: AnswerSelection }) {
+  const select = (question: AnswerQuestion, label: string) =>
+    selection.select(question, label, values, onChange);
   return (
-    <fieldset
-      ref={fields}
-      disabled={disabled}
-      className="request-answer-fields"
-    >
+    <fieldset disabled={disabled} className="request-answer-fields">
       {questions.map((question, index) => {
         const value = answerParts(values[question.id]);
         return (
           <div
             className="answer-field"
             key={question.id}
-            onFocusCapture={() => setActiveQuestion(question.id)}
-            onPointerDown={() => setActiveQuestion(question.id)}
+            onFocusCapture={() => selection.activate(question.id)}
+            onPointerDown={() => selection.activate(question.id)}
           >
             <p className="request-question-label">
               {questions.length > 1 && <span>{index + 1}. </span>}
@@ -110,24 +79,25 @@ export default function AnswerFields({
                 role="group"
                 aria-label={`${question.question} options`}
               >
-                {question.options.map((option, optionIndex) =>
-                  question.multiSelect ? (
+                {question.options.map((option, optionIndex) => {
+                  const copy = (
+                    <span className="request-option-copy">
+                      {optionIndex < 9 && (
+                        <span
+                          className="request-option-number"
+                          aria-hidden="true"
+                        >
+                          {optionIndex + 1}
+                        </span>
+                      )}
+                      <span>{option.label}</span>
+                    </span>
+                  );
+                  return question.multiSelect ? (
                     <Checkbox
                       key={option.label}
                       className="request-answer-option request-answer-checkbox"
-                      label={
-                        <span className="request-option-copy">
-                          {optionIndex < 9 && (
-                            <span
-                              className="request-option-number"
-                              aria-hidden="true"
-                            >
-                              {optionIndex + 1}
-                            </span>
-                          )}
-                          <span>{option.label}</span>
-                        </span>
-                      }
+                      label={copy}
                       aria-label={option.label}
                       autoFocus={index === 0 && optionIndex === 0}
                       description={option.description}
@@ -144,23 +114,13 @@ export default function AnswerFields({
                       autoFocus={index === 0 && optionIndex === 0}
                       onClick={() => select(question, option.label)}
                     >
-                      <span className="request-option-copy">
-                        {optionIndex < 9 && (
-                          <span
-                            className="request-option-number"
-                            aria-hidden="true"
-                          >
-                            {optionIndex + 1}
-                          </span>
-                        )}
-                        <span>{option.label}</span>
-                      </span>
+                      {copy}
                       {option.description && (
                         <small>{option.description}</small>
                       )}
                     </UnstyledButton>
-                  ),
-                )}
+                  );
+                })}
               </div>
             ) : null}
             {(!question.options?.length || question.isOther) &&
@@ -199,4 +159,4 @@ export default function AnswerFields({
       })}
     </fieldset>
   );
-}
+});

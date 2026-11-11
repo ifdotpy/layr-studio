@@ -139,18 +139,6 @@ mod tests {
                 FORWARD_PORT_MIN as u64,
             ),
             (
-                "AccountStartThrottleRequest/properties/burst/maximum",
-                crate::shared_values::ACCOUNT_START_BURST_MAX,
-            ),
-            (
-                "AccountStartThrottleRequest/properties/pauseSeconds/maximum",
-                crate::shared_values::ACCOUNT_START_PAUSE_MAX_SECONDS,
-            ),
-            (
-                "AccountStartThrottleRequest/properties/maxRunningTurns/maximum",
-                crate::shared_values::ACCOUNT_RUNNING_TURNS_MAX,
-            ),
-            (
                 "DefaultAccountGroupsRequest/properties/groups/maxItems",
                 crate::shared_values::ACCOUNT_GROUPS_MAX as u64,
             ),
@@ -171,18 +159,6 @@ mod tests {
             (
                 "ClaudeCancelRequest/properties/login_id/minLength",
                 ACCOUNT_LOGIN_ID_BYTES as u64,
-            ),
-            (
-                "AccountStartThrottleRequest/properties/burst/minimum",
-                crate::shared_values::ACCOUNT_START_BURST_MIN,
-            ),
-            (
-                "AccountStartThrottleRequest/properties/pauseSeconds/minimum",
-                crate::shared_values::ACCOUNT_START_PAUSE_MIN_SECONDS,
-            ),
-            (
-                "AccountStartThrottleRequest/properties/maxRunningTurns/minimum",
-                crate::shared_values::ACCOUNT_RUNNING_TURNS_MIN,
             ),
             ("BrowserForward/properties/port/maximum", u16::MAX as u64),
         ];

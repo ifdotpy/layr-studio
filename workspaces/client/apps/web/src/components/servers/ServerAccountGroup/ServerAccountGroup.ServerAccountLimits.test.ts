@@ -15,24 +15,33 @@ import {
   newestReading,
   readingAge,
 } from "../../../servers/ServerAccountLimits.tsx";
-import { ServerTurnStartLimits } from "./ServerTurnStartLimits.tsx";
+import { ProviderKind, AccountStatus } from "../../../generated/api.ts";
+import { ServerAccountGroup } from "./ServerAccountGroup.tsx";
 
-const account = (fields: object) =>
-  ({
-    id: "k",
-    label: "Work",
-    provider: "codex",
-    email: "Person@Example.test",
-    status: "ready",
-    ...fields,
-  }) as unknown as Account;
-const limits = (accountKey: string, at: number, usedPercent: number) =>
-  ({
-    accountKey,
-    at,
-    data: { accountId: null, rateLimits: { primary: { usedPercent } } },
-    error: null,
-  }) as unknown as AccountLimitsSnapshot;
+const account = (
+  fields: Partial<
+    Pick<Account, "id" | "label" | "provider" | "email" | "status">
+  >,
+): Account => ({
+  id: "k",
+  home: "/fixture",
+  source: "CLI",
+  label: "Work",
+  provider: ProviderKind.codex,
+  email: "Person@Example.test",
+  status: AccountStatus.ready,
+  ...fields,
+});
+const limits = (
+  accountKey: string,
+  at: number,
+  usedPercent: number,
+): AccountLimitsSnapshot => ({
+  accountKey,
+  at,
+  data: { accountId: null, rateLimits: { primary: { usedPercent } } },
+  error: null,
+});
 const render = (element: ReturnType<typeof createElement>) => {
   const fixture = observableFixture();
   const html = renderToStaticMarkup(
@@ -63,12 +72,11 @@ const render = (element: ReturnType<typeof createElement>) => {
 };
 const count = (text: string, part: string) => text.split(part).length - 1;
 
-test.each(["codex", "claude"] as const)(
-  "%s card turn start limits name the Studio server that stores them",
+test.each([ProviderKind.codex, ProviderKind.claude])(
+  "%s card keeps server account groups without turn start limits",
   (provider) => {
     const fullAccount = account({
       provider,
-      startThrottle: { burst: 8, pauseSeconds: 30, maxRunningTurns: 16 },
     });
     const matched = matchServerAccount([fullAccount], {
       provider,
@@ -77,7 +85,7 @@ test.each(["codex", "claude"] as const)(
     });
     expect(matched).toBe(fullAccount);
     const markup = render(
-      createElement(ServerTurnStartLimits, {
+      createElement(ServerAccountGroup, {
         source: {
           serverId: "mbp",
           serverLabel: "Igor MBP",
@@ -86,21 +94,19 @@ test.each(["codex", "claude"] as const)(
         onSaved: () => {},
       }),
     );
-    expect(markup).toContain(
-      "Turn start limits on Igor MBP: 8 per burst · 30 s pause · 16 running",
-    );
-    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain("Group on Igor MBP");
+    expect(markup).not.toContain("Turn start limits");
     expect(markup).not.toContain("Save turn start limits");
   },
 );
 
 test("a panel row maps to its server's account by provider and email, or label without an email", () => {
   const codex = account({});
-  const claude = account({ provider: "claude", id: "c" });
+  const claude = account({ provider: ProviderKind.claude, id: "c" });
   const unnamed = account({ email: null, label: "Local" });
   const list = [claude, codex, unnamed];
   const row = {
-    provider: "codex" as const,
+    provider: ProviderKind.codex,
     email: "person@example.test",
     label: "x",
   };
@@ -112,11 +118,11 @@ test("a panel row maps to its server's account by provider and email, or label w
 });
 
 test("a full account match honors the exact server account key without a label fallback", () => {
-  const first = account({ id: "first", provider: "claude" });
-  const second = account({ id: "second", provider: "claude" });
+  const first = account({ id: "first", provider: ProviderKind.claude });
+  const second = account({ id: "second", provider: ProviderKind.claude });
   const row = {
     accountKey: "second",
-    provider: "claude" as const,
+    provider: ProviderKind.claude,
     email: "person@example.test",
     label: "Work",
   };
@@ -206,7 +212,7 @@ test("an account waits for its server limits regardless of sign-in status", () =
         {
           serverId: "studio",
           serverLabel: "Studio server",
-          account: account({ status: "signedOut" }),
+          account: account({ status: AccountStatus.signedOut }),
         },
       ],
     }),

@@ -1929,23 +1929,6 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
         Ok(registry_account(&state.value, account)?.clone())
     }
 
-    /// The account's turn start throttle, read under the registry lock
-    /// without copying the row. Unknown accounts or providers are refused.
-    pub fn start_throttle(
-        &self,
-        account: &str,
-    ) -> Result<crate::account_start_gate::StartThrottle, AccountDriverError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| AccountDriverError::Poisoned)?;
-        crate::account_start_gate::StartThrottle::of_record(registry_account(
-            &state.value,
-            account,
-        )?)
-        .ok_or(AccountDriverError::InvalidRegistry)
-    }
-
     /// Stable, non-secret identity selected for a retained account session.
     pub fn auth_pin(&self, account: &str) -> Result<Value, AccountDriverError> {
         let record = self.internal_record(account)?;
@@ -2173,30 +2156,6 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             return Err(AccountDriverError::DurabilityUnconfirmed);
         }
         Ok(())
-    }
-
-    /// Replace the turn start throttle of `account`. A repeated request sets
-    /// the same values; the change signal reaches waiting starts at once.
-    pub fn set_start_throttle(
-        &self,
-        account: &str,
-        throttle: crate::account_start_gate::StartThrottle,
-    ) -> Result<AccountsSnapshot, AccountDriverError> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| AccountDriverError::Poisoned)?;
-        let mut updated = state.value.clone();
-        let row = registry_account_mut(&mut updated, account)?;
-        if row.get("deleted") == Some(&Value::Bool(true)) {
-            return Err(AccountDriverError::DeletedAccount);
-        }
-        row[crate::account_start_gate::REGISTRY_FIELD] = throttle.to_record();
-        if updated != state.value {
-            self.persist(&mut state, updated)?;
-        }
-        drop(state);
-        self.snapshot()
     }
 
     pub fn delete(
@@ -3048,7 +3007,6 @@ fn default_registry_bytes(codex_home: &Path) -> Result<Vec<u8>, AccountDriverErr
         credential_identity: None,
         organization_name: None,
         claude_options: None,
-        start_throttle: None,
         organization_mismatch: None,
     };
     match read_codex_auth(codex_home) {

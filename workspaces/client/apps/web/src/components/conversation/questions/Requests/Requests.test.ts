@@ -1,4 +1,7 @@
-import { requestApiFixture } from "../support/requestFixtures.ts";
+import {
+  createRequestFixture,
+  requestApiFixture,
+} from "../support/requestFixtures.ts";
 import {
   QuestionDecision,
   type components,
@@ -6,7 +9,11 @@ import {
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { approval, question } from "../../../../approvalFixtures.ts";
+import {
+  approval,
+  browserOpen,
+  question,
+} from "../../../../approvalFixtures.ts";
 import type { Approval } from "../../../../approvals.ts";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";
 import { requestFixture } from "../support/requestFixtures.ts";
@@ -321,4 +328,39 @@ it("replaces the request owner across scopes instead of reusing the previous ans
       'textarea[aria-label="Continue?"]',
     )?.value,
   ).toBe("");
+});
+
+it("keeps the unsaved sign-in address while SSE updates the same request", () => {
+  const request = approval({
+    id: "sign-in",
+    request: browserOpen("https://identity.example.test/sign-in"),
+  });
+  const fixture = createRequestFixture({
+    requests: [request],
+    scope: "scope",
+    notify: vi.fn(),
+  });
+  fixture.start();
+  try {
+    const view = fixture.owner.views.get(request.id)!;
+    view.setSignInAddress("http://localhost/callback?code=unsaved");
+    fixture.updateRequests([
+      {
+        ...request,
+        state: {
+          kind: "answering",
+          command: "command",
+          answer: { kind: "decision", decision: "accept" },
+        },
+      },
+    ]);
+    expect(fixture.owner.views.get(request.id)?.signInAddress).toBe(
+      "http://localhost/callback?code=unsaved",
+    );
+    expect(fixture.owner.views.get(request.id)?.request.state.kind).toBe(
+      "answering",
+    );
+  } finally {
+    fixture.dispose();
+  }
 });

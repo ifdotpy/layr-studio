@@ -1481,17 +1481,6 @@
             "title": "Source",
             "type": "string"
           },
-          "startThrottle": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AccountStartThrottle"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "status": {
             "$ref": "#/components/schemas/AccountStatus"
           }
@@ -2538,79 +2527,6 @@
         "title": "AccountSelectionRequest",
         "type": "object"
       },
-      "AccountStartThrottle": {
-        "additionalProperties": false,
-        "description": "Turn start throttle of one account, the same for every provider.\n\nStudio starts at most `burst` turns at once, then waits `pauseSeconds` after the\n`burst`-th start,\nand keeps at most `maxRunningTurns` turns running. A turn over a limit waits and\nstarts later. Studio limits turn starts only, not the provider's own requests\ninside a turn. Bounds: codex_shared_values.ACCOUNT_START_* and ACCOUNT_RUNNING_TURNS_*.",
-        "properties": {
-          "burst": {
-            "description": "Turn starts per burst.",
-            "maximum": 512,
-            "minimum": 1,
-            "title": "Burst",
-            "type": "integer"
-          },
-          "maxRunningTurns": {
-            "description": "Turns that may run at once on this account.",
-            "maximum": 512,
-            "minimum": 1,
-            "title": "Maxrunningturns",
-            "type": "integer"
-          },
-          "pauseSeconds": {
-            "description": "Seconds after the start that ends a burst before the next start.",
-            "maximum": 3600,
-            "minimum": 0,
-            "title": "Pauseseconds",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "burst",
-          "pauseSeconds",
-          "maxRunningTurns"
-        ],
-        "title": "AccountStartThrottle",
-        "type": "object"
-      },
-      "AccountStartThrottleRequest": {
-        "additionalProperties": false,
-        "description": "Replace one account's turn start throttle. Repeating a request sets the same values.",
-        "properties": {
-          "account_key": {
-            "title": "Account Key",
-            "type": "string"
-          },
-          "burst": {
-            "description": "Turn starts per burst.",
-            "maximum": 512,
-            "minimum": 1,
-            "title": "Burst",
-            "type": "integer"
-          },
-          "maxRunningTurns": {
-            "description": "Turns that may run at once on this account.",
-            "maximum": 512,
-            "minimum": 1,
-            "title": "Maxrunningturns",
-            "type": "integer"
-          },
-          "pauseSeconds": {
-            "description": "Seconds after the start that ends a burst before the next start.",
-            "maximum": 3600,
-            "minimum": 0,
-            "title": "Pauseseconds",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "burst",
-          "pauseSeconds",
-          "maxRunningTurns",
-          "account_key"
-        ],
-        "title": "AccountStartThrottleRequest",
-        "type": "object"
-      },
       "AccountStatus": {
         "enum": [
           "ready",
@@ -3616,9 +3532,6 @@
           "error": {
             "description": "Why the worker state is missing: unavailable (no live worker) or unresponsive (the worker did not answer in time).",
             "type": "string"
-          },
-          "gate": {
-            "$ref": "#/components/schemas/StartGateDiagnostics"
           },
           "preparationWaits": {
             "description": "Agents with a pending wait for a catalog refresh, a disk recheck or agent-row changes.",
@@ -6403,87 +6316,8 @@
         "type": "object"
       },
       "AgentEntityStartWaitDto": {
-        "description": "One epoch-scoped wait. `until` is a retry deadline in Unix seconds.\n\n```compile_fail\nuse studio_runtime_schema::agent_progress::AgentStartWait;\nlet _ = AgentStartWait::Slot { epoch: 1 };\n```\n```compile_fail\nuse studio_runtime_schema::agent_progress::AgentStartWait;\nlet _ = AgentStartWait::Pause { epoch: 1 };\n```",
+        "description": "One epoch-scoped wait. `until` is a retry deadline in Unix seconds.",
         "oneOf": [
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "maxRunningTurns": {
-                "format": "uint64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "const": "slot",
-                "type": "string"
-              },
-              "runningTurns": {
-                "format": "uint64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch",
-              "runningTurns",
-              "maxRunningTurns"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "const": "pause",
-                "type": "string"
-              },
-              "until": {
-                "format": "double",
-                "type": "number"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch",
-              "until"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "const": "start_queue",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch"
-            ],
-            "type": "object"
-          },
           {
             "additionalProperties": false,
             "properties": {
@@ -30255,78 +30089,6 @@
         ],
         "type": "string"
       },
-      "GateAdmitDiagnostics": {
-        "additionalProperties": false,
-        "properties": {
-          "ageMs": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "agent": {
-            "type": "string"
-          },
-          "claimed": {
-            "description": "true when the claim made the turn in flight; false when the admitted slot was dropped unclaimed.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "agent",
-          "claimed",
-          "ageMs"
-        ],
-        "type": "object"
-      },
-      "GateSlotDiagnostics": {
-        "additionalProperties": false,
-        "properties": {
-          "ageMs": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "agent": {
-            "type": "string"
-          },
-          "claimed": {
-            "description": "The claim made the turn in flight; false while the start is only admitted.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "agent",
-          "claimed",
-          "ageMs"
-        ],
-        "type": "object"
-      },
-      "GateWaiterDiagnostics": {
-        "additionalProperties": false,
-        "properties": {
-          "ageMs": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "agent": {
-            "type": "string"
-          },
-          "wait": {
-            "description": "queued: no decision yet; slot: every running slot is taken; pause: the burst pause runs; behind: free to start, behind an earlier start.",
-            "enum": [
-              "queued",
-              "slot",
-              "pause",
-              "behind"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "agent",
-          "wait",
-          "ageMs"
-        ],
-        "type": "object"
-      },
       "GitCommit": {
         "pattern": "^[0-9a-f]{40}$",
         "type": "string"
@@ -51139,38 +50901,6 @@
         "title": "StartAttemptRecordResponse",
         "type": "object"
       },
-      "StartGateDiagnostics": {
-        "additionalProperties": false,
-        "description": "The account's turn start throttle: admitted slots, queued starts and the latest admit outcomes.",
-        "properties": {
-          "recentAdmits": {
-            "description": "The latest admits, newest first.",
-            "items": {
-              "$ref": "#/components/schemas/GateAdmitDiagnostics"
-            },
-            "type": "array"
-          },
-          "running": {
-            "items": {
-              "$ref": "#/components/schemas/GateSlotDiagnostics"
-            },
-            "type": "array"
-          },
-          "waiters": {
-            "description": "Queued starts in arrival order; only the first may be admitted.",
-            "items": {
-              "$ref": "#/components/schemas/GateWaiterDiagnostics"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "running",
-          "waiters",
-          "recentAdmits"
-        ],
-        "type": "object"
-      },
       "StartModelSettingsRecordResponse": {
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
@@ -51218,9 +50948,6 @@
       },
       "StartWaitReason": {
         "enum": [
-          "slot",
-          "pause",
-          "start_queue",
           "disk",
           "model_catalog",
           "provider_session",
@@ -51234,87 +50961,8 @@
         "type": "string"
       },
       "StartWaitRecordResponse": {
-        "description": "One epoch-scoped wait. `until` is a retry deadline in Unix seconds.\n\n```compile_fail\nuse studio_runtime_schema::agent_progress::AgentStartWait;\nlet _ = AgentStartWait::Slot { epoch: 1 };\n```\n```compile_fail\nuse studio_runtime_schema::agent_progress::AgentStartWait;\nlet _ = AgentStartWait::Pause { epoch: 1 };\n```",
+        "description": "One epoch-scoped wait. `until` is a retry deadline in Unix seconds.",
         "oneOf": [
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "maxRunningTurns": {
-                "format": "uint64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "const": "slot",
-                "type": "string"
-              },
-              "runningTurns": {
-                "format": "uint64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch",
-              "runningTurns",
-              "maxRunningTurns"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "const": "pause",
-                "type": "string"
-              },
-              "until": {
-                "format": "double",
-                "type": "number"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch",
-              "until"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "epoch": {
-                "format": "int64",
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "reason": {
-                "const": "start_queue",
-                "type": "string"
-              }
-            },
-            "required": [
-              "reason",
-              "epoch"
-            ],
-            "type": "object"
-          },
           {
             "additionalProperties": false,
             "properties": {
@@ -68127,131 +67775,6 @@
           }
         },
         "summary": "Account Register"
-      }
-    },
-    "/api/accounts/throttle": {
-      "post": {
-        "operationId": "account_throttle_api_accounts_throttle_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountStartThrottleRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountsResponse"
-                }
-              }
-            },
-            "description": "Successful Response",
-            "headers": {
-              "Access-Control-Allow-Origin": {
-                "$ref": "#/components/headers/AccessControlAllowOrigin"
-              },
-              "Access-Control-Expose-Headers": {
-                "$ref": "#/components/headers/AccessControlExposeHeaders"
-              },
-              "Cache-Control": {
-                "$ref": "#/components/headers/CacheControl"
-              },
-              "Content-Encoding": {
-                "$ref": "#/components/headers/ContentEncoding"
-              },
-              "Content-Length": {
-                "$ref": "#/components/headers/ContentLength"
-              },
-              "Content-Security-Policy": {
-                "$ref": "#/components/headers/ContentSecurityPolicy"
-              },
-              "Content-Type": {
-                "$ref": "#/components/headers/ContentType"
-              },
-              "Referrer-Policy": {
-                "$ref": "#/components/headers/ReferrerPolicy"
-              },
-              "Server-Timing": {
-                "$ref": "#/components/headers/ServerTiming"
-              },
-              "Vary": {
-                "$ref": "#/components/headers/Vary"
-              },
-              "X-Content-Type-Options": {
-                "$ref": "#/components/headers/XContentTypeOptions"
-              },
-              "X-Studio-API-Schema": {
-                "$ref": "#/components/headers/StudioApiSchema"
-              },
-              "X-Studio-Server": {
-                "$ref": "#/components/headers/StudioServer"
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ApiError400",
-            "description": "Bad Request"
-          },
-          "401": {
-            "$ref": "#/components/responses/ApiError401",
-            "description": "Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/ApiError403",
-            "description": "Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/ApiError404",
-            "description": "Not Found"
-          },
-          "408": {
-            "$ref": "#/components/responses/ApiError408",
-            "description": "Request Timeout"
-          },
-          "409": {
-            "$ref": "#/components/responses/ApiError409",
-            "description": "Conflict"
-          },
-          "410": {
-            "$ref": "#/components/responses/ApiError410",
-            "description": "Gone"
-          },
-          "413": {
-            "$ref": "#/components/responses/ApiError413",
-            "description": "Content Too Large"
-          },
-          "415": {
-            "$ref": "#/components/responses/ApiError415",
-            "description": "Unsupported Media Type"
-          },
-          "426": {
-            "$ref": "#/components/responses/ApiError426",
-            "description": "Upgrade Required"
-          },
-          "429": {
-            "$ref": "#/components/responses/ApiError429",
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "$ref": "#/components/responses/ApiError500",
-            "description": "Internal Server Error"
-          },
-          "502": {
-            "$ref": "#/components/responses/ApiError502",
-            "description": "Bad Gateway"
-          },
-          "503": {
-            "$ref": "#/components/responses/ApiError503",
-            "description": "Service Unavailable"
-          }
-        },
-        "summary": "Account Throttle"
       }
     },
     "/api/action": {

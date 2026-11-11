@@ -208,12 +208,17 @@ test("isolated production PromptInput preserves its input behavior", async ({
     await input.evaluate((element) => element.getBoundingClientRect().height),
   ).toBeLessThanOrEqual(80);
 
+  await page.evaluate(() =>
+    window.setInputState!({ text: "$eli5", tooLong: false }),
+  );
+  await expect(input).toHaveValue("$eli5");
+  // A native selection change must open suggestions without a keyup.
+  await input.focus();
   await page.evaluate(() => {
-    window.setInputState!({ text: "$eli5", tooLong: false });
-    const element = document.querySelector<HTMLTextAreaElement>("#message");
-
-    element!.setSelectionRange(element!.value.length, element!.value.length);
-    element!.dispatchEvent(new Event("select", { bubbles: true }));
+    document
+      .querySelector<HTMLTextAreaElement>("#message")!
+      .setSelectionRange(1, 1);
+    document.dispatchEvent(new Event("selectionchange"));
   });
   await page.getByRole("option", { name: /eli5/ }).waitFor();
   await input.press("Enter");

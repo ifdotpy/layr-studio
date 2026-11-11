@@ -1,5 +1,5 @@
 import type { Json } from "../../../../types.ts";
-import type { BrowserOpenDetails } from "../support/requestData.ts";
+import type { BrowserOpenDetails } from "./requestData.ts";
 
 /** The kind of sign-in that a `browser/open` card asks for. */
 export type SignInFlow = "redirect" | "device" | "page";

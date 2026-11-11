@@ -1,40 +1,18 @@
-import {
-  questionAnswer,
-  savedAnswer as serializeAnswer,
-} from "./answerData.ts";
 import { observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
-import { errorText } from "../../../../api.ts";
-import { elicitationSchema } from "../support/requestData.ts";
-import AnswerFields, { answerList } from "../AnswerFields/AnswerFields.tsx";
+import AnswerFields from "../AnswerFields/AnswerFields.tsx";
 import {
   requestRenderProbe,
   type RequestView,
 } from "../RequestArea/RequestArea.tsx";
 export function AnswerForm({ view }: { view: RequestView }) {
   const { request, disabled: sending } = view;
-  const { post, close, notify, values, questions } = view;
+  const { close, values, questions } = view;
   requestRenderProbe("answer", request.id);
-  const elicitation = request.request.kind === "elicitation";
-  const required = new Set(elicitationSchema(request)?.required);
-  const ready =
-    [...required].every((id) =>
-      questions.some((question) => question.id === id),
-    ) &&
-    (elicitation || questions.length > 0) &&
-    questions
-      .filter((q) => !elicitation || required.has(q.id))
-      .every((q) =>
-        answerList(q, values[q.id]).some((answer) => answer.trim()),
-      );
+  const ready = view.answerReady;
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (sending || !ready) return;
-    try {
-      void post(questionAnswer(view, values), serializeAnswer(view, values));
-    } catch (e) {
-      notify(errorText(e));
-    }
+    view.submitAnswer();
   };
   return (
     <form
@@ -42,6 +20,8 @@ export function AnswerForm({ view }: { view: RequestView }) {
       aria-label="Reply to the agent"
       onSubmit={submit}
       onKeyDown={(e) => {
+        if (!sending)
+          view.answerSelection.keyDown(e, questions, values, view.setValue);
         if (e.key === "Escape") {
           e.stopPropagation();
           if (!sending) close();
@@ -49,6 +29,7 @@ export function AnswerForm({ view }: { view: RequestView }) {
       }}
     >
       <AnswerFields
+        selection={view.answerSelection}
         questions={questions}
         values={values}
         disabled={sending}
@@ -80,4 +61,4 @@ export function AnswerForm({ view }: { view: RequestView }) {
 
 export default observer(AnswerForm);
 
-export { savedAnswer } from "./answerData.ts";
+export { savedAnswer } from "../support/answerData.ts";

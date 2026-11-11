@@ -26,7 +26,7 @@ import {
   type AccountSource,
 } from "../../../servers/ServerAccountLimits.tsx";
 import { AccountLimitsAcrossServers } from "../AccountLimitsAcrossServers/AccountLimitsAcrossServers.tsx";
-import { ServerTurnStartLimits } from "../ServerTurnStartLimits/ServerTurnStartLimits.tsx";
+import { ServerAccountGroup } from "../ServerAccountGroup/ServerAccountGroup.tsx";
 import { AccountCapacityView } from "../../accounts/AccountCapacityView/AccountCapacityView.tsx";
 import type { Account } from "../../accounts/support/Accounts.tsx";
 import { accountLimitView } from "../../accounts/support/AccountTiles.tsx";
@@ -300,7 +300,7 @@ const ServerAccountsPanel = observer(function ServerAccountsPanel({
                             {text}
                           </button>
                           {source && (
-                            <ServerTurnStartLimits
+                            <ServerAccountGroup
                               source={source}
                               onSaved={() => {}}
                             />

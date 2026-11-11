@@ -1217,7 +1217,7 @@ impl SchedulerRepository {
             "dispatchPickedAt",
         )?;
         agent.status = AgentStatus::Starting;
-        // The start gate's wait record (`startWait`) ends with the claim.
+        // The epoch-scoped wait ends with the claim.
         agent.start_wait = None;
         agent.in_flight = Some(true);
         agent.turn_id = Default::default();

@@ -513,21 +513,15 @@ impl studio_runtime_services::provider_callbacks::ManagedCreationAccountRead
                     identity: ManagedAccountIdentity {
                         provider: row.provider_kind()?,
                         home: row.home.as_str().map(str::to_owned),
-                        account_id: row.account_id.as_str()
-                            .map(str::to_owned),
+                        account_id: row.account_id.as_str().map(str::to_owned),
                         email: row.email.as_str().map(str::to_owned),
                     },
                     ready: row.status.as_str() == Some("ready"),
-                    can_attempt_native_proof: row.can_attempt_native_proof.as_bool()
-                        == Some(true),
+                    can_attempt_native_proof: row.can_attempt_native_proof.as_bool() == Some(true),
                     disconnected: row.disconnected.as_bool() == Some(true),
                     deleted: row.deleted.as_bool() == Some(true),
                     duplicate: row.duplicate_of.as_str().is_some(),
-                    max_running_turns:
-                        studio_runtime_services::account_start_gate::StartThrottle::of_public_account(row)?
-                            .max_running,
-                    group: row.group.as_str()
-                        .map(str::to_owned),
+                    group: row.group.as_str().map(str::to_owned),
                 })
             })
             .collect();

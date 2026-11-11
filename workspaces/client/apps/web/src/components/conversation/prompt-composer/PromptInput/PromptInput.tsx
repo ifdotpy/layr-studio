@@ -6,12 +6,13 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
-  useState,
   type KeyboardEvent,
   type RefObject,
 } from "react";
 import ComposerAutocomplete from "../../ComposerAutocomplete/ComposerAutocomplete.tsx";
-import { useSkillAutocomplete } from "./useSkillAutocomplete.ts";
+import { SkillAutocomplete } from "../../support/SkillAutocomplete.ts";
+import { Owned } from "../../../ui/Owned/Owned.tsx";
+import { useServerNet } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { DraftReader } from "../PromptComposer/PromptComposer.tsx";
 import type { DraftWriter } from "../PromptComposer/PromptComposer.tsx";
 
@@ -59,7 +60,8 @@ const AutosizeInput = memo(function AutosizeInput({
   );
 });
 
-export default observer(function PromptInput(p: {
+type PromptInputProps = {
+  autocomplete?: SkillAutocomplete;
   value: string;
   draftResetVersion?: number;
   session: string;
@@ -88,7 +90,19 @@ export default observer(function PromptInput(p: {
     cwd: string;
     provider: string;
   };
-}) {
+};
+export default function PromptInput(p: PromptInputProps) {
+  if (p.autocomplete)
+    return <PromptInputView {...p} autocomplete={p.autocomplete} />;
+  return (
+    <Owned key={p.session} create={() => new SkillAutocomplete()}>
+      {(state) => <PromptInputView {...p} autocomplete={state} />}
+    </Owned>
+  );
+}
+const PromptInputView = observer(function PromptInputView(
+  p: PromptInputProps & { autocomplete: SkillAutocomplete },
+) {
   const composing = useRef(false);
   const nativeEditVersion = useRef(0);
   const observedResetVersion = useRef(p.draftResetVersion);
@@ -160,16 +174,17 @@ export default observer(function PromptInput(p: {
     },
     [p.getDraft, p.input, p.session, p.setDraft],
   );
-  const skills = useSkillAutocomplete({
-    ...p.skillCatalog,
-    input: p.input,
-    insert: insertSkill,
-  });
+  const net = useServerNet();
+  const { enabled, agentId, ...scope } = p.skillCatalog;
+  const read = net.reads.skills({ agent: agentId }, scope);
+  const skills = p.autocomplete;
+  const range = skills.rangeFor(read);
+  const updateRange = () => skills.updateRange(enabled, read, p.input.current);
+  const matches = range ? skills.matches : [];
   const commandQuery =
     p.managed && /^\/[a-z-]*$/i.test(p.value)
       ? p.value.slice(1).toLowerCase()
       : null;
-  const [dismissedCommand, setDismissedCommand] = useState<string | null>(null);
   const handlers = useRef<InputHandlers>({});
   const keyDown = useCallback<NonNullable<InputHandlers["onKeyDown"]>>(
     (event) => handlers.current.onKeyDown?.(event),
@@ -206,10 +221,10 @@ export default observer(function PromptInput(p: {
         resize();
       } else p.onChange(event.currentTarget.value);
     },
-    onClick: skills.updateRange,
+    onClick: updateRange,
     onBlur: skills.blur,
-    onKeyUp: skills.updateRange,
-    onSelect: skills.updateRange,
+    onKeyUp: updateRange,
+    onSelect: updateRange,
     onKeyDown: (event) => {
       if (
         event.key === "Tab" &&
@@ -253,10 +268,10 @@ export default observer(function PromptInput(p: {
         !p.modelCommand &&
         ((commandQuery !== null &&
           commandQuery !== "rename" &&
-          dismissedCommand !== `${p.session}:${p.value}`) ||
-          !!skills.range)
+          skills.dismissedCommand !== `${p.session}:${p.value}`) ||
+          !!range)
       }
-      resetKey={commandQuery ?? skills.range?.signature}
+      resetKey={commandQuery ?? range?.signature}
       options={
         commandQuery !== null
           ? "rename".includes(commandQuery)
@@ -269,26 +284,28 @@ export default observer(function PromptInput(p: {
                 },
               ]
             : []
-          : skills.matches.map((skill) => ({
+          : matches.map((skill) => ({
               value: skill.name,
               label: skill.name,
               description: skill.description,
             }))
       }
-      loading={commandQuery === null && skills.loading}
+      loading={
+        commandQuery === null && !!range && read.current.status === "loading"
+      }
       error={
-        commandQuery === null && skills.loadError
+        commandQuery === null && range && read.current.status === "error"
           ? "Could not load skills"
           : undefined
       }
       warning={
-        commandQuery === null && skills.hasErrors
+        commandQuery === null && !!skills.catalog?.errors.length
           ? "Some skills could not be loaded"
           : undefined
       }
       onDismiss={() => {
         if (commandQuery !== null)
-          setDismissedCommand(`${p.session}:${p.value}`);
+          skills.dismissCommand(`${p.session}:${p.value}`);
         else skills.dismiss();
       }}
       onSelect={(name) => {
@@ -296,8 +313,12 @@ export default observer(function PromptInput(p: {
           if (name === "rename") insertSkill("/rename ", 0, p.value.length);
           return;
         }
-        const skill = skills.matches.find((item) => item.name === name);
-        if (skill) skills.choose(skill);
+        const skill = matches.find((item) => item.name === name);
+        if (skill) {
+          const insertion = skills.choose(skill, p.input.current?.value || "");
+          if (insertion)
+            insertSkill(insertion.text, insertion.start, insertion.end);
+        }
       }}
     >
       <AutosizeInput

@@ -910,12 +910,7 @@ mod diagnostics_http_tests {
                         "account1": {
                             "closing": false,
                             "preparing": [{"agent": "agent-1", "rewake": true, "ageMs": 1200}],
-                            "preparationWaits": ["agent-2"],
-                            "gate": {
-                                "running": [{"agent": "agent-3", "claimed": true, "ageMs": 4000}],
-                                "waiters": [{"agent": "agent-4", "wait": "pause", "ageMs": 900}],
-                                "recentAdmits": [{"agent": "agent-3", "claimed": true, "ageMs": 4000}]
-                            }
+                            "preparationWaits": ["agent-2"]
                         },
                         "account2": {"error": "unresponsive"}
                     }),
@@ -1016,6 +1011,17 @@ mod diagnostics_http_tests {
         assert_eq!(
             value["analyticsCapture"],
             json!({"available": true, "failed": 0})
+        );
+        assert_eq!(
+            value["accountWorkers"],
+            json!({
+                "account1": {
+                    "closing": false,
+                    "preparing": [{"agent": "agent-1", "rewake": true, "ageMs": 1200}],
+                    "preparationWaits": ["agent-2"]
+                },
+                "account2": {"error": "Details redacted"}
+            })
         );
         assert!(
             Registry::compile(&[("GET".to_owned(), "/api/diagnostics".to_owned())])

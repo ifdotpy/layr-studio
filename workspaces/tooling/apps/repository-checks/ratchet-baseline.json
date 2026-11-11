@@ -2245,7 +2245,7 @@
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/provider_callbacks.rs",
-      "fingerprint": "c0b7f331024a4780df2d3cecb9a783dc9c3b984cab0168f38493efefc4c24260:0"
+      "fingerprint": "29866afa40e803c9c685cd9931e5c9aa9c7103391e3ce0ba21ba14a4836e0c21:0"
     },
     {
       "file": "workspaces/runtime/packages/runtime-services/src/recovery_absence.rs",
@@ -2667,24 +2667,12 @@
       "fingerprint": "a4fc2c6fe5816e16795ca4090209d675f02e5346505e127aabe49153c12acfe6:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/accounts/AccountStartThrottle/AccountStartThrottle.test.ts",
-      "fingerprint": "52267d508df7d569aba04cdc59896349d716a9af4da62368ba0d7cb3493e1205:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/components/accounts/AccountTiles/AccountTiles.test.ts",
       "fingerprint": "fa4f6030fbefdc035adeef2d5436936265f3b7f870746f8ec99214263f6012f3:0"
     },
     {
       "file": "workspaces/client/apps/web/src/components/conversation/questions/support/liveRequestConsumers.test.ts",
       "fingerprint": "b2d5d6ac5d417be601dd86316f5bf594275166679713d51ea82c74b9448b3725:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/components/servers/ServerTurnStartLimits/ServerTurnStartLimits.ServerAccountLimits.test.ts",
-      "fingerprint": "86fa6d3dee3e84fdca6b05d2f35c055ae078f5a5cd6b5b43fa01dea47193b486:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/components/servers/ServerTurnStartLimits/ServerTurnStartLimits.ServerAccountLimits.test.ts",
-      "fingerprint": "946d8fdd234323eb48d8998a3d6abe322a8ba492a3d067861b72c01903361fe3:0"
     },
     {
       "file": "workspaces/client/apps/web/src/components/sidebar/support/services.test.ts",
@@ -2721,10 +2709,6 @@
     {
       "file": "workspaces/client/apps/web/src/servers/eventSource.test.ts",
       "fingerprint": "03d24bdba8c9e272d6948e30c32dbe670cbac161425bf16fe401ee51cdd0a4f1:1"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/startWait.test.ts",
-      "fingerprint": "391849f6f40641a6032f6944b2068cff6c57b8bc2cdef60fd670a9f08a5fcb8b:0"
     },
     {
       "file": "workspaces/client/apps/web/src/sync/client.resourceBootstrap.test.ts",

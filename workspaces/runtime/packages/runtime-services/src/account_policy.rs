@@ -205,64 +205,6 @@ impl<'de> Deserialize<'de> for PublicClaudeOptions {
     }
 }
 
-/// Partial public throttle observation; extensions and malformed fields remain visible.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PublicThrottleFields {
-    #[serde(default, skip_serializing_if = "PublicNumber::is_missing")]
-    pub burst: PublicNumber,
-    #[serde(default, skip_serializing_if = "PublicNumber::is_missing")]
-    pub pause_seconds: PublicNumber,
-    #[serde(default, skip_serializing_if = "PublicNumber::is_missing")]
-    pub max_running_turns: PublicNumber,
-    #[serde(flatten)]
-    pub extensions: Map<String, Value>,
-}
-#[derive(Clone, PartialEq, Eq, Default)]
-pub enum PublicNumber {
-    #[default]
-    Missing,
-    Number(studio_json::Number),
-    Other(Value),
-}
-impl PublicNumber {
-    pub fn as_u64(&self) -> Option<u64> {
-        match self {
-            Self::Number(value) => value.as_u64(),
-            Self::Missing | Self::Other(_) => None,
-        }
-    }
-    fn is_missing(&self) -> bool {
-        matches!(self, Self::Missing)
-    }
-}
-impl Serialize for PublicNumber {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Missing => serializer.serialize_unit(),
-            Self::Number(value) => value.serialize(serializer),
-            Self::Other(value) => value.serialize(serializer),
-        }
-    }
-}
-impl<'de> Deserialize<'de> for PublicNumber {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(match Value::deserialize(deserializer)? {
-            Value::Number(value) => Self::Number(value),
-            value @ (Value::Null
-            | Value::Bool(_)
-            | Value::String(_)
-            | Value::Array(_)
-            | Value::Object(_)) => Self::Other(value),
-        })
-    }
-}
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum PublicThrottle {
-    Fields(studio_runtime_schema::json_object::JsonObject<PublicThrottleFields>),
-    Other(Value),
-}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PublicOrganizationMismatch {
@@ -320,12 +262,6 @@ pub struct PublicAccount {
         skip_serializing_if = "Option::is_none"
     )]
     pub claude_options: Option<PublicClaudeOptions>,
-    #[serde(
-        default,
-        deserialize_with = "present",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub start_throttle: Option<PublicThrottle>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -654,23 +590,6 @@ pub(crate) fn project_registry_typed(
                         PublicString::String(value.clone())
                     }),
             }),
-            start_throttle: row
-                .get("startThrottle")
-                .map(|raw| match &account.start_throttle {
-                    Some(value) => PublicThrottle::Fields(
-                        studio_runtime_schema::json_object::JsonObject(PublicThrottleFields {
-                            burst: PublicNumber::Number(value.0.burst_number().clone()),
-                            pause_seconds: PublicNumber::Number(
-                                value.0.pause_seconds_number().clone(),
-                            ),
-                            max_running_turns: PublicNumber::Number(
-                                value.0.max_running_turns_number().clone(),
-                            ),
-                            extensions: Map::new(),
-                        }),
-                    ),
-                    None => PublicThrottle::Other(raw.clone()),
-                }),
             organization_mismatch: account
                 .organization_mismatch
                 .clone()
@@ -796,7 +715,6 @@ mod tests {
         let registry = json!({"version":2,"defaultAccountKey":"default","accounts":{
             "default":{"id":"default","provider":"codex","home":"/home","label":"A","source":"CLI","status":"ready",
                 "email":null,"accountId":"id","deleted":false,
-                "startThrottle":{"burst":2.0,"pauseSeconds":30.0,"maxRunningTurns":2.0},
                 "claudeOptions":{"configDir":null,"vendor":{"n":1.0}},
                 "organizationMismatch":{"expected":{"name":null,"idSuffix":"a"},"observed":{"name":"name","idSuffix":"b"}}}
         },"logins":{}});
@@ -815,7 +733,7 @@ mod tests {
     fn public_fixture_ingress_keeps_malformed_and_null_fields() {
         for row in [
             json!({"id":null,"home":5,"status":false,"provider":"future","email":7,"group":null,"extra":{"n":1.0}}),
-            json!({"id":"a","provider":null,"startThrottle":{"burst":false},"organizationMismatch":null,"claudeOptions":{"configDir":7,"launchArgs":null,"vendor":[1,2]}}),
+            json!({"id":"a","provider":null,"organizationMismatch":null,"claudeOptions":{"configDir":7,"launchArgs":null,"vendor":[1,2]}}),
             json!({"id":"a","provider":"codex","home":"","deleted":null,"duplicateOf":null}),
         ] {
             let account: super::PublicAccount =

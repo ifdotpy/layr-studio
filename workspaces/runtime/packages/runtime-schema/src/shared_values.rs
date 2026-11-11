@@ -204,49 +204,6 @@ pub const IDLE_SESSION_UNLOAD_MIN_MINUTES: u64 = 0;
 /// Largest idle session unload delay, in minutes.
 pub const IDLE_SESSION_UNLOAD_MAX_MINUTES: u64 = 1440;
 
-// Turn start throttle per account, the same mechanism for every provider. Providers limit
-// requests per account, so Studio starts at most BURST turns at once, waits PAUSE seconds
-// after the start that ends a burst (BURST starts made, or the last free RUNNING slot
-// taken), and keeps at most RUNNING turns running. A turn over the limit waits and starts
-// later; it never fails. Studio counts turn starts, not the provider's own requests inside a
-// turn. Each account setting chooses a value in [MIN, MAX]; a new account takes its
-// provider's defaults. Units: turn starts, seconds, and running turns.
-//
-// Codex (measured 2026-10-19, one account): a burst of about 10 simultaneous requests is
-// admitted, more get HTTP 429 with a 58-60 s Retry-After; the allowance refills at 17 or
-// more requests per minute; 17 running turns showed no concurrency limit. Owner decision
-// 2026-10-20: the 512-worker live run saw only 23 provider 429 events at 48 concurrent
-// turns over 3 accounts, so the defaults are 16 per burst, a 30 s pause, and 32 running
-// turns.
-//
-// Claude (measured 2026-10-19): no throttle was observed up to about 19 sequential starts
-// per minute, a burst of 12, and 15 running turns. RUNNING mainly bounds host memory: each
-// running Claude CLI turn holds about 250-350 MiB.
-/// Default Codex turn starts per burst.
-pub const ACCOUNT_START_BURST_DEFAULT_CODEX: u64 = 16;
-/// Default Claude turn starts per burst.
-pub const ACCOUNT_START_BURST_DEFAULT_CLAUDE: u64 = 32;
-/// Fewest turn starts per burst.
-pub const ACCOUNT_START_BURST_MIN: u64 = 1;
-/// Most turn starts per burst.
-pub const ACCOUNT_START_BURST_MAX: u64 = 512;
-/// Default Codex pause after a burst, in seconds.
-pub const ACCOUNT_START_PAUSE_DEFAULT_SECONDS_CODEX: u64 = 30;
-/// Default Claude pause after a burst, in seconds.
-pub const ACCOUNT_START_PAUSE_DEFAULT_SECONDS_CLAUDE: u64 = 5;
-/// Shortest pause after a burst, in seconds.
-pub const ACCOUNT_START_PAUSE_MIN_SECONDS: u64 = 0;
-/// Longest pause after a burst, in seconds.
-pub const ACCOUNT_START_PAUSE_MAX_SECONDS: u64 = 3600;
-/// Default Codex running turns per account.
-pub const ACCOUNT_RUNNING_TURNS_DEFAULT_CODEX: u64 = 32;
-/// Default Claude running turns per account.
-pub const ACCOUNT_RUNNING_TURNS_DEFAULT_CLAUDE: u64 = 64;
-/// Fewest running turns per account.
-pub const ACCOUNT_RUNNING_TURNS_MIN: u64 = 1;
-/// Most running turns per account.
-pub const ACCOUNT_RUNNING_TURNS_MAX: u64 = 512;
-
 // Account groups and the account order of a project. An account can carry one group name
 // (for example "personal"). A project's account order is a list of group names; the
 // server default order applies to a project without its own order. Studio prefers the

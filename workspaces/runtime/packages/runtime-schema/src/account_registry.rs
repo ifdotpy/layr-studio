@@ -91,8 +91,6 @@ pub struct AccountRecord {
     pub organization_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_options: Option<JsonObject<ClaudeOptionsRecord>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start_throttle: Option<JsonObject<AccountStartThrottle>>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -112,27 +110,6 @@ pub enum AccountStatus {
     Duplicate,
 }
 
-#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AccountStartThrottle {
-    #[serde(rename = "burst", deserialize_with = "burst")]
-    _burst: Number,
-    #[serde(rename = "pauseSeconds", deserialize_with = "pause")]
-    _pause_seconds: Number,
-    #[serde(rename = "maxRunningTurns", deserialize_with = "running")]
-    _max_running_turns: Number,
-}
-impl AccountStartThrottle {
-    pub fn burst_number(&self) -> &Number {
-        &self._burst
-    }
-    pub fn pause_seconds_number(&self) -> &Number {
-        &self._pause_seconds
-    }
-    pub fn max_running_turns_number(&self) -> &Number {
-        &self._max_running_turns
-    }
-}
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OrganizationMismatch {
@@ -282,28 +259,6 @@ fn version<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
         u64::from(crate::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION),
     )
 }
-fn burst<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
-    integer(
-        d,
-        crate::shared_values::ACCOUNT_START_BURST_MIN,
-        crate::shared_values::ACCOUNT_START_BURST_MAX,
-    )
-}
-fn pause<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
-    integer(
-        d,
-        crate::shared_values::ACCOUNT_START_PAUSE_MIN_SECONDS,
-        crate::shared_values::ACCOUNT_START_PAUSE_MAX_SECONDS,
-    )
-}
-fn running<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
-    integer(
-        d,
-        crate::shared_values::ACCOUNT_RUNNING_TURNS_MIN,
-        crate::shared_values::ACCOUNT_RUNNING_TURNS_MAX,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,7 +281,6 @@ mod tests {
         watched.insert("AccountRegistryRecord".into(), schema);
         for name in [
             "AccountRecord",
-            "AccountStartThrottle",
             "ClaudeOrganizationMismatch",
             "ClaudeOrganization",
             "CodexLoginReceiptRecord",
@@ -341,7 +295,7 @@ mod tests {
                 .iter()
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>(),
-            "1331b5904e05cad1c56e009723ba0ccca9905d3d9449dcebf9c21a9497eddb54"
+            "397e7702f343b0aa76ab85c4f58373d031b47ccac715862ccb7193ccef46b8ea"
         );
     }
 
@@ -445,7 +399,6 @@ mod tests {
             "_credentialIdentity",
             "_organizationName",
             "claudeOptions",
-            "startThrottle",
             "organizationMismatch",
             "unknown",
         ] {
@@ -477,26 +430,6 @@ mod tests {
             for candidate in &candidates {
                 let mut v = valid.clone();
                 v["logins"]["r"][field] = candidate.clone();
-                values.push(v);
-            }
-        }
-        for field in ["burst", "pauseSeconds", "maxRunningTurns"] {
-            for candidate in [
-                json!(null),
-                json!(0),
-                json!(1),
-                json!(1.0),
-                json!(1.5),
-                json!(512),
-                json!(513),
-                json!(3600),
-                json!(3601),
-                json!("1"),
-            ] {
-                let mut v = valid.clone();
-                v["accounts"]["a"]["startThrottle"] =
-                    json!({"burst":1,"pauseSeconds":0,"maxRunningTurns":1});
-                v["accounts"]["a"]["startThrottle"][field] = candidate;
                 values.push(v);
             }
         }

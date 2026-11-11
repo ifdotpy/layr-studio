@@ -188,7 +188,7 @@ the provider's Ask policy starting from the next turn. An approval already in
 flight can still finish just after Ask is selected, so the turn can briefly retain
 Full for a fraction of a second. Quick-create inherits settings only from a live
 previous chat; an archived chat uses the defaults for a new chat. Account eligibility is always visible in compact provider groups with remaining limits; long names and emails are ellipsized, with full values in the account title and accessible description.
-Automatic account selection prefers a free slot, project order, then fewer
+Automatic account selection follows the project account order, then prefers fewer
 active agents. Eligibility is separate from each role's selected account.
 Project actions are available in the shared dialog footer. Hidden catalog models stay hidden. A proposed plan waits for a
 separate implementation request. Rollback preserves the original saved history.

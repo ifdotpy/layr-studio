@@ -60,11 +60,6 @@ pub(crate) fn routes() -> RouteGroup {
             set_default_groups,
         ),
         post(
-            "/api/accounts/throttle",
-            OperationStatus::Implemented,
-            set_start_throttle,
-        ),
-        post(
             "/api/accounts/reconnect",
             OperationStatus::Implemented,
             reconnect,
@@ -116,25 +111,6 @@ struct AccountGroupBody {
 struct DefaultGroupsBody {
     #[serde(deserialize_with = "account_groups")]
     groups: Vec<studio_runtime_schema::project_ingress::AccountGroup>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StartThrottleBody {
-    #[serde(rename = "account_key")]
-    account_key: String,
-    burst: studio_runtime_schema::bounded_integer::BoundedInteger<
-        1,
-        { studio_runtime_schema::shared_values::ACCOUNT_START_BURST_MAX },
-    >,
-    pause_seconds: studio_runtime_schema::bounded_integer::BoundedInteger<
-        0,
-        { studio_runtime_schema::shared_values::ACCOUNT_START_PAUSE_MAX_SECONDS },
-    >,
-    max_running_turns: studio_runtime_schema::bounded_integer::BoundedInteger<
-        1,
-        { studio_runtime_schema::shared_values::ACCOUNT_RUNNING_TURNS_MAX },
-    >,
 }
 
 #[derive(Deserialize)]
@@ -278,24 +254,6 @@ async fn set_default_groups(
         .map(|group| group.into_string())
         .collect();
     run_mutation(state, move |driver| driver.set_default_groups(&groups)).await
-}
-
-async fn set_start_throttle(
-    State(state): State<HttpState>,
-    ApiJson(body): ApiJson<StartThrottleBody>,
-) -> Result<Json<crate::generated::AccountsResponse>, ApiError> {
-    // The boundary validated the bounds against the schema; this is the same
-    // check by the runtime owner.
-    let throttle = studio_runtime_services::account_start_gate::StartThrottle::new(
-        body.burst.get() as u64,
-        body.pause_seconds.get() as u64,
-        body.max_running_turns.get() as u64,
-    )
-    .ok_or_else(|| ApiError::validation(vec![studio_json::json!("body")]))?;
-    run_mutation(state, move |driver| {
-        driver.set_start_throttle(&body.account_key, throttle)
-    })
-    .await
 }
 
 async fn delete(
@@ -896,15 +854,6 @@ mod strict_account_body_tests {
             r#"{{"groups":[{}]}}"#,
             vec!["\"a\""; 17].join(",")
         )));
-        assert!(valid::<super::StartThrottleBody>(
-            r#"{"account_key":"a","burst":1,"pauseSeconds":0,"maxRunningTurns":512}"#
-        ));
-        assert!(!valid::<super::StartThrottleBody>(
-            r#"{"account_key":"a","burst":513,"pauseSeconds":0,"maxRunningTurns":1}"#
-        ));
-        assert!(!valid::<super::StartThrottleBody>(
-            r#"{"account_key":"a","burst":1,"pauseSeconds":0,"maxRunningTurns":1,"extra":true}"#
-        ));
         assert!(valid::<super::RegisterAccountBody>(r#"{"home":"x"}"#));
         assert!(!valid::<super::RegisterAccountBody>(r#"{"home":""}"#));
     }

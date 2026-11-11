@@ -8,7 +8,7 @@ import { createRequestsMirror } from "../../../generated/observableResources.ts"
 import CodeBlock from "../CodeBlock/CodeBlock.tsx";
 import { createServerServices } from "../../../servers/serverServices.ts";
 import NewChatModelSettings from "../../settings/NewChatModelSettings/NewChatModelSettings.tsx";
-import { observable, runInAction, action, flow } from "mobx";
+import { observable, runInAction, action, flow, when } from "mobx";
 import {
   ServerAreasContextProvider,
   type ServerAreas,
@@ -1102,12 +1102,8 @@ it("observes peer project choices without a projects GET and preserves the grant
   ]);
   h.api.get.mockClear();
   h.api.post.mockResolvedValue({ grants: [] });
-  const screen = await mountCaller(
-    f,
-    createElement(ProjectPeers, {
-      form: createProjectPeersStore("one", h.api, vi.fn()),
-    }),
-  );
+  const form = createProjectPeersStore("one", h.api, vi.fn());
+  const screen = await mountCaller(f, createElement(ProjectPeers, { form }));
   try {
     const input = screen.host.querySelector("textarea");
     if (!input) throw new Error("Missing invitation input");
@@ -1137,7 +1133,10 @@ it("observes peer project choices without a projects GET and preserves the grant
       (button) => button.textContent === "Check invitation",
     );
     if (!check) throw new Error("Missing check action");
-    await act(async () => check.click());
+    await act(async () => {
+      check.click();
+      await when(() => !form.busy);
+    });
     expect(screen.host.querySelector("select")?.textContent).toContain(
       "First project",
     );

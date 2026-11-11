@@ -3,7 +3,6 @@
   "app/conversation/delivery/removeSendingMessages.ts": "Legacy removal command helper still reads history and sends commands.",
   "app/projects/newChatSettings.ts": "Legacy new-chat read helper still imports API/credential transport (R20–R21).",
   "components/accounts/AccountGroup/AccountGroup.tsx": "Account group command still obtains the API from context.",
-  "components/accounts/AccountStartThrottle/AccountStartThrottle.tsx": "Throttle reset command still uses the context API.",
   "components/accounts/SignInPushSettings/SignInPushSettings.tsx": "Push settings read and commands remain in the component (R13).",
   "components/agents/ExecutionSettings/ExecutionSettings.tsx": "Execution settings commands still obtain the context API.",
   "components/agents/UnifiedAgentSettings/UnifiedAgentSettings.tsx": "Agent settings commands still obtain the context API.",

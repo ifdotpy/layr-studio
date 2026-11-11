@@ -93,6 +93,17 @@ Remote server startup cannot migrate storage that exists only on a client.
 Explicit profile, credential, and workspace imports remain explicit operations
 with their own identity and permission checks.
 
+## Retiring account turn-start settings
+
+The 2026-11-11 migration removes persisted account `startThrottle` settings before
+strict registry decoding and clears the retired `slot`, `pause`, and `start_queue`
+agent waits. It validates the supported source fields and current destination,
+preserves registry ordering and request receipts, and publishes the file through
+the registry's atomic replacement owner. Other admission waits keep their epoch
+and evidence. The Canvas update runs in its existing migration transaction.
+A second startup leaves the converted registry bytes unchanged. Supported
+installations and backups containing these fields still require this migration.
+
 ## Removing a migration
 
 An entry can be removed only after supported installations and supported restore

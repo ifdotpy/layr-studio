@@ -214,14 +214,10 @@ pub struct StoreBridge {
     monitor_dispatch_wake: Arc<std::sync::RwLock<Arc<Notify>>>,
     idle_state_generation: Arc<watch::Sender<u64>>,
     idle_setting_generation: Arc<watch::Sender<u64>>,
-    /// Advances on every committed `runtime_agents` change; the start gate
-    /// waits on it for a freed running slot.
+    #[cfg(test)]
     agent_generation: Arc<watch::Sender<u64>>,
     /// Pending preparations wait here for the agent rows they depend on.
     agent_wakes: Arc<agent_wakes::AgentWakes>,
-    /// Turn start admission per account (see `account_start_gate`); shared by
-    /// every worker of this process, so a replaced worker keeps the counts.
-    start_gates: Arc<crate::account_start_gate::StartGates>,
     managed_tool_runtime:
         Arc<std::sync::RwLock<Option<Arc<crate::provider_callbacks::ManagedToolRuntime>>>>,
     /// Per-bridge fixture samples; DiskGate still owns every admission rule.
@@ -253,14 +249,18 @@ impl StoreBridge {
                 generation.send_modify(|value| *value = value.wrapping_add(1));
             }
         });
-        let (agent_generation, _) = watch::channel(0_u64);
-        let agent_generation = Arc::new(agent_generation);
-        let observed_agents = Arc::downgrade(&agent_generation);
-        store.add_table_change_observer(ObservedTable::Agents, move || {
-            if let Some(generation) = observed_agents.upgrade() {
-                generation.send_modify(|value| *value = value.wrapping_add(1));
-            }
-        });
+        #[cfg(test)]
+        let agent_generation = {
+            let (generation, _) = watch::channel(0_u64);
+            let generation = Arc::new(generation);
+            let observed = Arc::downgrade(&generation);
+            store.add_table_change_observer(ObservedTable::Agents, move || {
+                if let Some(generation) = observed.upgrade() {
+                    generation.send_modify(|value| *value = value.wrapping_add(1));
+                }
+            });
+            generation
+        };
         let agent_wakes = Arc::new(agent_wakes::AgentWakes::default());
         let observed_wakes = Arc::downgrade(&agent_wakes);
         store.add_table_row_change_observer(ObservedTable::Agents, move |change| {
@@ -277,9 +277,9 @@ impl StoreBridge {
             monitor_dispatch_wake: Arc::new(std::sync::RwLock::new(Arc::new(Notify::new()))),
             idle_state_generation,
             idle_setting_generation,
+            #[cfg(test)]
             agent_generation,
             agent_wakes,
-            start_gates: Arc::default(),
             managed_tool_runtime: Arc::new(std::sync::RwLock::new(None)),
             #[cfg(test)]
             disk_gate: None,
@@ -364,6 +364,7 @@ impl StoreBridge {
     fn idle_setting_changes(&self) -> watch::Receiver<u64> {
         self.idle_setting_generation.subscribe()
     }
+    #[cfg(test)]
     fn agent_changes(&self) -> watch::Receiver<u64> {
         self.agent_generation.subscribe()
     }
@@ -1866,7 +1867,6 @@ impl Worker {
                 }))
                 .collect::<Vec<_>>(),
             "preparationWaits": self.preparation_waits.keys().collect::<Vec<_>>(),
-            "gate": self.bridge.start_gates.gate(&self.account).diagnostics(),
         })
     }
     async fn wake(&mut self, agent: String, epoch: i64) -> Result<(), WorkerError> {
@@ -1890,7 +1890,6 @@ impl Worker {
         let start = self.preparation(&agent, Method::ThreadResume);
         let wake = turn_preparation::Wake {
             bridge: self.bridge.clone(),
-            driver: self.resources.account_driver.clone(),
             account: self.account.clone(),
             agent_id: agent,
             epoch,

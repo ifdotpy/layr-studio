@@ -2399,7 +2399,7 @@ async fn repeated_reconcile_does_not_retry_an_unavailable_account_before_backoff
 
 #[tokio::test]
 async fn registry_drains_strict_account_pages_after_one_global_wake() {
-    use studio_runtime_services::account_start_gate::AgentStartWait;
+    use studio_runtime_schema::agent_progress::AgentStartWait;
 
     let fixture = Fixture::new().await;
     seed_backlog(&fixture, 130, true).await;

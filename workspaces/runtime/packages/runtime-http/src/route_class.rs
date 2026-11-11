@@ -27,7 +27,6 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/accounts/name", OwnerOnly),
     ("POST", "/api/accounts/reconnect", OwnerOnly),
     ("POST", "/api/accounts/register", OwnerOnly),
-    ("POST", "/api/accounts/throttle", OwnerOnly),
     ("POST", "/api/action", ChatControl),
     ("POST", "/api/agents", Spawn),
     ("POST", "/api/agents/account", ChatControl),

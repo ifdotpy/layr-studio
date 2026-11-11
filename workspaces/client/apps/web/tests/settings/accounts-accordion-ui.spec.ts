@@ -238,16 +238,6 @@ test("Studio Accounts is exclusive and keeps keyboard focus inside settings and 
         await expect(
           dialog.getByRole("button", { name: "Apply reset", exact: true }),
         ).toHaveCount(0);
-        const throttle = rows
-          .last()
-          .getByRole("button", { name: /^Turn start limits/ });
-        if (await throttle.count()) {
-          await throttle.first().click();
-          await expect(
-            rows.last().getByRole("button", { name: "Save turn start limits" }),
-          ).toBeVisible();
-          await keyboardCycle(page, dialog);
-        }
         if (
           await dialog
             .getByRole("button", { name: "Back", exact: true })

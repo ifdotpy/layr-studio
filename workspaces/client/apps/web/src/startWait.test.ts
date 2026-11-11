@@ -2,47 +2,14 @@ import { expect, test } from "vitest";
 import { AgentStatus, StartWaitReason } from "./generated/api.ts";
 import { startWaitLabel } from "./startWait.ts";
 import type { Agent } from "./types.ts";
-import type { components } from "./generated/api.ts";
-
-type Wait = components["schemas"]["AgentEntityStartWaitDto"];
-type ExpectFalse<T extends false> = T;
-type MissingSlotEvidence = ExpectFalse<
-  { reason: typeof StartWaitReason.slot; epoch: number } extends Wait
-    ? true
-    : false
->;
-type MissingPauseEvidence = ExpectFalse<
-  { reason: typeof StartWaitReason.pause; epoch: number } extends Wait
-    ? true
-    : false
->;
-const missingEvidenceWitness: [MissingSlotEvidence, MissingPauseEvidence] = [
-  false,
-  false,
-];
-
 const queued = {
-  id: "worker",
   status: AgentStatus.queued,
   epoch: 3,
   startWait: {
-    reason: StartWaitReason.slot,
+    reason: StartWaitReason.model_catalog,
     epoch: 3,
-    runningTurns: 8,
-    maxRunningTurns: 8,
   },
-} as unknown as Agent;
-
-test("a queued start shows the account slot or pause it waits for", () => {
-  expect(missingEvidenceWitness).toEqual([false, false]);
-  expect(startWaitLabel(queued)).toBe("Waiting for an account slot (8/8)");
-  expect(
-    startWaitLabel({
-      ...queued,
-      startWait: { reason: StartWaitReason.pause, epoch: 3, until: 10 },
-    }),
-  ).toBe("Waiting for the account pause");
-});
+} satisfies Pick<Agent, "status" | "epoch" | "startWait">;
 
 test("a wait of another epoch or a started turn shows nothing", () => {
   expect(startWaitLabel({ ...queued, epoch: 4 })).toBeNull();

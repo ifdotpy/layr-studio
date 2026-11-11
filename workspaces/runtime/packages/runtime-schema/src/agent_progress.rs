@@ -122,15 +122,6 @@ pub(crate) fn account_change_schemas() -> [(&'static str, studio_json::Value); 7
 pub const START_WAIT_FIELD: &str = "startWait";
 
 /// One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
-///
-/// ```compile_fail
-/// use studio_runtime_schema::agent_progress::AgentStartWait;
-/// let _ = AgentStartWait::Slot { epoch: 1 };
-/// ```
-/// ```compile_fail
-/// use studio_runtime_schema::agent_progress::AgentStartWait;
-/// let _ = AgentStartWait::Pause { epoch: 1 };
-/// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "reason",
@@ -139,23 +130,6 @@ pub const START_WAIT_FIELD: &str = "startWait";
     deny_unknown_fields
 )]
 pub enum AgentStartWait {
-    Slot {
-        #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
-        epoch: i64,
-        #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
-        running_turns: u64,
-        #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
-        max_running_turns: u64,
-    },
-    Pause {
-        #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
-        epoch: i64,
-        until: f64,
-    },
-    StartQueue {
-        #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
-        epoch: i64,
-    },
     // Legacy read-only wait; a storage admission pass settles it as an error.
     Disk {
         #[schemars(range(min = 0, max = crate::shared_values::MAX_SAFE_INTEGER))]
@@ -210,9 +184,6 @@ fn present_deadline<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64
 impl AgentStartWait {
     pub fn epoch(&self) -> i64 {
         match self {
-            Self::Slot { epoch, .. } => *epoch,
-            Self::Pause { epoch, .. } => *epoch,
-            Self::StartQueue { epoch, .. } => *epoch,
             Self::Disk { epoch, .. } => *epoch,
             Self::ModelCatalog { epoch, .. } => *epoch,
             Self::ProviderSession { epoch, .. } => *epoch,
@@ -426,15 +397,8 @@ mod tests {
 
     #[test]
     fn start_wait_requires_variant_evidence() {
-        for value in [
-            r#"{"reason":"slot","epoch":3}"#,
-            r#"{"reason":"slot","epoch":3,"runningTurns":1}"#,
-            r#"{"reason":"pause","epoch":3}"#,
-            r#"{"reason":"pause","epoch":3,"until":null}"#,
-            r#"{"reason":"provider_session","epoch":3,"until":null}"#,
-        ] {
-            assert!(studio_json::from_str::<AgentStartWait>(value).is_err());
-        }
+        let value = r#"{"reason":"provider_session","epoch":3,"until":null}"#;
+        assert!(studio_json::from_str::<AgentStartWait>(value).is_err());
     }
 
     #[test]
@@ -442,12 +406,9 @@ mod tests {
         let schema = schemas()[0].1.clone();
         for variant in schema["oneOf"].as_array().expect("wait variants") {
             let properties = variant["properties"].as_object().expect("properties");
-            for field in ["epoch", "runningTurns", "maxRunningTurns"] {
-                if let Some(number) = properties.get(field) {
-                    assert_eq!(number["minimum"], 0);
-                    assert_eq!(number["maximum"], crate::shared_values::MAX_SAFE_INTEGER);
-                }
-            }
+            let number = &properties["epoch"];
+            assert_eq!(number["minimum"], 0);
+            assert_eq!(number["maximum"], crate::shared_values::MAX_SAFE_INTEGER);
         }
     }
 
@@ -461,42 +422,38 @@ mod tests {
                 .is_valid(&value)
         };
         for value in [
-            studio_json::json!({"reason":"slot", "epoch":1}),
-            studio_json::json!({"reason":"pause", "epoch":1, "until":null, "extension":{"kept":true}}),
+            studio_json::json!({"reason":"model_catalog", "epoch":1, "extension":true}),
+            studio_json::json!({"reason":"provider_session", "epoch":1, "until":"invalid"}),
         ] {
             assert!(!check(schemas[1].1.clone(), value.clone()));
             assert!(!check(schemas[0].1.clone(), value));
         }
         for invalid in [
-            studio_json::json!({"reason":"slot", "epoch":-1}),
-            studio_json::json!({"reason":"slot", "epoch":1, "runningTurns":-1}),
-            studio_json::json!({"reason":"slot", "epoch":1, "maxRunningTurns":9007199254740992_u64}),
+            studio_json::json!({"reason":"model_catalog", "epoch":-1}),
+            studio_json::json!({"reason":"dependency", "epoch":-1}),
+            studio_json::json!({"reason":"model_catalog", "epoch":9007199254740992_u64}),
         ] {
             assert!(!check(schemas[1].1.clone(), invalid));
         }
         assert!(check(
             schemas[0].1.clone(),
-            studio_json::json!({"reason":"slot", "epoch":1, "runningTurns":2, "maxRunningTurns":3})
+            studio_json::json!({"reason":"provider_session", "epoch":1, "until":3.0})
         ));
         assert!(!check(
             schemas[0].1.clone(),
-            studio_json::json!({"reason":"slot", "epoch":1, "runningTurns":2, "maxRunningTurns":3, "extension":true})
+            studio_json::json!({"reason":"provider_session", "epoch":1, "until":3.0, "extension":true})
         ));
     }
 
     #[test]
     fn agent_progress_schema_matches_strict_serde_contract() {
         for wait in [
-            AgentStartWait::Slot {
-                epoch: 3,
-                running_turns: 1,
-                max_running_turns: 2,
-            },
-            AgentStartWait::Pause {
-                epoch: 3,
-                until: 5.0,
-            },
             AgentStartWait::Disk { epoch: 3 },
+            AgentStartWait::ModelCatalog { epoch: 3 },
+            AgentStartWait::ProviderSession {
+                epoch: 3,
+                until: Some(4.0),
+            },
         ] {
             let value = studio_json::to_value(&wait).expect("typed wait");
             assert_eq!(

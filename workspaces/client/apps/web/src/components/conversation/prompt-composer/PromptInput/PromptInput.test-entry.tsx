@@ -1,3 +1,6 @@
+import { ServerStoreProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { createServerStore } from "../../../../store/server.ts";
+import { createSubscriptions } from "../../../../sync/subscriptions/module.ts";
 import "../../../../rendererStyles.ts";
 import {
   MantineProvider,
@@ -81,8 +84,23 @@ function IsolatedInputHarness({ mobile }: { mobile: boolean }) {
 }
 
 export function mount(mobile = false) {
+  const subscriptions = createSubscriptions({
+    watchResourceChanges: () => () => {},
+    watchResourceConnection: () => () => {},
+  });
+  const store = createServerStore(subscriptions);
+  window.addEventListener(
+    "pagehide",
+    () => {
+      store.dispose();
+      subscriptions.dispose();
+    },
+    { once: true },
+  );
   createRoot(document.getElementById("root")!).render(
-    <IsolatedInputHarness mobile={mobile} />,
+    <ServerStoreProvider value={store}>
+      <IsolatedInputHarness mobile={mobile} />
+    </ServerStoreProvider>,
   );
 }
 

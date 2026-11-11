@@ -4134,7 +4134,6 @@ mod tests {
             disconnected: false,
             deleted: false,
             duplicate: false,
-            max_running_turns: studio_runtime_schema::shared_values::ACCOUNT_RUNNING_TURNS_MAX,
             group: None,
         };
         ManagedFixture {

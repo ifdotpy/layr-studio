@@ -1,6 +1,6 @@
 import { resourceData } from "../../../../store/runtime.ts";
 import { useServerStore } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Button } from "@mantine/core";
 import { KeyRound } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -8,7 +8,6 @@ import type { RequestView } from "../RequestArea/RequestArea.tsx";
 import { useServerServices } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { canForwardSignIn } from "../support/openSignIn.ts";
 import {
-  RESULT_SENT_NOTE,
   SIGN_IN_FLOW_LABEL,
   SIGN_IN_STATE_LABEL,
   acceptBody,
@@ -23,7 +22,7 @@ import {
   timeLeftLabel,
   verificationPage,
   waitingChatsLabel,
-} from "./signInCardModel.ts";
+} from "../support/signInCardModel.ts";
 
 import { now } from "../../../../clock.ts";
 
@@ -45,17 +44,17 @@ export default observer(function SignInCard({ view }: { view: RequestView }) {
   const waiting = waitingChatsLabel(details.joined, {
     get: (id) => agents?.get(id)?.name || "",
   });
-  // The pasted address stays in this component only: never in drafts or storage.
-  const [address, setAddress] = useState("");
-  const [copied, setCopied] = useState(false);
+  // The pasted address stays in this request view only, never in drafts or storage.
+  const address = view.signInAddress;
+  const copied = view.signInCopy.copied();
   const field = useRef<HTMLInputElement>(null);
   const codeText = useRef<HTMLElement>(null);
   const open = (paste = false) =>
     void post(acceptBody(currentSignInWindow(canForwardSignIn()), paste));
   const copyCode = async () => {
     try {
-      await navigator.clipboard.writeText(details.userCode || "");
-      setCopied(true);
+      await view.signInCopy.copy(details.userCode || "");
+      if (view.signInCopy.failed) throw new Error("Copy failed");
     } catch {
       const node = codeText.current;
       const selection = window.getSelection();
@@ -69,22 +68,11 @@ export default observer(function SignInCard({ view }: { view: RequestView }) {
     }
   };
   const pasteFromClipboard = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) setAddress(text.trim());
-      else field.current?.focus();
-    } catch {
-      field.current?.focus();
-    }
+    if (!(await view.pasteSignIn())) field.current?.focus();
   };
-  const send = async (event: React.FormEvent) => {
+  const send = (event: React.FormEvent) => {
     event.preventDefault();
-    const body = pasteBody(address);
-    if (!body || sending) return;
-    if (await post(body)) {
-      setAddress("");
-      notify(RESULT_SENT_NOTE);
-    }
+    void view.sendSignIn();
   };
   const errorBlock = error ? (
     <p className="sign-in-card-error" role="alert">
@@ -199,7 +187,7 @@ export default observer(function SignInCard({ view }: { view: RequestView }) {
               placeholder={`http://localhost:${details.port ?? ""}${details.redirectPath ?? "/"}?code=…`}
               value={address}
               disabled={state === "sending"}
-              onChange={(event) => setAddress(event.target.value)}
+              onChange={(event) => view.setSignInAddress(event.target.value)}
             />
           </label>
           {errorBlock}
