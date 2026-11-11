@@ -239,8 +239,8 @@ test("the real error leaf preserves actions, selection and the dismissal cap", a
   const { vi } = await import("vitest");
   const { conversationActionsFixture, observableFixture } =
     await import("../integration-support/observableFixture.tsx");
-  const { ConversationProvider } =
-    await import("../../conversation/support/navigation.ts");
+  const { ServerAreasContextProvider: ConversationProvider } =
+    await import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx");
   const { STUDIO_ERRORS_DISMISS_MAX_IDS: cap } =
     await import("../../../generated/sharedValues.ts");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

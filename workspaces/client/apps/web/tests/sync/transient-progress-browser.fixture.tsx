@@ -1,5 +1,5 @@
 import { browserAreas } from "../fixtures/owner-support.tsx";
-import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as AreasProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ClaudeAuthFlow } from "../../src/components/accounts/support/ClaudeAuthFlow.ts";
 import "../../src/rendererStyles.ts";
 import { createDataObserver } from "../../src/sync/subscriptions/data.ts";

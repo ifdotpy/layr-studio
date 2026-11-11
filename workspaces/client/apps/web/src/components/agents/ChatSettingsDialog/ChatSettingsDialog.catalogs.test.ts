@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
 import { ChatSettingsDialog } from "./ChatSettingsDialog.tsx";
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   observableFixture,
   conversationActionsFixture,

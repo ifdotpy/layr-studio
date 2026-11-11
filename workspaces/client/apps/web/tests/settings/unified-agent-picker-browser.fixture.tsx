@@ -66,7 +66,7 @@ import ProjectAccount from "../../src/components/projects/ProjectAccount/Project
 import SharedChatCreate from "../../src/components/projects/SharedChatCreate/SharedChatCreate.tsx";
 import { writeModelChoices } from "../../src/components/settings/models/support/modelChoices.ts";
 
-import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as AreasProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   browserAreas,
   browserProjectSaves,

@@ -2,7 +2,7 @@ import { ActionIcon, Menu, Tooltip, UnstyledButton } from "@mantine/core";
 import { Folder, FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { observer } from "mobx-react-lite";
 
-import { SidebarProjectStates } from "../SidebarAttention/SidebarAttention.tsx";
+import { default as SidebarProjectStates } from "../ProjectStateCounts/ProjectStateCounts.tsx";
 
 import { CompactChatCount } from "../CompactChatCount/CompactChatCount.tsx";
 import { sidebarRender } from "../../../perf/sidebarRenderProbe.ts";

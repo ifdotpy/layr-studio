@@ -12,7 +12,7 @@ import { requestFixture } from "./requestFixtures.ts";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";
 import { approval, question } from "../../../../approvalFixtures.ts";
 import Conversation from "../../ObservedConversation/ObservedConversation.tsx";
-import { ConversationProvider } from "../../support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { conversationActionsFixture } from "../../../shell/integration-support/observableFixture.tsx";
 import { requestTestEnvironment } from "../Requests/requestTestFixture.ts";
 

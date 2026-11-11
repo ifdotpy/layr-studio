@@ -8,10 +8,8 @@ import { createServerStore } from "../../src/store/server.ts";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { Agent } from "../../src/types.ts";
-import {
-  ConversationProvider,
-  type ConversationActions,
-} from "../../src/components/conversation/support/navigation.ts";
+import { type ConversationActions } from "../../src/components/conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
 /** Static state facts with the real room/complaint resource acquisition owner. */
 export function messageModels(stateDir: string, agents: readonly Agent[]) {

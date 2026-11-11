@@ -1,7 +1,7 @@
 import { serverSidebarBackend } from "../../servers/serverSidebarBackend.ts";
 import { ServerAreasProvider } from "../../components/shell/ServerAreasProvider/ServerAreasProvider.tsx";
 import { SidebarListOwner } from "../shell/SidebarOwner.ts";
-import { ToastNotice } from "../../components/shell/App/App.tsx";
+import { ToastNotice } from "../../components/shell/ToastNotice/ToastNotice.tsx";
 import { MantineProvider } from "@mantine/core";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";

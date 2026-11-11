@@ -7,9 +7,7 @@ import {
 } from "../RequestArea/RequestArea.tsx";
 import { RequestCard } from "../RequestCard/RequestCard.tsx";
 
-export { RequestArea } from "../RequestArea/RequestArea.tsx";
-export { RequestCard, openRequestAnswer } from "../RequestCard/RequestCard.tsx";
-export { AnswerForm } from "../AnswerForm/AnswerForm.tsx";
+export { openRequestAnswer } from "../RequestCard/RequestCard.tsx";
 
 const RequestGroup = observer(function RequestGroup({
   requests,

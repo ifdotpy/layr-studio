@@ -7,7 +7,7 @@ import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { ConversationProvider } from "../../src/components/conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import {
   RequestFixture,

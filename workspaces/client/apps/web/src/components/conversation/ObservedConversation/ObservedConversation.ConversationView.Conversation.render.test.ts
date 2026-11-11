@@ -20,7 +20,7 @@ import {
   useRequestOwner,
   RequestAreaOwner,
 } from "../questions/RequestArea/RequestArea.tsx";
-import { ConversationProvider } from "../support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { requestTestEnvironment } from "../questions/Requests/requestTestFixture.ts";
 

@@ -13,7 +13,8 @@ import { observer } from "mobx-react-lite";
 import { useConversationActions } from "../support/navigation.ts";
 import AgentAvatar from "../../agents/AgentAvatar/AgentAvatar.tsx";
 import MessageDate from "../transcript/MessageDate/MessageDate.tsx";
-import Requests, { RequestArea } from "../questions/Requests/Requests.tsx";
+import Requests from "../questions/Requests/Requests.tsx";
+import { RequestArea } from "../questions/RequestArea/RequestArea.tsx";
 import StreamingText from "../transcript/StreamingText/StreamingText.tsx";
 import PromptComposer from "../prompt-composer/PromptComposer/PromptComposer.tsx";
 

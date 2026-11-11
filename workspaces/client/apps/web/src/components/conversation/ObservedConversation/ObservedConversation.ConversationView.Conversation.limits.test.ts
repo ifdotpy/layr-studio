@@ -3,7 +3,7 @@ import { renderMessageRow } from "../ConversationTranscript/ConversationTranscri
 import { createNet } from "../../../servers/net/net.ts";
 // @vitest-environment happy-dom
 import type { Agent } from "../../../types.ts";
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   conversationActionsFixture,
   setStartupFixture,

@@ -1,4 +1,4 @@
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { AgentSource, AgentStatus } from "../../../generated/api.ts";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";

@@ -23,7 +23,7 @@ import Accounts, {
 } from "../../src/components/accounts/Accounts/Accounts.tsx";
 import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
 import { accountRows } from "../../src/servers/AccountsPanelState.ts";
-import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as AreasProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import ClaudeProfile from "../../src/components/shell/ClaudeProfile/ClaudeProfile.tsx";
 import AccountSignInNotice from "../../src/components/accounts/AccountSignInNotice/AccountSignInNotice.tsx";
 import "../../src/components/accounts/support/accounts.css";

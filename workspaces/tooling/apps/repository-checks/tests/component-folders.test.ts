@@ -461,3 +461,100 @@ test("wrapped React class expressions count as components", () => {
     /exported components/,
   );
 });
+
+for (const declaration of [
+  "export const Hidden = ownedView(() => new State(), () => null);",
+  "export const Hidden = section(() => null);",
+  "const hidden = observer(ownedView(() => new State(), () => null)); export default hidden;",
+  "const hidden = memo(section(() => null)); export default hidden;",
+]) {
+  test(`component wrappers retain ownership without JSX: ${declaration}`, () => {
+    for (const [file, prefix, expected] of [
+      ["support/hidden.tsx", "", /support exports a product component/],
+      ["../app/hidden.tsx", "", /exported component outside src\/components/],
+      ["Button/Button.tsx", view("Button"), /exported components/],
+    ] as const)
+      assert.match(
+        check({ [file]: prefix + declaration }).join("\n"),
+        expected,
+      );
+  });
+}
+test("mixed type and non-component re-exports stay allowed", () => {
+  assert.deepEqual(
+    check({
+      "Button/Button.tsx":
+        view("Button") +
+        'export type { Icon } from "../Icon/Icon.tsx"; export { type Icon as Other } from "../Icon/Icon.tsx"; export { value } from "../Icon/Icon.tsx";',
+      "Icon/Icon.tsx": view("Icon") + "export const value = 1;",
+    }),
+    [],
+  );
+});
+for (const file of [
+  "support/mixed.tsx",
+  "../app/mixed.tsx",
+  "Button/Button.tsx",
+]) {
+  for (const binding of ["Icon", "default as Icon"])
+    test(`mixed component re-exports are rejected in ${file}: ${binding}`, () => {
+      assert.match(
+        check({
+          [file]: view("Button") + `export { ${binding} } from "./Icon.tsx";`,
+          [file.replace(/[^/]+$/, "Icon.tsx")]:
+            view("Icon") + "export default Icon;",
+        }).join("\n"),
+        /barrel/,
+      );
+    });
+}
+
+for (const file of [
+  "support/mixed.tsx",
+  "../app/mixed.tsx",
+  "Button/Button.tsx",
+])
+  test(`mixed wildcard component re-exports are rejected in ${file}`, () => {
+    assert.match(
+      check({
+        [file]: view("Button") + 'export * from "./Icon.tsx";',
+        [file.replace(/[^/]+$/, "Icon.tsx")]: view("Icon"),
+      }).join("\n"),
+      /barrel/,
+    );
+  });
+
+test("a non-component default beside a component can be re-exported", () => {
+  assert.deepEqual(
+    check({
+      "support/mixed.tsx":
+        'export { default as value } from "../Icon/Icon.tsx"; export const tag = "x";',
+      "Icon/Icon.tsx": view("Icon") + "export default 42;",
+    }),
+    [],
+  );
+});
+
+test("a mixed wildcard does not forward a default-only component", () => {
+  assert.deepEqual(
+    check({
+      "support/mixed.tsx":
+        'export * from "../Icon/Icon.tsx"; export const tag = "x";',
+      "Icon/Icon.tsx": "export default function Icon() { return null; }",
+    }),
+    [],
+  );
+});
+
+for (const declaration of ["export type { Icon };", "export { type Icon };"])
+  test(`a mixed wildcard ignores target type-only exports: ${declaration}`, () => {
+    assert.deepEqual(
+      check({
+        "support/mixed.tsx":
+          'export * from "../../app/iconTypes.tsx"; export const tag = "x";',
+        "../app/iconTypes.tsx":
+          "function Icon() { return null; } " + declaration,
+      }),
+      [],
+    );
+  });

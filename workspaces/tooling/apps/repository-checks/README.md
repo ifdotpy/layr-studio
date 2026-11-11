@@ -109,3 +109,22 @@ Shrink this existing baseline
 with `node workspaces/tooling/apps/repository-checks/ast-grep.ts --shrink`.
 The rules inspect syntax and do not resolve renamed MobX imports or callback
 indirection. Ast-grep tests cover TypeScript and TSX forms in `ast-grep/tests`.
+
+`web-no-ad-hoc-operation-state` uses the existing TypeScript syntax parser and
+the same fingerprint ratchet. `operation-state.ts` names the migrated owners;
+new production modules importing `RequestRegistry` or `requestOperations` also
+join the check. Writable operation fields, operation-named state/ref hooks,
+direct mutation transport, mutation UUID/stable-ID generation, request-outbox
+writes, `runInAction` and reload/refetch calls are rejected. Import aliases,
+member aliases and destructuring are followed by spelling, without resolving
+types or arbitrary callback indirection. Registry projections, validation,
+read loading and navigation IDs remain local concerns.
+
+The exact-path exceptions live in `ratchet-baseline.json`, each with a protocol
+reason. Four transport calls are initially allowed: the rename and project-location
+adapters and two unmigrated AppUi operations. Their fingerprints can only shrink;
+adding another call in an allowed file still fails. The immutable migration seed
+is main `4f44f7fc`, used only when history predates this rule. Registry internals
+own identity and lifecycle and are outside the migrated-consumer scope. Other
+specialized protocol owners join only when migrated. Run the AST witnesses with
+`node --test workspaces/tooling/apps/repository-checks/tests/ast-grep.test.ts`.

@@ -7,10 +7,8 @@ import {
   observableFixture,
 } from "../../../shell/integration-support/observableFixture.tsx";
 import { serializeStateCollections } from "../../../../generated/observableResources.ts";
-import {
-  ConversationProvider,
-  useConversationActions,
-} from "../../support/navigation.ts";
+import { useConversationActions } from "../../support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { StudioErrorItem } from "../../../shell/StudioErrorList/StudioErrorList.tsx";
 import ConversationWarnings from "../../ConversationWarnings/ConversationWarnings.tsx";
 

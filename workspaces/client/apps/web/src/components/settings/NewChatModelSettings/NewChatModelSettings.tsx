@@ -1,4 +1,4 @@
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { observer } from "mobx-react-lite";
 import { Button, Stack } from "@mantine/core";
 import { ServerServicesProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";

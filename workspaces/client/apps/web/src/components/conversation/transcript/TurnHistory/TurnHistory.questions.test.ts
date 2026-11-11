@@ -26,7 +26,7 @@ import {
   type QuestionHistoryEntry,
   type QuestionLookup,
 } from "../../support/questionCardModel.ts";
-import { RequestCard } from "../../questions/Requests/Requests.tsx";
+import { RequestCard } from "../../questions/RequestCard/RequestCard.tsx";
 import {
   RequestFixture,
   createRequestFixture,

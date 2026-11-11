@@ -10,7 +10,7 @@ import { configure } from "mobx";
 import { expect, it, vi } from "vitest";
 import { AppTeam } from "../AppTeam/AppTeam.tsx";
 import { AgentSource, AgentStatus } from "../../../generated/api.ts";
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useTeam } from "../../agents/support/TeamPanelContext.tsx";
 import {
   conversationActionsFixture,

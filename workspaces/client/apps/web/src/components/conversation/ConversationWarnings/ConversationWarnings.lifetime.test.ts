@@ -5,7 +5,7 @@ import { MantineProvider } from "@mantine/core";
 import { action } from "mobx";
 import { expect, it, vi } from "vitest";
 import ConversationWarnings from "./ConversationWarnings.tsx";
-import { ConversationProvider } from "../support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ConversationStore } from "../support/ConversationStore.ts";
 import { createConversationContext } from "../support/conversationContext.ts";
 import {

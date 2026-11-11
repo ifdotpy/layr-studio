@@ -2,7 +2,8 @@ import { approval, browserOpen } from "../../../../approvalFixtures.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import Requests, { RequestArea } from "./Requests.tsx";
+import Requests from "./Requests.tsx";
+import { RequestArea } from "../RequestArea/RequestArea.tsx";
 import { RequestAreaOwner } from "../RequestArea/RequestArea.tsx";
 import { serverLocalStorage } from "../../../../servers/storage.ts";
 import {

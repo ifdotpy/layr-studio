@@ -8,7 +8,7 @@ import { expect, test, vi } from "vitest";
 import Accounts from "./Accounts.tsx";
 import { ProviderKind } from "../../../generated/api.ts";
 import { accountsFixture } from "./Accounts.fixture.ts";
-import { Provider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ServerServicesProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
 test("keeps an account modal open across renders and closes its report with the owner", async () => {

@@ -7,10 +7,8 @@ import {
 import * as fixtureApi from "../../src/servers/net/api.ts";
 import { createServerStore } from "../../src/store/server.ts";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
-import {
-  ConversationProvider,
-  type ConversationActions,
-} from "../../src/components/conversation/support/navigation.ts";
+import { type ConversationActions } from "../../src/components/conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   observableFixture,
   conversationActionsFixture,

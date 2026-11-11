@@ -203,9 +203,12 @@ it("shows a generated state query failure before its first value and reload reco
   const { createRoot } = await import("react-dom/client");
   const { MantineProvider } = await import("@mantine/core");
   const { default: App } = await import("../../components/shell/App/App.tsx");
-  const { ServerAreas, ServerAreasContextProvider } =
-    await import("../ServerAreasProvider.tsx");
-  const { ServerServicesProvider, ServerStoreProvider } =
+  const { ServerAreas } = await import("../ServerAreasProvider.tsx");
+  const {
+    ServerServicesProvider,
+    ServerStoreProvider,
+    ServerAreasContextProvider,
+  } =
     await import("../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx");
   const { createSubscriptions } =
     await import("../../sync/subscriptions/module.ts");

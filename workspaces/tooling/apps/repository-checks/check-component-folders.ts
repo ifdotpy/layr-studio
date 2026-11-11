@@ -21,34 +21,43 @@ function unwrap(expression: ts.Expression): ts.Expression {
   return expression;
 }
 
-function wrappedView(expression: ts.Expression): boolean {
-  const call = unwrap(expression);
-  if (!ts.isCallExpression(call)) return false;
-  const wrapper = call.expression.getText();
-  const render = /(?:^|\.)ownedView$/.test(wrapper)
-    ? call.arguments[1]
-    : /(?:^|\.)section$/.test(wrapper)
-      ? call.arguments[0]
-      : undefined;
-  if (!render) return false;
-  const containsJsx = (node: ts.Node): boolean =>
-    ts.isJsxElement(node) ||
-    ts.isJsxSelfClosingElement(node) ||
-    ts.isJsxFragment(node) ||
-    !!ts.forEachChild(node, containsJsx);
-  return containsJsx(render);
+// Both declaration forms follow the same wrapper chain to the render value.
+function componentValue(expression: ts.Expression): {
+  value: ts.Expression;
+  owned: boolean;
+} {
+  let value = unwrap(expression);
+  let owned = false;
+  while (ts.isCallExpression(value)) {
+    const wrapper = value.expression.getText();
+    const isOwnedView = /(?:^|\.)ownedView$/.test(wrapper);
+    const isSection = /(?:^|\.)section$/.test(wrapper);
+    if (
+      !isOwnedView &&
+      !isSection &&
+      !/(?:^|\.)(?:observer|memo|forwardRef)$/.test(wrapper)
+    )
+      break;
+    owned ||= isOwnedView || isSection;
+    const render = value.arguments[isOwnedView ? 1 : 0];
+    if (!render) break;
+    value = unwrap(render);
+  }
+  return { value, owned };
 }
 
 function componentNames(
   file: string,
   text: string,
   exportedOnly: boolean,
+  binding?: "default" | "named",
 ): string[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const declarations = new Map<string, ts.Node>();
   const aliases = new Map<string, string>();
   const exported = new Set<string>();
   const wrapped = new Set<string>();
+  let defaultName: string | undefined;
   let wrappedCallback: ts.Identifier | undefined;
   const isPublic = (node: ts.Node) =>
     ts.canHaveModifiers(node) &&
@@ -58,8 +67,13 @@ function componentNames(
       const name =
         node.name?.text ?? (isPublic(node) ? "__default" : undefined);
       if (name) {
+        const isDefault = ts
+          .getModifiers(node)
+          ?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+        if (isDefault) defaultName = name;
         declarations.set(name, node);
-        if (isPublic(node)) exported.add(name);
+        if (isPublic(node) && (binding !== "named" || !isDefault))
+          exported.add(name);
       }
     }
     if (ts.isVariableStatement(node))
@@ -67,7 +81,10 @@ function componentNames(
         if (!ts.isIdentifier(declaration.name)) continue;
         const name = declaration.name.text;
         declarations.set(name, declaration);
-        if (declaration.initializer && wrappedView(declaration.initializer))
+        if (
+          declaration.initializer &&
+          componentValue(declaration.initializer).owned
+        )
           wrapped.add(name);
         if (isPublic(node)) exported.add(name);
         if (
@@ -76,19 +93,11 @@ function componentNames(
         )
           aliases.set(name, unwrap(declaration.initializer).getText(source));
       }
-    if (ts.isExportAssignment(node)) {
-      let expression: ts.Expression = unwrap(node.expression);
-      let wrappedDefault = false;
-      while (ts.isCallExpression(expression) && expression.arguments[0]) {
-        wrappedDefault ||= /(?:^|\.)(?:ownedView|section)$/.test(
-          expression.expression.getText(),
-        );
-        expression = unwrap(
-          /(?:^|\.)ownedView$/.test(expression.expression.getText())
-            ? (expression.arguments[1] ?? expression.arguments[0])
-            : expression.arguments[0],
-        );
-      }
+    if (ts.isExportAssignment(node) && binding !== "named") {
+      const { value: expression, owned: wrappedDefault } = componentValue(
+        node.expression,
+      );
+      if (ts.isIdentifier(expression)) defaultName = expression.text;
       if (ts.isIdentifier(expression) && wrappedDefault)
         wrappedCallback = expression;
       else if (ts.isIdentifier(expression)) exported.add(expression.text);
@@ -100,18 +109,21 @@ function componentNames(
           callback && /^[A-Z]/.test(callback) && /[a-z]/.test(callback)
             ? callback
             : "__default";
+        defaultName = name;
         declarations.set(name, expression);
         exported.add(name);
       }
     }
     if (
       ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
       !node.moduleSpecifier &&
       node.exportClause &&
       ts.isNamedExports(node.exportClause)
     )
       for (const entry of node.exportClause.elements)
-        exported.add(entry.propertyName?.text ?? entry.name.text);
+        if (!entry.isTypeOnly)
+          exported.add(entry.propertyName?.text ?? entry.name.text);
   }
   if (wrappedCallback) {
     // A wrapped default keeps the callback's name only when it resolves to a
@@ -129,6 +141,7 @@ function componentNames(
     )
       exported.add(wrappedCallback.text);
     else {
+      defaultName = "__default";
       declarations.set("__default", wrappedCallback);
       wrapped.add("__default");
       exported.add("__default");
@@ -143,7 +156,7 @@ function componentNames(
         declarations.set(node.name.text, node);
       if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
         declarations.set(node.name.text, node);
-        if (node.initializer && wrappedView(node.initializer))
+        if (node.initializer && componentValue(node.initializer).owned)
           wrapped.add(node.name.text);
       }
       ts.forEachChild(node, collect);
@@ -151,7 +164,15 @@ function componentNames(
     ts.forEachChild(source, collect);
   }
   const names = new Set<string>();
-  for (let name of exportedOnly ? exported : declarations.keys()) {
+  const candidates =
+    binding === "default"
+      ? defaultName
+        ? [defaultName]
+        : []
+      : exportedOnly
+        ? exported
+        : declarations.keys();
+  for (let name of candidates) {
     const seen = new Set<string>();
     while (aliases.has(name) && !seen.has(name)) {
       seen.add(name);
@@ -188,18 +209,24 @@ function componentNames(
             /\b(?:Component|PureComponent)\b/.test(clause.getText()),
           )) ||
         (ts.isCallExpression(value) &&
-          (wrappedView(value) ||
+          (componentValue(value).owned ||
             /(?:^|\.)(?:observer|memo|forwardRef|section)$/.test(
               value.expression.getText(),
             ))))
     )
       names.add(name);
   }
-  return [...names].sort();
+  return binding === "default" && names.size
+    ? ["__default"]
+    : [...names].sort();
 }
 
-export function exportedComponents(file: string, text: string): string[] {
-  return componentNames(file, text, true);
+export function exportedComponents(
+  file: string,
+  text: string,
+  binding?: "default" | "named",
+): string[] {
+  return componentNames(file, text, true, binding);
 }
 
 function isSupportDirectory(directory: string): boolean {
@@ -235,7 +262,39 @@ export function checkComponentFolders(
       (source.statements.length > 0 &&
         source.statements.every(
           (n) => ts.isExportDeclaration(n) && n.moduleSpecifier,
-        ))
+        )) ||
+      source.statements.some((node) => {
+        if (
+          !ts.isExportDeclaration(node) ||
+          node.isTypeOnly ||
+          !node.moduleSpecifier ||
+          !ts.isStringLiteral(node.moduleSpecifier) ||
+          (node.exportClause && !ts.isNamedExports(node.exportClause))
+        )
+          return false;
+        const target = path.resolve(
+          path.dirname(file),
+          node.moduleSpecifier.text,
+        );
+        const resolved = [target, target + ".tsx", target + ".ts"].find(
+          (candidate) => existsSync(candidate),
+        );
+        if (!resolved) return false;
+        const text = readFileSync(resolved, "utf8");
+        const components = exportedComponents(resolved, text);
+        if (!node.exportClause)
+          return exportedComponents(resolved, text, "named").length > 0;
+        // Target export aliases (Icon as PublicIcon) are not resolved.
+        return node.exportClause.elements.some(
+          (entry) =>
+            !entry.isTypeOnly &&
+            ((entry.propertyName ?? entry.name).text === "default"
+              ? exportedComponents(resolved, text, "default").includes(
+                  "__default",
+                )
+              : components.includes((entry.propertyName ?? entry.name).text)),
+        );
+      })
     )
       errors.push(`${relative(file)}: barrel; import its target directly`);
   }

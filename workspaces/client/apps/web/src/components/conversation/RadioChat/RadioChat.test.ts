@@ -13,7 +13,7 @@ import {
   observableFixture,
   conversationActionsFixture,
 } from "../../shell/integration-support/observableFixture.tsx";
-import { ConversationProvider } from "../support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ApiError } from "../../../api.ts";
 import { serverLocalStorage } from "../../../servers/storage.ts";
 import type { RoomEntityDtoFields } from "../../../generated/observableFieldTypes.ts";

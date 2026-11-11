@@ -10,7 +10,7 @@ import {
   observableFixture,
   conversationActionsFixture,
 } from "../../integration-support/observableFixture.tsx";
-import { ConversationProvider } from "../../../conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";
 import type { StateEntity } from "../../../../generated/observableResources.ts";
 import { serverLocalStorage } from "../../../../servers/storage.ts";

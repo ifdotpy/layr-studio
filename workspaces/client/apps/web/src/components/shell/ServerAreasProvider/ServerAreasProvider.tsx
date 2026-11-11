@@ -1,4 +1,5 @@
-import { ServerAreas, Provider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { type ReactNode } from "react";
 
 export function ServerAreasProvider({

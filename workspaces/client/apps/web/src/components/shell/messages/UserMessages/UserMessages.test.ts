@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
 import { conversationActionsFixture } from "../../integration-support/observableFixture.tsx";
-import { ConversationProvider } from "../../../conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createSubscriptions } from "../../../../sync/subscriptions/module.ts";
 import { createServerStore } from "../../../../store/server.ts";
 import { ServerStoreProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";

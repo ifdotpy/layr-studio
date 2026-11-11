@@ -8,7 +8,7 @@ import AccountAddDialog, {
 } from "./AccountAddDialog.tsx";
 import type AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
 import type ClaudeAddSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
-import { Provider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { accountsFixture } from "../Accounts/Accounts.fixture.ts";
 import { ProviderKind } from "../../../generated/providerKind.ts";
 

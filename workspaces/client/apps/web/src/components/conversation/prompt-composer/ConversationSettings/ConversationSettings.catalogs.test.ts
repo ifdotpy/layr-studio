@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { action, makeAutoObservable } from "mobx";
 import { workerCatalogKey } from "../../../agents/support/WorkerModelPicker.tsx";
 import ConversationSettings from "./ConversationSettings.tsx";
-import { ServerAreasContextProvider } from "../../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ServerStoreProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   conversationActionsFixture,

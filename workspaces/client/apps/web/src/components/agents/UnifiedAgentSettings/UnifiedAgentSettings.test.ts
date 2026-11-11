@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ApiError } from "../../../api.ts";
 import { createMutationJournal } from "../../../servers/mutationIdentity.ts";
 import { accountsFixture } from "../../accounts/Accounts/Accounts.fixture.ts";
-import { Provider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { UnifiedAgentSettingsView as UnifiedAgentSettings } from "./UnifiedAgentSettings.tsx";
 
 const harness = vi.hoisted(() => ({

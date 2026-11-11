@@ -21,10 +21,7 @@ export type ConversationSendOptions = {
 };
 export type ConversationActions =
   import("../../../app/ServerAreasProvider.tsx").ServerAreas;
-export {
-  ServerAreasContextProvider as ConversationProvider,
-  useServerAreas as useConversationActions,
-} from "../../../app/ServerAreasProvider.tsx";
+export { useServerAreas as useConversationActions } from "../../../app/ServerAreasProvider.tsx";
 
 export const [TranscriptProvider, useTranscriptActions] =
   createArea<ConversationTranscriptActions>("Transcript");

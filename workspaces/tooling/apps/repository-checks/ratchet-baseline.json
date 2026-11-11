@@ -3087,5 +3087,27 @@
   "web-listener-set-tsx": [],
   "web-make-observable-tsx": [],
   "web-store-effect-tsx": [],
-  "web-store-effect": []
+  "web-store-effect": [],
+  "web-no-ad-hoc-operation-state": [
+    {
+      "file": "workspaces/client/apps/web/src/renameRequest.ts",
+      "fingerprint": "783f1cf0d047934b818d5670a3c78d9d08e3c8387aa3794a68912ffb572f1299:0",
+      "reason": "Approved rename operation adapter serializes the registry-owned ID into the transport."
+    },
+    {
+      "file": "workspaces/client/apps/web/src/servers/projectLocations.ts",
+      "fingerprint": "e5dade59f256ef0be3750f9cfe96a3c7e23bd8068afe692cf8777ab7ae339153:0",
+      "reason": "Approved project-location operation adapter validates the exact registry-owned receipt."
+    },
+    {
+      "file": "workspaces/client/apps/web/src/app/shell/AppUi.tsx",
+      "fingerprint": "ea30f9b1e18c79b9548e630833cf83eeb13f5535f86a677e8b0ae214678ae0a6:0",
+      "reason": "Unmigrated conversation working-folder and room-delete operations remain in the shared AppUi owner."
+    },
+    {
+      "file": "workspaces/client/apps/web/src/app/shell/AppUi.tsx",
+      "fingerprint": "a462abea502abc4f3c7ec7da26868e3aa8c0d5080097ab3a8b6109e1897ff782:0",
+      "reason": "Unmigrated conversation working-folder and room-delete operations remain in the shared AppUi owner."
+    }
+  ]
 }

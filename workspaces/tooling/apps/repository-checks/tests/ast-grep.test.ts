@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import "./operation-state.test.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {

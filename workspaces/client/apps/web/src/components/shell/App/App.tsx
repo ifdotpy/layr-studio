@@ -26,7 +26,7 @@ import { AppNotices } from "../AppNotices/AppNotices.tsx";
 import { AppAccountNotices } from "../AppAccountNotices/AppAccountNotices.tsx";
 import { ToastNotice } from "../ToastNotice/ToastNotice.tsx";
 export { AppUi } from "../../../app/shell/AppUi.tsx";
-export { ToastNotice } from "../ToastNotice/ToastNotice.tsx";
+
 export default observer(function App() {
   const a = useServerAreas(),
     { scope, startup, layout } = a;

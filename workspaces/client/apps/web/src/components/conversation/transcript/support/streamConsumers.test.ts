@@ -14,7 +14,7 @@ import {
   observableFixture,
   conversationActionsFixture,
 } from "../../../shell/integration-support/observableFixture.tsx";
-import { ConversationProvider } from "../../support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { requestTestEnvironment } from "../../questions/Requests/requestTestFixture.ts";
 import { UserMessage } from "../../../shell/messages/UserMessage/UserMessage.tsx";
 import { useConversationHistory } from "../../../../conversation/historyFixture.ts";

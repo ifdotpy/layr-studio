@@ -21,7 +21,7 @@ import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { createServerStore } from "../../src/store/server.ts";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { browserAreas } from "../fixtures/owner-support.tsx";
-import { Provider } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
 import { accountRows } from "../../src/servers/AccountsPanelState.ts";
 import { frameAccounts } from "../../src/components/accounts/Accounts/Accounts.tsx";

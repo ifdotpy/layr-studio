@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { observer } from "mobx-react-lite";
 import type { SidebarChatView } from "../support/viewModel.ts";
 import { ChatIndicatorKind as ChatOperationalKind } from "../../../status/operationalStatus.ts";
-export { default as SidebarProjectStates } from "../ProjectStateCounts/ProjectStateCounts.tsx";
 
 export const SidebarAttention = observer(function SidebarAttention({
   rows,

@@ -1,7 +1,13 @@
 import { isGlueSource, HOOK_MANIFEST, glueFiles } from "./react-glue.ts";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { readdirSync, writeFileSync, existsSync } from "node:fs";
+import { readdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import {
+  OPERATION_STATE_RULE,
+  isOperationOwner,
+  operationStateMatches,
+  initialOperationBaseline,
+} from "./operation-state.ts";
 import { fileURLToPath } from "node:url";
 import {
   checkRatchet,
@@ -108,6 +114,16 @@ export function scan(
     grouped[rule] = fingerprintMatches(
       scoped.filter((match) => match.ruleId === rule),
     );
+  if (!filter || new RegExp(filter).test(OPERATION_STATE_RULE))
+    grouped[OPERATION_STATE_RULE] = fingerprintMatches(
+      paths.sort().flatMap((file) => {
+        if (!isGlueSource(file)) return [];
+        const text = readFileSync(path.join(scanRoot, file), "utf8");
+        return isOperationOwner(file, text)
+          ? operationStateMatches(file, text)
+          : [];
+      }),
+    );
   return grouped;
 }
 
@@ -125,8 +141,9 @@ function previousBaseline(
     if (!existsSync(path.join(snapshot, HOOK_MANIFEST))) {
       const initial = scan(snapshot, glueFiles(snapshot), "^web-", rulesRoot);
       for (const [rule, entries] of Object.entries(initial))
-        previous[rule] = entries;
+        if (rule !== OPERATION_STATE_RULE) previous[rule] = entries;
     }
+    previous[OPERATION_STATE_RULE] ??= initialOperationBaseline(repositoryRoot);
     return previous;
   });
 }
@@ -158,6 +175,7 @@ export function webPatternErrors(
       { cwd: repositoryRoot, encoding: "utf8" },
     ),
   );
+  committed[OPERATION_STATE_RULE] ??= initialOperationBaseline(repositoryRoot);
   return [
     ...baselineGrowthErrors(baseline, committed),
     ...baselineGrowthErrors(
@@ -183,6 +201,17 @@ export function run(shrink = false): number {
       .filter((file) => file.endsWith(".yml"))
       .map((file) => file.slice(0, -4)),
   );
+  rules.add(OPERATION_STATE_RULE);
+  const missingReasons = (baseline[OPERATION_STATE_RULE] ?? []).filter(
+    (entry) => !entry.reason?.trim(),
+  );
+  if (missingReasons.length) {
+    for (const entry of missingReasons)
+      console.error(
+        `${OPERATION_STATE_RULE}: allowance in ${entry.file} needs a protocol reason`,
+      );
+    return 1;
+  }
   if (shrink) {
     const updated: Baseline = { ...baseline };
     for (const rule of rules) {

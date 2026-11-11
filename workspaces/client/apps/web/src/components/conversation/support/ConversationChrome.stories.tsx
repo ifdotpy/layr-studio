@@ -2,7 +2,7 @@ import {
   observableFixture,
   conversationActionsFixture,
 } from "../../shell/integration-support/observableFixture.tsx";
-import { ConversationProvider } from "./navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ChatIndicatorKind as ChatOperationalKind } from "../../../status/operationalStatus.ts";
 import {
   AgentSource as GeneratedApiAgentSource,

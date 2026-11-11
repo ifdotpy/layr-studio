@@ -17,10 +17,9 @@ import {
   question as questionField,
 } from "../../src/approvalFixtures.ts";
 import type { Approval } from "../../src/approvals.ts";
-import Requests, {
-  RequestCard,
-  RequestArea,
-} from "../../src/components/conversation/questions/Requests/Requests.tsx";
+import Requests from "../../src/components/conversation/questions/Requests/Requests.tsx";
+import { RequestCard } from "../../src/components/conversation/questions/RequestCard/RequestCard.tsx";
+import { RequestArea } from "../../src/components/conversation/questions/RequestArea/RequestArea.tsx";
 import History from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
 function TurnHistory(props: ComponentProps<typeof History>) {
   return (

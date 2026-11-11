@@ -1,4 +1,4 @@
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { componentSnapshot as snapshotFixture } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
 import { accountRows } from "../../../servers/AccountsPanelState.ts";
 import Workspace from "../../shell/Workspace/Workspace.tsx";

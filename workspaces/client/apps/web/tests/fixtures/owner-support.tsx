@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ServerAreas, Provider } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreas } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   createServerViewServices,
   useServerApi,

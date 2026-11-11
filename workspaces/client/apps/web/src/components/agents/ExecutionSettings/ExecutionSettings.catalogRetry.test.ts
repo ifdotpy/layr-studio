@@ -6,7 +6,7 @@ import { expect, it, vi } from "vitest";
 import { ExecutionSettings } from "./ExecutionSettings.tsx";
 import { ProviderKind } from "../../../generated/api.ts";
 import { createModelsMirror } from "../../../generated/observableResources.ts";
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   observableFixture,

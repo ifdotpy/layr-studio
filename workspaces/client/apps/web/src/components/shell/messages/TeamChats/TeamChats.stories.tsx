@@ -10,7 +10,7 @@ import {
   observableFixture,
   conversationActionsFixture,
 } from "../../integration-support/observableFixture.tsx";
-import { ConversationProvider } from "../../../conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createRoomMirror } from "../../../../generated/observableResources.ts";
 import type { RoomEntityDtoFields } from "../../../../generated/observableFieldTypes.ts";
 

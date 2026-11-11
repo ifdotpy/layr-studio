@@ -10,7 +10,9 @@ export const RATCHET_BASELINE = fileURLToPath(
 );
 
 export type Violation = { file: string; fingerprint: string; message: string };
-export type BaselineEntry = Pick<Violation, "file" | "fingerprint">;
+export type BaselineEntry = Pick<Violation, "file" | "fingerprint"> & {
+  reason?: string;
+};
 export type Baseline = Record<string, BaselineEntry[]>;
 
 // Call in source order. Occurrence indices distinguish identical matches in a file.
@@ -50,7 +52,18 @@ export function parseBaseline(text: string): Baseline {
         typeof entry.fingerprint !== "string"
       )
         throw new Error(`Malformed ratchet baseline entry for ${rule}`);
-      return { file: entry.file, fingerprint: entry.fingerprint };
+      if (
+        "reason" in entry &&
+        (typeof entry.reason !== "string" || !entry.reason.trim())
+      )
+        throw new Error(`Malformed ratchet reason for ${rule}`);
+      return {
+        file: entry.file,
+        fingerprint: entry.fingerprint,
+        ...("reason" in entry && typeof entry.reason === "string"
+          ? { reason: entry.reason }
+          : {}),
+      };
     });
   }
   return result;

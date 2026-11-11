@@ -24,9 +24,8 @@ import {
 } from "./TeamChatsStore.ts";
 import { useConversationActions } from "../../../conversation/support/navigation.ts";
 import StreamingText from "../../../conversation/transcript/StreamingText/StreamingText.tsx";
-import Requests, {
-  RequestArea,
-} from "../../../conversation/questions/Requests/Requests.tsx";
+import Requests from "../../../conversation/questions/Requests/Requests.tsx";
+import { RequestArea } from "../../../conversation/questions/RequestArea/RequestArea.tsx";
 import UserMessages from "../UserMessages/UserMessages.tsx";
 
 /** A compact room clock; its native tooltip retains the full local date. */

@@ -9,10 +9,8 @@ import CodeBlock from "../CodeBlock/CodeBlock.tsx";
 import { createServerServices } from "../../../servers/serverServices.ts";
 import NewChatModelSettings from "../../settings/NewChatModelSettings/NewChatModelSettings.tsx";
 import { observable, runInAction, action, flow, when } from "mobx";
-import {
-  ServerAreasContextProvider,
-  type ServerAreas,
-} from "../../../app/ServerAreasProvider.tsx";
+import { type ServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   ServerStoreProvider,
   useServerStore,
@@ -20,7 +18,7 @@ import {
 import { createRoot } from "react-dom/client";
 import { WorkerError } from "../../agents/worker/WorkerError/WorkerError.tsx";
 import { NativeModelActions } from "../../conversation/NativeModelActions/NativeModelActions.tsx";
-import { ConversationProvider } from "../../conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ExecutionSummaryTrigger } from "../../agents/ExecutionSummaryTrigger/ExecutionSummaryTrigger.tsx";
 import { ClaudeSettings } from "../../settings/ClaudeSettings/ClaudeSettings.tsx";
 import TurnHistory from "../../conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
@@ -87,9 +85,8 @@ import {
   createUsageFixture,
   type UsageFixtureInputs,
 } from "../../../app/settings/UsageFixture.tsx";
-import Requests, {
-  RequestArea,
-} from "../../conversation/questions/Requests/Requests.tsx";
+import Requests from "../../conversation/questions/Requests/Requests.tsx";
+import { RequestArea } from "../../conversation/questions/RequestArea/RequestArea.tsx";
 import { approval } from "../../../approvalFixtures.ts";
 import type { AgentSetupPickerProps } from "../../agents/AgentSetupPicker/AgentSetupPicker.tsx";
 

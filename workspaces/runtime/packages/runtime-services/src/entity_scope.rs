@@ -66,6 +66,16 @@ fn page_units(units: &mut Vec<Unit>, limit: usize, after: i64, through: i64) -> 
     }
 }
 
+/// Later sources need no projection beyond the extra candidate already known to
+/// fall outside this page. Keep that candidate to prove truncation, including ties.
+fn projection_through(units: &[Unit], limit: usize, through: i64) -> i64 {
+    if units.len() <= limit {
+        return through;
+    }
+    let mut sequences = units.iter().map(|unit| unit.seq).collect::<Vec<_>>();
+    (*sequences.select_nth_unstable(limit).1).min(through)
+}
+
 /// Start a scoped read: resolve the reset decision over both sources, then read the
 /// first page. `since` is the client cursor; None or an out-of-range cursor resets.
 pub fn resume(
@@ -267,6 +277,7 @@ pub fn pull_global_fresh(
             None,
             None,
             limit + 1,
+            max_sequence,
         )?);
     }
     let room = limit as usize - head.len();
@@ -373,6 +384,7 @@ pub fn continue_page(
             agent,
             fetch,
         )?);
+        let project_through = projection_through(&units, limit as usize, through);
         units.extend(agent_units(
             transaction,
             after,
@@ -382,6 +394,7 @@ pub fn continue_page(
             id,
             agent,
             fetch,
+            project_through,
         )?);
         units.extend(window_units(
             transaction,
@@ -648,6 +661,7 @@ fn agent_units(
     id: Option<&str>,
     agent: Option<&str>,
     fetch: i64,
+    project_through: i64,
 ) -> StoreResult<Vec<Unit>> {
     let mut units = if agent.is_none() && wanted.contains("agentTail") {
         tail_units(connection, after, through, deletes_after, id, fetch)?
@@ -679,16 +693,31 @@ fn agent_units(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?
         .collect::<Result<_, _>>()?;
+    let project_through =
+        project_through.min(projection_through(&units, (fetch - 1) as usize, through));
     let contexts = if wanted.contains("agentSummary") {
         crate::agent_operational::load(
             connection,
-            &changed.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            &changed
+                .iter()
+                .filter(|(_, seq)| *seq <= project_through)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>(),
         )?
     } else {
         BTreeMap::new()
     };
     let snapshot = deletes_after == i64::MAX;
     for (agent_id, seq) in changed {
+        // Read candidate keys over the original interval before deferring views:
+        // narrowing SQL before MAX(seq) could expose an older mark for an agent.
+        if seq > project_through {
+            units.push(Unit {
+                seq,
+                rows: Vec::new(),
+            });
+            continue;
+        }
         // A gone agent reads as no views: deletes in a delta, nothing in a snapshot.
         let rows = agent_docs_with_context(
             connection,
@@ -862,12 +891,20 @@ fn agent_docs_with_context(
 pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
     let wanted = AGENT_VIEW_COLLECTIONS.iter().copied().collect();
     let high = durable_seq::high(connection)?;
-    Ok(
-        agent_units(connection, 0, high, i64::MAX, &wanted, None, None, i64::MAX)?
-            .into_iter()
-            .flat_map(|unit| unit.rows)
-            .collect(),
-    )
+    Ok(agent_units(
+        connection,
+        0,
+        high,
+        i64::MAX,
+        &wanted,
+        None,
+        None,
+        i64::MAX,
+        high,
+    )?
+    .into_iter()
+    .flat_map(|unit| unit.rows)
+    .collect())
 }
 
 /// Units of the window collections in `(after, through]`, at most `fetch` per window:
@@ -1298,6 +1335,84 @@ mod catch_up_query_tests {
         )
         .unwrap();
         db
+    }
+
+    #[tokio::test]
+    async fn scoped_page_does_not_project_agents_beyond_its_candidate_boundary() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(directory.path()))
+            .await
+            .unwrap();
+        store
+            .transaction_with(|tx| {
+                for id in ["first", "second"] {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        id,
+                        json!({"stateDir":id}),
+                        false,
+                    )?;
+                }
+                studio_runtime_store::AgentRepository::put(
+                    tx,
+                    &studio_runtime_store::AgentRecord::from_value(json!({
+                        "id":"later", "rootId":"later", "provider":"codex", "accountKey":"default",
+                        "epoch":1, "compactions":0, "status":"idle"
+                    }))?,
+                )?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .unwrap();
+        store
+            .test_read_transaction(|tx| {
+                let projections = Arc::new(AtomicUsize::new(0));
+                let observed = projections.clone();
+                tx.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        rusqlite::hooks::AuthAction::Read {
+                            table_name: "runtime_agents",
+                            column_name: "record",
+                            ..
+                        }
+                    ) {
+                        observed.fetch_add(1, Ordering::Relaxed);
+                    }
+                    rusqlite::hooks::Authorization::Allow
+                }))?;
+                let collections = r#"["workspace","agentSummary"]"#;
+                let mut page = resume(tx, None, Some(collections), None, None, false, 1)?;
+                assert_eq!(page.rows[0].id, "current");
+                assert!(page.checkpoint < page.max_sequence);
+                assert_eq!(
+                    projections.load(Ordering::Relaxed),
+                    0,
+                    "later agent views must not be built and discarded on this page"
+                );
+                tx.authorizer(
+                    None::<fn(rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization>,
+                )?;
+                let mut ids = page
+                    .rows
+                    .iter()
+                    .map(|row| row.id.clone())
+                    .collect::<Vec<_>>();
+                while page.checkpoint < page.max_sequence {
+                    let next = continue_page(tx, &page, Some(collections), None, None, false, 1)?;
+                    assert!(next.checkpoint > page.checkpoint);
+                    ids.extend(next.rows.iter().map(|row| row.id.clone()));
+                    page = next;
+                }
+                assert_eq!(ids, ["current", "first", "second", "later"]);
+                Ok::<_, StoreError>(())
+            })
+            .unwrap();
     }
 
     #[test]

@@ -246,8 +246,4 @@ export class ServerAreas {
   });
 }
 
-export {
-  useServerAreas,
-  ServerAreasContextProvider,
-  ServerAreasContextProvider as Provider,
-} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+export { useServerAreas } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";

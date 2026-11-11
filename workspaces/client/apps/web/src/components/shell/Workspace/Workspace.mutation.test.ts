@@ -3,7 +3,7 @@ import { MantineProvider } from "@mantine/core";
 import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { Provider as AreaProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as AreaProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   conversationActionsFixture,
   observableFixture,

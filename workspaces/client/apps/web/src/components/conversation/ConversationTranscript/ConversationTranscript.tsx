@@ -35,10 +35,9 @@ import {
 import { type Message } from "../../../types.ts";
 import { SelectedTitle } from "../SelectedTitle/SelectedTitle.tsx";
 import { reportPromptComposerRender } from "../../../perf/promptComposerRenderProbe.ts";
-import Requests, {
-  RequestArea,
-  RequestCard,
-} from "../questions/Requests/Requests.tsx";
+import Requests from "../questions/Requests/Requests.tsx";
+import { RequestArea } from "../questions/RequestArea/RequestArea.tsx";
+import { RequestCard } from "../questions/RequestCard/RequestCard.tsx";
 import MessageDate from "../transcript/MessageDate/MessageDate.tsx";
 import ClaudeRepairNotice from "../ClaudeRepairNotice/ClaudeRepairNotice.tsx";
 import TurnHistory from "../transcript/TurnHistory/TurnHistory.tsx";

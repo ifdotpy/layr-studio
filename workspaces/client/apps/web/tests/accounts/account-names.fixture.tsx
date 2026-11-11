@@ -2,7 +2,7 @@ import "../../src/rendererStyles.ts";
 import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { AccountsState } from "../../src/components/accounts/support/Accounts.tsx";
 import { browserAreas } from "../fixtures/owner-support.tsx";
-import { Provider } from "../../src/app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as Provider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";

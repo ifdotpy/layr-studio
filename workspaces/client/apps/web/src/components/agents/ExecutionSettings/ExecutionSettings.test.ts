@@ -20,7 +20,7 @@ import {
 } from "../../../generated/api.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
-import { Provider as AreasProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerAreasContextProvider as AreasProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 const renderToStaticMarkup = (node: Parameters<typeof renderMarkup>[0]) =>
   renderMarkup(createElement(AreasProvider, { value: areas }, node));
 import { MantineProvider } from "@mantine/core";

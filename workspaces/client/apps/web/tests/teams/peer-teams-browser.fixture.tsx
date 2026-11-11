@@ -6,7 +6,7 @@ import { createServerStore } from "../../src/store/server.ts";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import "../../src/rendererStyles.ts";
 import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
-import { ConversationProvider } from "../../src/components/conversation/support/navigation.ts";
+import { ServerAreasContextProvider as ConversationProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   ServerStoreProvider,
   useServerStore,
