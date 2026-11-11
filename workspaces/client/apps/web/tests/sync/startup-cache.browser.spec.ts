@@ -217,6 +217,18 @@ test("a direct view paints the cached shell while its initial stream is held; a 
       truncated: false,
     }),
   });
+  // Model identities are qualified by account; provider payload ids stay bare.
+  server.snapshot.runtime.modelsByAccount = {
+    default: [
+      {
+        id: "fixture-model",
+        model: "fixture-model",
+        accountKey: "default",
+        catalogPosition: 0,
+        provider: "codex",
+      },
+    ],
+  };
   const running = server.snapshot.threads[0];
   if (!running) throw new Error("Missing startup conversation");
   running.inFlight = true;

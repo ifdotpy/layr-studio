@@ -967,10 +967,13 @@ test("accounts settings show per-server state and provider choices", async ({
   await expect(startAgain).not.toBeVisible();
   await page.clock.fastForward(1);
   await expect(startAgain).toBeVisible();
-  await expect(startAgain).toBeDisabled();
+  // The held reconnect makes the readiness flag false asynchronously after the
+  // watchdog fires; wait for that syncing state, then the button must be disabled.
   await expect(secondClaudeSignIn).toContainText(
     "Syncing. Sign-in will be available when sync finishes.",
+    { timeout: 15_000 },
   );
+  await expect(startAgain).toBeDisabled();
   expect(addStarts).toHaveLength(3);
   heldRecovery.resolve();
   await page.clock.resume();

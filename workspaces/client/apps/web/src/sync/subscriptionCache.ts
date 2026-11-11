@@ -170,9 +170,6 @@ function decode(
       const entity = "entity" in row ? parseEntityPayload(row.entity) : null;
       if (
         !entity ||
-        (entity.collection === "agentDetail" &&
-          entity.value.id !== entity.id) ||
-        ("id" in entity.value && entity.value.id !== entity.id) ||
         !scope ||
         !scope.collections.includes(entity.collection) ||
         row.id !== `entity:${entity.collection}:${entity.id}` ||

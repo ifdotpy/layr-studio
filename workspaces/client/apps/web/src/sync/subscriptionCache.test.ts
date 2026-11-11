@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   SUBSCRIPTION_CACHE_INDEX_KEY,
   SUBSCRIPTION_CACHE_VERSION,
+  SUBSCRIPTION_CACHE_WRITE_MS,
   createSubscriptionCache,
   subscriptionRows,
 } from "./subscriptionCache.ts";
@@ -13,7 +14,11 @@ import {
 import { subscriptionKey } from "./subscriptions/contracts.ts";
 import { TRANSCRIPT_PROJECTION_FORMAT } from "./transcriptMetadata.ts";
 import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
-import { AgentStatus, SubscriptionCachePolicy } from "../generated/api.ts";
+import {
+  AgentStatus,
+  SubscriptionCachePolicy,
+  type SyncEntityPayload,
+} from "../generated/api.ts";
 
 const ref = { kind: "transcript", agentId: "agent" } as const;
 const cursor = { workspaceId: "workspace", seq: 4 };
@@ -119,6 +124,64 @@ it.each([
   },
 );
 
+it("reloads a persisted state snapshot with account-qualified model identities", async () => {
+  vi.useFakeTimers();
+  const state = { kind: "state" } as const;
+  const values = new Map<string, unknown>();
+  const storage = {
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: unknown) => {
+      values.set(key, value);
+    },
+    delete: async (key: string) => {
+      values.delete(key);
+    },
+  };
+  const collection = new LocalCollection("model-state-writer");
+  const entity = {
+    collection: "model" as const,
+    id: "account:fixture-model",
+    value: {
+      id: "fixture-model",
+      model: "fixture-model",
+      accountKey: "account",
+      catalogPosition: 0,
+      provider: "codex",
+    },
+  } satisfies SyncEntityPayload;
+  await collection.applyBatch([
+    {
+      id: `entity:model:${entity.id}`,
+      seq: cursor.seq,
+      payload: "",
+      entity,
+    },
+  ]);
+  const writer = createSubscriptionCache(storage, collection, "workspace");
+  await writer.setPolicy(state, SubscriptionCachePolicy.cache);
+  writer.save(state, cursor, await subscriptionRows(state, collection));
+  await vi.advanceTimersByTimeAsync(SUBSCRIPTION_CACHE_WRITE_MS);
+  expect(values.size).toBe(2);
+  writer.stop();
+  const reloaded = new LocalCollection("model-state-reader");
+  const reader = createSubscriptionCache(storage, reloaded, "workspace");
+  try {
+    expect(await reader.load(state)).toEqual(cursor);
+    expect(reloaded.all()).toContainEqual({
+      id: `entity:model:${entity.id}`,
+      seq: cursor.seq,
+      payload: "",
+      entity,
+      _deleted: false,
+    });
+    expect(reloaded.all()).toContainEqual(
+      expect.objectContaining({ id: "state:entities:ready", payload: "ready" }),
+    );
+  } finally {
+    reader.stop();
+  }
+});
+
 it("hydrates the cached data before returning its resume cursor", async () => {
   const storage = {
     get: vi.fn().mockResolvedValue({
@@ -141,7 +204,7 @@ it("hydrates the cached data before returning its resume cursor", async () => {
   cache.stop();
 });
 
-it("drops a malformed entity before exposing a resume cursor", async () => {
+it("drops an entity outside the selected scope before exposing a resume cursor", async () => {
   const selected = { kind: "agentDetail", agentId: "agent" } as const;
   const storage = {
     get: vi.fn().mockResolvedValue({
@@ -152,9 +215,13 @@ it("drops a malformed entity before exposing a resume cursor", async () => {
       data: [
         {
           kind: "entity",
-          id: "entity:agentDetail:agent",
+          id: "entity:agentDetail:other",
           seq: 4,
-          entity: { collection: "agentDetail", id: "agent", value: {} },
+          entity: {
+            collection: "agentDetail",
+            id: "other",
+            value: { id: "other" },
+          },
         },
       ],
     }),
@@ -304,6 +371,12 @@ it.each([
     contractHash: "wrong",
     subscription: subscriptionKey(ref),
     cursor,
+    data: [cachedRow],
+  },
+  {
+    version: SUBSCRIPTION_CACHE_VERSION,
+    subscription: subscriptionKey(ref),
+    cursor: { ...cursor, workspaceId: "other-workspace" },
     data: [cachedRow],
   },
 ])(
@@ -648,38 +721,6 @@ it.each([null, [], { id: "other" }])(
     cache.stop();
   },
 );
-
-it("rejects an entity with an invalid value", async () => {
-  const selected = { kind: "agentDetail", agentId: "agent" } as const;
-  const storage = {
-    get: vi.fn().mockResolvedValue({
-      version: SUBSCRIPTION_CACHE_VERSION,
-      contractHash: API_SCHEMA_HASH,
-      subscription: subscriptionKey(selected),
-      cursor,
-      data: [
-        {
-          kind: "entity",
-          id: "entity:agentDetail:agent",
-          seq: 4,
-          entity: {
-            collection: "agentDetail",
-            id: "agent",
-            value: { id: "other" },
-          },
-        },
-      ],
-    }),
-    put: vi.fn(),
-    delete: vi.fn(),
-  };
-  const collection = new LocalCollection("fixture");
-  const cache = createSubscriptionCache(storage, collection, "workspace");
-  expect(await cache.load(selected)).toBeUndefined();
-  expect(storage.delete).toHaveBeenCalledOnce();
-  expect(collection.all()).toEqual([]);
-  cache.stop();
-});
 
 const PAYLOAD = 1_000;
 const agentRef = (agentId: string) =>
