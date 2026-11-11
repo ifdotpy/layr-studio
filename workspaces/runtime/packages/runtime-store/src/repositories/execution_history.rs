@@ -20,6 +20,52 @@ pub struct AttemptReceipt<I> {
     pub result: Value,
 }
 
+/// Settled provider request ownership, read from its existing execution attempt.
+#[derive(studio_db_api::DbProjection)]
+#[db(of = ExecutionRunsRow)]
+pub struct ProviderRequestTurn {
+    pub agent: String,
+    pub turn: Option<String>,
+}
+
+#[studio_db_api::db_queries]
+mod provider_request_queries {
+    use super::*;
+    use crate::{
+        agent_tables::SessionsStorageRow,
+        peer_update_settings::Canvas,
+        receipt_tables::{OutboxStorageRow, RequestResultsRow},
+    };
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = Canvas, mode = read, cardinality = many,
+        result = ProviderRequestTurn, projection = ProviderRequestTurn,
+        tables(runs = ExecutionRunsRow, attempts = ExecutionAttemptsRow, sessions = SessionsStorageRow),
+        columns(agent = ExecutionRunsRow::AGENT, turn = ExecutionRunsRow::TURN,
+            account = ExecutionRunsRow::ACCOUNT, thread = ExecutionRunsRow::THREAD,
+            run_id = ExecutionRunsRow::ID, run = ExecutionAttemptsRow::RUN,
+            record = ExecutionAttemptsRow::RECORD, chat = SessionsStorageRow::CHAT,
+            session_thread = SessionsStorageRow::THREAD_ID, session_account = SessionsStorageRow::ACCOUNT_KEY,
+            state = SessionsStorageRow::STATE),
+        sql = "SELECT r.{agent} AS {agent},json_extract(a.{record},'$.turnId') AS {turn}
+            FROM {runs} r JOIN {attempts} a ON a.{run}=r.{run_id}
+            WHERE r.{agent} IN (SELECT {chat} FROM {sessions}
+                WHERE {session_thread}=?2 AND {session_account}=?1 AND {state}<>'ended')
+            AND r.{account}=?1 AND r.{thread}=?2
+            AND json_extract(a.{record},'$.requestTicket')=?3
+            AND json_extract(a.{record},'$.connectionGeneration')=?4 LIMIT 2")]
+    pub struct Turn<'a> {
+        #[db(column = ExecutionRunsRow::ACCOUNT)]
+        pub account: &'a str,
+        #[db(column = SessionsStorageRow::THREAD_ID)]
+        pub thread: &'a str,
+        #[db(column = RequestResultsRow::ID)]
+        pub request: &'a str,
+        #[db(column = OutboxStorageRow::GENERATION)]
+        pub generation: Option<i64>,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionRun<T = String, E = studio_json::Number> {
@@ -348,6 +394,35 @@ impl ExecutionHistoryRepository {
             Ok(attempt)
         })
         .transpose()
+    }
+
+    pub fn provider_request_turn(
+        db: &rusqlite::Connection,
+        account: &str,
+        thread: &str,
+        request: &str,
+        generation: u64,
+    ) -> StoreResult<Option<ProviderRequestTurn>> {
+        let Ok(generation) = i64::try_from(generation) else {
+            return Ok(None);
+        };
+        let mut rows = crate::peer_update_settings::canvas_read(db).collect(
+            &provider_request_queries::Turn::QUERY,
+            &provider_request_queries::Turn {
+                account,
+                thread,
+                request,
+                generation: Some(generation),
+            },
+        )?;
+        Ok((rows.len() == 1).then(|| rows.remove(0)))
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn validate_provider_request_queries(
+        db: &rusqlite::Connection,
+    ) -> Result<(), studio_db_api::QueryValidationError> {
+        provider_request_queries::validate_queries(db)
     }
     /// Read the current execution by its owner pointer. History order never grants authority.
     pub fn current_run(

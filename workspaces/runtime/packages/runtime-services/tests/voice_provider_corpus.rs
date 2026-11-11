@@ -1972,6 +1972,7 @@ impl VoiceProviderPort for BlockingProvider {
                 | Method::ThreadResume
                 | Method::ThreadRead
                 | Method::ThreadTurnsList
+                | Method::ThreadTurnsItemsList
                 | Method::TurnStart
                 | Method::TurnSteer
                 | Method::TurnInterrupt

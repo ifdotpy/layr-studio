@@ -208,23 +208,43 @@ pub async fn admit_native(
             if let Some(body) = immediate(&snapshot, &request)? {
                 return Ok(NativeAdmission::Answer(body));
             }
-            // Read the mode once; Ask can race an approval already admitted.
-            if snapshot.actor()["provider"] != ProviderKind::Claude.key()
-                && snapshot.actor()["permissionMode"]
-                    == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-                        .as_str()
+            let policy = full_access_policy(&snapshot)?;
+            if matches!(policy, Some(FullAccessPolicy::Answer))
                 && full_access_covers(&request.method)
             {
                 return record_policy_answer(tx, &context, &identity, &request, now)
                     .map(NativeAdmission::Answer);
             }
-            let CallbackDecision::Pending(id) = admit(tx, &context, &snapshot, &request, now)?
+            let CallbackDecision::Pending(id) =
+                admit_with_policy(tx, &context, &snapshot, &request, now, policy)?
             else {
                 return Err(CallbackError::Unknown);
             };
             Ok(NativeAdmission::Card(id))
         })
         .await
+}
+
+/// Native permission semantics in full access mode. New providers must choose
+/// explicitly; they cannot inherit another provider's permission behavior.
+#[derive(Clone, Copy)]
+enum FullAccessPolicy {
+    Answer,
+    Deadline,
+}
+
+fn full_access_policy(
+    snapshot: &CallbackSnapshot,
+) -> Result<Option<FullAccessPolicy>, CallbackError> {
+    let provider = ProviderKind::of_record(snapshot.actor())
+        .map_err(|_| CallbackError::Stored("runtime_agents/provider".into()))?;
+    let policy = match provider {
+        ProviderKind::Codex => FullAccessPolicy::Answer,
+        ProviderKind::Claude => FullAccessPolicy::Deadline,
+    };
+    Ok((snapshot.actor()["permissionMode"]
+        == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions.as_str())
+    .then_some(policy))
 }
 
 /// Tool approvals share the answer conversion of explicit user answers.
@@ -523,6 +543,24 @@ pub(super) fn admit(
     input: &Input,
     now: f64,
 ) -> Result<CallbackDecision, CallbackError> {
+    admit_with_policy(
+        tx,
+        context,
+        snapshot,
+        input,
+        now,
+        full_access_policy(snapshot)?,
+    )
+}
+
+fn admit_with_policy(
+    tx: &Transaction<'_>,
+    context: &CallbackContext,
+    snapshot: &CallbackSnapshot,
+    input: &Input,
+    now: f64,
+    policy: Option<FullAccessPolicy>,
+) -> Result<CallbackDecision, CallbackError> {
     let identity = ReplyIdentity::new(context, &input.id);
     if let Some(decision) = storage::saved_decision(tx, &identity, input)? {
         return Ok(decision);
@@ -534,10 +572,7 @@ pub(super) fn admit(
     let id = owner.id.clone();
     // A Claude agent in full access mode asks only what Claude Code insists on.
     // Nobody watches for it, so the server declines it after a time.
-    let fire_at = (snapshot.actor()["provider"] == ProviderKind::Claude.key()
-        && snapshot.actor()["permissionMode"]
-            == studio_runtime_schema::claude_permissions::PermissionMode::BypassPermissions
-                .as_str()
+    let fire_at = (matches!(policy, Some(FullAccessPolicy::Deadline))
         && input.method == CLAUDE_TOOL_METHOD)
         .then_some(Timestamp(now + CLAUDE_FULL_ACCESS_APPROVAL_SECONDS));
     let new = new_approval(tx, &id, context, input, fire_at)?;

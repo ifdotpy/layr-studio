@@ -453,6 +453,8 @@ impl ProviderTaskFactory for WireFactory {
                 handle: handle.clone(),
                 open_attempted: true,
                 info: Some(AttachmentInfo {
+                    spawn_started_at: None,
+                    initialized_at: None,
                     handle: handle.clone(),
                     generation: Generation(7),
                     pid: 1,
@@ -492,6 +494,7 @@ impl ProviderTaskFactory for WireFactory {
                                         current.initialization = InitializationStatus::Ready;
                                     });
                                     CommandReceipt::Written {
+                                        written_at: None,
                                         remote_id: None,
                                         duplicate: false,
                                     }
@@ -503,6 +506,7 @@ impl ProviderTaskFactory for WireFactory {
                                             .unwrap();
                                     }
                                     CommandReceipt::Written {
+                                        written_at: None,
                                         remote_id: Some(sequence),
                                         duplicate: false,
                                     }
@@ -514,6 +518,7 @@ impl ProviderTaskFactory for WireFactory {
                                         CommandReceipt::Unknown
                                     } else {
                                         CommandReceipt::Written {
+                                            written_at: None,
                                             remote_id: None,
                                             duplicate: false,
                                         }
@@ -533,7 +538,7 @@ impl ProviderTaskFactory for WireFactory {
                                 });
                                 let thread_id = write.message()["params"]["threadId"].clone();
                                 sequence += 1;
-                                events.send(JournalEntry {
+                                events.send(JournalEntry { boundary_at: None,
                                     received_at_ms: 0,
                                     cursor: EventCursor(sequence),
                                     generation: Generation(7),
@@ -548,6 +553,7 @@ impl ProviderTaskFactory for WireFactory {
                                 sequence += 1;
                                 events
                                     .send(JournalEntry {
+                                        boundary_at: None,
                                         received_at_ms: 0,
                                         cursor: EventCursor(sequence),
                                         generation: Generation(7),
@@ -591,6 +597,7 @@ impl ProviderTaskFactory for WireFactory {
                                             sequence += 1;
                                             events
                                                 .send(JournalEntry {
+                                                    boundary_at: None,
                                                     received_at_ms: 0,
                                                     cursor: EventCursor(sequence),
                                                     generation: Generation(7),
@@ -614,6 +621,7 @@ impl ProviderTaskFactory for WireFactory {
                                         sequence += 1;
                                         events
                                             .send(JournalEntry {
+                                                boundary_at: None,
                                                 received_at_ms: 0,
                                                 cursor: EventCursor(sequence),
                                                 generation: Generation(7),
@@ -632,7 +640,7 @@ impl ProviderTaskFactory for WireFactory {
                                             .unwrap();
                                         sequence += 1;
                                         events
-                                            .send(JournalEntry {
+                                            .send(JournalEntry { boundary_at: None,
                                                 received_at_ms: 0,
                                                 cursor: EventCursor(sequence),
                                                 generation: Generation(7),
@@ -3595,6 +3603,11 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
         .unwrap();
         std::os::unix::fs::symlink(bridge_node_modules, temp.path().join("node_modules")).unwrap();
         std::fs::write(&sdk, include_str!("fixtures/claude-sdk.mts")).unwrap();
+        std::fs::write(
+            temp.path().join("package.json"),
+            r#"{"version":"0.0.0-fixture"}"#,
+        )
+        .unwrap();
         std::fs::write(
             &loader,
             "import fs from 'node:fs'; import {registerHooks} from 'node:module'; import {pathToFileURL} from 'node:url'; fs.appendFileSync(process.env.STUDIO_TEST_CLAUDE_LOG,'loader-loaded\\n'); registerHooks({resolve(specifier,context,nextResolve){if(specifier==='@anthropic-ai/claude-agent-sdk'){fs.appendFileSync(process.env.STUDIO_TEST_CLAUDE_LOG,'sdk-resolved\\n');return {url:pathToFileURL(process.env.STUDIO_TEST_CLAUDE_SDK).href,shortCircuit:true};}return nextResolve(specifier,context);}});\n",

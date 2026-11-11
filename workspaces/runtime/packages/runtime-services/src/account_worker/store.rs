@@ -178,10 +178,7 @@ pub(super) fn save_account_submission(
     }
     let account = &context.intent.account_key;
     let request = super::retained::storage::TransportRequest::from(request);
-    let signature = studio_runtime_store::sha256_hex(
-        &studio_json::to_vec(&json!({"context":context,"request":request}))
-            .map_err(StoreError::from)?,
-    );
+    let signature = boundary::submission_signature(context, &request)?;
     Outbox::put(
         tx,
         &OutboxRow {
@@ -220,8 +217,10 @@ fn account_written(
     let ProviderCall::Account(call) = &mut row.payload else {
         return Err(invalid(operation));
     };
-    let written = super::retained::storage::TransportRequest::from(request);
-    if call.written.as_ref().is_some_and(|old| old != &written) {
+    let mut written = super::retained::storage::TransportRequest::from(request);
+    if let Some(old) = call.written.as_ref()
+        && !boundary::merge_receipt(&mut written, old)
+    {
         return Err(invalid(operation));
     }
     call.written = Some(written);
@@ -450,7 +449,11 @@ pub(super) fn record_supervisor_written(
             if remote_id.is_some() {
                 request.remote_id = remote_id;
             }
-            if call.written.as_ref().is_some_and(|old| old != &request) {
+            if call
+                .written
+                .as_ref()
+                .is_some_and(|old| !boundary::merge_receipt(&mut request, old))
+            {
                 return Err(invalid(operation));
             }
             call.written = Some(request);
@@ -1228,6 +1231,7 @@ pub(super) async fn submitted(
                 | Method::ThreadResume
                 | Method::ThreadRead
                 | Method::ThreadTurnsList
+                | Method::ThreadTurnsItemsList
                 | Method::TurnSteer
                 | Method::ThreadList
                 | Method::ThreadArchive
@@ -1450,11 +1454,24 @@ pub(super) async fn outcome(
     session_closed: bool,
 ) -> Result<(SettledOutcome, Option<agent_fault::AgentFault>), WorkerError> {
     let Some(context) = pending else {
-        if let SessionOutcome::GenerationClosed { generation } = outcome {
-            scheduler::lifecycle_transaction(&store, move |tx| {
-                disconnect_provider_generation(tx, &account, generation, false)
-            })
-            .await?;
+        match outcome {
+            SessionOutcome::Write {
+                outcome: WriteOutcome::Written,
+                recovery: Some(request),
+                ..
+            } => {
+                scheduler::lifecycle_transaction_with(&store, move |tx| {
+                    boundary::late_written(tx, &account, &request)
+                })
+                .await?;
+            }
+            SessionOutcome::GenerationClosed { generation } => {
+                scheduler::lifecycle_transaction(&store, move |tx| {
+                    disconnect_provider_generation(tx, &account, generation, false)
+                })
+                .await?;
+            }
+            SessionOutcome::Write { .. } | SessionOutcome::Resolved { .. } => {}
         }
         return Ok((SettledOutcome::default(), None));
     };
@@ -1476,6 +1493,7 @@ pub(super) async fn outcome(
         resources,
         context,
         outcome,
+        reply_boundary_at: None,
         session_closed,
     };
     scheduler::lifecycle_transaction_with(&store, move |tx| {
@@ -1547,6 +1565,8 @@ pub(super) struct OutcomeStep {
     pub resources: Arc<preparation::PreparationResources>,
     pub context: Arc<Pending>,
     pub outcome: SessionOutcome,
+    /// Provider reply receive sample, retained when queue capacity defers its entry.
+    pub reply_boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     pub session_closed: bool,
 }
 
@@ -1561,6 +1581,7 @@ fn settle_outcome(
         resources,
         context,
         outcome,
+        reply_boundary_at: _,
         session_closed,
     } = step;
     let i = &context.intent;
@@ -1842,6 +1863,7 @@ fn settle_outcome(
                 | Method::ThreadRealtimeClosed
                 | Method::ThreadRead
                 | Method::ThreadTurnsList
+                | Method::ThreadTurnsItemsList
                 | Method::TurnSteer
                 | Method::ThreadList
                 | Method::ThreadArchive
@@ -2379,13 +2401,25 @@ pub(super) async fn journal_batch(
         // A background recovery can commit before its cache handoff arrives.
         // Validate the cached snapshot under the writer, reconstructing only
         // after a newer commit or rollback invalidated its revision.
-        let streams = current_streams(tx, &account, Some(&streams))?;
+        let streams = current_streams(tx, &account, Some(streams))?;
         let mut faults = Vec::new();
         // Before this batch's receipts are counted against their bound.
         delete_delivered_publications(tx, &delivered)?;
         // The outcome a reply carries settles before its own journal entry.
         let settled = match outcome {
             Some(step) => {
+                if let SessionOutcome::Resolved {
+                    outcome:
+                        RequestOutcome::Reply {
+                            body: ResponseBody::Result(value),
+                            ..
+                        },
+                    ..
+                } = &step.outcome
+                    && let Some(turn) = value["turn"]["id"].as_str()
+                {
+                    boundary::seed(tx, &step.context, turn, step.reply_boundary_at)?;
+                }
                 let (settled, fault) = settle_outcome_isolated(tx, &state_root, *step)?;
                 faults.extend(fault);
                 Some(settled)
@@ -2445,9 +2479,11 @@ pub(super) async fn journal_batch(
                 applied => applied?,
             };
             match applied {
-                Ok(Some((updated, effect))) => {
-                    next = updated;
-                    committed.push((entry, effect));
+                Ok(Some(applied)) => {
+                    if let Some(updated) = applied.stream_update {
+                        next = updated;
+                    }
+                    committed.push((entry, applied.effect));
                 }
                 Ok(None) => {
                     deferred_agent = subject;
@@ -2661,6 +2697,11 @@ fn record_manual_release_closure(
     Ok(true)
 }
 
+struct JournalApplied {
+    stream_update: Option<NotificationStreamBuffer>,
+    effect: Option<Effect>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn journal_one(
     tx: &rusqlite::Transaction<'_>,
@@ -2672,26 +2713,42 @@ fn journal_one(
     limits_observation: Option<&crate::usage_resume::LimitsObservation>,
     outbox: &mut PublicationOutbox,
     policy: JournalPolicy<'_>,
-) -> Result<Option<(NotificationStreamBuffer, Option<Effect>)>, WorkerError> {
+) -> Result<Option<JournalApplied>, WorkerError> {
     let JournalIdentity {
         account,
         journal_scope,
     } = identity;
     let operation = journal_operation(journal_scope, entry.generation.0, entry.cursor.0);
-    let digest = journal_digest(entry, &operation)?;
+    let encoded_frame = match &entry.payload {
+        JournalPayload::Frame(frame) => Some(journal_frame_payload(frame, &operation)?),
+        JournalPayload::RawStdout { .. }
+        | JournalPayload::Stderr(_)
+        | JournalPayload::Exit(_)
+        | JournalPayload::Other { .. } => None,
+    };
+    let digest = match &encoded_frame {
+        Some(bytes) => studio_runtime_store::sha256_hex(bytes),
+        None => journal_digest(entry, &operation)?,
+    };
     let stream_generation = current_stream_generation(tx, journal_scope, entry.generation.0)?;
     if entry.cursor.0 <= checkpoint(tx, journal_scope, stream_generation)? {
-        return Ok(Some((streams.clone(), None)));
+        return Ok(Some(JournalApplied {
+            stream_update: None,
+            effect: None,
+        }));
     }
     if let Some(old) = Outbox::get::<JournalSettlement>(tx, &operation).map_err(outbox_error)? {
         if !old.payload.digest.is_empty() && old.payload.digest != digest {
             return Err(invalid(&operation));
         }
         if old.payload.committed {
-            return Ok(Some((streams.clone(), None)));
+            return Ok(Some(JournalApplied {
+                stream_update: None,
+                effect: None,
+            }));
         }
     }
-    let mut next = streams.clone();
+    let mut next = std::borrow::Cow::Borrowed(streams);
     let mut effect = None;
     let mut publications = Vec::new();
     if let JournalPayload::Frame(frame) = &entry.payload {
@@ -2861,7 +2918,8 @@ fn journal_one(
                                 cursor: entry.cursor.0,
                             };
                             let observation_agent = NotificationAgent::from(&agent);
-                            next.queue_effects(
+                            boundary::seed_started(tx, &identity, turn)?;
+                            let mut boundary_effects =
                                 crate::notification_runtime_effects::RuntimeNotificationEffects
                                     .post_commit(
                                         Some(&observation_agent),
@@ -2871,9 +2929,10 @@ fn journal_one(
                                         crate::notification_dispatch::ObservationTime::new(now())
                                             .ok_or_else(|| invalid(&identity.agent_id))?,
                                         &crate::notification_dispatch::DispatchOutcome::Written,
-                                    ),
-                            );
-                            publications.push(next.take_post_commit()?);
+                                    );
+                            boundary::stamp_effects(&mut boundary_effects, entry.boundary_at);
+                            next.to_mut().queue_effects(boundary_effects);
+                            publications.push(next.to_mut().take_post_commit()?);
                             if interrupt {
                                 effect = Some(Effect::Interrupt {
                                     agent: identity.agent_id,
@@ -2899,15 +2958,16 @@ fn journal_one(
                             )?;
                             return Ok(None);
                         }
-                        next = flush_notification_streams(
+                        if let Some(flushed) = flush_notification_streams(
                             tx,
                             &identity.agent_id,
                             publication,
                             streams,
                             now(),
-                        )?
-                        .unwrap_or(next);
-                        publications.push(next.take_post_commit()?);
+                        )? {
+                            next = std::borrow::Cow::Owned(flushed);
+                        }
+                        publications.push(next.to_mut().take_post_commit()?);
                         let agent_before =
                             NotificationDispatchRepository::agent_record(tx, &identity.agent_id)?
                                 .ok_or_else(|| invalid(&identity.agent_id))?;
@@ -2950,7 +3010,7 @@ fn journal_one(
                                 generation: entry.generation.0,
                                 cursor: entry.cursor.0,
                             };
-                            next.queue_effects(
+                            let mut boundary_effects =
                                 crate::notification_runtime_effects::RuntimeNotificationEffects
                                     .post_commit(
                                         Some(&NotificationAgent::from(&agent_before)),
@@ -2960,17 +3020,23 @@ fn journal_one(
                                         crate::notification_dispatch::ObservationTime::new(now())
                                             .ok_or_else(|| invalid(&identity.agent_id))?,
                                         &crate::notification_dispatch::DispatchOutcome::Written,
-                                    ),
-                            );
-                            publications.push(next.take_post_commit()?);
+                                    );
+                            boundary::stamp_effects(&mut boundary_effects, entry.boundary_at);
+                            next.to_mut().queue_effects(boundary_effects);
+                            publications.push(next.to_mut().take_post_commit()?);
                             crate::notification_dispatch::prune_inactive_streams(
                                 tx,
-                                &mut next,
+                                next.to_mut(),
                                 now(),
                                 false,
                             )?;
                             if let Some(turn) = turn {
-                                next.settle_turn(&identity.agent_id, account, thread, turn);
+                                next.to_mut().settle_turn(
+                                    &identity.agent_id,
+                                    account,
+                                    thread,
+                                    turn,
+                                );
                             }
                             effect = Some(
                                 if params["turn"]["status"] == "failed"
@@ -3030,6 +3096,11 @@ fn journal_one(
                             CheckedNotificationDispatch {
                                 agent_id: &identity.agent_id,
                                 agent,
+                                boundary_at: entry.boundary_at,
+                                canonical_frame: encoded_frame.as_deref().map(|bytes| {
+                                    &bytes[JOURNAL_FRAME_PAYLOAD_PREFIX.len()
+                                        ..bytes.len() - JOURNAL_FRAME_PAYLOAD_SUFFIX.len()]
+                                }),
                                 effects:
                                     &crate::notification_runtime_effects::RuntimeNotificationEffects,
                             },
@@ -3046,24 +3117,22 @@ fn journal_one(
                             now(),
                         )?;
                         publications.push(dispatched.post_commit);
-                        let staged = dispatched.stream_update.unwrap_or(next);
-                        next = if staged.pending_bytes() >= STREAM_FLUSH_BYTES {
+                        if let Some(staged) = dispatched.stream_update {
+                            next = std::borrow::Cow::Owned(staged);
+                        }
+                        if next.pending_bytes() >= STREAM_FLUSH_BYTES {
                             let flushed = flush_notification_streams(
                                 tx,
                                 &identity.agent_id,
                                 publication,
-                                &staged,
+                                &next,
                                 now(),
                             )?;
                             if let Some(mut flushed) = flushed {
                                 publications.push(flushed.take_post_commit()?);
-                                flushed
-                            } else {
-                                staged
+                                next = std::borrow::Cow::Owned(flushed);
                             }
-                        } else {
-                            staged
-                        };
+                        }
                     }
                 }
             }
@@ -3081,7 +3150,14 @@ fn journal_one(
     // answer, so the cursor settles without waiting for it.
     super::callback_record::accept(tx, account, journal_scope, entry)?;
     save_journal(tx, identity, entry, digest, true)?;
-    Ok(Some((next, effect)))
+    let update = match next {
+        std::borrow::Cow::Borrowed(_) => None,
+        std::borrow::Cow::Owned(next) => Some(next),
+    };
+    Ok(Some(JournalApplied {
+        stream_update: update,
+        effect,
+    }))
 }
 
 /// Count the real journal dispatch work without the outer batch's publication validation.
@@ -3095,7 +3171,10 @@ pub(super) fn test_journal_dispatch_work(
     let mut streams = NotificationStreamBuffer::default();
     let mut outbox = PublicationOutbox::default();
     for entry in entries {
-        if let Some((next, _)) = journal_one(
+        if let Some(JournalApplied {
+            stream_update: Some(next),
+            ..
+        }) = journal_one(
             tx,
             JournalIdentity {
                 account: "default",
@@ -4248,7 +4327,7 @@ pub(crate) fn persist_streams(
 pub(super) fn current_streams(
     tx: &studio_runtime_store::Transaction<'_>,
     account: &str,
-    cached: Option<&NotificationStreamBuffer>,
+    cached: Option<NotificationStreamBuffer>,
 ) -> Result<NotificationStreamBuffer, WorkerError> {
     if let Some(cached) = cached
         && let Some((cached_account, revision)) = &cached.store_revision
@@ -4256,7 +4335,7 @@ pub(super) fn current_streams(
     {
         let current:Option<String>=tx.query_row_cached("SELECT json_extract(streams,'$.revision') FROM runtime_account_state WHERE account=?1",[account],|row|row.get(0)).optional()?.flatten();
         if current.as_ref() == Some(revision) {
-            return Ok(cached.clone());
+            return Ok(cached);
         }
     }
     load_streams(tx, account)
@@ -4838,6 +4917,7 @@ mod pending_thread_start_tests {
     fn submit(db: &rusqlite::Connection, account: &str, agent: &str, method: Method) -> String {
         let operation = format!("account:{account}:{agent}:{}", method.as_str());
         let request = RecoveredRequest {
+            boundary_timing: None,
             ticket: studio_runtime_providers::RequestTicket {
                 id: RequestId::String(operation.clone()),
                 generation: 1,
@@ -5073,6 +5153,7 @@ mod manual_release_decode_tests {
             INSERT INTO sessions VALUES('owner','thread','active');").unwrap();
         let tx = db.transaction().unwrap();
         let entry = JournalEntry {
+            boundary_at: None,
             received_at_ms: 1,
             cursor: studio_runtime_process::EventCursor(1),
             generation: Generation(1),
@@ -5119,6 +5200,7 @@ mod manual_release_decode_tests {
         .unwrap();
         let tx = db.transaction().unwrap();
         let entry = JournalEntry {
+            boundary_at: None,
             received_at_ms: 1,
             cursor: studio_runtime_process::EventCursor(1),
             generation: Generation(1),
@@ -5176,6 +5258,7 @@ mod manual_release_decode_tests {
         .unwrap();
         let tx = db.transaction().unwrap();
         let entry = JournalEntry {
+            boundary_at: None,
             received_at_ms: 1,
             cursor: studio_runtime_process::EventCursor(1),
             generation: Generation(1),

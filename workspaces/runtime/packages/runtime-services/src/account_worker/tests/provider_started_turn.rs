@@ -36,6 +36,7 @@ async fn tool_call(peer: &mut Peer, turn: &str) -> Value {
     callback
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })

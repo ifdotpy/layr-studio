@@ -153,6 +153,7 @@ async fn answered_tool_call(state: &State, peer: &mut Peer, index: usize) {
     callback
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -241,6 +242,7 @@ async fn scenario_callback_delivery_preserves_uncertainty(
         assert_eq!(delivery_states(&state).await, [OutboxStatus::Submitted]);
         match outcome {
             Some(WriteOutcome::Written) => drop(callback.receipt.send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })),
@@ -253,6 +255,7 @@ async fn scenario_callback_delivery_preserves_uncertainty(
                     "NotSent reuses the exact completed tool result"
                 );
                 drop(retry.receipt.send(CommandReceipt::Written {
+                    written_at: None,
                     remote_id: None,
                     duplicate: false,
                 }));

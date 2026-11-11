@@ -1,3 +1,6 @@
+import { CLAUDE_RUNTIME_SDK_VERSION } from "./sdk-version.ts";
+import { decodeBridgeDynamicTools } from "./bridge-decode.ts";
+import { decodeLegacyProofTools } from "./legacy-move-bundle.ts";
 import type { Session } from "./session-state.ts";
 import type { McpSdkServerConfigWithInstance } from "@anthropic-ai/claude-agent-sdk";
 export type ProofTool = {
@@ -31,9 +34,7 @@ import path from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-const require = createRequire(import.meta.url);
 const run = promisify(execFile);
 // The paired channel signs canonical JSON, so a catalog from the source arrives with sorted
 // object keys; catalogs and option hashes compare in this canonical form.
@@ -71,12 +72,17 @@ const normalizeTool = ({ schema, ...entry }: ProofTool) => ({
 // JSON text too; the target reads that text, after checking it against the sorted copy.
 // Exact-list text is written by this bridge with JSON.stringify before a signed move.
 // Its sorted counterpart is checked below before it is used as the same type.
-function parseExactList<T>(text: string): T {
+function parseExactList(text: string): unknown {
   return JSON.parse(text);
 }
-export function exactList<T>(sorted: T, text: unknown, what: string): T {
+function exactList<T>(
+  sorted: T,
+  text: unknown,
+  what: string,
+  decode: (value: unknown) => T,
+): T {
   if (typeof text !== "string") return sorted;
-  const exact = parseExactList<T>(text);
+  const exact = decode(parseExactList(text));
   if (sorted !== undefined && canonicalJson(exact) !== canonicalJson(sorted))
     throw new Error(`The exact ${what} differ from the moved copy`);
   return exact;
@@ -90,8 +96,9 @@ export function exactTurnTools<T>(
 ): T {
   if (typeof session?.dynamicToolsJson !== "string" || !Array.isArray(tools))
     return tools;
-  const exact = parseExactList<T>(session.dynamicToolsJson);
-  return canonicalJson(exact) === canonicalJson(tools) ? exact : tools;
+  const exact = parseExactList(session.dynamicToolsJson);
+  // Equality to the typed input proves its JSON shape before restoring key order.
+  return canonicalJson(exact) === canonicalJson(tools) ? (exact as T) : tools;
 }
 export function exactSession<
   T extends Pick<Session, "dynamicToolsJson" | "dynamicTools">,
@@ -103,6 +110,7 @@ export function exactSession<
       session.dynamicTools,
       session.dynamicToolsJson,
       "Studio tools",
+      decodeBridgeDynamicTools,
     ),
   };
 }
@@ -116,6 +124,7 @@ export function exactProof<
       proof.compiledTools,
       proof.compiledToolsJson,
       "compiled Studio tools",
+      decodeLegacyProofTools,
     ),
   };
 }
@@ -445,16 +454,7 @@ export async function moveVersions(executable: string) {
   });
   const cli = stdout.trim().match(/^([\d.]+)/)?.[1];
   if (!cli) throw new Error("The Claude CLI version is unavailable");
-  const sdkPackage: { version: string } = JSON.parse(
-    await fs.readFile(
-      path.join(
-        path.dirname(require.resolve("@anthropic-ai/claude-agent-sdk")),
-        "package.json",
-      ),
-      "utf8",
-    ),
-  );
-  return { cli, sdk: sdkPackage.version };
+  return { cli, sdk: CLAUDE_RUNTIME_SDK_VERSION };
 }
 export async function nativeFile(
   sessionId: string,

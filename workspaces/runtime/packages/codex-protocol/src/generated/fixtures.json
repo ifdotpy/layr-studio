@@ -1,0 +1,2135 @@
+{
+  "ClientRequest": [
+    {
+      "id": "fixture",
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "fixture",
+          "version": "fixture"
+        }
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "server/diagnostics",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "userVerification/status",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "userVerification/enroll",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "userVerification/delete",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "userVerification/verify",
+      "params": {
+        "challenge": "fixture",
+        "description": "fixture",
+        "title": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "userVerification/cancel",
+      "params": {
+        "requestId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/start",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "thread/resume",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/fork",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/sample",
+      "params": {
+        "expectedTurnId": "fixture",
+        "prompt": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/sample/cancel",
+      "params": {
+        "requestId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/archive",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/delete",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/unsubscribe",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/increment_elicitation",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/decrement_elicitation",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/name/set",
+      "params": {
+        "name": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/prediction/request",
+      "params": {
+        "sourceTurnId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/goal/set",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/goal/get",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/goal/clear",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/queue/add",
+      "params": {
+        "clientUserMessageId": "fixture",
+        "input": [],
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/queue/list",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/queue/update",
+      "params": {
+        "input": [],
+        "queuedSubmissionId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/queue/delete",
+      "params": {
+        "queuedSubmissionId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/queue/reorder",
+      "params": {
+        "queuedSubmissionIds": [],
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/queue/start",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/metadata/update",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/attachment/add",
+      "params": {
+        "attachmentType": "fixture",
+        "identityKey": "fixture",
+        "payload": null,
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/attachment/list",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/attachmentOwner/list",
+      "params": {
+        "attachmentType": "fixture",
+        "identityKey": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/attachment/remove",
+      "params": {
+        "attachmentType": "fixture",
+        "identityKey": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/section/move",
+      "params": {
+        "sectionId": null,
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/settings/update",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/memoryMode/set",
+      "params": {
+        "mode": "enabled",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/memory/read",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "memory/status",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "memory/reset"
+    },
+    {
+      "id": "fixture",
+      "method": "rollout/compress"
+    },
+    {
+      "id": "fixture",
+      "method": "thread/unarchive",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/compact/start",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/shellCommand",
+      "params": {
+        "command": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/approveGuardianDeniedAction",
+      "params": {
+        "event": null,
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/backgroundTerminals/clean",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/backgroundTerminals/list",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/backgroundTerminals/terminate",
+      "params": {
+        "processId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/revert",
+      "params": {
+        "beforeTurnId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "project/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "project/read",
+      "params": {
+        "projectId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "project/create",
+      "params": {
+        "idempotencyKey": "fixture",
+        "name": "fixture",
+        "roots": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "project/import",
+      "params": {
+        "idempotencyKey": "fixture",
+        "name": "fixture",
+        "roots": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "project/update",
+      "params": {
+        "projectId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "project/move",
+      "params": {
+        "projectId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "project/delete",
+      "params": {
+        "projectId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "threadSection/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "threadSection/create",
+      "params": {
+        "name": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "threadSection/update",
+      "params": {
+        "name": "fixture",
+        "sectionId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "threadSection/delete",
+      "params": {
+        "sectionId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/search",
+      "params": {
+        "searchTerm": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/searchOccurrences",
+      "params": {
+        "searchTerm": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/loaded/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "thread/read",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/readState/update",
+      "params": {
+        "expectedRevision": "fixture",
+        "operation": {
+          "type": "read"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/turns/list",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/items/list",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/items/read",
+      "params": {
+        "itemIds": [],
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/guardianReview",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/inject_items",
+      "params": {
+        "items": [],
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "skills/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "skills/extraRoots/set",
+      "params": {
+        "extraRoots": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "hooks/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "marketplace/add",
+      "params": {
+        "source": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "marketplace/remove",
+      "params": {
+        "marketplaceName": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "marketplace/upgrade",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/search",
+      "params": {
+        "searchTerm": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/installed",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/reconcile",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/read",
+      "params": {
+        "pluginName": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/skill/read",
+      "params": {
+        "remoteMarketplaceName": "fixture",
+        "remotePluginId": "fixture",
+        "skillName": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/share/save",
+      "params": {
+        "pluginPath": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/share/updateTargets",
+      "params": {
+        "discoverability": "UNLISTED",
+        "remotePluginId": "fixture",
+        "shareTargets": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/share/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/share/checkout",
+      "params": {
+        "remotePluginId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/share/delete",
+      "params": {
+        "remotePluginId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "app/read",
+      "params": {
+        "appIds": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "app/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "app/installed",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "fs/readFile",
+      "params": {
+        "path": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/writeFile",
+      "params": {
+        "dataBase64": "fixture",
+        "path": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/createDirectory",
+      "params": {
+        "path": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/getMetadata",
+      "params": {
+        "path": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/readDirectory",
+      "params": {
+        "path": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/remove",
+      "params": {
+        "path": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/copy",
+      "params": {
+        "destinationPath": "fixture",
+        "sourcePath": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/watch",
+      "params": {
+        "path": "fixture",
+        "watchId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fs/unwatch",
+      "params": {
+        "watchId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "skills/config/write",
+      "params": {
+        "enabled": false
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/install",
+      "params": {
+        "pluginName": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "plugin/uninstall",
+      "params": {
+        "pluginId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "turn/start",
+      "params": {
+        "input": [],
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "turn/settings/update",
+      "params": {
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "turn/steer",
+      "params": {
+        "expectedTurnId": "fixture",
+        "input": [],
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "turn/interrupt",
+      "params": {
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/realtime/start",
+      "params": {
+        "outputModality": "text",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/realtime/appendAudio",
+      "params": {
+        "audio": {
+          "data": "fixture",
+          "numChannels": 0,
+          "sampleRate": 0
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/realtime/appendText",
+      "params": {
+        "text": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/realtime/appendSpeech",
+      "params": {
+        "text": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/realtime/stop",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/timeline/list",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "thread/realtime/listVoices",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "review/start",
+      "params": {
+        "target": {
+          "type": "uncommittedChanges"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "model/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "account/gatewayOAuth/read"
+    },
+    {
+      "id": "fixture",
+      "method": "account/gatewayOAuth/login"
+    },
+    {
+      "id": "fixture",
+      "method": "account/gatewayOAuth/cancel"
+    },
+    {
+      "id": "fixture",
+      "method": "modelProvider/capabilities/read",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "experimentalFeature/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "permissionProfile/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "experimentalFeature/enablement/set",
+      "params": {
+        "enablement": {}
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/enable"
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/disable"
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/status/read"
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/pairing/start",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/pairing/status",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/client/list",
+      "params": {
+        "environmentId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "remoteControl/client/revoke",
+      "params": {
+        "clientId": "fixture",
+        "environmentId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "collaborationMode/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "mock/experimentalMethod",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "environment/add",
+      "params": {
+        "environmentId": "fixture",
+        "execServerUrl": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "environment/info",
+      "params": {
+        "environmentId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "environment/status",
+      "params": {
+        "environmentId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServer/oauth/login",
+      "params": {
+        "name": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "config/mcpServer/reload"
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServerStatus/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServer/resource/read",
+      "params": {
+        "server": "fixture",
+        "uri": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServer/event/stream/start",
+      "params": {
+        "arguments": null,
+        "name": "fixture",
+        "server": "fixture",
+        "subscriptionId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServer/event/stream/stop",
+      "params": {
+        "subscriptionId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServer/tool/call",
+      "params": {
+        "server": "fixture",
+        "threadId": "fixture",
+        "tool": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "windowsSandbox/setupStart",
+      "params": {
+        "mode": "elevated"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "windowsSandbox/readiness"
+    },
+    {
+      "id": "fixture",
+      "method": "account/login/start",
+      "params": {
+        "apiKey": "fixture",
+        "type": "apiKey"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "account/bedrock/discover",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "account/bedrock/setup",
+      "params": {
+        "profile": "fixture",
+        "region": "fixture",
+        "type": "profile"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "account/gcp/setup",
+      "params": {
+        "projectId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "account/bedrock/checkGovCloudRequirements",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "account/login/cancel",
+      "params": {
+        "loginId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "accountSession/list",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "accountSession/switch",
+      "params": {
+        "accountId": "fixture",
+        "sessionId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "account/logout"
+    },
+    {
+      "id": "fixture",
+      "method": "account/rateLimits/read"
+    },
+    {
+      "id": "fixture",
+      "method": "account/rateLimitResetCredit/consume",
+      "params": {
+        "idempotencyKey": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "account/usage/read"
+    },
+    {
+      "id": "fixture",
+      "method": "account/workspaceMessages/read"
+    },
+    {
+      "id": "fixture",
+      "method": "account/sendAddCreditsNudgeEmail",
+      "params": {
+        "creditType": "credits"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "feedback/upload",
+      "params": {
+        "classification": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "feedback/save",
+      "params": {
+        "classification": "fixture",
+        "savePath": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "command/exec",
+      "params": {
+        "command": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "command/exec/write",
+      "params": {
+        "processId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "command/exec/terminate",
+      "params": {
+        "processId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "command/exec/resize",
+      "params": {
+        "processId": "fixture",
+        "size": {
+          "cols": 0,
+          "rows": 0
+        }
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "process/spawn",
+      "params": {
+        "command": [],
+        "cwd": "fixture",
+        "processHandle": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "process/writeStdin",
+      "params": {
+        "processHandle": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "process/kill",
+      "params": {
+        "processHandle": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "process/resizePty",
+      "params": {
+        "processHandle": "fixture",
+        "size": {
+          "cols": 0,
+          "rows": 0
+        }
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "config/read",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "externalAgentConfig/detect",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "externalAgentConfig/import",
+      "params": {
+        "migrationItems": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "externalAgentConfig/import/recordHistory",
+      "params": {
+        "itemTypeResults": [],
+        "providerId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "externalAgentConfig/import/readHistories"
+    },
+    {
+      "id": "fixture",
+      "method": "config/value/write",
+      "params": {
+        "keyPath": "fixture",
+        "mergeStrategy": "replace",
+        "value": null
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "config/batchWrite",
+      "params": {
+        "edits": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "configRequirements/read"
+    },
+    {
+      "id": "fixture",
+      "method": "account/read",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "fuzzyFileSearch",
+      "params": {
+        "query": "fixture",
+        "roots": []
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fuzzyFileSearch/sessionStart",
+      "params": {
+        "roots": [],
+        "sessionId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fuzzyFileSearch/sessionUpdate",
+      "params": {
+        "query": "fixture",
+        "sessionId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "fuzzyFileSearch/sessionStop",
+      "params": {
+        "sessionId": "fixture"
+      }
+    }
+  ],
+  "ClientNotification": [
+    {
+      "method": "initialized"
+    }
+  ],
+  "ServerNotification": [
+    {
+      "method": "error",
+      "params": {
+        "error": {
+          "message": "fixture"
+        },
+        "threadId": "fixture",
+        "turnId": "fixture",
+        "willRetry": false
+      }
+    },
+    {
+      "method": "thread/started",
+      "params": {
+        "thread": {
+          "cliVersion": "fixture",
+          "createdAt": 0,
+          "cwd": "fixture",
+          "ephemeral": false,
+          "id": "fixture",
+          "modelProvider": "fixture",
+          "preview": "fixture",
+          "projectId": null,
+          "sessionId": "fixture",
+          "source": "cli",
+          "status": {
+            "type": "notLoaded"
+          },
+          "turns": [],
+          "updatedAt": 0
+        }
+      }
+    },
+    {
+      "method": "thread/status/changed",
+      "params": {
+        "status": {
+          "type": "notLoaded"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/readState/changed",
+      "params": {
+        "readState": {
+          "revision": "fixture"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/archived",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/deleted",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/unarchived",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/closed",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/reverted",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "skills/changed",
+      "params": {}
+    },
+    {
+      "method": "thread/name/updated",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/section/changed",
+      "params": {
+        "sectionId": null,
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/attachment/updated",
+      "params": {
+        "attachmentId": "fixture",
+        "attachmentType": "fixture",
+        "identityKey": "fixture",
+        "operation": "created",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/goal/updated",
+      "params": {
+        "goal": {
+          "createdAt": 0,
+          "objective": "fixture",
+          "status": "active",
+          "threadId": "fixture",
+          "timeUsedSeconds": 0,
+          "tokensUsed": 0,
+          "updatedAt": 0
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/prediction/updated",
+      "params": {
+        "result": {
+          "type": "completed"
+        },
+        "sourceTurnId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/goal/cleared",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/queue/changed",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "project/changed",
+      "params": {
+        "changeType": "created",
+        "projectId": "fixture"
+      }
+    },
+    {
+      "method": "thread/project/updated",
+      "params": {
+        "projectId": null,
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/environment/connected",
+      "params": {
+        "environmentId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/environment/disconnected",
+      "params": {
+        "environmentId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/settings/updated",
+      "params": {
+        "threadId": "fixture",
+        "threadSettings": {
+          "approvalPolicy": "untrusted",
+          "approvalsReviewer": "user",
+          "collaborationMode": {
+            "mode": "plan",
+            "settings": {
+              "model": "fixture"
+            }
+          },
+          "cwd": "fixture",
+          "model": "fixture",
+          "modelProvider": "fixture",
+          "sandboxPolicy": {
+            "type": "dangerFullAccess"
+          }
+        }
+      }
+    },
+    {
+      "method": "thread/tokenUsage/updated",
+      "params": {
+        "threadId": "fixture",
+        "tokenUsage": {
+          "last": {
+            "cachedInputTokens": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 0
+          },
+          "total": {
+            "cachedInputTokens": 0,
+            "inputTokens": 0,
+            "outputTokens": 0,
+            "reasoningOutputTokens": 0,
+            "totalTokens": 0
+          }
+        },
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "turn/started",
+      "params": {
+        "threadId": "fixture",
+        "turn": {
+          "id": "fixture",
+          "items": [],
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "method": "hook/started",
+      "params": {
+        "run": {
+          "displayOrder": 0,
+          "entries": [],
+          "eventName": "preModelRequest",
+          "executionMode": "sync",
+          "handlerType": "command",
+          "id": "fixture",
+          "scope": "thread",
+          "sourcePath": "fixture",
+          "startedAt": 0,
+          "status": "running"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "fixture",
+        "turn": {
+          "id": "fixture",
+          "items": [],
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "method": "hook/completed",
+      "params": {
+        "run": {
+          "displayOrder": 0,
+          "entries": [],
+          "eventName": "preModelRequest",
+          "executionMode": "sync",
+          "handlerType": "command",
+          "id": "fixture",
+          "scope": "thread",
+          "sourcePath": "fixture",
+          "startedAt": 0,
+          "status": "running"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "turn/diff/updated",
+      "params": {
+        "diff": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "turn/plan/updated",
+      "params": {
+        "plan": [],
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "item": {
+          "content": [],
+          "id": "fixture",
+          "type": "userMessage"
+        },
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/autoApprovalReview/started",
+      "params": {
+        "action": {
+          "command": "fixture",
+          "cwd": "fixture",
+          "source": "shell",
+          "type": "command"
+        },
+        "review": {
+          "status": "inProgress"
+        },
+        "reviewId": "fixture",
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/autoApprovalReview/completed",
+      "params": {
+        "action": {
+          "command": "fixture",
+          "cwd": "fixture",
+          "source": "shell",
+          "type": "command"
+        },
+        "completedAtMs": 0,
+        "decisionSource": "agent",
+        "review": {
+          "status": "inProgress"
+        },
+        "reviewId": "fixture",
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "autoApprovalReview/strictReviewRequired",
+      "params": {
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "completedAtMs": 0,
+        "item": {
+          "content": [],
+          "id": "fixture",
+          "type": "userMessage"
+        },
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "params": {
+        "delta": "fixture",
+        "itemId": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/plan/delta",
+      "params": {
+        "delta": "fixture",
+        "itemId": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "command/exec/outputDelta",
+      "params": {
+        "capReached": false,
+        "deltaBase64": "fixture",
+        "processId": "fixture",
+        "stream": "stdout"
+      }
+    },
+    {
+      "method": "process/outputDelta",
+      "params": {
+        "capReached": false,
+        "deltaBase64": "fixture",
+        "processHandle": "fixture",
+        "stream": "stdout"
+      }
+    },
+    {
+      "method": "process/exited",
+      "params": {
+        "exitCode": 0,
+        "processHandle": "fixture",
+        "stderr": "fixture",
+        "stderrCapReached": false,
+        "stdout": "fixture",
+        "stdoutCapReached": false
+      }
+    },
+    {
+      "method": "item/commandExecution/outputDelta",
+      "params": {
+        "delta": "fixture",
+        "itemId": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/commandExecution/terminalInteraction",
+      "params": {
+        "itemId": "fixture",
+        "processId": "fixture",
+        "stdin": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/fileChange/outputDelta",
+      "params": {
+        "delta": "fixture",
+        "itemId": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/fileChange/patchUpdated",
+      "params": {
+        "changes": [],
+        "itemId": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "serverRequest/resolved",
+      "params": {
+        "requestId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "item/mcpToolCall/progress",
+      "params": {
+        "itemId": "fixture",
+        "message": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "mcpServer/oauthLogin/completed",
+      "params": {
+        "name": "fixture",
+        "success": false
+      }
+    },
+    {
+      "method": "mcpServer/startupStatus/updated",
+      "params": {
+        "name": "fixture",
+        "status": "starting"
+      }
+    },
+    {
+      "method": "mcpServer/event/stream/notification",
+      "params": {
+        "notification": {
+          "method": "fixture",
+          "params": null
+        },
+        "subscriptionId": "fixture"
+      }
+    },
+    {
+      "method": "account/updated",
+      "params": {}
+    },
+    {
+      "method": "account/gatewayOAuth/changed",
+      "params": {
+        "providerId": "fixture",
+        "status": "notReady"
+      }
+    },
+    {
+      "method": "account/rateLimits/updated",
+      "params": {
+        "rateLimits": {}
+      }
+    },
+    {
+      "method": "app/list/updated",
+      "params": {
+        "data": []
+      }
+    },
+    {
+      "method": "remoteControl/status/changed",
+      "params": {
+        "installationId": "fixture",
+        "serverName": "fixture",
+        "status": "disabled"
+      }
+    },
+    {
+      "method": "externalAgentConfig/import/progress",
+      "params": {
+        "importId": "fixture",
+        "itemTypeResults": []
+      }
+    },
+    {
+      "method": "externalAgentConfig/import/completed",
+      "params": {
+        "importId": "fixture",
+        "itemTypeResults": []
+      }
+    },
+    {
+      "method": "fs/changed",
+      "params": {
+        "changedPaths": [],
+        "watchId": "fixture"
+      }
+    },
+    {
+      "method": "item/reasoning/summaryTextDelta",
+      "params": {
+        "delta": "fixture",
+        "itemId": "fixture",
+        "summaryIndex": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/reasoning/summaryPartAdded",
+      "params": {
+        "itemId": "fixture",
+        "summaryIndex": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "item/reasoning/textDelta",
+      "params": {
+        "contentIndex": 0,
+        "delta": "fixture",
+        "itemId": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "thread/compacted",
+      "params": {
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "model/rerouted",
+      "params": {
+        "fromModel": "fixture",
+        "reason": "highRiskCyberActivity",
+        "threadId": "fixture",
+        "toModel": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "model/verification",
+      "params": {
+        "threadId": "fixture",
+        "turnId": "fixture",
+        "verifications": []
+      }
+    },
+    {
+      "method": "modelProvider/authRecoveryStarted",
+      "params": {
+        "message": "fixture",
+        "provider": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "modelProvider/authRecoveryCompleted",
+      "params": {
+        "message": "fixture",
+        "provider": "fixture",
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "turn/moderationMetadata",
+      "params": {
+        "metadata": null,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "method": "model/safetyBuffering/updated",
+      "params": {
+        "model": "fixture",
+        "reasons": [],
+        "showBufferingUi": false,
+        "threadId": "fixture",
+        "turnId": "fixture",
+        "useCases": []
+      }
+    },
+    {
+      "method": "warning",
+      "params": {
+        "message": "fixture"
+      }
+    },
+    {
+      "method": "guardianWarning",
+      "params": {
+        "message": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "deprecationNotice",
+      "params": {
+        "summary": "fixture"
+      }
+    },
+    {
+      "method": "configWarning",
+      "params": {
+        "summary": "fixture"
+      }
+    },
+    {
+      "method": "fuzzyFileSearch/sessionUpdated",
+      "params": {
+        "files": [],
+        "query": "fixture",
+        "sessionId": "fixture"
+      }
+    },
+    {
+      "method": "fuzzyFileSearch/sessionCompleted",
+      "params": {
+        "sessionId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/started",
+      "params": {
+        "threadId": "fixture",
+        "version": "v1"
+      }
+    },
+    {
+      "method": "thread/realtime/itemAdded",
+      "params": {
+        "item": null,
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/item/started",
+      "params": {
+        "item": {
+          "id": "fixture",
+          "realtimeSessionId": "fixture",
+          "type": "realtimeSessionStarted"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/item/transcript/delta",
+      "params": {
+        "delta": "fixture",
+        "itemId": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/item/completed",
+      "params": {
+        "item": {
+          "id": "fixture",
+          "realtimeSessionId": "fixture",
+          "type": "realtimeSessionStarted"
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/transcript/delta",
+      "params": {
+        "delta": "fixture",
+        "role": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/transcript/done",
+      "params": {
+        "role": "fixture",
+        "text": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/outputAudio/delta",
+      "params": {
+        "audio": {
+          "data": "fixture",
+          "numChannels": 0,
+          "sampleRate": 0
+        },
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/sdp",
+      "params": {
+        "sdp": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/error",
+      "params": {
+        "message": "fixture",
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "thread/realtime/closed",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "method": "windows/worldWritableWarning",
+      "params": {
+        "extraCount": 0,
+        "failedScan": false,
+        "samplePaths": []
+      }
+    },
+    {
+      "method": "windowsSandbox/setupCompleted",
+      "params": {
+        "mode": "elevated",
+        "success": false
+      }
+    },
+    {
+      "method": "account/login/completed",
+      "params": {
+        "success": false
+      }
+    }
+  ],
+  "ServerRequest": [
+    {
+      "id": "fixture",
+      "method": "item/commandExecution/requestApproval",
+      "params": {
+        "itemId": "fixture",
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "item/fileChange/requestApproval",
+      "params": {
+        "itemId": "fixture",
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "item/tool/requestUserInput",
+      "params": {
+        "isBlocking": false,
+        "itemId": "fixture",
+        "questions": [],
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "mcpServer/elicitation/request",
+      "params": {
+        "serverName": "fixture",
+        "threadId": "fixture",
+        "challenge": "fixture",
+        "description": "fixture",
+        "mode": "openai/userVerification",
+        "title": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "item/permissions/requestApproval",
+      "params": {
+        "cwd": "fixture",
+        "itemId": "fixture",
+        "permissions": {},
+        "startedAtMs": 0,
+        "threadId": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "item/tool/call",
+      "params": {
+        "arguments": null,
+        "callId": "fixture",
+        "threadId": "fixture",
+        "tool": "fixture",
+        "turnId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "account/chatgptAuthTokens/refresh",
+      "params": {
+        "reason": "unauthorized"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "attestation/generate",
+      "params": {}
+    },
+    {
+      "id": "fixture",
+      "method": "currentTime/read",
+      "params": {
+        "threadId": "fixture"
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "applyPatchApproval",
+      "params": {
+        "callId": "fixture",
+        "conversationId": "fixture",
+        "fileChanges": {}
+      }
+    },
+    {
+      "id": "fixture",
+      "method": "execCommandApproval",
+      "params": {
+        "callId": "fixture",
+        "command": [],
+        "conversationId": "fixture",
+        "cwd": "fixture",
+        "parsedCmd": []
+      }
+    }
+  ]
+}

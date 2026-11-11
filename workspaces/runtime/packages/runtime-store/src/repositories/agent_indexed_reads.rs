@@ -62,6 +62,31 @@ macro_rules! holds_workspace_operation {
 pub struct AgentIndexedReads;
 
 impl AgentIndexedReads {
+    /// Read only changed episodes for named thread clocks through sessions_thread.
+    pub fn thread_idle_deadline_changes(
+        connection: &Connection,
+        account: &str,
+        deadlines: &std::collections::BTreeMap<String, Option<f64>>,
+    ) -> StoreResult<Vec<(String, String)>> {
+        let read = crate::peer_update_settings::canvas_read(connection);
+        let mut records = Vec::new();
+        for (thread, deadline) in deadlines {
+            let deadline = studio_json::to_string(deadline)?;
+            records.extend(
+                read.collect(
+                    &idle_deadline_queries::Changed::QUERY,
+                    &idle_deadline_queries::Changed {
+                        account,
+                        thread,
+                        deadline: &deadline,
+                    },
+                )?
+                .into_iter()
+                .map(|row| (row.id, row.record)),
+            );
+        }
+        Ok(records)
+    }
     /// Canonical DDL of the indexes this module owns (Rust-owned).
     #[doc(hidden)]
     pub fn index_definitions() -> Vec<crate::OwnedRuntimeIndexDefinition> {
@@ -271,6 +296,49 @@ impl AgentIndexedReads {
     }
 }
 
+#[derive(studio_db_api::DbProjection)]
+#[db(of = crate::agent_tables::AgentsStorageRow)]
+struct IdleDeadlineAgentRow {
+    id: String,
+    #[db(raw)]
+    record: String,
+}
+
+#[studio_db_api::db_queries]
+mod idle_deadline_queries {
+    use super::IdleDeadlineAgentRow;
+    use crate::agent_tables::{AgentsStorageRow, SessionsStorageRow};
+    use crate::peer_update_settings::Canvas;
+    use studio_db_api::DbQuery;
+
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas, mode=read, cardinality=many,
+        result=IdleDeadlineAgentRow, projection=IdleDeadlineAgentRow,
+        tables(agents=AgentsStorageRow, sessions=SessionsStorageRow),
+        columns(id=AgentsStorageRow::ID, record=AgentsStorageRow::RECORD,
+            thread=SessionsStorageRow::THREAD_ID, chat=SessionsStorageRow::CHAT,
+            account=SessionsStorageRow::ACCOUNT_KEY, state=SessionsStorageRow::STATE),
+        sql="WITH changed AS MATERIALIZED (
+            SELECT a.{id},a.{record},a.idle_episode_id FROM {sessions} s INDEXED BY sessions_thread
+            CROSS JOIN {agents} a ON a.{id}=s.{chat}
+            WHERE s.{thread}=?2 AND s.{account}=?1 AND s.{state}<>'ended'
+            AND a.idle_episode_type='object' AND a.provider='claude' AND a.account_key=?1
+            AND json_extract(a.{record},'$.threadId')=?2
+            AND json_extract(a.{record},'$.idleCompactionEpisode.unloadAt') IS NOT json_extract(?3,'$'))
+            SELECT changed.{id} AS {id},changed.{record} AS {record} FROM changed
+            WHERE NOT EXISTS(SELECT 1 FROM {agents} receipt WHERE receipt.idle_episode_type='object'
+            AND receipt.idle_episode_id=changed.idle_episode_id
+            AND json_extract(receipt.{record},'$.idleCompactionEpisode.fired')=1)")]
+    pub struct Changed<'a> {
+        #[db(column=SessionsStorageRow::ACCOUNT_KEY)]
+        pub account: &'a str,
+        #[db(column=SessionsStorageRow::THREAD_ID)]
+        pub thread: &'a str,
+        #[db(column=AgentsStorageRow::ID)]
+        pub deadline: &'a str,
+    }
+}
+
 fn prefix_upper(prefix: &str) -> Option<String> {
     for (offset, ch) in prefix.char_indices().rev() {
         let next = (ch as u32).checked_add(1)?;
@@ -415,6 +483,7 @@ mod tests {
 
     #[test]
     fn indexed_reads_equal_the_full_scan_semantics() {
+        idle_deadline_queries::validate_queries(&crate::test_canvas()).unwrap();
         let connection = fixture();
         let ids =
             |rows: Vec<(String, String)>| rows.into_iter().map(|row| row.0).collect::<Vec<_>>();

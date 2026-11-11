@@ -49,7 +49,7 @@ for (const raw of [
   },
   null,
 ]) {
-  test(`unsupported live rate evidence is retained without a known-limit decision: ${JSON.stringify(raw)}`, async () => {
+  test(`unsupported live rate evidence becomes an unsupported wire decision: ${JSON.stringify(raw)}`, async () => {
     assert.deepEqual(parseRateLimitInfo(raw), { type: "unsupported", raw });
     const bridge = await startBridge(
       new URL("./usage-events.fixture.mts", import.meta.url),
@@ -71,7 +71,6 @@ for (const raw of [
       const note = await bridge.note("account/rateLimits/updated");
       assert.deepEqual(note.params.claudeRateLimit, {
         type: "unsupported",
-        raw,
       });
       const completed = await bridge.note("turn/completed");
       assert.equal(completed.params.turn.error, undefined);

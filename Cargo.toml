@@ -17,6 +17,7 @@ members = [
     "workspaces/runtime/packages/read-models",
     "workspaces/runtime/packages/json",
     "workspaces/runtime/packages/runtime-providers",
+    "workspaces/runtime/packages/codex-protocol",
     "workspaces/runtime/packages/runtime-priority-sys",
     "workspaces/runtime/packages/runtime-proc-sys",
     "workspaces/runtime/packages/runtime-process",
@@ -121,7 +122,7 @@ ureq = { version = "=3.5.0", default-features = false, features = ["rustls-no-pr
 [workspace.metadata.layr-retest]
 env = { RUSTUP_TOOLCHAIN = "1.99.1-aarch64-apple-darwin", CARGO_INCREMENTAL = "1", RUSTC_WRAPPER = "", CARGO_BUILD_RUSTC_WRAPPER = "", CLIPPY_CONF_DIR = "workspaces/tooling/apps/repository-checks/clippy-ratchet" }
 sweep = [
-    ["build", "--workspace", "--exclude", "studio-native-client", "--lib", "--tests", "--bins", "--examples", "--locked"],
+    ["build", "--workspace", "--exclude", "studio-native-client", "--tests", "--bins", "--examples", "--locked"],
     ["clippy", "--workspace", "--exclude", "studio-native-client", "--all-targets", "--locked", "--", "-D", "warnings", "--cap-lints", "warn", "-W", "clippy::struct_excessive_bools", "-W", "clippy::option_option", "-W", "clippy::redundant_clone", "-W", "clippy::needless_pass_by_value", "-W", "clippy::disallowed_methods"],
     { target_dir = "provider-contract-compile", args = ["check", "--offline", "-p", "studio-runtime-schema"] },
     ["build", "-p", "studio-client-wasm", "--release", "--target", "wasm32-unknown-unknown", "--locked"],

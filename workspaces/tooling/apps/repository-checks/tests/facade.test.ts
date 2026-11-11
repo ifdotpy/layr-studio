@@ -135,7 +135,7 @@ test("short and comprehensive recipes preserve their owned test boundaries", () 
   assert.doesNotMatch(fast.command, /test:browser/);
   assert.match(comprehensive.command, /'--profile' 'ci'/);
   assert.match(comprehensive.command, /clippy-ratchet\.ts/);
-  assert.match(comprehensive.command, /test:unit:prepared/);
+  assert.match(comprehensive.command, /test:unit:pure/);
   assert.match(comprehensive.command, /test:browser:smoke:prepared/);
 });
 
@@ -1149,7 +1149,8 @@ test("WASM preparation locates only the pinned CLI and builds before binding", (
   mkdirSync(path.dirname(path.join(root, manifest)), { recursive: true });
   writeFileSync(path.join(root, script), readFileSync(script));
   // The script reads its cargo arguments from the file beside it.
-  const buildArgs = "workspaces/client/apps/web/scripts/client-wasm-build-args.json";
+  const buildArgs =
+    "workspaces/client/apps/web/scripts/client-wasm-build-args.json";
   writeFileSync(path.join(root, buildArgs), readFileSync(buildArgs));
   writeFileSync(path.join(root, manifest), readFileSync(manifest));
   executable(

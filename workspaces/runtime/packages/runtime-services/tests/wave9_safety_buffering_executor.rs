@@ -149,7 +149,7 @@ impl AccountSessionPort for Session<'_> {
             }
             let stage = intent["stage"].as_str().expect("intent stage");
             let result = match request.method {
-                Method::ThreadTurnsList => {
+                Method::ThreadTurnsList | Method::ThreadTurnsItemsList => {
                     let verify = stage == "verify_turns";
                     json!({"data":[{"id":"turn","status":if verify {"interrupted"} else {"inProgress"}}]})
                 }
@@ -406,7 +406,7 @@ impl AccountSessionPort for StartBlockingSession {
                     .expect("release accepted start");
             }
             let result = match request.method {
-                Method::ThreadTurnsList => {
+                Method::ThreadTurnsList | Method::ThreadTurnsItemsList => {
                     json!({"data":[{"id":"turn","status":if stage == "verify_turns" {"interrupted"} else {"inProgress"}}]})
                 }
                 Method::ThreadItemsList => {

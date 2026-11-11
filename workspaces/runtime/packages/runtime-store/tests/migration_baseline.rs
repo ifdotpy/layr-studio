@@ -326,6 +326,8 @@ async fn migration_baseline_named_clock_queries_validate_after_supported_upgrade
                 studio_runtime_store::clock_schema::validate_named_queries(db).map_err(
                     |error| studio_runtime_store::StoreError::SchemaMismatch(error.to_string()),
                 )?;
+                studio_runtime_store::ExecutionHistoryRepository::validate_provider_request_queries(db)
+                    .map_err(|error| studio_runtime_store::StoreError::SchemaMismatch(error.to_string()))?;
                 let (high, floor) = studio_runtime_store::durable_seq::high_and_floor(db)?;
                 assert!(high >= floor);
                 Ok(())

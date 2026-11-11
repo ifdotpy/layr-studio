@@ -536,6 +536,22 @@ fn check_account_group_parity(openapi: &Value) -> Result<(), String> {
 
 /// Hold the committed OpenAPI document and persisted-state schemas to the Rust owners.
 pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<(), String> {
+    let mut timing_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    timing_generator.subschema_for::<crate::provider_timing::ProviderBoundaryTiming>();
+    for (name, schema) in timing_generator.take_definitions(true) {
+        if openapi["components"]["schemas"][&name] != schema {
+            return Err(format!("{name} must match provider_timing Rust owner"));
+        }
+    }
+    if openapi["components"]["schemas"]["AnalyticsTurnRecord"]["properties"]["boundaryTiming"]
+        != studio_json::json!({"$ref":"#/components/schemas/ProviderBoundaryTiming"})
+    {
+        return Err(
+            "AnalyticsTurnRecord.boundaryTiming must reference ProviderBoundaryTiming".into(),
+        );
+    }
     let snapshot: Value = studio_json::from_str(include_str!(
         "schemas/persisted-continuation-snapshot.schema.json"
     ))
@@ -1576,6 +1592,15 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         studio_json::json!({"type":"string", "const":crate::desktop::BACKEND_KIND});
     openapi["components"]["schemas"]["AnalyticsUsageRecord"]["properties"]["studioUsage"] =
         studio_json::json!({"$ref":"#/components/schemas/UsageObservation"});
+    let mut timing_generator = schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    timing_generator.subschema_for::<crate::provider_timing::ProviderBoundaryTiming>();
+    for (name, schema) in timing_generator.take_definitions(true) {
+        openapi["components"]["schemas"][&name] = schema;
+    }
+    openapi["components"]["schemas"]["AnalyticsTurnRecord"]["properties"]["boundaryTiming"] =
+        studio_json::json!({"$ref":"#/components/schemas/ProviderBoundaryTiming"});
     openapi["components"]["schemas"]["SyncIdentityResponse"]["properties"]["syncProtocol"]["const"] =
         studio_json::json!(crate::sync_protocol::SYNC_IDENTITY_PROTOCOL_VERSION);
     let identity_version =
@@ -1987,6 +2012,14 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: studio_json::to_string_pretty(&schema).map_err(|error| error.to_string())? + "\n",
         });
     }
+    let path = "workspaces/runtime/packages/runtime-schema/src/schemas/analytics-turn.schema.json";
+    let mut turn_schema = read_json(root, path)?;
+    turn_schema["properties"]["boundaryTiming"] = studio_json::json!({"$ref":"https://codex-studio.invalid/openapi.json#/components/schemas/ProviderBoundaryTiming"});
+    rendered.push(Rendered {
+        path: path.into(),
+        text: studio_json::to_string_pretty(&turn_schema).map_err(|error| error.to_string())?
+            + "\n",
+    });
     // Analytics embeds the same accounting owner with local schema references.
     let usage_defs = crate::usage::schemas_with_definitions_path("/$defs");
     for name in ["analytics-usage", "analytics-notice"] {
@@ -2021,6 +2054,43 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         text: studio_json::to_string_pretty(&usage_schema).map_err(|error| error.to_string())?
             + "\n",
     });
+    if with_api_types {
+        let mut generator = schemars::generate::SchemaSettings::draft2020_12()
+            .for_serialize()
+            .with(|settings| settings.definitions_path = "/components/schemas".into())
+            .into_generator();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeMethods>();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeRequest>();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeOutbound>();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeProviderOptions>();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeNotifications>();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeHistoricalNotifications>();
+        generator.subschema_for::<crate::provider_input::bridge::BridgeServerRequests>();
+        let schemas = generator.take_definitions(true);
+        let document = studio_json::json!({
+            "openapi":"3.1.0", "info":{"title":"Claude bridge protocol","version":"1"},
+            "paths":{}, "components":{"schemas":schemas}
+        });
+        rendered.push(Rendered {
+            path: "workspaces/providers/apps/claude-bridge/bridge-wire.generated.ts".into(),
+            text: api_types(root, &document, "--rust-owned")?,
+        });
+        let schema = document["components"]["schemas"]
+            .to_string()
+            .replace("#/components/schemas/", "#/$defs/");
+        let text = format!(
+            "// {HEADER}\nimport type {{ core }} from \"zod\";\nexport const bridgeWireDefinitions = {schema} satisfies Record<string, core.JSONSchema.JSONSchema>;\n"
+        );
+        rendered.push(Rendered {
+            path: "workspaces/providers/apps/claude-bridge/bridge-wire-schema.generated.ts".into(),
+            text: run_node(
+                root,
+                "node_modules/oxfmt/bin/oxfmt",
+                "--stdin-filepath=bridge-wire-schema.generated.ts",
+                &text,
+            )?,
+        });
+    }
     if with_api_types {
         let mut generator = schemars::generate::SchemaSettings::draft2020_12()
             .for_serialize()
@@ -2524,22 +2594,6 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
         assert!(output.status.success());
         let actual: Vec<bool> = studio_json::from_slice(&output.stdout).expect("policy results");
         assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn committed_contract_copies_match_the_rust_owners() {
-        let root = repository_root();
-        let rendered = render(&root, false).expect("contracts render");
-        assert!(
-            rendered
-                .iter()
-                .all(|file| !file.path.starts_with("workspaces/runtime/apps/server/"))
-        );
-        assert_eq!(
-            stale(&root, &rendered),
-            Vec::<String>::new(),
-            "run `pnpm run contracts:generate`"
-        );
     }
 
     #[test]

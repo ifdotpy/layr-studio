@@ -1,4 +1,6 @@
 use crate::CachedSql;
+use crate::agent_tables::AgentsStorageRow;
+use crate::peer_update_settings::canvas_read;
 use rusqlite::Connection;
 use studio_runtime_schema::persistence::HoldStatus;
 
@@ -36,6 +38,13 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     bootstrap_connection_functions: &[],
 };
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDeletion {
+    id: AgentId,
+    deleted_at: Option<f64>,
+}
+
 impl AgentRepository {
     /// Seed the singleton rows the change-journal triggers update when a
     /// schema-only state lacks them; without them no change is journaled.
@@ -53,6 +62,38 @@ impl AgentRepository {
 
     pub fn get(connection: &Connection, id: &AgentId) -> StoreResult<Option<AgentRecord>> {
         Table::<AgentRecord>::new(connection).get(id)
+    }
+
+    pub fn exists(connection: &Connection, id: &str) -> StoreResult<bool> {
+        Ok(studio_db_api::db_query!(
+            canvas_read(connection),
+            AgentsStorageRow,
+            exists(),
+            filter(AgentsStorageRow::ID.eq_ref(id))
+        )?)
+    }
+
+    /// Missing, live (including a zero deletion time), or deleted, by primary key.
+    pub fn deletion_status(connection: &Connection, id: &str) -> StoreResult<Option<bool>> {
+        studio_db_api::db_query!(
+            canvas_read(connection),
+            AgentsStorageRow,
+            scalar_raw(AgentsStorageRow::RECORD),
+            filter(AgentsStorageRow::ID.eq_ref(id))
+        )?
+        .map(|row| {
+            let agent: AgentDeletion = crate::records::decode_agent_projection(id, &row)?;
+            if agent.id.0 != id {
+                return Err(crate::records::invalid_agent_field(
+                    id,
+                    "/id",
+                    "row_id_mismatch",
+                    None,
+                ));
+            }
+            Ok(agent.deleted_at.is_some_and(|at| at != 0.0))
+        })
+        .transpose()
     }
 
     pub fn put(connection: &Connection, record: &AgentRecord) -> StoreResult<()> {
@@ -107,6 +148,156 @@ inventory::submit! {
 mod invalid_agent_repair_tests {
     use super::*;
     use studio_json::json;
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+        cardinality = none, result = (), tables(agents = AgentsStorageRow),
+        columns(id = AgentsStorageRow::ID, record = AgentsStorageRow::RECORD),
+        sql = "UPDATE {agents} SET {record}=json_set({record},'$.deletedAt',json({id})) WHERE {id} IN ('true','false')")]
+    struct BooleanDeletion;
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+        cardinality = none, result = (), tables(agents = AgentsStorageRow),
+        columns(id = AgentsStorageRow::ID, record = AgentsStorageRow::RECORD),
+        sql = "UPDATE {agents} SET {record}=json_set({record},'$.deletedAt',NULL,'$.epoch',json({id})) WHERE {id} IN ('true','false')")]
+    struct BooleanEpoch;
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+        cardinality = none, result = (), tables(agents = AgentsStorageRow),
+        columns(record = AgentsStorageRow::RECORD),
+        sql = "UPDATE {agents} SET {record}=substr({record},1,length({record})-1)||',\"deletedAt\":0,\"deletedAt\":true'||char(125)")]
+    struct DuplicateDeletion;
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+        cardinality = none, result = (), tables(agents = AgentsStorageRow),
+        columns(record = AgentsStorageRow::RECORD),
+        sql = "UPDATE {agents} SET {record}=substr({record},1,length({record})-1)||',\"epoch\":false'||char(125)")]
+    struct DuplicateEpoch;
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+        cardinality = none, result = (), tables(agents = AgentsStorageRow),
+        columns(id = AgentsStorageRow::ID, record = AgentsStorageRow::RECORD),
+        sql = "UPDATE {agents} SET {record}=json_set({record},'$.epoch',CASE {id} WHEN 'negative' THEN -1 ELSE 9007199254740992 END)")]
+    struct InvalidEpochRange;
+
+    #[test]
+    fn agent_narrow_reads_preserve_duplicate_keys_and_epoch_bounds() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        let seed = |id: &str| {
+            let agent = AgentRecord::from_value(json!({"id":id,"rootId":id,
+                "provider":"codex","accountKey":"default","epoch":1,
+                "status":"idle","compactions":0,"autoWake":true}))
+            .unwrap();
+            AgentRepository::put(&tx, &agent).unwrap();
+        };
+        seed("owner");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&DuplicateDeletion::QUERY, &DuplicateDeletion)
+            .unwrap();
+        assert!(AgentRepository::get(&tx, &"owner".into()).is_err());
+        assert!(AgentRepository::deletion_status(&tx, "owner").is_err());
+        assert!(crate::RulesRepository::owner(&tx, "owner").is_err());
+        seed("owner");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&DuplicateEpoch::QUERY, &DuplicateEpoch)
+            .unwrap();
+        assert!(AgentRepository::get(&tx, &"owner".into()).is_err());
+        assert!(crate::RulesRepository::owner(&tx, "owner").is_err());
+        seed("negative");
+        seed("unsafe");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&InvalidEpochRange::QUERY, &InvalidEpochRange)
+            .unwrap();
+        for id in ["negative", "unsafe"] {
+            assert!(AgentRepository::get(&tx, &id.into()).is_err());
+            assert!(crate::RulesRepository::owner(&tx, id).is_err());
+        }
+    }
+
+    #[test]
+    fn agent_narrow_reads_reject_sql_boolean_numbers() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        for id in ["true", "false"] {
+            let agent = AgentRecord::from_value(json!({"id":id,"rootId":id,
+                "provider":"codex","accountKey":"default","epoch":1,
+                "status":"idle","compactions":0,"autoWake":true}))
+            .unwrap();
+            AgentRepository::put(&tx, &agent).unwrap();
+        }
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&BooleanDeletion::QUERY, &BooleanDeletion)
+            .unwrap();
+        for id in ["true", "false"] {
+            assert!(AgentRepository::get(&tx, &id.into()).is_err());
+            assert!(
+                AgentRepository::deletion_status(&tx, id).is_err(),
+                "deletedAt={id}"
+            );
+            assert!(
+                crate::RulesRepository::owner(&tx, id).is_err(),
+                "deletedAt={id}"
+            );
+            assert!(AgentRepository::exists(&tx, id).unwrap());
+        }
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&BooleanEpoch::QUERY, &BooleanEpoch)
+            .unwrap();
+        for id in ["true", "false"] {
+            assert!(AgentRepository::get(&tx, &id.into()).is_err());
+            assert!(
+                crate::RulesRepository::owner(&tx, id).is_err(),
+                "epoch={id}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_liveness_reads_distinguish_zero_deleted_and_missing_rows() {
+        let db = crate::fresh_state::test_canvas();
+        assert!(!AgentRepository::exists(&db, "missing").unwrap());
+        assert_eq!(
+            AgentRepository::deletion_status(&db, "missing").unwrap(),
+            None
+        );
+        for (id, deletion, deleted) in [
+            ("live", json!(null), false),
+            ("zero", json!(0), false),
+            ("deleted", json!(1.5), true),
+        ] {
+            let mut agent = AgentRecord::from_value(json!({
+                "compactions":0,"accountKey":"default","id":id,"rootId":id,
+                "provider":"codex","epoch":1,"status":"idle","deletedAt":deletion
+            }))
+            .unwrap();
+            // Archived state does not determine AgentRecord::is_deleted.
+            agent.archived = studio_runtime_schema::queue_command::Field::Value(true);
+            AgentRepository::put(&db, &agent).unwrap();
+            let scope = crate::agent_volatile::publication_work::scope();
+            assert!(AgentRepository::exists(&db, id).unwrap());
+            assert_eq!(
+                AgentRepository::deletion_status(&db, id).unwrap(),
+                Some(deleted)
+            );
+            assert_eq!(
+                crate::agent_volatile::publication_work::take_full_decodes(),
+                0
+            );
+            drop(scope);
+            assert_eq!(
+                AgentRepository::get(&db, &id.into())
+                    .unwrap()
+                    .unwrap()
+                    .is_deleted(),
+                deleted
+            );
+        }
+    }
 
     #[test]
     fn receipt_domain_quarantine_does_not_decode_malformed_agent() {

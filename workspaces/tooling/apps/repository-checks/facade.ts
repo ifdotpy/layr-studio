@@ -1083,13 +1083,18 @@ export function gateSteps(root: string, name: string): GateStep[] {
         ...script(
           "web unit tests",
           web,
-          fast ? "test:unit:fast" : "test:unit:prepared",
+          fast ? "test:unit:fast" : "test:unit:pure",
         ),
-        // The real HTTP draft fixture runs after Rust witnesses in this lane.
-        // Keep its startup deadline without competing with our nextest workers.
+        lane: "web",
+        requires: "wasm",
+        // The web app, its WASM client crates, generated contracts and the Rust draft server.
+        inputs: ["workspaces/client", "workspaces/runtime"],
+      },
+      {
+        ...script("web HTTP fixtures", web, "test:unit:http"),
+        // Start the real draft server after nextest and doctests finish.
         lane: "rust",
         requires: "workspace",
-        // The web app, its WASM client crates, generated contracts and the Rust draft server.
         inputs: ["workspaces/client", "workspaces/runtime"],
       },
       ...["studio-claude-bridge", "codex-agents-desktop"].map(

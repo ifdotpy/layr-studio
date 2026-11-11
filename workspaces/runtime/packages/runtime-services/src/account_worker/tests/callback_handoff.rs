@@ -30,6 +30,7 @@ fn entry(generation: u64, cursor: u64, frame: &Value) -> JournalEntry {
         panic!("fixture frame decodes");
     };
     JournalEntry {
+        boundary_at: None,
         received_at_ms: cursor,
         cursor: EventCursor(cursor),
         generation: Generation(generation),
@@ -243,6 +244,7 @@ async fn shutdown_reads_the_final_callback_outcome_after_the_event_lane_closes()
             .receipt
             .send(match outcome {
                 WriteOutcome::Written => CommandReceipt::Written {
+                    written_at: None,
                     remote_id: None,
                     duplicate: false,
                 },
@@ -503,6 +505,7 @@ async fn an_accepted_request_is_answered_once_after_restart() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -531,6 +534,7 @@ async fn a_request_redelivered_after_commit_is_answered_once() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -781,6 +785,7 @@ async fn submitted_callback_recovery_sends_exact_saved_reply_without_dispatching
     );
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -882,6 +887,7 @@ async fn duplicate_callback_receipt_keeps_uncertainty_and_never_repeats_the_answ
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: true,
         })
@@ -937,6 +943,7 @@ async fn missing_callback_receipt_recovers_exact_saved_answer_once_after_same_ge
     reply
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -1229,6 +1236,7 @@ async fn managed_callback_first_handoff_captures_the_current_actor_authority() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -1286,7 +1294,7 @@ async fn flood(
                         let wire = wire.expect("provider writes");
                         answered.push(wire.value["id"].as_str().unwrap_or_default().to_owned());
                         wire.receipt
-                            .send(CommandReceipt::Written { remote_id: None, duplicate: false })
+                            .send(CommandReceipt::Written { written_at: None, remote_id: None, duplicate: false })
                             .ok()
                             .unwrap();
                     }
@@ -1371,6 +1379,7 @@ async fn an_unanswered_request_does_not_stop_events_or_new_work() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -1408,7 +1417,7 @@ async fn a_burst_beyond_the_callback_limits_is_answered_once_each() {
                     let wire = wire.expect("provider writes");
                     answered.push(wire.value["id"].as_str().unwrap().to_owned());
                     wire.receipt
-                        .send(CommandReceipt::Written { remote_id: None, duplicate: false })
+                        .send(CommandReceipt::Written { written_at: None, remote_id: None, duplicate: false })
                         .ok()
                         .unwrap();
                 }
@@ -1471,6 +1480,7 @@ async fn the_same_cursor_in_two_generations_is_two_records() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -1504,6 +1514,7 @@ async fn a_submitted_record_of_an_ended_generation_is_retired_unsent() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })

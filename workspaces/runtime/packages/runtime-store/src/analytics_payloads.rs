@@ -64,6 +64,8 @@ pub struct AnalyticsTurnRecordFields {
     pub started_at: Option<f64>,
     pub status: String,
     pub terminal_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary_timing: Option<studio_runtime_schema::provider_timing::ProviderBoundaryTiming>,
 }
 analytics_payload!(AnalyticsTurnRecord, AnalyticsTurnRecordFields);
 

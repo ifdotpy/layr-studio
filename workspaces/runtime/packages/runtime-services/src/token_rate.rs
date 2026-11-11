@@ -188,7 +188,7 @@ struct Publication {
 
 enum ProjectorCommand {
     Observe {
-        effect: NotificationPostCommit,
+        effect: Box<NotificationPostCommit>,
         effect_bit: u8,
     },
     Settle(oneshot::Sender<()>),
@@ -372,7 +372,10 @@ impl TokenRateHub {
             }
         };
         effect_agent_id(&effect).ok_or(TokenRateError::Unavailable)?;
-        self.queue(ProjectorCommand::Observe { effect, effect_bit })
+        self.queue(ProjectorCommand::Observe {
+            effect: Box::new(effect),
+            effect_bit,
+        })
     }
 
     /// Wait until every observation queued before this call is projected and published.
@@ -998,6 +1001,7 @@ mod tests {
         turn: &str,
     ) -> NotificationPostCommit {
         NotificationPostCommit::TokenRateUsage(NotificationObservation {
+            boundary_at: None,
             agent: Some(SharedJson::new(
                 json!({"provider":"codex","id":agent_id,"rootId":agent_id,"turnId":turn}),
             )),
@@ -1497,6 +1501,7 @@ mod tests {
             ..super::ProjectedAgent::default()
         };
         let observation = |method: &str, at: f64| super::NotificationObservation {
+            boundary_at: None,
             agent: Some(SharedJson::new(
                 json!({"provider":"codex","id":"agent","inFlight":true,"turnId":"turn"}),
             )),
@@ -1696,6 +1701,7 @@ mod tests {
     ) -> Vec<(NotificationPostCommit, u8)> {
         let observation = |cursor: u64, method: &str, params: studio_json::Value| {
             NotificationObservation {
+                boundary_at: None,
                 agent: Some(SharedJson::new(
                     json!({"id":agent,"rootId":"root","turnId":"turn","inFlight":true,"provider":provider.key()}),
                 )),

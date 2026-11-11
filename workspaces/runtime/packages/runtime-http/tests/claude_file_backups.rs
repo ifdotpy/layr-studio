@@ -72,6 +72,8 @@ impl ProviderTaskFactory for Factory {
                 handle: handle.clone(),
                 open_attempted: true,
                 info: Some(AttachmentInfo {
+                    spawn_started_at: None,
+                    initialized_at: None,
                     handle,
                     generation,
                     pid: 1,
@@ -97,6 +99,7 @@ impl ProviderTaskFactory for Factory {
                                 drop(reply.send(CommandReceipt::CachedInitialize(json!({}))));
                             } else {
                                 drop(reply.send(CommandReceipt::Written {
+                                    written_at: None,
                                     remote_id: None,
                                     duplicate: false,
                                 }));
@@ -107,6 +110,7 @@ impl ProviderTaskFactory for Factory {
                                     cursor += 1;
                                     entries
                                         .send(JournalEntry {
+                                    boundary_at: None,
                                             received_at_ms: options.clock.now_ms(),
                                             cursor: EventCursor(cursor),
                                             generation,

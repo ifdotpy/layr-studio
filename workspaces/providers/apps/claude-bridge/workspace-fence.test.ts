@@ -95,7 +95,7 @@ test("native Layr sessions resolve the managed binary and receive their store en
     cwd: bridge.root,
     approvalPolicy: "never",
     claude: { env: environment },
-  };
+  } satisfies import("./bridge-protocol.ts").BridgeParams<"thread/start">;
   const id = (await bridge.call("thread/start", options)).thread.id;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt)
@@ -182,8 +182,8 @@ test("native reviewer sessions retain account selectors with a filtered environm
   bridges.push(bridge);
   const scratch = path.join(bridge.root, "scratch");
   await fs.mkdir(scratch);
-  const environment: Record<string, string | undefined> = {
-    PATH: process.env.PATH,
+  const environment: Record<string, string> = {
+    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
     HOME: scratch,
     TMPDIR: scratch,
     LANG: "C",

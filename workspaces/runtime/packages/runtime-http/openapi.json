@@ -15185,6 +15185,9 @@
             "default": null,
             "title": "At"
           },
+          "boundaryTiming": {
+            "$ref": "#/components/schemas/ProviderBoundaryTiming"
+          },
           "cyberAccessProgram": {
             "anyOf": [
               {
@@ -17362,6 +17365,35 @@
           "groups"
         ],
         "title": "BlockingPoolMetrics",
+        "type": "object"
+      },
+      "BoundaryStamp": {
+        "additionalProperties": false,
+        "properties": {
+          "bootId": {
+            "default": null,
+            "description": "Kernel boot UUID; absent on legacy stamps or when unavailable.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "monotonicNs": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unixSeconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "unixSeconds",
+          "monotonicNs"
+        ],
         "type": "object"
       },
       "BranchDraft": {
@@ -22435,7 +22467,7 @@
         ]
       },
       "CodexErrorInfo": {
-        "$comment": "Owner: codex-cli 0.164.0; app-server generate-json-schema --experimental. definitions/CodexErrorInfo from v2/ErrorNotification.json. Refresh with pnpm run contracts:vendor:refresh.",
+        "$comment": "Owner: codex-cli 0.167.1; app-server generate-json-schema --experimental. definitions/CodexErrorInfo from v2/ErrorNotification.json. Refresh with pnpm run contracts:vendor:refresh.",
         "$schema": "http://json-schema.org/draft-07/schema#",
         "anyOf": [
           {
@@ -22446,6 +22478,8 @@
               "rateLimitExceeded",
               "flexUnavailable",
               "serverOverloaded",
+              "modelNotFound",
+              "policyCapacityUnavailable",
               "cyberPolicy",
               "misalignmentPolicyViolation",
               "tooManyDenials",
@@ -40817,6 +40851,154 @@
           "path"
         ],
         "title": "ProjectWriteRequest",
+        "type": "object"
+      },
+      "ProviderBoundaryTiming": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acceptedToTerminalMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "acceptedToWrittenMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "enqueued": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enqueuedToAcceptedMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "firstEvent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "firstToken": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "initialized": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "providerHandle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spawnStarted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spawnToInitializedMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "terminal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "written": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundaryStamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "writtenToFirstEventMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "writtenToFirstTokenMs": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "ProviderKind": {

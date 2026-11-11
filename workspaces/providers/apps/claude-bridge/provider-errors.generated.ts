@@ -21,6 +21,8 @@ export interface components {
           | "rateLimitExceeded"
           | "flexUnavailable"
           | "serverOverloaded"
+          | "modelNotFound"
+          | "policyCapacityUnavailable"
           | "cyberPolicy"
           | "misalignmentPolicyViolation"
           | "tooManyDenials"
@@ -77,6 +79,8 @@ export interface components {
       | "rateLimitExceeded"
       | "flexUnavailable"
       | "serverOverloaded"
+      | "modelNotFound"
+      | "policyCapacityUnavailable"
       | "cyberPolicy"
       | "misalignmentPolicyViolation"
       | "tooManyDenials"
@@ -110,6 +114,8 @@ export const KnownCodexErrorKind = {
   rateLimitExceeded: "rateLimitExceeded",
   flexUnavailable: "flexUnavailable",
   serverOverloaded: "serverOverloaded",
+  modelNotFound: "modelNotFound",
+  policyCapacityUnavailable: "policyCapacityUnavailable",
   cyberPolicy: "cyberPolicy",
   misalignmentPolicyViolation: "misalignmentPolicyViolation",
   tooManyDenials: "tooManyDenials",
@@ -142,6 +148,8 @@ export const KNOWN_CODEX_ERROR_KINDS = [
   "rateLimitExceeded",
   "flexUnavailable",
   "serverOverloaded",
+  "modelNotFound",
+  "policyCapacityUnavailable",
   "cyberPolicy",
   "misalignmentPolicyViolation",
   "tooManyDenials",

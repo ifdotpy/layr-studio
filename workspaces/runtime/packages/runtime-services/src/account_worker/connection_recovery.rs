@@ -300,7 +300,7 @@ pub(super) async fn lifecycle_completion(
     let message_recovery_id = recovery_id;
     let write_message: Box<crate::recovery_store::RecoveryMessageWriter> = Box::new(
         move |tx, agent, account, generation, turn, item, timestamp| {
-            let streams = super::store::current_streams(tx, account, Some(&cached))
+            let streams = super::store::current_streams(tx, account, Some(cached.clone()))
                 .map_err(stream_store_error)?;
             // TODO(agent-record-chain r3: recovery slice): recovery_store.rs::RecoveryMessageWriter owns this JSON boundary.
             let mut typed = AgentRecord::from_value(agent.clone())

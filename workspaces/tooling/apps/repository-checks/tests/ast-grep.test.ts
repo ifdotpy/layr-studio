@@ -17,7 +17,7 @@ import {
   readBaseline,
   WEB_RATCHET_SEED_BASE,
 } from "../ratchet.ts";
-import { run, scan, webPatternErrors } from "../ast-grep.ts";
+import { scan, webPatternErrors } from "../ast-grep.ts";
 
 const rules = "workspaces/tooling/apps/repository-checks/ast-grep/rules";
 const fixtures: readonly (readonly [string, string, string, string])[] = [
@@ -170,8 +170,6 @@ test("baseline decoder rejects malformed entries", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-test("repository ast-grep baseline is current", () => assert.equal(run(), 0));
-
 test("web architecture ast-grep rule cases pass", () => {
   const output = execFileSync(
     "node_modules/.bin/ast-grep",

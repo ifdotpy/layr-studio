@@ -7,6 +7,8 @@ use thiserror::Error;
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum wire bytes occupied by a frame's LF or CRLF delimiter.
 pub const MAX_FRAME_DELIMITER_BYTES: usize = 2;
+/// Reserved bytes for the transport stamp member, including its key and comma.
+const MAX_BOUNDARY_METADATA_BYTES: usize = 256;
 
 /// Count payload bytes in a complete wire frame, excluding LF or CRLF when present.
 #[must_use]
@@ -105,6 +107,7 @@ define_methods! {
     ThreadResume => "thread/resume",
     ThreadRead => "thread/read",
     ThreadTurnsList => "thread/turns/list",
+    ThreadTurnsItemsList => "thread/turns/items/list",
     TurnStart => "turn/start",
     TurnSteer => "turn/steer",
     TurnInterrupt => "turn/interrupt",
@@ -291,6 +294,7 @@ pub struct DecodedJournalEntry {
     pub cursor: u64,
     pub generation: u64,
     pub payload: DecodedJournalPayload,
+    pub boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -303,12 +307,6 @@ pub enum CodecError {
     FrameTooLarge { limit: usize },
     #[error("cannot serialize protocol frame: {0}")]
     Serialization(String),
-}
-
-fn decode_frame(line: &[u8]) -> Result<Frame, CodecError> {
-    studio_json::from_slice::<WireObject<'_>>(line)
-        .map_err(|error| CodecError::MalformedJson(error.to_string()))?
-        .into_frame()
 }
 
 /// Decode a compatibility probe reply, retaining its historical permissive
@@ -350,6 +348,9 @@ struct WireObject<'a> {
     result: Option<Value>,
     #[serde(default, deserialize_with = "present")]
     error: Option<Value>,
+    /// Transport metadata is consumed before constructing a provider Frame.
+    #[serde(rename = "_studioBoundaryAt")]
+    boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     #[serde(flatten)]
     fields: Map<String, Value>,
 }
@@ -368,6 +369,7 @@ impl WireObject<'_> {
             mut params,
             mut result,
             error,
+            boundary_at: _,
             mut fields,
         } = self;
         let mut keep = |key: &str, value: Option<Value>| {
@@ -431,35 +433,92 @@ impl WireObject<'_> {
 /// same wire schema as stdout lines, without re-encoding it. Only a malformed
 /// payload is encoded, to keep its bytes for the journal.
 pub fn decode_journal_value(cursor: u64, generation: u64, payload: &Value) -> DecodedJournalEntry {
-    let decoded = WireObject::deserialize(payload)
-        .map_err(|error| CodecError::MalformedJson(error.to_string()))
-        .and_then(WireObject::into_frame);
-    let payload = match decoded {
-        Ok(frame) => DecodedJournalPayload::Frame(frame),
-        Err(error) => DecodedJournalPayload::RawStdout {
-            bytes: studio_json::to_vec(payload).unwrap_or_default(),
-            error,
-        },
+    let decoded = json_payload_bytes(payload)
+        .and_then(|bytes| check_journal_size(payload, bytes))
+        .and_then(|()| journal_value_frame(payload));
+    let (payload, boundary_at) = match decoded {
+        Ok((frame, stamp)) => (DecodedJournalPayload::Frame(frame), stamp),
+        Err(error) => raw_journal_payload(studio_json::to_vec(payload).unwrap_or_default(), error),
     };
     DecodedJournalEntry {
         cursor,
         generation,
         payload,
+        boundary_at,
     }
+}
+
+fn journal_value_frame(
+    payload: &Value,
+) -> Result<
+    (
+        Frame,
+        Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    ),
+    CodecError,
+> {
+    let wire = WireObject::deserialize(payload)
+        .map_err(|error| CodecError::MalformedJson(error.to_string()))?;
+    let stamp = wire.boundary_at;
+    wire.into_frame().map(|frame| (frame, stamp))
+}
+
+/// Count encoded bytes without allocating a second payload buffer.
+fn json_payload_bytes(value: &Value) -> Result<usize, CodecError> {
+    #[derive(Default)]
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self.0.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count::default();
+    studio_json::to_writer(&mut count, value).map_err(serialize_error)?;
+    Ok(count.0)
+}
+
+fn check_journal_size(payload: &Value, wire_bytes: usize) -> Result<(), CodecError> {
+    let name = studio_runtime_schema::provider_timing::BOUNDARY_STAMP_FIELD;
+    let metadata_bytes = payload
+        .as_object()
+        .and_then(|object| object.get(name).map(|value| (object.len(), value)))
+        .map(|(members, value)| {
+            json_payload_bytes(value).map(|bytes| bytes + name.len() + 3 + usize::from(members > 1))
+        })
+        .transpose()?
+        .unwrap_or_default();
+    check_journal_byte_sizes(wire_bytes, metadata_bytes)
+}
+
+fn check_journal_byte_sizes(wire_bytes: usize, metadata_bytes: usize) -> Result<(), CodecError> {
+    if metadata_bytes > MAX_BOUNDARY_METADATA_BYTES
+        || wire_bytes > MAX_FRAME_BYTES + MAX_BOUNDARY_METADATA_BYTES
+        || wire_bytes.saturating_sub(metadata_bytes) > MAX_FRAME_BYTES
+    {
+        return Err(CodecError::FrameTooLarge {
+            limit: MAX_FRAME_BYTES,
+        });
+    }
+    Ok(())
 }
 
 /// Decode a complete supervisor stdout journal record without losing its
 /// cursor when its payload is not valid protocol JSON.
 pub fn decode_journal_entry(cursor: u64, generation: u64, bytes: Vec<u8>) -> DecodedJournalEntry {
     let decoded = decode_journal_frame(&bytes);
-    let payload = match decoded {
-        Ok(frame) => DecodedJournalPayload::Frame(frame),
-        Err(error) => DecodedJournalPayload::RawStdout { bytes, error },
+    let (payload, boundary_at) = match decoded {
+        Ok((frame, stamp)) => (DecodedJournalPayload::Frame(frame), stamp),
+        Err(error) => raw_journal_payload(bytes, error),
     };
     DecodedJournalEntry {
         cursor,
         generation,
         payload,
+        boundary_at,
     }
 }
 
@@ -470,21 +529,51 @@ pub fn decode_journal_entry_borrowed(
     generation: u64,
     bytes: &[u8],
 ) -> DecodedJournalEntry {
-    let payload = match decode_journal_frame(bytes) {
-        Ok(frame) => DecodedJournalPayload::Frame(frame),
-        Err(error) => DecodedJournalPayload::RawStdout {
-            bytes: bytes.to_vec(),
-            error,
-        },
+    let (payload, boundary_at) = match decode_journal_frame(bytes) {
+        Ok((frame, stamp)) => (DecodedJournalPayload::Frame(frame), stamp),
+        Err(error) => raw_journal_payload(bytes.to_vec(), error),
     };
     DecodedJournalEntry {
         cursor,
         generation,
         payload,
+        boundary_at,
     }
 }
 
-fn decode_journal_frame(bytes: &[u8]) -> Result<Frame, CodecError> {
+/// A supervisor can timestamp a JSON object that is not a valid provider frame.
+/// Strip only the new transport field on that fallback too. Legacy raw bytes
+/// without the field remain byte-for-byte unchanged.
+fn raw_journal_payload(
+    mut bytes: Vec<u8>,
+    error: CodecError,
+) -> (
+    DecodedJournalPayload,
+    Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+) {
+    let mut boundary_at = None;
+    if let Ok(mut object) = studio_json::from_slice::<Map<String, Value>>(&bytes)
+        && let Some(stamp) =
+            object.remove(studio_runtime_schema::provider_timing::BOUNDARY_STAMP_FIELD)
+    {
+        boundary_at = studio_json::from_value(stamp).ok();
+        bytes = studio_json::to_vec(&object).expect("parsed provider JSON serializes");
+    }
+    (
+        DecodedJournalPayload::RawStdout { bytes, error },
+        boundary_at,
+    )
+}
+
+fn decode_journal_frame(
+    bytes: &[u8],
+) -> Result<
+    (
+        Frame,
+        Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    ),
+    CodecError,
+> {
     let mut line = bytes;
     if let Some(without_newline) = line.strip_suffix(b"\n") {
         line = without_newline;
@@ -492,12 +581,145 @@ fn decode_journal_frame(bytes: &[u8]) -> Result<Frame, CodecError> {
             line = without_carriage_return;
         }
     }
-    if frame_payload_bytes(bytes) > MAX_FRAME_BYTES {
+    let payload_bytes = frame_payload_bytes(bytes);
+    if payload_bytes > MAX_FRAME_BYTES + MAX_BOUNDARY_METADATA_BYTES {
         Err(CodecError::FrameTooLarge {
             limit: MAX_FRAME_BYTES,
         })
     } else {
-        decode_frame(line)
+        if payload_bytes > MAX_FRAME_BYTES {
+            // Only near-limit records need this allocation-free extra pass.
+            // Measure the stamp's actual bytes, including noncanonical numbers.
+            #[derive(Deserialize)]
+            struct Envelope<'a> {
+                #[serde(borrow, rename = "_studioBoundaryAt")]
+                stamp: Option<studio_json::RawJson<'a>>,
+            }
+            let envelope: Envelope<'_> = studio_json::from_slice(line)
+                .map_err(|error| CodecError::MalformedJson(error.to_string()))?;
+            let metadata_bytes = envelope.stamp.map_or(0, |stamp| {
+                stamp.as_str().len()
+                    + studio_runtime_schema::provider_timing::BOUNDARY_STAMP_FIELD.len()
+                    + 4
+            });
+            check_journal_byte_sizes(payload_bytes, metadata_bytes)?;
+        }
+        let wire = studio_json::from_slice::<WireObject<'_>>(line)
+            .map_err(|error| CodecError::MalformedJson(error.to_string()))?;
+        let stamp = wire.boundary_at;
+        wire.into_frame().map(|frame| (frame, stamp))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod boundary_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn boundary_metadata_does_not_consume_provider_frame_budget() {
+        use studio_runtime_schema::provider_timing::BOUNDARY_STAMP_FIELD;
+        for provider_bytes in [
+            MAX_FRAME_BYTES - 20,
+            MAX_FRAME_BYTES,
+            MAX_FRAME_BYTES + 1,
+            MAX_FRAME_BYTES + MAX_BOUNDARY_METADATA_BYTES,
+        ] {
+            let mut value = studio_json::json!({"id":"r","result":{"pad":""}});
+            let overhead = studio_json::to_vec(&value).unwrap().len();
+            value["result"]["pad"] = Value::String("x".repeat(provider_bytes - overhead));
+            value[BOUNDARY_STAMP_FIELD] = studio_json::json!({"bootId":"00000000-0000-0000-0000-000000000001","unixSeconds":10.,"monotonicNs":42});
+            let bytes = studio_json::to_vec(&value).unwrap();
+            assert!(bytes.len() > MAX_FRAME_BYTES);
+            for decoder in 0..3 {
+                let decoded = match decoder {
+                    0 => decode_journal_value(1, 7, &value),
+                    1 => decode_journal_entry(1, 7, bytes.clone()),
+                    _ => decode_journal_entry_borrowed(1, 7, &bytes),
+                };
+                if provider_bytes <= MAX_FRAME_BYTES {
+                    assert!(
+                        matches!(decoded.payload, DecodedJournalPayload::Frame(_)),
+                        "decoder={decoder}, provider_bytes={provider_bytes}"
+                    );
+                } else {
+                    assert!(
+                        matches!(
+                            decoded.payload,
+                            DecodedJournalPayload::RawStdout {
+                                error: CodecError::FrameTooLarge { .. },
+                                ..
+                            }
+                        ),
+                        "decoder={decoder}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn malformed_boundary_metadata_is_extracted_without_changing_raw_provider_bytes() {
+        use studio_runtime_schema::provider_timing::{BOUNDARY_STAMP_FIELD, BoundaryStamp};
+        let stamp = BoundaryStamp {
+            boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+            unix_seconds: 10.,
+            monotonic_ns: 42,
+        };
+        for plain in [
+            studio_json::json!({"method":17}),
+            studio_json::json!({"id":null,"result":{}}),
+            studio_json::json!({"method":"turn/started","id":false}),
+        ] {
+            let raw = studio_json::to_vec(&plain).unwrap();
+            let mut tagged = plain.clone();
+            tagged[BOUNDARY_STAMP_FIELD] = studio_json::json!(stamp);
+            let bytes = studio_json::to_vec(&tagged).unwrap();
+            for decoded in [
+                decode_journal_value(1, 7, &tagged),
+                decode_journal_entry(1, 7, bytes.clone()),
+                decode_journal_entry_borrowed(1, 7, &bytes),
+            ] {
+                assert_eq!(decoded.boundary_at, Some(stamp));
+                let DecodedJournalPayload::RawStdout { bytes, .. } = decoded.payload else {
+                    panic!("invalid frame")
+                };
+                assert_eq!(bytes, raw);
+            }
+        }
+    }
+
+    #[test]
+    fn supervisor_boundary_metadata_is_removed_before_frame_construction() {
+        use studio_runtime_schema::provider_timing::{BOUNDARY_STAMP_FIELD, BoundaryStamp};
+        let stamp = BoundaryStamp {
+            boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+            unix_seconds: 10.,
+            monotonic_ns: 42,
+        };
+        for mut wire in [
+            studio_json::json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"turn"}},"extension":{"keep":true}}),
+            studio_json::json!({"id":"request","result":{"turn":{"id":"turn"}}}),
+            studio_json::json!({"method":"future/event","params":{"text":"keep"},"extension":{"keep":true}}),
+        ] {
+            let plain = decode_journal_value(1, 7, &wire);
+            wire[BOUNDARY_STAMP_FIELD] = studio_json::json!(stamp);
+            let bytes = studio_json::to_vec(&wire).unwrap();
+            for tagged in [
+                decode_journal_value(1, 7, &wire),
+                decode_journal_entry(1, 7, bytes.clone()),
+                decode_journal_entry_borrowed(1, 7, &bytes),
+            ] {
+                assert_eq!(tagged.boundary_at, Some(stamp));
+                assert_eq!(tagged.payload, plain.payload);
+                let (DecodedJournalPayload::Frame(tagged), DecodedJournalPayload::Frame(plain)) =
+                    (&tagged.payload, &plain.payload)
+                else {
+                    panic!("valid frames")
+                };
+                assert_eq!(encode_line(tagged).unwrap(), encode_line(plain).unwrap());
+            }
+        }
     }
 }
 
@@ -643,5 +865,181 @@ fn sanitize_failure_payload(payload: &mut Value) {
                 }
             }
         }
+    }
+}
+
+/// Vendor method classification of an incoming Codex frame. Unknown names keep
+/// their original frame through the same compatibility accessor as known names.
+/// Payload migration deliberately stays separate: this classification does not
+/// deserialize a second JSON tree on the stdout hot path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CodexIncomingMethod {
+    Notification(studio_codex_protocol::ServerNotificationMethod),
+    Request(studio_codex_protocol::ServerRequestMethod),
+    Unknown { method: String },
+}
+
+impl CodexIncomingMethod {
+    #[must_use]
+    pub fn disposition(&self) -> Option<crate::codex_disposition::Disposition> {
+        match self {
+            Self::Notification(method) => {
+                Some(crate::codex_disposition::server_notification(*method))
+            }
+            Self::Request(method) => Some(crate::codex_disposition::server_request(*method)),
+            Self::Unknown { method: _ } => None,
+        }
+    }
+}
+
+impl Frame {
+    /// Compatibility view for consumers awaiting typed payload migration.
+    #[must_use]
+    pub fn method_and_params(&self) -> Option<(&str, &Value)> {
+        static NULL: Value = Value::Null;
+        match self {
+            Self::Notification(frame) => Some((
+                frame.method.as_str(),
+                frame.params.as_ref().unwrap_or(&NULL),
+            )),
+            Self::Request(frame) => Some((
+                frame.method.as_str(),
+                frame.params.as_ref().unwrap_or(&NULL),
+            )),
+            Self::UnknownMethod(frame) => {
+                Some((&frame.method, frame.fields.get("params").unwrap_or(&NULL)))
+            }
+            Self::Response {
+                id: _,
+                body: _,
+                fields: _,
+            } => None,
+        }
+    }
+
+    /// Classify once at a Codex ingress. The enclosing reader owns provider
+    /// identity; the Claude bridge's extensions do not enter this decoder.
+    #[must_use]
+    pub fn codex_incoming_method(&self) -> Option<CodexIncomingMethod> {
+        let (method, _) = self.method_and_params()?;
+        let is_request = match self {
+            Self::Request(_) => true,
+            Self::Notification(_) => false,
+            Self::UnknownMethod(frame) => frame.fields.contains_key("id"),
+            Self::Response {
+                id: _,
+                body: _,
+                fields: _,
+            } => return None,
+        };
+        Some(if is_request {
+            studio_codex_protocol::ServerRequestMethod::from_wire(method)
+                .map(CodexIncomingMethod::Request)
+                .unwrap_or_else(|| CodexIncomingMethod::Unknown {
+                    method: method.to_owned(),
+                })
+        } else {
+            studio_codex_protocol::ServerNotificationMethod::from_wire(method)
+                .map(CodexIncomingMethod::Notification)
+                .unwrap_or_else(|| CodexIncomingMethod::Unknown {
+                    method: method.to_owned(),
+                })
+        })
+    }
+}
+
+#[cfg(test)]
+mod codex_protocol_tests {
+    use super::*;
+    use studio_codex_protocol::{ServerNotification, ServerNotificationMethod, ServerRequest};
+    use studio_json::json;
+
+    #[test]
+    fn codex_known_unknown_and_malformed_notification_boundary() {
+        let known = json!({"method":"thread/name/updated","params":{"threadId":"thread","threadName":"name"}});
+        let decoded = decode_journal_value(1, 1, &known);
+        let DecodedJournalPayload::Frame(frame) = decoded.payload else {
+            panic!("known notification frame")
+        };
+        assert_eq!(
+            frame.codex_incoming_method(),
+            Some(CodexIncomingMethod::Notification(
+                ServerNotificationMethod::ThreadNameUpdated
+            ))
+        );
+        assert_eq!(
+            frame.method_and_params(),
+            Some(("thread/name/updated", &known["params"]))
+        );
+        assert!(ServerNotification::deserialize(&known).is_ok());
+        let unknown = json!({"method":"future/notification","params":{"opaque":[1,2]}});
+        let DecodedJournalPayload::Frame(frame) = decode_journal_value(2, 1, &unknown).payload
+        else {
+            panic!("unknown notification retained")
+        };
+        assert_eq!(
+            frame.codex_incoming_method(),
+            Some(CodexIncomingMethod::Unknown {
+                method: "future/notification".into()
+            })
+        );
+        assert_eq!(
+            frame.method_and_params(),
+            Some(("future/notification", &unknown["params"]))
+        );
+        assert_eq!(
+            studio_json::from_slice::<Value>(&encode_line(&frame).unwrap()).unwrap(),
+            unknown
+        );
+        let malformed =
+            json!({"method":"thread/name/updated","params":{"threadId":123,"threadName":"name"}});
+        assert!(ServerNotification::deserialize(&malformed).is_err());
+        assert!(
+            ServerNotification::deserialize(json!({"method":"thread/name/updated","params":{}}))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn codex_vendor_union_keeps_common_fields_and_optional_null_presence() {
+        let valid = json!({"id":1,"method":"mcpServer/elicitation/request","params":{"mode":"openaiForm","message":"Confirm","requestedSchema":{},"serverName":"mcp","threadId":"thread","turnId":null}});
+        assert!(ServerRequest::deserialize(&valid).is_ok());
+        let mut missing = valid.clone();
+        missing["params"]
+            .as_object_mut()
+            .unwrap()
+            .remove("serverName");
+        assert!(ServerRequest::deserialize(&missing).is_err());
+        let mut unknown = valid;
+        unknown["params"]["mode"] = json!("futureForm");
+        assert!(ServerRequest::deserialize(&unknown).is_err());
+        assert!(
+            studio_codex_protocol::ThreadStatus::deserialize(json!({"type":"active"})).is_err()
+        );
+        assert!(
+            studio_codex_protocol::ThreadStatus::deserialize(
+                json!({"type":"active","activeFlags":["futureFlag"]})
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn codex_server_request_decodes_typed_params_and_result_contract() {
+        let value = json!({"id":17,"method":"currentTime/read","params":{"threadId":"thread"}});
+        assert!(ServerRequest::deserialize(&value).is_ok());
+        let DecodedJournalPayload::Frame(frame) = decode_journal_value(1, 1, &value).payload else {
+            panic!("request frame")
+        };
+        assert_eq!(
+            frame.codex_incoming_method(),
+            Some(CodexIncomingMethod::Request(
+                studio_codex_protocol::ServerRequestMethod::CurrentTimeRead
+            ))
+        );
+        assert_eq!(
+            frame.codex_incoming_method().unwrap().disposition(),
+            Some(crate::codex_disposition::Disposition::Handled)
+        );
     }
 }

@@ -13,6 +13,7 @@ file-rotate.workspace = true
 serde = { workspace = true, features = ["derive"] }
 studio-json = { path = "../json" }
 studio-runtime-providers = { path = "../runtime-providers" }
+studio-runtime-schema = { path = "../runtime-schema" }
 studio-runtime-store = { path = "../runtime-store" }
 thiserror.workspace = true
 strum.workspace = true

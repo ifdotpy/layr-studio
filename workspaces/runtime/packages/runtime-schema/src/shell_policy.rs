@@ -10,8 +10,9 @@ pub const PRESSURE_RESTART_GUARD_MS: u64 = 30 * 60 * 1000;
 /// Maximum time between native shell policy observations, in milliseconds.
 pub const TICK_MS: u64 = 2_500;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(rename = "BackgroundShellPolicySettings")]
 pub struct Settings {
     pub quiet_threshold_ms: u64,
     pub pressure_cleanup: bool,

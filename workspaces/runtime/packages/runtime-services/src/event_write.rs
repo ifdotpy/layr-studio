@@ -560,7 +560,13 @@ fn enqueue(
         if auto_wake {
             queue_agent(transaction, agent)?;
         }
-        EventWriteRepository::mark_event_enqueued(transaction, &id, monotonic_ns())?;
+        let accepted = studio_runtime_process::clock::boundary_stamp();
+        EventWriteRepository::mark_event_enqueued(
+            transaction,
+            &id,
+            accepted.monotonic_ns.into(),
+            Some(accepted),
+        )?;
     }
     Ok(inserted)
 }

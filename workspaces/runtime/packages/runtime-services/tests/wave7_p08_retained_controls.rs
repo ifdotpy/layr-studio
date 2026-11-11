@@ -78,6 +78,7 @@ impl ClaudeSessionPort for AccountPort {
                 | studio_runtime_providers::Method::ThreadResume
                 | studio_runtime_providers::Method::ThreadRead
                 | studio_runtime_providers::Method::ThreadTurnsList
+                | studio_runtime_providers::Method::ThreadTurnsItemsList
                 | studio_runtime_providers::Method::TurnStart
                 | studio_runtime_providers::Method::TurnSteer
                 | studio_runtime_providers::Method::TurnInterrupt

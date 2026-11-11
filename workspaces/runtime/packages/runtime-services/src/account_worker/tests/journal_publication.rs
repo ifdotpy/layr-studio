@@ -599,7 +599,7 @@ async fn stream_cache_revision_keeps_allocations_and_bounds_validation_work() {
                     }),
                 )?;
                 let started = std::time::Instant::now();
-                let validated = store::current_streams(tx, "default", Some(&cached))?;
+                let validated = store::current_streams(tx, "default", Some(cached.clone()))?;
                 let elapsed = started.elapsed();
                 tx.progress_handler(1, None::<fn() -> bool>)?;
                 assert!(
@@ -643,7 +643,7 @@ async fn stream_cache_revision_handles_owner_snapshots_and_rolled_back_handoffs(
     let original = canonical.clone();
     let failed = store
         .transaction_with(move |tx| {
-            let mut next = store::current_streams(tx, "default", Some(&original))?;
+            let mut next = store::current_streams(tx, "default", Some(original))?;
             store::persist_streams(tx, "default", &mut next)?;
             *capture.lock().expect("staged handoff") = Some(next);
             Err::<(), _>(store::invalid("rollback-fixture"))
@@ -656,7 +656,7 @@ async fn stream_cache_revision_handles_owner_snapshots_and_rolled_back_handoffs(
         .take()
         .expect("buffer");
     let restored = store
-        .transaction_with(move |tx| store::current_streams(tx, "default", Some(&rolled_back)))
+        .transaction_with(move |tx| store::current_streams(tx, "default", Some(rolled_back)))
         .await
         .expect("rollback invalidates staged handoff");
     assert_eq!(restored, canonical);
@@ -669,7 +669,7 @@ async fn stream_cache_revision_handles_owner_snapshots_and_rolled_back_handoffs(
     let current = store
         .transaction_with(move |tx| {
             store::persist_streams(tx, "default", &mut replacement)?;
-            let current = store::current_streams(tx, "default", Some(&old))?;
+            let current = store::current_streams(tx, "default", Some(old))?;
             assert_eq!(
                 current, replacement,
                 "delayed handoff must reload even at the same publication sequence"

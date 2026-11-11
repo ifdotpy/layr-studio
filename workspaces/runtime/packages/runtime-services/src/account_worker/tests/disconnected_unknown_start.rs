@@ -38,6 +38,7 @@ async fn unknown_start_then_disconnect(state: &State, generation: u64) -> (Peer,
                 .unwrap();
             let operation = format!("account:default:{}:turn/start", intent.attempt_id);
             let request = RecoveredRequest {
+                boundary_timing: None,
                 ticket: studio_runtime_providers::RequestTicket {
                     id: RequestId::String(operation.clone()),
                     generation: 1,
@@ -215,6 +216,7 @@ async fn serve_absent_history(
         }
         let request = wire.value;
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -254,6 +256,7 @@ async fn a_replaced_provider_without_the_input_sends_it_once() {
     if wire.value["method"] == "thread/resume" {
         let resume = wire.value;
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -263,6 +266,7 @@ async fn a_replaced_provider_without_the_input_sends_it_once() {
     }
     assert_eq!(wire.value["method"], "turn/start", "{}", wire.value);
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });

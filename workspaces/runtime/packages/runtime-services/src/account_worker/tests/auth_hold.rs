@@ -210,6 +210,7 @@ async fn hold(state: &State, peer: &mut Peer, worker: &AccountHandle, agent: &st
                     "held starts write nothing else"
                 );
                 let _ignored = wire.receipt.send(CommandReceipt::Written {
+                    written_at: None,
                     remote_id: None,
                     duplicate: false,
                 });
@@ -231,6 +232,7 @@ async fn start(state: &State, peer: &mut Peer, worker: &AccountHandle, agent: &s
     if wire.value["method"] == "thread/resume" {
         let resume = wire.value;
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -240,6 +242,7 @@ async fn start(state: &State, peer: &mut Peer, worker: &AccountHandle, agent: &s
     }
     assert_eq!(wire.value["method"], "turn/start");
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });

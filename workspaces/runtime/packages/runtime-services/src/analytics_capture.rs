@@ -69,8 +69,26 @@ pub struct PreparedCapture {
     rejected_usage: Option<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
     ledger_since: studio_runtime_schema::usage::ledger::LedgerEpoch,
     unknown_usage_key: Option<String>,
+    boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    first_delta_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 impl PreparedCapture {
+    pub fn at_provider_boundary(
+        mut self,
+        stamp: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    ) -> Result<Self, CaptureError> {
+        if stamp.is_some_and(|stamp| !stamp.unix_seconds.is_finite() || stamp.unix_seconds < 0.) {
+            return Err(CaptureError::Invalid("/boundaryAt"));
+        }
+        self.boundary_at = stamp;
+        self.first_delta_at = (self.method == "item/modelOutput/firstDelta"
+            || self.params["delta"]
+                .as_str()
+                .is_some_and(|delta| !delta.is_empty()))
+        .then_some(stamp)
+        .flatten();
+        Ok(self)
+    }
     pub fn event(
         agent: &Value,
         method: &str,
@@ -180,6 +198,8 @@ impl PreparedCapture {
             rejected_usage: None,
             ledger_since,
             unknown_usage_key: None,
+            boundary_at: None,
+            first_delta_at: None,
         })
     }
     pub(crate) fn model_payload_shared(
@@ -699,7 +719,11 @@ pub(crate) fn capture_logged_effect(
         observation.observed_at.get(),
         observation.observed_at.get(),
         epoch,
-    )?;
+    )?
+    .at_provider_boundary(observation.boundary_at)?;
+    if let Some(metrics) = metrics {
+        prepared.first_delta_at = metrics.first_delta_at;
+    }
     if let Effect::Analytics {
         usage_conflict: Some(conflict),
         ..
@@ -952,25 +976,17 @@ pub fn decide(
             bytes: i64::try_from(p.to_string().len()).ok(),
         });
     }
-    if method == "thread/tokenUsage/updated" {
-        let provider = ProviderKind::of_record(&q.agent)
-            .map_err(|_| CaptureError::Invalid("/agent/provider"))?;
-        usage(&q, provider, &mut meta, &rows, &mut result);
-        return Ok(result);
-    }
-    if q.model {
-        model_item(&q, &meta, rows.item, &mut result);
-        return Ok(result);
-    }
     if studio_runtime_store::truthy(Some(&meta["turnId"]))
-        && matches!(
+        && !q.model
+        && (matches!(
             method,
             "turn/started"
                 | "turn/completed"
                 | "item/agentMessage/delta"
                 | "item/started"
                 | "item/completed"
-        )
+        ) || q.source == CaptureSource::Live
+            && (q.boundary_at.is_some() || method == "analytics/adapterBoundary"))
     {
         let mut row=rows.turn.clone().unwrap_or_else(||merge(&meta,json!({"id":key(&meta,&meta["turnId"]),"at":at,"startedAt":null,"finishedAt":null,"firstOutputAt":null,"durationMs":null,"firstOutputDelayMs":null,"status":"unknown","source":q.source.name()})));
         match method {
@@ -1032,8 +1048,21 @@ pub fn decide(
                 }
             }
         }
+        boundary_timings(&q, &mut row)?;
         timings(&mut row);
-        result.rows.push((CaptureTable::Turns, row));
+        if rows.turn.as_ref() != Some(&row) {
+            result.rows.push((CaptureTable::Turns, row));
+        }
+    }
+    if method == "thread/tokenUsage/updated" {
+        let provider = ProviderKind::of_record(&q.agent)
+            .map_err(|_| CaptureError::Invalid("/agent/provider"))?;
+        usage(&q, provider, &mut meta, &rows, &mut result);
+        return Ok(result);
+    }
+    if q.model {
+        model_item(&q, &meta, rows.item, &mut result);
+        return Ok(result);
     }
     if method == "analytics/rateLimits" {
         if rows.last_limit.as_ref().map(limit_content) != Some(limit_content(p)) {
@@ -1060,6 +1089,8 @@ pub fn decide(
             rejected_usage: q.rejected_usage.clone(),
             ledger_since: q.ledger_since,
             unknown_usage_key: q.unknown_usage_key.clone(),
+            boundary_at: q.boundary_at,
+            first_delta_at: q.first_delta_at,
         };
         let recursive = decide(
             CaptureSnapshot::from_records(std::sync::Arc::new(next), rows)?,
@@ -1076,6 +1107,56 @@ pub fn decide(
     }
     protocol_item(&q, &meta, rows.item, &mut result);
     Ok(result)
+}
+fn boundary_timings(q: &PreparedCapture, row: &mut Value) -> Result<(), CaptureError> {
+    use studio_runtime_schema::provider_timing::ProviderBoundaryTiming;
+    if q.source != CaptureSource::Live {
+        return Ok(());
+    }
+    let mut timing: ProviderBoundaryTiming = row
+        .get("boundaryTiming")
+        .map(serde::Deserialize::deserialize)
+        .transpose()
+        .map_err(StoreError::from)?
+        .unwrap_or_default();
+    let mut incoming = if q.method == "analytics/adapterBoundary" {
+        serde::Deserialize::deserialize(&q.params["boundaryTiming"]).map_err(StoreError::from)?
+    } else {
+        ProviderBoundaryTiming::default()
+    };
+    // Account-wide notices without a native turn identity must not claim the
+    // current agent turn's first event.
+    if let Some(stamp) = q.boundary_at
+        && (q.params["turnId"].is_string() || q.params["turn"]["id"].is_string())
+    {
+        incoming.first_event = Some(stamp);
+        let output = q.method == "item/modelOutput/firstDelta"
+            || matches!(
+                q.method.as_str(),
+                "item/agentMessage/delta"
+                    | "item/reasoning/textDelta"
+                    | "item/reasoning/summaryTextDelta"
+                    | "item/reasoning/summaryDelta"
+            );
+        if output
+            && let Some(token) = q.first_delta_at
+            && timing.terminal.is_none_or(|terminal| {
+                token.same_boot(terminal) && token.monotonic_ns <= terminal.monotonic_ns
+            })
+        {
+            incoming.first_token = Some(token);
+        }
+        if q.method == "turn/completed" && q.params["turn"]["status"] != "uncertain" {
+            incoming.terminal = Some(stamp);
+        }
+    }
+    timing.merge_first(incoming);
+    if timing != Default::default() {
+        row["boundaryTiming"] =
+            serde::Serialize::serialize(&timing, studio_json::value::Serializer)
+                .map_err(StoreError::from)?;
+    }
+    Ok(())
 }
 fn protocol_item(
     q: &PreparedCapture,
@@ -2084,5 +2165,158 @@ mod identity_read_tests {
         let result = check_agent_identity(&store, vec![json!({"id":"missing"})]).await;
         assert!(matches!(result, Err(CaptureError::StaleIdentity)));
         assert_eq!(store.writer_admissions(), before);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod boundary_timing_tests {
+    use super::*;
+
+    #[test]
+    fn model_boundary_stamps_first_delta_once_without_repeated_turn_writes() {
+        for (provider, model_delta) in [
+            ("codex", "item/reasoning/textDelta"),
+            ("claude", "item/modelOutput/firstDelta"),
+        ] {
+            let agent =
+                json!({"id":"agent","name":"Agent","provider":provider,"threadId":"thread"});
+            let mut turn = None;
+            for (index, (method, delta, status)) in [
+                ("turn/started", "", "running"),
+                ("item/agentMessage/delta", "", ""),
+                (model_delta, "thought", ""),
+                ("item/agentMessage/delta", "answer", ""),
+                ("item/agentMessage/delta", "more", ""),
+                ("turn/completed", "", "interrupted"),
+                ("item/modelOutput/firstDelta", "", ""),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let at = index as f64 + 1.;
+                let params = json!({"threadId":"thread","turnId":"turn","delta":delta,"turn":{"id":"turn","status":status}});
+                let prepared = PreparedCapture::event(
+                    &agent,
+                    method,
+                    &params,
+                    at,
+                    at,
+                    CaptureSource::Live,
+                    Default::default(),
+                )
+                .unwrap()
+                .at_provider_boundary(Some(
+                    studio_runtime_schema::provider_timing::BoundaryStamp {
+                        boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+                        unix_seconds: at,
+                        monotonic_ns: (at * 1000000.) as u64,
+                    },
+                ))
+                .unwrap();
+                let decision = decide(
+                    CaptureSnapshot::from_records(
+                        Arc::new(prepared),
+                        CaptureRows {
+                            turn: turn.clone(),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap(),
+                    Default::default(),
+                )
+                .unwrap();
+                let changed = decision
+                    .rows
+                    .into_iter()
+                    .find(|(table, _)| *table == CaptureTable::Turns)
+                    .map(|(_, row)| row);
+                if index == 4 || index == 6 {
+                    assert!(changed.is_none(), "repeated stamps do not write a turn");
+                }
+                if changed.is_some() {
+                    turn = changed;
+                }
+            }
+            let row = turn.unwrap();
+            assert_eq!(row["boundaryTiming"]["firstEvent"]["monotonicNs"], 1000000);
+            assert_eq!(row["boundaryTiming"]["firstToken"]["monotonicNs"], 3000000);
+            assert_eq!(row["boundaryTiming"]["terminal"]["monotonicNs"], 6000000);
+        }
+    }
+
+    #[test]
+    fn boundary_stamps_keep_first_occurrences_across_retries_interrupts_and_no_output() {
+        for provider in ["codex", "claude"] {
+            let agent =
+                json!({"id":"agent","name":"Agent","provider":provider,"threadId":"thread"});
+            let mut turn = None;
+            for (method, time, extra) in [
+                (
+                    "analytics/adapterBoundary",
+                    1.,
+                    json!({"boundaryTiming":{"requestId":"request","accepted":{"bootId":"00000000-0000-0000-0000-000000000001","unixSeconds":10.,"monotonicNs":1000000},"written":null}}),
+                ),
+                ("turn/started", 3., json!({"turn":{"id":"turn"}})),
+                (
+                    "analytics/adapterBoundary",
+                    4.,
+                    json!({"boundaryTiming":{"requestId":"request","accepted":{"bootId":"00000000-0000-0000-0000-000000000001","unixSeconds":20.,"monotonicNs":2000000},"written":{"bootId":"00000000-0000-0000-0000-000000000001","unixSeconds":21.,"monotonicNs":2500000}}}),
+                ),
+                (
+                    "turn/completed",
+                    5.,
+                    json!({"turn":{"id":"turn","status":"interrupted"}}),
+                ),
+            ] {
+                let mut params = json!({"threadId":"thread","turnId":"turn"});
+                params
+                    .as_object_mut()
+                    .unwrap()
+                    .extend(extra.as_object().unwrap().clone());
+                let stamp = (!method.starts_with("analytics/")).then_some(
+                    studio_runtime_schema::provider_timing::BoundaryStamp {
+                        boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+                        unix_seconds: 100. - time,
+                        monotonic_ns: (time * 1000000.) as u64,
+                    },
+                );
+                let prepared = PreparedCapture::event(
+                    &agent,
+                    method,
+                    &params,
+                    time,
+                    time,
+                    CaptureSource::Live,
+                    Default::default(),
+                )
+                .unwrap()
+                .at_provider_boundary(stamp)
+                .unwrap();
+                let snapshot = CaptureSnapshot::from_records(
+                    Arc::new(prepared),
+                    CaptureRows {
+                        turn: turn.clone(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                let decision = decide(snapshot, Default::default()).unwrap();
+                if let Some((_, row)) = decision
+                    .rows
+                    .into_iter()
+                    .find(|(table, _)| *table == CaptureTable::Turns)
+                {
+                    turn = Some(row);
+                }
+            }
+            let row = turn.expect("timed turn");
+            assert_eq!(row["boundaryTiming"]["accepted"]["monotonicNs"], 1000000);
+            assert_eq!(row["boundaryTiming"]["firstEvent"]["monotonicNs"], 3000000);
+            assert_eq!(row["boundaryTiming"]["acceptedToWrittenMs"], 1.5);
+            assert_eq!(row["boundaryTiming"]["acceptedToTerminalMs"], 4.);
+            assert!(row["boundaryTiming"]["firstToken"].is_null());
+            assert_eq!(row["status"], "interrupted");
+        }
     }
 }

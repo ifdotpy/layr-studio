@@ -1775,7 +1775,7 @@ mod tests {
                         }
                         json!({"data":[{"model":"gpt-5.6-sol"}],"nextCursor":null})
                     }
-                    Method::ThreadTurnsList => {
+                    Method::ThreadTurnsList | Method::ThreadTurnsItemsList => {
                         let start = request.params["cursor"]
                             .as_str()
                             .map(|s| s.parse::<usize>().expect("cursor"))

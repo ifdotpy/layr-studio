@@ -7667,6 +7667,9 @@ export interface components {
        * @default null
        */
       at?: number | null | undefined;
+      boundaryTiming?:
+        | components["schemas"]["ProviderBoundaryTiming"]
+        | undefined;
       /**
        * Cyberaccessprogram
        * @default null
@@ -8540,6 +8543,18 @@ export interface components {
       queued: number;
       /** Running */
       running: number;
+    };
+    BoundaryStamp: {
+      /**
+       * Format: uuid
+       * @description Kernel boot UUID; absent on legacy stamps or when unavailable.
+       * @default null
+       */
+      bootId?: string | null | undefined;
+      /** Format: uint64 */
+      monotonicNs: number;
+      /** Format: double */
+      unixSeconds: number;
     };
     /** BranchDraft */
     BranchDraft: {
@@ -10717,6 +10732,8 @@ export interface components {
           | "rateLimitExceeded"
           | "flexUnavailable"
           | "serverOverloaded"
+          | "modelNotFound"
+          | "policyCapacityUnavailable"
           | "cyberPolicy"
           | "misalignmentPolicyViolation"
           | "tooManyDenials"
@@ -18302,6 +18319,32 @@ export interface components {
        * @default null
        */
       workspace_policy?: "layr-native" | null | undefined;
+    };
+    ProviderBoundaryTiming: {
+      accepted?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      /** Format: double */
+      acceptedToTerminalMs?: number | null | undefined;
+      /** Format: double */
+      acceptedToWrittenMs?: number | null | undefined;
+      enqueued?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      /** Format: double */
+      enqueuedToAcceptedMs?: number | null | undefined;
+      firstEvent?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      firstToken?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      /** Format: uint64 */
+      generation?: number | null | undefined;
+      initialized?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      providerHandle?: string | null | undefined;
+      requestId?: string | null | undefined;
+      spawnStarted?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      /** Format: double */
+      spawnToInitializedMs?: number | null | undefined;
+      terminal?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      written?: components["schemas"]["BoundaryStamp"] | null | undefined;
+      /** Format: double */
+      writtenToFirstEventMs?: number | null | undefined;
+      /** Format: double */
+      writtenToFirstTokenMs?: number | null | undefined;
     };
     /**
      * ProviderKind

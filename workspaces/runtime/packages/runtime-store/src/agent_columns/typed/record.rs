@@ -798,7 +798,7 @@ fn deserialize_transfer_id<'de, D: serde::Deserializer<'de>>(
     }
 }
 
-fn deserialize_agent_epoch<'de, D: serde::Deserializer<'de>>(
+pub(crate) fn deserialize_agent_epoch<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<i64, D::Error> {
     let epoch = i64::deserialize(deserializer)?;

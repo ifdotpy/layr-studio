@@ -6,6 +6,8 @@
   "scripts": {
     "test:unit": "pnpm run build:wasm && vitest run --config vitest.unit.config.ts",
     "test:unit:fast": "vitest run --config vitest.fast.config.ts --project fast",
+    "test:unit:pure": "vitest run --config vitest.pure.config.ts",
+    "test:unit:http": "vitest run --config vitest.http.config.ts",
     "test:browser": "pnpm run build && node scripts/run-browser-tests.ts --config playwright.config.ts --project=client",
     "test:browser:smoke": "pnpm run build && pnpm run test:browser:smoke:prepared",
     "test:browser:list": "node scripts/run-browser-tests.ts --config playwright.config.ts --project=client --list",

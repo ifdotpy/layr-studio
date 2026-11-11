@@ -32,22 +32,6 @@ fn owner_hold_reason(hold: OwnerHold) -> &'static str {
         }
     }
 }
-const OWNER_FIELDS: &[&str] = &[
-    "epoch",
-    "status",
-    "archived",
-    "accountKey",
-    "threadId",
-    "autoWake",
-    "deletedAt",
-    "restartRecovery",
-    "disconnectRecovery",
-    "nativeFailureHold",
-    "approvalPolicy",
-    "sandbox",
-    "profile",
-    "role",
-];
 
 #[derive(Debug, Error)]
 pub enum RuleError {
@@ -209,6 +193,21 @@ pub struct TickObservation {
 }
 
 impl RuleSnapshot {
+    pub(crate) fn from_owner(
+        record: &studio_runtime_store::RuleRecord,
+        owner: &studio_runtime_store::RuleOwnerRecord,
+    ) -> Result<Self, RuleError> {
+        Self::from_stored(record, owner.value())
+    }
+
+    pub(crate) fn current_owner(
+        &self,
+        rule: &studio_runtime_store::RuleRecord,
+        owner: &studio_runtime_store::RuleOwnerRecord,
+    ) -> bool {
+        self.current(rule, &owner.value())
+    }
+
     #[cfg(test)]
     pub fn from_records(rule: &Value, owner: Value) -> Result<Self, RuleError> {
         let record: studio_runtime_store::RuleRecord = serde_path_to_error::deserialize(rule)
@@ -270,7 +269,7 @@ impl RuleSnapshot {
     }
     pub fn current(&self, rule: &studio_runtime_store::RuleRecord, owner: &Value) -> bool {
         rule == &self.raw
-            && OWNER_FIELDS
+            && studio_runtime_store::RulesRepository::OWNER_FIELDS
                 .iter()
                 .all(|field| owner.get(field) == self.owner_raw.get(field))
     }

@@ -106,7 +106,6 @@ test("native events use fractional utilization without mutating cached windows",
   ]) {
     assert.deepEqual(limitEvent(initial, raw).claudeRateLimit, {
       type: "unsupported",
-      raw,
     });
   }
 });
@@ -199,6 +198,27 @@ test("rate limit events retain overage permission without utilization", () => {
   assert.equal(current.rateLimits.claudeRateLimit, undefined);
 });
 
+test("rate limit wire evidence contains only normalized consumer fields", () => {
+  const next = limitEvent(null, {
+    rateLimitType: "five_hour",
+    status: "allowed",
+    utilization: 0.25,
+    futureVendorField: { unused: true },
+  });
+  const expected = {
+    rateLimitType: "five_hour",
+    status: "allowed",
+    utilization: 0.25,
+  };
+  assert.deepEqual(next.claudeRateLimit, expected);
+  assert.deepEqual(next.rateLimits.claudeRateLimit, expected);
+  assert.deepEqual(
+    limitEvent(null, { status: "future_status", secretVendorField: true })
+      .claudeRateLimit,
+    { type: "unsupported" },
+  );
+});
+
 test("overage permission is replaced and unknown limit resets remain visible", () => {
   const allowed = limitEvent(null, {
     rateLimitType: "five_hour",
@@ -224,7 +244,6 @@ test("overage permission is replaced and unknown limit resets remain visible", (
   assert.equal(canUseOverage(unknown!.claudeRateLimit), false);
   assert.deepEqual(unknown!.claudeRateLimit, {
     type: "unsupported",
-    raw: { rateLimitType: "future_scope", status: "rejected", resetsAt: 900 },
   });
   assert.equal(unknown!.rateLimitsByLimitId["claude-unknown-limit"], undefined);
   const overage = limitEvent(allowed, {

@@ -58,6 +58,8 @@ fn fake_with_stop_barrier(
         handle: handle.clone(),
         open_attempted: true,
         info: Some(AttachmentInfo {
+            spawn_started_at: None,
+            initialized_at: None,
             handle: handle.clone(),
             generation: Generation(1),
             pid: 1,
@@ -177,6 +179,7 @@ fn reply(id: RequestId) -> Frame {
 }
 fn entry(cursor: u64, at: u64, payload: JournalPayload) -> JournalEntry {
     JournalEntry {
+        boundary_at: None,
         cursor: EventCursor(cursor),
         generation: Generation(1),
         received_at_ms: at,
@@ -187,6 +190,7 @@ fn written(sender: oneshot::Sender<CommandReceipt>) {
     assert!(
         sender
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false
             })
@@ -1507,6 +1511,7 @@ async fn unresolved_requests_never_hold_back_a_preparation() {
 
 fn recovered(id: RequestId, method: Method, deadline_ms: u64) -> RecoveredRequest {
     RecoveredRequest {
+        boundary_timing: None,
         ticket: studio_runtime_providers::RequestTicket {
             generation: 1,
             id,
@@ -1934,7 +1939,7 @@ async fn replenished_journal_and_settlement_lanes_allow_command_and_receipt_prog
         tokio::select! {
             _ = &mut operation, if !admitted => admitted = true,
             observed = peer.commands.recv() => match observed.unwrap() {
-                Observed::Write(reply) => { reply.send(CommandReceipt::Written { remote_id: Some(10), duplicate: false }).ok().unwrap(); }
+                Observed::Write(reply) => { reply.send(CommandReceipt::Written { written_at: None, remote_id: Some(10), duplicate: false }).ok().unwrap(); }
                 Observed::Ack(cursor, reply) => { reply.send(CommandReceipt::Acknowledged(cursor)).ok().unwrap(); }
             },
             event = session.events.recv() => {
@@ -1976,6 +1981,7 @@ async fn written_correlation_survives_reply_resolving_before_receipt() {
     );
     receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: Some(99),
             duplicate: false,
         })

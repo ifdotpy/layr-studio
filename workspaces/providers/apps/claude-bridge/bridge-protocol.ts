@@ -1,177 +1,64 @@
+// Wire DTOs are generated from runtime-schema::provider_input::bridge. SDK
+// types below are internal adapters for model catalogs, questions and opaque moves.
+import type * as Wire from "./bridge-wire.generated.ts";
 import type {
-  AccountInfo,
-  ElicitationRequest,
-  ElicitationResult,
-  McpServerStatus,
-  ModelInfo,
-  Options,
-  SDKTaskStartedMessage,
-  SDKTaskUpdatedMessage,
-  SDKTaskNotificationMessage,
-  SDKBackgroundTasksChangedMessage,
-  SDKControlGetUsageResponse,
-  Query,
-  SlashCommand,
-} from "@anthropic-ai/claude-agent-sdk";
+  BridgeMethods,
+  BridgeNotifications,
+  BridgeServerRequests,
+} from "./bridge-wire.generated.ts";
+export type {
+  BridgeMethods,
+  BridgeNotifications,
+  BridgeServerRequests,
+} from "./bridge-wire.generated.ts";
+import type { Options, Query, ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 import type { AskUserQuestionInput } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
-import type {
-  Item,
-  Session,
-  Thread,
-  Turn,
-  FreshItem,
-  FreshTurn,
-  CompletedTurn,
-  JournalRepairReport,
-} from "./session-state.ts";
-import type { UsageObservation } from "./usage-contract.generated.ts";
-import type { CLAUDE_STEER_COMPLETION_RECEIPTS } from "./lifecycle-capabilities.generated.ts";
-import type {
-  CacheReport,
-  ToolDefinition,
-  RateLimitBucketDto,
-  RateLimitWindowDto,
-  BackgroundShellPolicySettings,
-  ClaudeBridgeSessionWire,
-  ClaudeBridgeTurnWire,
-} from "./runtime-contract.generated.ts";
-import type { ShellPolicyReport } from "./shell-policy.ts";
-import type {
-  HUMAN_INPUT,
-  STUDIO_EVENT_INPUT,
-} from "./input-origin.generated.ts";
+import type { Session } from "./session-state.ts";
 import type { MoveProof } from "./move.ts";
 import type { ExternalServer, CatalogDependencies } from "./move-external.ts";
 
-// These types describe the bridge's wire values, not unvalidated JSON ingress.
-// Command executor messages pass through unchanged and remain unknown here.
-export type BridgeRpcId = string | number;
-export type BridgeEmpty = Record<string, never>;
-export interface BridgeError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-export interface BridgeSuccessResponse<R> {
-  id: BridgeRpcId;
-  result: R;
-}
-export interface BridgeErrorResponse {
-  id: BridgeRpcId;
-  error: BridgeError;
-}
+export type BridgeRpcId = Wire.RequestId;
+export type BridgeEmpty = Wire.BridgeEmpty;
+export type BridgeError = Wire.BridgeError;
+export type BridgeSuccessResponse<R> = Omit<
+  Wire.BridgeSuccessResponse,
+  "result"
+> & { result: R };
+export type BridgeErrorResponse = Wire.BridgeErrorResponse;
 export type BridgeResponse<R = unknown> =
   | BridgeSuccessResponse<R>
   | BridgeErrorResponse;
-export type BridgeInputOrigin = typeof HUMAN_INPUT | typeof STUDIO_EVENT_INPUT;
-export type BridgeInput = (
-  | { type: "text"; text: string }
-  | { type: "localImage"; path: string }
-) & { inputOrigin?: BridgeInputOrigin | undefined };
-export interface BridgePage<T> {
-  data: T[];
-  nextCursor: string | null;
-}
-export interface BridgePageParams {
-  cursor?: string | null | undefined;
-  limit?: number | undefined;
-}
-export type BridgeThreadParams =
-  import("./runtime-contract.generated.ts").ThreadIdentity;
-export type BridgeSessionParams = Partial<
-  Pick<
-    Session,
-    | "model"
-    | "approvalPolicy"
-    | "activePermissionProfile"
-    | "sandbox"
-    | "claude"
-    | "developerInstructions"
-    | "ephemeral"
-    | "capabilityProfile"
-  >
-> &
-  ClaudeBridgeSessionWire & {
-    cwd?: string | undefined;
-    dynamicTools?: ToolDefinition[] | undefined;
+export type BridgeMethod = keyof BridgeMethods;
+export type BridgeParams<M extends BridgeMethod> = BridgeMethods[M][0];
+export type BridgeResult<M extends BridgeMethod> = BridgeMethods[M][1];
+export type BridgeRequest<M extends BridgeMethod = BridgeMethod> = {
+  [K in M]: {
+    id?: BridgeRpcId | undefined;
+    method: K;
+    params: BridgeParams<K>;
   };
-export interface BridgeTurnParams
-  extends BridgeThreadParams, ClaudeBridgeTurnWire {
-  approvalPolicy?: Session["approvalPolicy"];
-  dynamicTools?: ToolDefinition[] | undefined;
-  input: BridgeInput[];
-  clientUserMessageId?: string | undefined;
-  effort?: Options["effort"] | undefined;
-  serviceTier?: string | undefined;
-  claudeCommand?: string | undefined;
-  // Rust sends the mode with the cache report; its enum in runtime-schema owns the strings.
-  idleCompaction?:
-    | (Pick<CacheReport, "prefix" | "requestId"> & {
-        mode?: string | undefined;
-      })
-    | undefined;
-  // Rust sets these on ordinary input (see the idle summary return path).
-  idleCompactionMode?: string | undefined;
-  idleSummaryRosterIncluded?: boolean | undefined;
-}
-export type BridgeThreadResult = {
-  thread: Thread;
-  model: Session["model"];
-  sandbox: null;
-  approvalPolicy: string | null | undefined;
-  activePermissionProfile: Session["activePermissionProfile"];
-  reattached?: true | undefined;
+}[M];
+export type BridgeMethodResult<M extends BridgeMethod = BridgeMethod> = {
+  [K in M]: { method: K; result: BridgeResult<K> };
+}[M];
+export type BridgeInput = BridgeParams<"turn/start">["input"][number];
+export type BridgeInputOrigin = NonNullable<BridgeInput["inputOrigin"]>;
+export type BridgeThreadParams = Wire.ThreadParams;
+export type BridgeSessionParams = Omit<BridgeParams<"thread/start">, "cwd"> & {
+  cwd?: string | undefined;
 };
-export type BridgeTurnResult = {
-  turn: Pick<Turn, "id" | "status">;
-  steered?: true | undefined;
-};
-// The bridge merges task events and their patches into one mutable task view.
-export type BridgeTask = Partial<
-  Omit<SDKTaskStartedMessage, "subtype"> &
-    Omit<SDKTaskUpdatedMessage["patch"], "status"> & {
-      output_file?: string | undefined;
-    } & SDKBackgroundTasksChangedMessage["tasks"][number]
-> & {
-  status?:
-    | SDKTaskNotificationMessage["status"]
-    | SDKTaskUpdatedMessage["patch"]["status"]
-    | undefined;
-};
-export type BridgeCommand = Required<
-  Pick<
-    SlashCommand,
-    "name" | "description" | "argumentHint" | "aliases" | "builtin"
-  >
->;
-export type BridgeRateWindow = Pick<
-  RateLimitWindowDto,
-  "usedPercent" | "resetsAt" | "windowDurationMins"
->;
-export type BridgeRateBucket = Pick<
-  RateLimitBucketDto,
-  "primary" | "secondary"
-> & {
-  [K in "limitId" | "limitName"]: NonNullable<RateLimitBucketDto[K]>;
-} & { claudeRateLimit?: unknown };
-export interface BridgeRateLimits {
-  rateLimits: BridgeRateBucket;
-  rateLimitsByLimitId: Record<string, BridgeRateBucket>;
-  subscriptionType?:
-    | SDKControlGetUsageResponse["subscription_type"]
-    | undefined;
-  extraUsage?:
-    | NonNullable<SDKControlGetUsageResponse["rate_limits"]>["extra_usage"]
-    | null
-    | undefined;
-  accountId?: string | undefined;
-  claudeRateLimit?: unknown;
-}
-// Studio owns the consumed projection; model values still come from SDK ModelInfo.
-type CatalogModel = import("./runtime-contract.generated.ts").ProviderModel;
-export type BridgeModel = CatalogModel & {
+export type BridgeTurnParams = BridgeParams<"turn/start">;
+export type BridgeThreadResult = BridgeResult<"thread/resume">;
+export type BridgeTurnResult = BridgeResult<"turn/start">;
+export type BridgeTask = Wire.Task;
+export type BridgeCommand = BridgeResult<"claude/commands">[number];
+export type BridgeRateLimits = BridgeResult<"account/rateLimits/read">;
+export type BridgeRateBucket = BridgeRateLimits["rateLimits"];
+export type BridgeRateWindow = NonNullable<BridgeRateBucket["primary"]>;
+// SDK model values are narrowed while adapting to Studio's model DTO.
+export type BridgeModel = Wire.ProviderModel & {
   supportedReasoningEfforts: Array<
-    NonNullable<CatalogModel["supportedReasoningEfforts"]>[number] & {
+    NonNullable<Wire.ProviderModel["supportedReasoningEfforts"]>[number] & {
       reasoningEffort: NonNullable<ModelInfo["supportedEffortLevels"]>[number];
     }
   >;
@@ -214,313 +101,18 @@ export type BridgeMoveSession = Omit<Session, "moveProof"> & {
   moveProof: BridgeStoredMoveProof;
   dynamicToolsJson: string;
 };
-// Legacy mirror items can lack an id. Writers retain undefined and JSON
-// serializes those array entries as null; neither path invents an identity.
-export type BridgeInputReceiptIdentity = Item["id"] | null;
-export interface BridgeInterruptReceipt {
-  cancelled: BridgeInputReceiptIdentity[];
-  still_queued: BridgeInputReceiptIdentity[];
-}
-export interface BridgeQueuedInput {
-  id?: Item["id"];
-  status: "queued";
-}
-// TodoWrite's unvalidated SDK tool input is forwarded unchanged. The Rust
-// notification consumer stores these fields as raw JSON plan steps.
-export interface BridgePlanStep {
-  step?: unknown;
-  status?: unknown;
-}
-export type BridgeRepairReport = Omit<
-  JournalRepairReport,
-  "status" | "scopeConfirmed" | "nativeHistoryConfirmed"
-> & {
-  status: JournalRepairReport["status"] | "none";
-  scopeConfirmed: boolean | null;
-  nativeHistoryConfirmed: boolean | null;
-};
-export interface BridgeState {
-  settings: NonNullable<Session["claude"]>;
-  turns: (Pick<Turn, "id" | "status" | "error"> & {
-    canRestoreFiles: boolean;
-    restoreFilesUnavailableReason: string | null;
-    text: string;
-  })[];
-  tasks: BridgeTask[];
-  version?: string | undefined;
-  nativeId: string;
-  nativeSessionOutcome?: "unknown" | undefined;
-  nativeSessionError?: string | undefined;
-  contextWindow?: number | undefined;
-  totalTokens?: number | undefined;
-}
 
-// Each pair is [accepted params, successful result]. Responses on stdout carry
-// only id/result; the method discriminator is retained by the awaiting caller.
-export interface BridgeMethods {
-  initialize: [
-    unknown,
-    {
-      userAgent: "studio-claude-bridge";
-      platform: NodeJS.Platform;
-      capabilities: {
-        claudeVersion: 23;
-        passiveAccountRead: true;
-        activityRead: true;
-        [CLAUDE_STEER_COMPLETION_RECEIPTS]: true;
-      };
-    },
-  ];
-  initialized: [unknown, BridgeEmpty];
-  "model/list": [unknown, BridgePage<BridgeModel>];
-  "claude/activity": [unknown, { busy: boolean }];
-  "account/read": [
-    { passive?: boolean | undefined },
-    {
-      account: {
-        type: "claude";
-        email: AccountInfo["email"];
-        organizationUuid?: string | undefined;
-        accountUuid?: string | undefined;
-        _credentialIdentity: string;
-        planType: AccountInfo["subscriptionType"];
-      };
-      requiresOpenaiAuth: false;
-    },
-  ];
-  "account/rateLimits/read": [{ cwd?: string | undefined }, BridgeRateLimits];
-  "claude/commands": [{ cwd?: string | undefined }, BridgeCommand[]];
-  "claude/moveVersions": [unknown, { cli: string; sdk: string }];
-  "claude/moveIdentity": [unknown, { email: string; organizationId: string }];
-  "claude/moveProof": [BridgeThreadParams, BridgeMoveProof];
-  "claude/movePreflight": [
-    { proof: BridgeMoveProof; model: string; cwd: string },
-    Pick<BridgeMoveProof, "snapshotHash" | "optionsHash" | "proofMethod">,
-  ];
-  "claude/moveExport": [
-    BridgeThreadParams,
-    { path: string; session: BridgeMoveSession },
-  ];
-  "claude/moveImport": [
-    { session: BridgeMoveSession; path: string; cwd: string },
-    { thread: Thread },
-  ];
-  "claude/repairReport": [BridgeThreadParams, BridgeRepairReport];
-  "claude/fileBackups": [
-    BridgeThreadParams & { settledRequestIds?: string[] | null | undefined },
-    {
-      count: number;
-      bytes: number;
-      maxCount: number;
-      maxBytes: number;
-      released: number;
-    },
-  ];
-  "claude/state": [BridgeThreadParams, BridgeState];
-  "claude/diagnostics": [
-    unknown,
-    {
-      liveQueries: number;
-      activeTurns: number;
-      backgroundQueries: number;
-      idleQueries: number;
-      sessionCache: {
-        cachedSessions: number;
-        retainedBytes: number;
-        pendingWrites: number;
-        unsavedSessions: number;
-        journalBytes: number;
-      };
-    },
-  ];
-  "claude/settings": [
-    BridgeThreadParams & { settings: NonNullable<Session["claude"]> },
-    { settings: NonNullable<Session["claude"]> },
-  ];
-  "thread/start": [
-    BridgeSessionParams & { cwd: string },
-    Omit<BridgeSessionParams, "sandbox" | "model"> & {
-      thread: Thread;
-      model: Session["model"];
-      sandbox: null;
-    },
-  ];
-  "thread/turns/list": [
-    BridgeThreadParams &
-      BridgePageParams & { sortDirection?: "asc" | "desc" | undefined },
-    BridgePage<Turn>,
-  ];
-  "thread/turns/items/list": [
-    BridgeThreadParams & BridgePageParams & { turnId: string },
-    BridgePage<Item>,
-  ];
-  "thread/list": [BridgePageParams, BridgePage<Thread>];
-  "skills/extraRoots/set": [unknown, never];
-  "thread/resume": [
-    BridgeThreadParams &
-      BridgeSessionParams & { excludeTurns?: boolean | undefined },
-    BridgeThreadResult,
-  ];
-  "thread/read": [
-    BridgeThreadParams & { includeTurns?: boolean | undefined },
-    BridgeThreadResult,
-  ];
-  "thread/unsubscribe": [
-    BridgeThreadParams,
-    { status: "unsubscribed" | "notLoaded" },
-  ];
-  "thread/loaded/list": [unknown, BridgePage<string>];
-  "thread/fork": [
-    BridgeThreadParams &
-      BridgeSessionParams & {
-        lastTurnId?: string | null | undefined;
-        excludeTurns?: boolean | undefined;
-      },
-    BridgeThreadResult,
-  ];
-  "thread/compact/start": [
-    BridgeThreadParams & {
-      requestId?: string | undefined;
-      idleCompaction?: BridgeTurnParams["idleCompaction"];
-    },
-    BridgeTurnResult,
-  ];
-  "turn/start": [BridgeTurnParams, BridgeTurnResult];
-  "turn/steer": [
-    BridgeThreadParams & {
-      expectedTurnId: string;
-      clientUserMessageId: string;
-      input: BridgeInput[];
-    },
-    { turnId: string },
-  ];
-  "turn/interrupt": [
-    BridgeThreadParams & {
-      turnId?: string | undefined;
-      stopBackgroundTasks?: boolean | undefined;
-    },
-    BridgeInterruptReceipt,
-  ];
-  "thread/name/set": [BridgeThreadParams & { name: string }, BridgeEmpty];
-  "thread/backgroundTerminals/list": [
-    BridgeThreadParams,
-    BridgePage<BridgeTask> & { terminals: BridgeTask[] },
-  ];
-  "thread/queue/list": [
-    BridgeThreadParams,
-    BridgePage<BridgeQueuedInput> & {
-      items: BridgeQueuedInput[];
-    },
-  ];
-  "thread/commandExecution/background": [
-    BridgeThreadParams & { turnId: string; itemId: string },
-    { status: "backgrounded" | "not_running" },
-  ];
-  "claude/stopTask": [BridgeThreadParams & { taskId: string }, BridgeEmpty];
-  "claude/shellPolicy": [
-    BridgeThreadParams & {
-      settings: BackgroundShellPolicySettings;
-      eligible: boolean;
-      critical: boolean;
-    },
-    { watched: number },
-  ];
-  "mcpServerStatus/list": [
-    BridgeThreadParams & BridgePageParams,
-    BridgePage<Omit<McpServerStatus, "config">>,
-  ];
-  "mcpServer/reconnect": [BridgeThreadParams & { name: string }, BridgeEmpty];
-  "skills/list": [
-    { cwds?: string[] | undefined },
-    {
-      data: {
-        cwd: string;
-        skills: {
-          name: string;
-          description: string;
-          path: string;
-          enabled: boolean;
-        }[];
-        errors: { message: string }[];
-      }[];
-    },
-  ];
-  "config/read": [Record<string, unknown>, unknown];
-  "command/exec": [Record<string, unknown>, unknown];
-  "command/exec/write": [Record<string, unknown>, unknown];
-  "command/exec/resize": [Record<string, unknown>, unknown];
-  "command/exec/terminate": [Record<string, unknown>, unknown];
-}
-export type BridgeMethod = keyof BridgeMethods;
-export type BridgeParams<M extends BridgeMethod> = BridgeMethods[M][0];
-export type BridgeResult<M extends BridgeMethod> = BridgeMethods[M][1];
-export type BridgeRequest<M extends BridgeMethod = BridgeMethod> = {
-  [K in M]: {
-    id?: BridgeRpcId | undefined;
-    method: K;
-    params: BridgeParams<K>;
-  };
-}[M];
-export type BridgeMethodResult<M extends BridgeMethod = BridgeMethod> = {
-  [K in M]: { method: K; result: BridgeResult<K> };
-}[M];
-
-export interface BridgeItemEvent extends BridgeThreadParams {
-  turnId?: string | undefined;
-  item: FreshItem;
-  startedAtMs?: number | undefined;
-  completedAtMs?: number | undefined;
-}
-// Existing rows can be re-emitted unchanged without claiming fresh guarantees.
-export interface BridgeHistoricalItemEvent extends Omit<
-  BridgeItemEvent,
-  "item"
-> {
-  item: Item & { id: string; type: string };
-}
-export interface BridgeNotifications {
-  "item/started": BridgeItemEvent;
-  "item/completed": BridgeItemEvent;
-  "turn/started": BridgeThreadParams & {
-    turn: Pick<FreshTurn, "id"> & { status: "inProgress" };
-  };
-  "turn/completed": BridgeThreadParams & {
-    turn: CompletedTurn & {
-      unappliedSteers?: BridgeInputReceiptIdentity[] | undefined;
-    };
-  };
-  "thread/tokenUsage/updated": BridgeThreadParams & {
-    turnId?: string | null | undefined;
-    studioUsage: UsageObservation;
-  };
-  "account/rateLimits/updated": BridgeRateLimits;
-  "provider/generationStarted": BridgeThreadParams & {
-    turnId: string;
-    responseId: string;
-  };
-  "item/agentMessage/delta": BridgeThreadParams & {
-    turnId: string;
-    itemId: string;
-    delta: string;
-  };
-  "thread/idleCompaction/updated": BridgeThreadParams & {
-    turnId?: string | undefined;
-    report?: CacheReport | undefined;
-    // Set when the separate summary query finished; it carries no cache report.
-    preparedSummary?: { requestId: string } | undefined;
-  };
-  "thread/shellPolicy/updated": BridgeThreadParams & {
-    report: ShellPolicyReport;
-  };
-  "turn/plan/updated": BridgeThreadParams & {
-    turnId: string;
-    plan: BridgePlanStep[];
-  };
-  "serverRequest/resolved": BridgeThreadParams & {
-    requestId?: BridgeRpcId | undefined;
-  };
-  "command/exec/outputDelta": unknown;
-}
+export type BridgeInputReceiptIdentity =
+  BridgeResult<"turn/interrupt">["cancelled"][number];
+export type BridgeInterruptReceipt = BridgeResult<"turn/interrupt">;
+export type BridgeQueuedInput =
+  BridgeResult<"thread/queue/list">["items"][number];
+export type BridgePlanStep =
+  BridgeNotifications["turn/plan/updated"]["plan"][number];
+export type BridgeRepairReport = BridgeResult<"claude/repairReport">;
+export type BridgeState = BridgeResult<"claude/state">;
+export type BridgeItemEvent = BridgeNotifications["item/started"];
+export type BridgeHistoricalItemEvent = Wire.HistoricalItemEvent;
 export type BridgeNotificationMethod = keyof BridgeNotifications;
 export type BridgeNotificationParams<M extends BridgeNotificationMethod> =
   BridgeNotifications[M];
@@ -529,56 +121,12 @@ export type BridgeNotification<
 > = {
   [K in M]: { method: K; params: BridgeNotificationParams<K> };
 }[M];
-
 type NativeQuestion = AskUserQuestionInput["questions"][number];
-// Fresh questions have passed the SDK-owned field and cardinality contract.
 export type BridgeUserQuestion = NativeQuestion & {
   id: string;
   isOther: true;
   isSecret: false;
 };
-
-export interface BridgeServerRequests {
-  "item/tool/requestUserInput": [
-    BridgeThreadParams & {
-      turnId: string;
-      itemId: string;
-      questions: BridgeUserQuestion[];
-    },
-    { answers?: Record<string, { answers: string[] }> | undefined },
-  ];
-  "item/commandExecution/requestApproval": [
-    BridgeThreadParams & {
-      turnId: string;
-      itemId: string;
-      command: string;
-      cwd: string;
-      reason: string;
-    },
-    { decision: "accept" | "acceptForSession" | "decline" | "cancel" },
-  ];
-  "item/tool/call": [
-    BridgeThreadParams & {
-      turnId?: string | undefined;
-      callId: string;
-      tool: string;
-      arguments: Record<string, unknown>;
-    },
-    {
-      success?: boolean | undefined;
-      contentItems?:
-        | ({ text?: string | undefined } & Record<string, unknown>)[]
-        | undefined;
-    },
-  ];
-  "mcpServer/elicitation/request": [
-    BridgeThreadParams & {
-      turnId?: string | undefined;
-      request: ElicitationRequest;
-    } & ElicitationRequest,
-    ElicitationResult,
-  ];
-}
 export type BridgeServerMethod = keyof BridgeServerRequests;
 export type BridgeServerParams<M extends BridgeServerMethod> =
   BridgeServerRequests[M][0];
@@ -589,3 +137,4 @@ export type BridgeServerRequest<
 > = {
   [K in M]: { id: BridgeRpcId; method: K; params: BridgeServerParams<K> };
 }[M];
+export type BridgeOutbound = Wire.BridgeOutbound;

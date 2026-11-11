@@ -230,6 +230,8 @@ pub struct OpenResult {
     #[serde(rename = "returnCode")]
     pub return_code: Option<i32>,
     pub pid: u32,
+    pub spawn_started_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    pub initialized_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -361,6 +363,7 @@ pub enum WriteResult {
     Fresh {
         remote_id: Option<NativeId>,
         durable_ms: f64,
+        written_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     },
     Duplicate {
         remote_id: Option<NativeId>,
@@ -375,6 +378,8 @@ struct WriteResultWire {
     remote_id: Option<NativeId>,
     #[serde(rename = "durableMs")]
     durable_ms: f64,
+    #[serde(rename = "writtenAt")]
+    written_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 impl TryFrom<WriteResultWire> for WriteResult {
     type Error = &'static str;
@@ -384,6 +389,7 @@ impl TryFrom<WriteResultWire> for WriteResult {
             (true, false, remote_id) => Ok(Self::Fresh {
                 remote_id,
                 durable_ms: wire.durable_ms,
+                written_at: wire.written_at,
             }),
             (true, true, remote_id) => Ok(Self::Duplicate {
                 remote_id,

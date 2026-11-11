@@ -1146,3 +1146,23 @@ mod project_record_kind {
     }
 }
 pub use project_record_kind::apply as project_record_kind;
+
+/// Persist a malformed deletion field to exercise stored-data refusal through HTTP.
+pub fn agent_with_boolean_deletion(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+) -> crate::StoreResult<()> {
+    use crate::agent_tables::AgentsStorageRow;
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+        cardinality = none, result = (), tables(agents = AgentsStorageRow),
+        columns(id = AgentsStorageRow::ID, record = AgentsStorageRow::RECORD),
+        sql = "UPDATE {agents} SET {record}=json_set({record},'$.deletedAt',json('true')) WHERE {id}=?1")]
+    struct BooleanDeletion<'a> {
+        #[db(column = AgentsStorageRow::ID)]
+        id: &'a str,
+    }
+    crate::peer_update_settings::canvas_tx(tx)
+        .named(&BooleanDeletion::QUERY, &BooleanDeletion { id })?;
+    Ok(())
+}

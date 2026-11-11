@@ -293,6 +293,7 @@ pub(super) async fn scenario_late_context_change_refuses_submission() {
                 let operation =
                     format!("account:default:{}:turn/start", prepared.intent.attempt_id);
                 let request = RecoveredRequest {
+                    boundary_timing: None,
                     ticket: studio_runtime_providers::RequestTicket {
                         id: RequestId::String(operation.clone()),
                         generation: 1,
@@ -461,6 +462,7 @@ pub(super) async fn scenario_sibling_completion_does_not_refuse_non_lead() {
                 let operation =
                     format!("account:default:{}:turn/start", prepared.intent.attempt_id);
                 let request = RecoveredRequest {
+                    boundary_timing: None,
                     ticket: studio_runtime_providers::RequestTicket {
                         id: RequestId::String(operation.clone()),
                         generation: 1,

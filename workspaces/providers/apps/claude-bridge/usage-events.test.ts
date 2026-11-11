@@ -99,24 +99,29 @@ test("retry and fallback details survive as readable thread items", async () => 
     },
     {
       type: "system",
-      // @ts-expect-error This legacy CLI subtype intentionally exercises bridge compatibility outside the current SDK union.
-      subtype: "model_fallback",
+      subtype: "model_refusal_fallback",
+      trigger: "refusal",
+      direction: "retry",
+      request_id: null,
       // @ts-expect-error This legacy fixture intentionally uses a non-UUID message identity.
       uuid: "fallback-1",
       original_model: "claude-opus-4-6",
       fallback_model: "claude-sonnet-4-6",
-      content: "Changed model after the usage limit.",
+      content:
+        "Changed from claude-opus-4-6 to claude-sonnet-4-6 after refusal.",
     },
     {
       type: "system",
-      // @ts-expect-error This legacy CLI subtype intentionally exercises bridge compatibility outside the current SDK union.
-      subtype: "model_consent_fallback",
+      subtype: "model_refusal_fallback",
+      trigger: "refusal",
+      direction: "sticky",
+      request_id: null,
       // @ts-expect-error This legacy fixture intentionally uses a non-UUID message identity.
       uuid: "consent-1",
       original_model: "claude-opus-4-6",
       fallback_model: "claude-sonnet-4-6",
-      choice: "session",
-      content: "Changed model for this session.",
+      content:
+        "Changed from claude-opus-4-6 to claude-sonnet-4-6 for this session.",
     },
     { type: "result", subtype: "success", is_error: false, result: "Done" },
   ]);
@@ -163,4 +168,67 @@ test("an Opus rejection does not attach its reset to a Sonnet failure", async ()
   ]);
   assert.equal(turn.error!.codexErrorInfo, undefined);
   assert.equal(turn.error!.resetsAt, undefined);
+});
+
+for (const delta of [
+  { type: "text_delta", text: "text" },
+  { type: "thinking_delta", thinking: "reasoning" },
+  { type: "input_json_delta", partial_json: "{" },
+] as const) {
+  test(`first model output records ${delta.type} once per turn`, async () => {
+    const { bridge, turn } = await run([
+      {
+        type: "stream_event",
+        event: { type: "content_block_delta", index: 0, delta },
+      },
+      {
+        type: "stream_event",
+        event: { type: "content_block_delta", index: 0, delta },
+      },
+      failed,
+    ]);
+    const first = bridge.notes.filter(
+      (note) => note.method === "item/modelOutput/firstDelta",
+    );
+    assert.equal(first.length, 1);
+    assert.deepEqual(first[0]!.params, {
+      threadId: bridge.thread,
+      turnId: turn.id,
+    });
+  });
+}
+
+test("empty model output deltas do not start first-output timing", async () => {
+  const { bridge } = await run([
+    {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "" },
+      },
+    },
+    {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "" },
+      },
+    },
+    {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: "" },
+      },
+    },
+    failed,
+  ]);
+  assert.equal(
+    bridge.notes.filter((note) => note.method === "item/modelOutput/firstDelta")
+      .length,
+    0,
+  );
 });

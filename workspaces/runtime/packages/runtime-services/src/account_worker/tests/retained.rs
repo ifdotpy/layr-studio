@@ -765,6 +765,7 @@ async fn reset_service_holds_lost_response_without_resending() {
         first_wire
             .receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -1111,6 +1112,7 @@ async fn retained_checkpointed_not_sent_retries_with_the_same_ticket_once() {
         retry_wire
             .receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -1150,6 +1152,7 @@ async fn retained_retry_lost_response_replays_unknown_without_another_send() {
         retry_wire
             .receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -2614,6 +2617,7 @@ async fn a_new_connection_rechecks_an_adopted_turn_that_its_one_check_saw_runnin
         .expect("provider session remains open");
     assert_eq!(first.value["method"], "thread/read", "{}", first.value);
     let _ignored = first.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -4058,6 +4062,7 @@ async fn recovery_reconcile_wait_does_not_hold_store_bridge_permit() {
         request
             .receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -4166,6 +4171,7 @@ async fn retained_committed_callback_keeps_exact_response_and_sends_once() {
     assert!(
         wire.receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: Some(42),
                 duplicate: false,
             })
@@ -4221,6 +4227,7 @@ async fn retained_deadline_during_intent_never_writes_after_expiry() {
     assert!(
         wire.receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -4260,6 +4267,7 @@ async fn retained_response_before_write_receipt_stays_positive() {
     .expect("response result committed before write receipt");
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })

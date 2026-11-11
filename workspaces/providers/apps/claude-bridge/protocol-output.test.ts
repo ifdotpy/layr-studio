@@ -1,3 +1,4 @@
+import { decodeLegacyMoveProof } from "./legacy-move-bundle.ts";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
@@ -321,9 +322,11 @@ test("producer null model and userMcp preserve fresh output and move override ha
           },
         }) + "\n",
       );
-      const proof = await bridge.call("claude/moveProof", {
-        threadId: bridge.thread,
-      });
+      const proof = decodeLegacyMoveProof(
+        await bridge.call("claude/moveProof", {
+          threadId: bridge.thread,
+        }),
+      );
       assert.deepEqual(proof.session.moveTurnOptions, overrides);
       assert.equal(
         proof.options.settings.fastMode,

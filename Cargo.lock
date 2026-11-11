@@ -5932,6 +5932,7 @@ dependencies = [
  "schemars_derive 1.2.3",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -6754,6 +6755,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-codex-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "studio-json",
+]
+
+[[package]]
 name = "studio-db-api"
 version = "0.1.0"
 dependencies = [
@@ -6952,6 +6961,7 @@ dependencies = [
  "studio-runtime-priority-sys",
  "studio-runtime-proc-sys",
  "studio-runtime-providers",
+ "studio-runtime-schema",
  "studio-runtime-store",
  "tempfile",
  "thiserror 2.0.21",
@@ -6963,6 +6973,7 @@ name = "studio-runtime-providers"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "studio-codex-protocol",
  "studio-json",
  "studio-runtime-schema",
  "thiserror 2.0.21",
@@ -6982,6 +6993,7 @@ dependencies = [
  "sha2 0.11.1",
  "strum",
  "studio-client-domain",
+ "studio-codex-protocol",
  "studio-db-api",
  "studio-json",
  "studio-observable-codegen",

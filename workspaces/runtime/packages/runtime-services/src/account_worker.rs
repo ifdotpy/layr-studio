@@ -34,6 +34,7 @@ use tokio::{
 mod agent_fault;
 mod agent_wakes;
 mod background_commands;
+mod boundary;
 pub mod callback;
 mod callback_record;
 mod connection_recovery;
@@ -498,6 +499,12 @@ pub enum AccountCommand {
     #[cfg(test)]
     IdleInspect {
         sweep_at: Option<tokio::time::Instant>,
+        reply: tokio::sync::oneshot::Sender<idle_unload::IdleObservation>,
+    },
+    /// Apply an idle-eligible usage read after the test has parked a local request.
+    #[cfg(test)]
+    IdleApplySnapshot {
+        thread: String,
         reply: tokio::sync::oneshot::Sender<idle_unload::IdleObservation>,
     },
     /// The caller's durable event and epoch are rechecked inside the claim transaction.
@@ -1488,6 +1495,16 @@ impl Worker {
                 }
                 let _sent = reply.send(self.idle_observation());
             }
+            #[cfg(test)]
+            AccountCommand::IdleApplySnapshot { thread, reply } => {
+                self.idle_snapshot_ready(
+                    tokio::time::Instant::now(),
+                    BTreeSet::from([thread]),
+                    idle_unload::IdleUsageSnapshot::default(),
+                )
+                .await?;
+                let _sent = reply.send(self.idle_observation());
+            }
             AccountCommand::CommittedFrame(command) => self.committed_frame(*command).await?,
             AccountCommand::RetainedRequest(command) => self.retained_request(*command).await?,
             AccountCommand::JournalBarrier(command) => self.retained_barrier(command).await?,
@@ -1591,7 +1608,7 @@ impl Worker {
         self.streams = self
             .db("refresh_streams", move |store| async move {
                 store
-                    .transaction_with(move |tx| store::current_streams(tx, &account, Some(&cached)))
+                    .transaction_with(move |tx| store::current_streams(tx, &account, Some(cached)))
                     .await
             })
             .await?;
@@ -1923,7 +1940,7 @@ impl Worker {
             return Ok(());
         }
         if let Some(thread) = intent.thread_id.as_deref() {
-            self.idle_thread_touched(thread);
+            self.idle_thread_touched(thread).await?;
         }
         if method == Method::TurnInterrupt {
             let commit = self.commit(intent, method, interrupt_turn, None, false);
@@ -2062,7 +2079,7 @@ impl Worker {
                 } = *prepared;
                 // A wake's claim ran in its task; its thread is in use from here.
                 if let Some(thread) = intent.thread_id.as_deref() {
-                    self.idle_thread_touched(thread);
+                    self.idle_thread_touched(thread).await?;
                 }
                 if matches!(step, store::PreparationStep::Retry) {
                     rewake = Some(intent.epoch);
@@ -2370,7 +2387,7 @@ impl Worker {
         let params = steer::params(&intent, &turn, &compiled.compiled);
         let thread_id = intent.thread_id.clone();
         if let Some(thread) = thread_id.as_deref() {
-            self.idle_thread_touched(thread);
+            self.idle_thread_touched(thread).await?;
         }
         let context = Pending {
             thread: None,
@@ -2747,6 +2764,10 @@ impl Worker {
                         resources,
                         context,
                         outcome,
+                        reply_boundary_at: event
+                            .journal
+                            .as_ref()
+                            .and_then(|entry| entry.boundary_at),
                         session_closed: closing,
                     },
                     id,

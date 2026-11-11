@@ -4,6 +4,7 @@
 
 mod callback_queue_limit;
 mod codec;
+pub mod codex_disposition;
 mod connection;
 mod initialize;
 mod provider_kind;
@@ -12,11 +13,11 @@ pub mod supervisor_protocol;
 
 pub use callback_queue_limit::CALLBACK_QUEUE_LIMIT;
 pub use codec::{
-    CodecError, DecodedJournalEntry, DecodedJournalPayload, Frame, MAX_FRAME_BYTES,
-    MAX_FRAME_DELIMITER_BYTES, Method, NotificationFrame, RequestFrame, RequestId, ResponseBody,
-    UnknownMethodFrame, decode_journal_entry, decode_journal_entry_borrowed, decode_journal_value,
-    decode_probe_response, encode_line, encode_line_into, frame_payload_bytes,
-    frame_prefix_payload_bytes, validate_initialize_params,
+    CodecError, CodexIncomingMethod, DecodedJournalEntry, DecodedJournalPayload, Frame,
+    MAX_FRAME_BYTES, MAX_FRAME_DELIMITER_BYTES, Method, NotificationFrame, RequestFrame, RequestId,
+    ResponseBody, UnknownMethodFrame, decode_journal_entry, decode_journal_entry_borrowed,
+    decode_journal_value, decode_probe_response, encode_line, encode_line_into,
+    frame_payload_bytes, frame_prefix_payload_bytes, validate_initialize_params,
 };
 pub use connection::{
     Action, Inbound, InitializationStatus, Lifecycle, RequestOutcome, RequestTicket, SessionError,

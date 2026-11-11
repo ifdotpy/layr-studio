@@ -483,6 +483,8 @@ impl Supervisor {
         let mut result = json!({"resumed":resumed,"initResult":row.init_result,"acknowledged":row.snapshot.acknowledged(),"sequence":row.snapshot.sequence(),"generation":row.snapshot.generation(),"returnCode":child.code()?,"pid":child.pid});
         result[SUPERVISOR_JOURNAL_EPOCH_FIELD] =
             json!(self.journal.epoch(handle, &self.journal_id)?);
+        result["spawnStartedAt"] = json!(child.spawn_started_at);
+        result["initializedAt"] = json!(*lock(&child.initialized_at)?);
         Ok(result)
     }
     fn child_action(&self, command: Command) -> Result<Value> {
@@ -513,20 +515,23 @@ impl Supervisor {
                     &Value::Object(message),
                     now()?,
                 )?;
-                let (duplicate, remote_id) = match decision {
-                    WriteDecision::Duplicate { remote_id } => (true, remote_id),
+                let (duplicate, remote_id, written_at) = match decision {
+                    WriteDecision::Duplicate { remote_id } => (true, remote_id, None),
                     WriteDecision::Accept {
                         remote_id,
                         outbound,
                         ..
                     } => {
-                        child.write(&outbound)?;
+                        let written_at = child.write(&outbound)?;
+                        if outbound["method"] == "initialized" {
+                            lock(&child.initialized_at)?.get_or_insert(written_at);
+                        }
                         self.journal.mark_written(&handle, &operation_id)?;
-                        (false, remote_id)
+                        (false, remote_id, Some(written_at))
                     }
                 };
                 Ok(
-                    json!({"accepted":true,"duplicate":duplicate,"remoteId":remote_id,"durableMs":started.elapsed().as_secs_f64()*1000.0}),
+                    json!({"accepted":true,"duplicate":duplicate,"remoteId":remote_id,"writtenAt":written_at,"durableMs":started.elapsed().as_secs_f64()*1000.0}),
                 )
             }
             Command::OperationStatus { operation_id, .. } => {

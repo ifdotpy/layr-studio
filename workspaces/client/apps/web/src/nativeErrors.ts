@@ -27,6 +27,8 @@ export const nativeErrorHints = {
   tooManyDenials:
     "Review the denied actions and approval settings before continuing.",
   serverOverloaded: "Try later or select another model.",
+  modelNotFound: "Choose an available model before continuing.",
+  policyCapacityUnavailable: "Try again later or choose another model.",
   cyberPolicy:
     "Start a new chat with a narrower or rephrased task, or use another provider or model.",
   misalignmentPolicyViolation:

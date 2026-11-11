@@ -2413,6 +2413,7 @@ mod tests {
             "monitor:watch",
         );
         let request = RecoveredRequest {
+            boundary_timing: None,
             ticket: RequestTicket {
                 id: RequestId::String(key.clone()),
                 generation: 1,
@@ -2920,6 +2921,7 @@ mod tests {
                         | Method::ThreadResume
                         | Method::ThreadRead
                         | Method::ThreadTurnsList
+                        | Method::ThreadTurnsItemsList
                         | Method::TurnStart
                         | Method::TurnSteer
                         | Method::TurnInterrupt
@@ -3738,6 +3740,7 @@ mod tests {
                         | Method::ThreadResume
                         | Method::ThreadRead
                         | Method::ThreadTurnsList
+                        | Method::ThreadTurnsItemsList
                         | Method::TurnStart
                         | Method::TurnSteer
                         | Method::TurnInterrupt

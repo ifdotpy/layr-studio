@@ -426,7 +426,7 @@ async fn transferred_monitor_fixture(
             CallerAdmission::Replay(_) => panic!("fresh command"),
         };
         let key = studio_runtime_schema::provider_call_contract::transport_key("default", &operation);
-        let request = TransportRequest { id:studio_runtime_providers::RequestId::String(key.clone()), generation:7, method:call.method, operation:key.clone(), thread:None,lightweight:true,deadline:60000,unknown:false,remote_id:None };
+        let request = TransportRequest { boundary_timing: None, id:studio_runtime_providers::RequestId::String(key.clone()), generation:7, method:call.method, operation:key.clone(), thread:None,lightweight:true,deadline:60000,unknown:false,remote_id:None };
         let retained = RetainedCall { call, request:Some(request), admitted:admitted.clone(),written:true,outcome:None };
         studio_runtime_store::outbox::Outbox::put(tx,&studio_runtime_store::outbox::OutboxRow {
             id:key,kind:OutboxKind::ProviderCall,owner_kind:OwnerKind::Agent,owner_id:"owner".into(),request_id:Some(admitted.id().into()),signature,
@@ -636,6 +636,25 @@ async fn process_action_rejects_duplicate_keys() {
     assert_eq!(status, 400);
     assert!(port.calls.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn malformed_process_owner_keeps_stored_data_http_status() {
+    let (_root, app, port) = fixture("success").await;
+    port.store
+        .transaction(|tx| {
+            studio_runtime_store::test_fixtures::agent_with_boolean_deletion(tx, "owner")
+        })
+        .await
+        .unwrap();
+    let (status, body) = call(&app, "GET", "/api/processes?agent=owner", Value::Null).await;
+    assert_eq!(status, 503);
+    assert_eq!(
+        body["error"],
+        "Stored data runtime_agents/owner is unavailable"
+    );
+    assert!(port.calls.lock().unwrap().is_empty());
+}
+
 async fn fixture(behavior: &'static str) -> (tempfile::TempDir, axum::Router, Arc<Port>) {
     let root = tempfile::tempdir().unwrap();
     let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());

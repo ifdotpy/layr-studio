@@ -329,6 +329,7 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
             | Method::ThreadResume
             | Method::ThreadRead
             | Method::ThreadTurnsList
+            | Method::ThreadTurnsItemsList
             | Method::TurnStart
             | Method::TurnSteer
             | Method::TurnInterrupt
@@ -775,6 +776,7 @@ pub(crate) fn valid_actorless_request_shape(
                     .is_some_and(|id| !id.is_empty())
                 && params.get("includeTurns") == Some(&json!(false))
         }
+        Method::ThreadTurnsItemsList => false,
         Method::ThreadTurnsList => {
             only(
                 &["threadId", "limit", "sortDirection", "itemsView"],
@@ -1711,6 +1713,7 @@ mod validation_tests {
                 | Method::ThreadResume
                 | Method::ThreadRead
                 | Method::ThreadTurnsList
+                | Method::ThreadTurnsItemsList
                 | Method::TurnStart
                 | Method::TurnSteer
                 | Method::TurnInterrupt

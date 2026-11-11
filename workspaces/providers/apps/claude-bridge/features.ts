@@ -104,7 +104,8 @@ export function limitEvent(
     ...current,
     rateLimits: main,
     rateLimitsByLimitId: all,
-    claudeRateLimit: evidence.type === "known" ? evidence.raw : evidence,
+    claudeRateLimit:
+      evidence.type === "known" ? evidence.info : { type: "unsupported" },
   };
   if (evidence.type === "unsupported") return result;
   const { info, scope } = evidence;
@@ -120,7 +121,7 @@ export function limitEvent(
     windowDurationMins: rateWindowMinutes[scope.window],
     ...(info.resetsAt === undefined ? {} : { resetsAt: info.resetsAt }),
   };
-  bucket.claudeRateLimit = evidence.raw;
+  bucket.claudeRateLimit = info;
   return result;
 }
 export function nativeItem(block: NativeToolBlock, cwd: string): FreshToolItem {

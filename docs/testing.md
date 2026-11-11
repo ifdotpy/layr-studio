@@ -282,10 +282,28 @@ Every agent and developer follows these rules:
    with `STUDIO_RETEST=1` (see "Retest" below). It is not the default. It builds a second
    copy of the tests with coverage, and the measured runs below were slower than the
    default path.
-7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same commands as the gate: the Rust workspace build (with `--lib`, which builds the libraries that nextest needs) and the clippy of `clippy-ratchet.ts`. Its `env` sets the ratchet's `CLIPPY_CONF_DIR` as a relative path. Then a new line takes warm units for the build, the first nextest run and clippy (checked by `layr-sweep-parity.test.ts`).
+7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same commands as the gate: the Rust workspace build (`--tests --bins --examples`) and the clippy of `clippy-ratchet.ts`. `--tests` includes library test harnesses; adding `--lib` changes proc macros from nextest's host units into root units and rebuilds their dependants. Binaries and examples preserve the supervisor, contracts and draft server. Its `env` sets the ratchet's `CLIPPY_CONF_DIR` as a relative path. Then a new line takes warm units for the build, the first nextest run and clippy (checked by `layr-sweep-parity.test.ts`).
 8. Run Cargo with the workspace arguments of the gate (`--workspace --exclude studio-native-client`),
    also for doctests. `-p <crate>` resolves the features of one crate, so 20 to 50
    dependencies get other features than the workspace build and compile cold.
+
+For the four-package store/server/services/db-api selection, retain workspace resolution:
+`cargo nextest run --workspace --exclude studio-native-client -E 'package(=studio-runtime-store) | package(=studio-runtime-server) | package(=studio-runtime-services) | package(=studio-db-api)'`.
+The preserved integration fingerprints show that `-p` changes the proc macro's `syn`
+dependency features even after the root/host mismatch is fixed. Nextest's execution
+filter preserves the workspace build graph; `selectCrates` uses that same approach.
+
+Build-only verification on 2026-11-11: preparation compiled 323 units (22 workspace
+crates) in 305.5 seconds; the following nextest `--no-run` compiled only
+`studio-client-wasm` (one workspace crate) in 4.8 seconds overall, with 0.62 seconds
+reported by Cargo. The db-api/schema duplicate compilation is gone in this proof;
+the small WASM library remainder is a known follow-up. This does not establish
+zero recompilation, a passing test run, or a new full-gate wall time.
+
+The facade runs pure web units in the `web` lane beside Rust, after WASM preparation.
+`vitest.http.config.ts` owns the three files that start a real draft HTTP server;
+only these run in the Rust lane after nextest and doctests. The full standalone
+`test:unit:prepared` command still includes both sets.
 
 Rust test runners do not inherit `LAYR_SOCKET`, `LAYR_DIRECT`, or
 `LAYR_ROOT` from the agent environment. This keeps tests from connecting to the

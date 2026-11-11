@@ -10,6 +10,9 @@
       "title": "At",
       "type": "number"
     },
+    "boundaryTiming": {
+      "$ref": "https://codex-studio.invalid/openapi.json#/components/schemas/ProviderBoundaryTiming"
+    },
     "finishedAt": {
       "anyOf": [
         {

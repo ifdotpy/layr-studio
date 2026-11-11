@@ -5,7 +5,8 @@ use std::path::Path;
 
 use studio_runtime_store::rules_tick::{RULE_BATCH, RulesTickRepository};
 use studio_runtime_store::{
-    AgentRecord, RuleRecord, RulesRepository, RuntimeStore, StoreError, Transaction,
+    AgentRepository, RuleOwnerRecord, RuleRecord, RulesRepository, RuntimeStore, StoreError,
+    Transaction,
 };
 use thiserror::Error;
 
@@ -195,7 +196,7 @@ pub async fn tick_batch(
             .read_async("runtime-services/rules_tick", move |tx| {
                 Ok::<_, RulesTickError>(
                     decide(tx, &probe, now, fingerprint, available)?
-                        .is_some_and(|(_, decision)| decision.record.is_some()),
+                        .is_some_and(|decision| decision.record.is_some()),
                 )
             })
             .await?;
@@ -204,12 +205,11 @@ pub async fn tick_batch(
         }
         let Some((changed, check)) = store
             .transaction_with::<_, RulesTickError>(move |transaction| {
-                let Some((owner, decision)) =
-                    decide(transaction, &sampled, now, fingerprint, available)?
+                let Some(decision) = decide(transaction, &sampled, now, fingerprint, available)?
                 else {
                     return Ok(None);
                 };
-                let changed = apply(transaction, &owner, &decision, now)?;
+                let changed = apply(transaction, sampled.owner_id(), &decision, now)?;
                 Ok(Some((changed, decision.check)))
             })
             .await?
@@ -266,7 +266,7 @@ pub async fn recover_batch(
                     return Ok(None);
                 };
                 let owner = owner(tx, sampled.owner_id())?;
-                if !sampled.current(&rule, &owner.value()) {
+                if !sampled.current_owner(&rule, &owner) {
                     return Ok(None);
                 }
                 if let Some(check) = &intent_for_tx
@@ -280,7 +280,7 @@ pub async fn recover_batch(
                         CheckReconciliation::Unknown => {}
                     }
                 }
-                let changed = apply(tx, &owner, &sampled.recover(now)?, now)?;
+                let changed = apply(tx, sampled.owner_id(), &sampled.recover(now)?, now)?;
                 Ok(Some((changed, None)))
             })
             .await?
@@ -367,7 +367,7 @@ pub async fn settle_submission(
                                     .into(),
                             );
                         }
-                        apply(tx, &owner(tx, snapshot.owner_id())?, &decision, now)?;
+                        apply(tx, snapshot.owner_id(), &decision, now)?;
                     }
                     Ok(())
                 })
@@ -426,12 +426,7 @@ pub fn finish_in_transaction(
     if let Some(record) = &mut decision.record {
         record.launch_intent = None;
     }
-    apply(
-        transaction,
-        &owner(transaction, snapshot.owner_id())?,
-        &decision,
-        now,
-    )
+    apply(transaction, snapshot.owner_id(), &decision, now)
 }
 
 /// Same-agent event hook. Commit, then pass each returned intent to submit_check.
@@ -460,15 +455,15 @@ pub fn event_in_transaction(
     };
     let mut checks = Vec::new();
     for row in rows {
-        if row.rule.agent != agent.id().as_ref() {
+        if row.rule.agent != event.agent_id {
             continue;
         }
-        let snapshot = RuleSnapshot::from_stored(&row.rule, agent.value())?;
+        let snapshot = RuleSnapshot::from_owner(&row.rule, &agent)?;
         let decision = snapshot.event(event.kind, event.text, event.key, event.now)?;
         if decision.check.is_some() && !monitor_available {
             return Err(RulesTickError::MonitorUnavailable);
         }
-        if apply(transaction, &agent, &decision, event.now)? {
+        if apply(transaction, event.agent_id, &decision, event.now)? {
             report.changed += 1;
         }
         if let Some(check) = decision.check {
@@ -482,8 +477,8 @@ fn load_snapshot(
     connection: &studio_runtime_store::Connection,
     rule: RuleRecord,
 ) -> Result<RuleSnapshot, RulesTickError> {
-    let owner = owner(connection, &rule.agent)?.value();
-    Ok(RuleSnapshot::from_stored(&rule, owner)?)
+    let owner = owner(connection, &rule.agent)?;
+    Ok(RuleSnapshot::from_owner(&rule, &owner)?)
 }
 /// Decide one sampled rule against current rows: `None` when the sample is stale.
 fn decide(
@@ -492,12 +487,12 @@ fn decide(
     now: f64,
     fingerprint: Option<RuleFileFingerprint>,
     available: bool,
-) -> Result<Option<(AgentRecord, RuleDecision)>, RulesTickError> {
+) -> Result<Option<RuleDecision>, RulesTickError> {
     let Some(rule) = RulesRepository::get(connection, sampled.id())? else {
         return Ok(None);
     };
     let owner = owner(connection, sampled.owner_id())?;
-    if !sampled.current(&rule, &owner.value()) {
+    if !sampled.current_owner(&rule, &owner) {
         return Ok(None);
     }
     let activity = if sampled.is_low_workers() {
@@ -521,14 +516,14 @@ fn decide(
     if decision.check.is_some() && !available {
         return Err(RulesTickError::MonitorUnavailable);
     }
-    Ok(Some((owner, decision)))
+    Ok(Some(decision))
 }
 
 fn owner(
     connection: &studio_runtime_store::Connection,
     id: &str,
-) -> Result<AgentRecord, RulesTickError> {
-    RulesRepository::agent(connection, id)?.ok_or_else(|| {
+) -> Result<RuleOwnerRecord, RulesTickError> {
+    RulesRepository::owner(connection, id)?.ok_or_else(|| {
         StoreError::InvalidStoredRecord {
             object: "agents",
             id: id.to_owned(),
@@ -538,7 +533,7 @@ fn owner(
 }
 fn apply(
     transaction: &Transaction<'_>,
-    agent: &AgentRecord,
+    agent_id: &str,
     decision: &RuleDecision,
     now: f64,
 ) -> Result<bool, RulesTickError> {
@@ -576,9 +571,11 @@ fn apply(
     }
     RulesRepository::put(transaction, &record)?;
     if let Some(wake) = &decision.wake {
+        let agent = AgentRepository::get(transaction, &agent_id.into())?
+            .ok_or(StoreError::RecordContract("missing rule owner"))?;
         enqueue_recovery_event(
             transaction,
-            agent,
+            &agent,
             wake.id.clone(),
             wake.kind,
             wake.text.clone(),

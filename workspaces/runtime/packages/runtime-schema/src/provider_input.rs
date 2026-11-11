@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod bridge;
 pub mod items;
 
 /// Unsupported live rate-limit evidence remains opaque and cannot supply an
@@ -20,7 +21,7 @@ pub enum UnsupportedClaudeRateLimit {
     Unsupported { raw: studio_json::Value },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderInputOrigin {
     Human,

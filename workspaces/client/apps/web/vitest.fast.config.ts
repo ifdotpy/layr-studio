@@ -1,4 +1,5 @@
-import base from "./vitest.unit.config";
+import base from "./vitest.unit.config.ts";
+import { HTTP_FIXTURE_TESTS } from "./vitest.http.config.ts";
 
 // Single owner of this package's short-tier witnesses; preserve file isolation.
 export default {
@@ -6,6 +7,7 @@ export default {
   test: {
     ...base.test,
     name: "fast",
+    exclude: HTTP_FIXTURE_TESTS,
     include: [
       "src/observed.test.ts",
       "src/observedNetwork.test.ts",
@@ -58,7 +60,6 @@ export default {
       "src/components/conversation/support/actionReads.render.test.ts",
       "src/perf/collector.test.ts",
       "src/perf/root.test.ts",
-      "src/perf/bundle.test.ts",
       "src/accountName.test.ts",
       "src/store/transient.test.ts",
       "src/components/accounts/AccountAddForm/AccountAddForm.test.ts",
@@ -223,7 +224,6 @@ export default {
       "src/components/settings/models/support/modelOption.test.ts",
       "src/components/agents/ChatStatus/ChatStatus.chatActivity.test.ts",
       "src/sync/send.independent.test.ts",
-      "src/pythonBackendRemoval.test.ts",
       "src/sync/draftPayload.test.ts",
       "src/scrollFollowFixture.test.ts",
       "src/receiptSummaryFixture.test.ts",

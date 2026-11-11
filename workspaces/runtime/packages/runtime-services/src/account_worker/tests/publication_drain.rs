@@ -16,6 +16,7 @@ static NEXT_ROOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsiz
 
 fn publication_effect(cursor: u64) -> NotificationPostCommit {
     NotificationPostCommit::TokenRateStream(NotificationObservation {
+        boundary_at: None,
         agent: Some(SharedJson::new(rate_agent())),
         method: "item/agentMessage/delta".into(),
         params: SharedJson::new(json!({"threadId":"thread","turnId":"turn","delta":"sample"})),
@@ -56,6 +57,7 @@ fn analytics_effect_for(
 ) -> NotificationPostCommit {
     NotificationPostCommit::Analytics {
         observation: NotificationObservation {
+            boundary_at: None,
             agent: Some(SharedJson::new(agent)),
             method: method.into(),
             params: SharedJson::new(params),
@@ -78,6 +80,7 @@ fn analytics_effect_for(
 
 fn token_rate_usage_effect(cursor: u64) -> NotificationPostCommit {
     NotificationPostCommit::TokenRateUsage(NotificationObservation {
+        boundary_at: None,
         agent: Some(SharedJson::new(rate_agent())),
         method: "thread/tokenUsage/updated".into(),
         params: SharedJson::new(json!({"threadId":"thread","turnId":"turn","tokenUsage":{
@@ -98,6 +101,7 @@ fn token_rate_usage_effect(cursor: u64) -> NotificationPostCommit {
 
 fn token_rate_association_effect(cursor: u64) -> NotificationPostCommit {
     NotificationPostCommit::TokenRateAssociation(NotificationObservation {
+        boundary_at: None,
         agent: Some(SharedJson::new(rate_agent())),
         method: "item/started".into(),
         params: SharedJson::new(
@@ -117,6 +121,7 @@ fn token_rate_association_effect(cursor: u64) -> NotificationPostCommit {
 
 fn token_rate_started_effect(cursor: u64) -> NotificationPostCommit {
     NotificationPostCommit::TokenRateUsage(NotificationObservation {
+        boundary_at: None,
         agent: Some(SharedJson::new(rate_agent())),
         method: "turn/started".into(),
         params: SharedJson::new(json!({"turnId":"turn"})),
@@ -1267,6 +1272,7 @@ async fn one_chats_native_layr_save_error_does_not_stop_other_chats_publications
         let mut agent_value = rate_agent();
         agent_value["id"] = json!(agent);
         NotificationPostCommit::TokenRateUsage(NotificationObservation {
+            boundary_at: None,
             agent: Some(SharedJson::new(agent_value)),
             method: "turn/completed".into(),
             params: SharedJson::new(json!({"threadId":"thread","turn":{"id":"turn"}})),

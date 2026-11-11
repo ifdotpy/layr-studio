@@ -60,6 +60,8 @@ pub struct TransportRequest<M> {
     pub unknown: bool,
     #[serde(rename = "remoteId")]
     pub remote_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_timing: Option<Box<crate::provider_timing::ProviderBoundaryTiming>>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

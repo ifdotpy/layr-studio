@@ -225,7 +225,7 @@ export function formatSqlBaseline(rows: Allowance[]): string {
     });
   return `{\n${lines.join(",\n")}\n}\n`;
 }
-export function scanRustNodes(paths: string[]): Node[] {
+export function scanRustNodes(paths: string[], directory = root): Node[] {
   const attributeChainEnd = {
     not: {
       any: ["attribute_item", "line_comment", "block_comment"].map((kind) => ({
@@ -322,7 +322,26 @@ export function scanRustNodes(paths: string[]): Node[] {
     {
       id: "boundary",
       language: "Rust",
-      rule: { pattern: "$T::declare($$$A)" },
+      rule: { pattern: "$T::declare($$A)" },
+    },
+    {
+      id: "vendor-open-json-field",
+      language: "Rust",
+      rule: {
+        all: [
+          { kind: "scoped_type_identifier" },
+          { regex: "^studio_json::Value$" },
+          {
+            inside: {
+              any: [
+                { kind: "field_declaration" },
+                { kind: "ordered_field_declaration_list" },
+              ],
+              stopBy: "end",
+            },
+          },
+        ],
+      },
     },
     {
       id: "boundary",
@@ -377,8 +396,25 @@ export function scanRustNodes(paths: string[]): Node[] {
   const declared = new Set(
     result.filter((node) => node.ruleId === "declared-query").map(key),
   );
+  // JSON Schema true/open leaves are vendor types, not persistence boundaries.
+  // Keep every import, expression, SQL site and call in this file visible.
+  const vendorFields = new Set(
+    result
+      .filter(
+        (node) =>
+          node.ruleId === "vendor-open-json-field" &&
+          path
+            .relative(directory, path.resolve(root, node.file))
+            .replaceAll(path.sep, "/") ===
+            "workspaces/runtime/packages/codex-protocol/src/generated/mod.rs",
+      )
+      .map(key),
+  );
   return result.filter(
-    (node) => node.ruleId !== "sql" || !declared.has(key(node)),
+    (node) =>
+      node.ruleId !== "vendor-open-json-field" &&
+      !(node.ruleId === "boundary" && vendorFields.has(key(node))) &&
+      (node.ruleId !== "sql" || !declared.has(key(node))),
   );
 }
 function scanPython(file: string): (Node & { symbol: string })[] {

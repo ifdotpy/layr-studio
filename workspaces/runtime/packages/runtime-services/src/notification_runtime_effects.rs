@@ -55,6 +55,7 @@ impl NotificationEffects for RuntimeNotificationEffects {
         let before_observation = before.map(SharedJson::agent_projection);
         let after_observation = after.map(SharedJson::agent_projection);
         let observation = |agent: Option<&SharedJson>| NotificationObservation {
+            boundary_at: None,
             agent: agent.cloned(),
             method: method.into(),
             params: params.clone(),

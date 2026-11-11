@@ -14,6 +14,41 @@ For a local build, run `cargo build --release -p studio-runtime-server --feature
 
 To turn reporting off, deliver a normal build without `STUDIO_PERF_REPORTING=1`, or rebuild without the Cargo feature and web build variable. Restarting clears the in-memory aggregates.
 
+## Provider turn boundaries
+
+Normal analytics turn records include optional `boundaryTiming`, owned by
+`runtime-schema::provider_timing`. `runtime-process::clock` samples paired Unix
+seconds and host monotonic nanoseconds. Derived durations use monotonic time;
+wall clock corrections do not affect them. Analytics detail responses and the
+turn's raw detail expose these fields without a new table or polling.
+
+`enqueued` is the earliest input accepted into the server's existing event queue.
+`accepted` is the separate validated adapter admission; `enqueuedToAcceptedMs`
+includes queue and preparation time without changing the admission boundary.
+Historical inputs without a paired enqueue stamp leave `enqueued` absent.
+`written` is the complete request's stdin flush, not model application acceptance.
+`firstEvent` is the first matching provider response or turn notification;
+`firstToken` is the first nonempty model text/reasoning delta (Claude also reports
+the first SDK tool-input delta). `terminal` is the provider's terminal event,
+including failure or interruption. A turn with no model output has no first-token
+stamp. These durations include provider and model execution; they do not isolate
+model compute time.
+
+`spawnStarted` precedes process creation and `initialized` follows the required
+initialized write. Their original process identity is the provider handle and
+generation. Retained processes keep their original stamps when known. Request
+stamps use the existing durable operation identity and survive unknown outcomes;
+an unknown or duplicate write receipt does not invent a write timestamp or replay
+the request. Until a provider turn ID is known, the request receipt retains these
+clocks. Historical records remain unstamped.
+
+Only first occurrences update timing in analytics. The new paired timing metadata
+is excluded from provider frame bytes, request signatures, and journal digests.
+The existing `_studioSupervisorReceivedAt` field keeps its replay-compatible behavior.
+Each stamp includes the kernel boot UUID. Monotonic comparisons and durations
+require the same known boot UUID; retained enqueue stamps from another boot and
+legacy stamps without it leave the derived duration unknown.
+
 ## Client
 
 Build the web renderer with `STUDIO_PERF_REPORTING=1` to enable client diagnostics. It aggregates browser long tasks, event duration and input delay by event type, and React render duration for the composer and history; every 60 seconds a nonempty window is sent to the server. Reports contain timings and counts, not message text or other user content. The default build excludes this instrumentation. The feature-on Vite plugin injects the authenticated request accessor and reporter mounts at exact source anchors; a changed or ambiguous anchor fails the build.

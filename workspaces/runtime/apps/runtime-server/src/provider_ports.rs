@@ -1002,7 +1002,8 @@ mod tests {
                             }]}),
                         }))
                     }
-                    Method::Initialize
+                    Method::ThreadTurnsItemsList
+                    | Method::Initialize
                     | Method::Initialized
                     | Method::Ack
                     | Method::AccountLoginCancel

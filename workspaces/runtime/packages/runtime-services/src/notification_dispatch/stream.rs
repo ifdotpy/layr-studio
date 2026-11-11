@@ -517,6 +517,9 @@ impl NotificationStreamBuffer {
                 let old_size = capture.retained_bytes;
                 let saved = &mut capture.observation;
                 let metrics = &mut capture.metrics;
+                if !delta.is_empty() && metrics.first_delta_at.is_none() {
+                    metrics.first_delta_at = observation.boundary_at;
+                }
                 let mut removed_bytes = 0;
                 let mut added_bytes = studio_json::to_string(&delta)
                     .map_or(usize::MAX, |value| value.len())
@@ -597,6 +600,9 @@ impl NotificationStreamBuffer {
                     Value::String(super::suffix(&delta, TOOL_OUTPUT_CHARS));
             }
             let metrics = NotificationStreamMetrics {
+                first_delta_at: (!delta.is_empty())
+                    .then_some(observation.boundary_at)
+                    .flatten(),
                 hours: vec![NotificationHourMetrics {
                     hour,
                     count: 1,
@@ -1537,6 +1543,11 @@ mod tests {
             method: "item/agentMessage/delta".into(),
         };
         let observation = |cursor, delta: &str| NotificationObservation {
+            boundary_at: Some(studio_runtime_schema::provider_timing::BoundaryStamp {
+                boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+                unix_seconds: cursor as f64,
+                monotonic_ns: cursor,
+            }),
             agent: None,
             method: key.method.clone(),
             params: crate::notification_dispatch::SharedJson::new(json!({"delta":delta})),
@@ -1550,6 +1561,9 @@ mod tests {
         };
         let mut streams = NotificationStreamBuffer::default();
         streams
+            .stage_analytics(key.clone(), observation(0, ""))
+            .unwrap();
+        streams
             .stage_analytics(key.clone(), observation(1, "a"))
             .unwrap();
         let first_size = streams.analytics_bytes;
@@ -1558,6 +1572,13 @@ mod tests {
             .unwrap();
         assert_eq!(streams.analytics.len(), 1);
         assert_eq!(streams.analytics[0].observation.params["delta"], "ab");
+        assert_eq!(
+            streams.analytics[0]
+                .metrics
+                .first_delta_at
+                .map(|stamp| stamp.monotonic_ns),
+            Some(1)
+        );
         assert_eq!(
             studio_json::from_str::<Value>(&studio_json::to_string(&streams).unwrap()).unwrap()["analytics"][0]
                 .as_array()
@@ -1582,6 +1603,7 @@ mod tests {
 
     fn analytics_observation(method: &str, cursor: u64) -> NotificationObservation {
         NotificationObservation {
+            boundary_at: None,
             agent: None,
             method: method.into(),
             params: crate::notification_dispatch::SharedJson::new(json!({"delta":"x"})),

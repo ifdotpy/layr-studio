@@ -1026,11 +1026,10 @@ for (const mode of ["empty", "partial", "all"]) {
     }
     await end(bridge);
     const done = await completed(bridge, old);
-    const settings = { thinking: { type: "enabled", budgetTokens: 1000 } };
+    const settings = { thinking: true };
     assert.deepEqual(
       await bridge.call("claude/settings", {
         threadId: bridge.thread,
-        // @ts-expect-error Deliberate legacy opaque settings wire fixture.
         settings,
       }),
       { settings },

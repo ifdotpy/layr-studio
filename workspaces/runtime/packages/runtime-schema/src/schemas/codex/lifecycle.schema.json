@@ -1,5 +1,5 @@
 {
-  "$comment": "Owner: codex-cli 0.164.0; app-server generate-json-schema --experimental. Selected definitions, unchanged.",
+  "$comment": "Owner: codex-cli 0.167.1; app-server generate-json-schema --experimental. Selected definitions, unchanged.",
   "definitions": {
     "TurnStatus": {
       "enum": ["completed", "interrupted", "failed", "inProgress"],

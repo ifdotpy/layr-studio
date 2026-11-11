@@ -61,6 +61,7 @@ async fn loaded(peer: &mut Peer) {
     assert_eq!(wire.value["method"], "thread/loaded/list");
     assert_eq!(wire.value["params"], json!({"limit": 100}));
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -771,6 +772,7 @@ async fn idle_snapshot_is_admitted_while_a_full_backlog_waits_for_the_worker() {
     tokio::time::timeout(PROGRESS_GUARD, async move {
         for cursor in start + 1..=start + backlog as u64 {
             let entry = JournalEntry {
+                boundary_at: None,
                 received_at_ms: clock.now_ms(),
                 cursor: EventCursor(cursor),
                 generation,
@@ -790,6 +792,7 @@ async fn idle_snapshot_is_admitted_while_a_full_backlog_waits_for_the_worker() {
         .expect("provider session remains open");
     assert_eq!(wire.value["method"], "thread/loaded/list");
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1194,6 +1197,7 @@ async fn advance_idle_clock(worker: &AccountHandle, by: Duration) {
 /// finishes, the clock runs again and the thread unloads although an unrelated
 /// request keeps the account busy. Before, the parked thread was checked again
 /// only when the whole account had no local work.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_thread_parked_by_its_own_request_unloads_when_that_request_finishes() {
     use crate::account_worker::retained::{RequestActor, SessionRequest};
@@ -1202,7 +1206,12 @@ async fn a_thread_parked_by_its_own_request_unloads_when_that_request_finishes()
     let beyond_setting = Duration::from_secs(SETTING_MINUTES * 60 + 1);
     let state = State::new().await;
     let mut peer = Peer::new();
-    let mut worker = peer.worker(state.bridge.clone()).await;
+    let mut worker = provider_worker(
+        &state,
+        &mut peer,
+        studio_runtime_providers::ProviderKind::Claude,
+    )
+    .await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
     set_delay(&state, SETTING_MINUTES).await;
@@ -1215,10 +1224,36 @@ async fn a_thread_parked_by_its_own_request_unloads_when_that_request_finishes()
         "a lead waits for the setting"
     );
 
+    let wall = crate::idle_compaction::wall_now();
+    let cache_fire = wall
+        + studio_runtime_schema::shared_values::IDLE_COMPACTION_CACHE_SECONDS
+            * studio_runtime_schema::shared_values::IDLE_COMPACTION_FIRE_FRACTION;
+    let agent_id = state.agent.clone();
+    let epoch = state.epoch;
+    state.bridge.run(move |store| async move {
+        store.transaction(move |tx| {
+            let mut agent = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?.unwrap().value();
+            agent["idleCompactionEpisode"] = json!({
+                "id":"retained-request-episode", "cache":{
+                    "requestId":"response", "ttl":"1h", "warm":true,
+                    "lastActivityAt":wall*1000.0, "contextTokens":210000,
+                    "prefix":"prefix", "compactionEnabled":true, "idleCompactionEnabled":true
+                },
+                "identity":{"accountKey":"default","threadId":THREAD,"epoch":epoch},
+                "prefixInputs":[], "attempt":"request", "fired":false,
+                "fireAt":wall+30.0, "expiresAt":wall+studio_runtime_schema::shared_values::IDLE_COMPACTION_CACHE_SECONDS,
+                "unloadAt":wall+60.0
+            });
+            AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(agent)?)
+        }).await?;
+        Ok(())
+    }).await.unwrap();
+    assert!(state.record().await["idleCompactionEpisode"]["unloadAt"].is_number());
+
     let (probe, probe_task) = unrelated_request_in_flight(
         &mut peer,
         &worker,
-        studio_runtime_providers::ProviderKind::Codex,
+        studio_runtime_providers::ProviderKind::Claude,
     )
     .await;
     let port = worker.retained_session();
@@ -1248,15 +1283,58 @@ async fn a_thread_parked_by_its_own_request_unloads_when_that_request_finishes()
     );
 
     advance_idle_clock(&worker, beyond_setting).await;
+    observe_idle(&worker, &mut peer, &json!("pending retained request"), true).await;
     assert!(
         peer.writes.try_recv().is_err(),
         "a request for the thread keeps it loaded while it runs"
     );
+    assert!(!history_task.is_finished());
+    let episode = &state.record().await["idleCompactionEpisode"];
+    assert!(
+        episode["unloadAt"].is_null(),
+        "pending request must clear the obsolete unload deadline: {episode}"
+    );
+    assert!(
+        (episode["fireAt"].as_f64().unwrap() - cache_fire).abs() < 0.001,
+        "pending request must restore the cache deadline: {episode}"
+    );
+    // A usage read begun before the retained request may finish after its local block.
+    let (reply, applied) = oneshot::channel();
+    worker
+        .send(AccountCommand::IdleApplySnapshot {
+            thread: THREAD.into(),
+            reply,
+        })
+        .await
+        .unwrap();
+    assert!(progress(applied).await.unwrap().deadline.is_none());
     progress(peer.reply(&read, json!({"thread": {"id": THREAD}}))).await;
     progress(history_task).await.unwrap().unwrap();
 
-    // The finished request starts a fresh idle interval.
-    advance_idle_clock(&worker, beyond_setting).await;
+    // Acknowledge that request completion rearmed the thread before advancing its clock.
+    let rearmed = observe_idle(
+        &worker,
+        &mut peer,
+        &json!("finished retained request"),
+        false,
+    )
+    .await;
+    assert!(
+        rearmed.deadline.is_some(),
+        "late usage snapshot must not strand a completed local request: {rearmed:?}"
+    );
+    tokio::time::pause();
+    tokio::time::advance(beyond_setting).await;
+    tokio::time::resume();
+    // Drive the due sweep explicitly; a timer wake is not a completed protocol step.
+    let (reply, swept) = oneshot::channel();
+    worker
+        .send(AccountCommand::IdleInspect {
+            sweep_at: Some(tokio::time::Instant::now()),
+            reply,
+        })
+        .await
+        .unwrap();
     idle_checks(&mut peer).await;
     answer(
         &mut peer,
@@ -1265,6 +1343,7 @@ async fn a_thread_parked_by_its_own_request_unloads_when_that_request_finishes()
         json!({"status": "unsubscribed"}),
     )
     .await;
+    assert!(progress(swept).await.unwrap().released.contains(THREAD));
     assert!(
         !probe_task.is_finished(),
         "the unrelated request is still in flight"

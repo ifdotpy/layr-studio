@@ -331,6 +331,7 @@ impl ProviderAdapter for CodexAdapter {
         };
         let mut spec =
             ProviderLaunchSpec::new(launch(&CODEX_THREAD_UNLOAD_DELAY), environment, root)
+                .with_provider(ProviderKind::Codex)
                 .with_inherited_cwd();
         // The command before the unload override, which running app-servers keep.
         spec.reattach_commands.push(launch(&[]));
@@ -658,7 +659,7 @@ fn claude_launch(
     let launch = BridgeSnapshot::from_launch(profile)
         .and_then(|snapshot| snapshot.launch(resolved, &metadata, environment))
         .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
-    Ok((launch, claude))
+    Ok((launch.with_provider(ProviderKind::Claude), claude))
 }
 
 /// Resolve `configured` (a path, or a name searched in `path`) to a canonical executable.

@@ -68,6 +68,10 @@ clippy-runtime:
 deny-bans:
     cargo deny --locked --offline check bans
 
+[doc("Compare the installed Codex protocol and vendor request/result links with the pinned contract. Requires access to the vendor source for the installed release.")]
+provider-drift:
+    @node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --drift
+
 [doc("Check generated API and persisted-state contracts in read-only drift mode.")]
 contracts-check:
     @node {{quote(facade)}} contracts-check
@@ -255,3 +259,7 @@ test-live-handover:
 
 test-quarantine:
     @cargo nextest run --build-jobs 4 -p studio-runtime-services -p studio-runtime-process --run-ignored only --test-threads 1 -E 'test(=wave7_p04_review::answer_and_cancellation_restart_at_each_real_store_queue_and_transport_boundary) | test(=workspace_ready_git::tests::worktree_children_spawned_together_in_one_repository_all_start) | test(=terminal_pty::tests::printf_output_is_delivered_losslessly) | test(=account_worker::tests::publication_off_path::analytics_are_logged_in_the_journal_commit_and_projected_off_the_writer) | test(=account_worker::tests::idle_unload::codex_a_finished_worker_whose_turn_failed_unloads_its_thread) | test(=account_worker::tests::accepted_turn_reattaches_and_keeps_notification_effects) | test(=multi_server_corpus::python_authentication_outputs_match_complete_principal_and_writes) | test(=provider_task::unverifiable_retained_child_refused_before_open)'
+
+[doc("Report Claude SDK export drift against the latest published SDK or a supplied sdk.d.ts, without changing dependencies.")]
+claude-sdk-drift *args:
+    @node {{quote(justfile_directory() / "workspaces/providers/apps/claude-bridge/sdk-drift.ts")}} {{args}}

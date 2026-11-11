@@ -2303,7 +2303,9 @@ mod retained_executor_tests {
                         json!({"thread":{"id":"source-thread","status":{"type":"idle"},
                     "path":self.native_path}})
                     }
-                    Method::ThreadTurnsList => json!({"data":[],"nextCursor":null}),
+                    Method::ThreadTurnsList | Method::ThreadTurnsItemsList => {
+                        json!({"data":[],"nextCursor":null})
+                    }
                     Method::ThreadFork => {
                         let mut receipt = self.receipt(
                             &request.account,
@@ -2556,6 +2558,7 @@ mod retained_executor_tests {
                     | Method::ThreadResume
                     | Method::ThreadRead
                     | Method::ThreadTurnsList
+                    | Method::ThreadTurnsItemsList
                     | Method::TurnStart
                     | Method::TurnSteer
                     | Method::TurnInterrupt

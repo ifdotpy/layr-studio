@@ -21,6 +21,7 @@ fn p06_empty_deltas_arm_timer_and_coalesce_without_refusal() {
             .stage_analytics(
                 key.clone(),
                 NotificationObservation {
+                    boundary_at: None,
                     agent: None,
                     method: key.method.clone(),
                     params: SharedJson::new(params.clone()),

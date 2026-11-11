@@ -24,6 +24,8 @@ impl ProviderHandle {
 /// This intentionally has no `Debug` implementation because it contains secrets.
 #[derive(Clone)]
 pub struct ProviderLaunchSpec {
+    /// Protocol identity for typed ingress; generic helper processes leave this absent.
+    pub provider: Option<studio_runtime_providers::ProviderKind>,
     pub command: Vec<String>,
     pub environment: BTreeMap<String, String>,
     pub cwd: Option<PathBuf>,
@@ -60,6 +62,12 @@ pub struct RetainedLaunchValues {
 }
 
 impl ProviderLaunchSpec {
+    #[must_use]
+    pub fn with_provider(mut self, provider: studio_runtime_providers::ProviderKind) -> Self {
+        self.provider = Some(provider);
+        self
+    }
+
     /// Launch with the supervisor's inherited working directory.
     #[must_use]
     pub fn with_inherited_cwd(mut self) -> Self {
@@ -70,6 +78,7 @@ impl ProviderLaunchSpec {
     #[must_use]
     pub fn new(command: Vec<String>, environment: BTreeMap<String, String>, cwd: PathBuf) -> Self {
         Self {
+            provider: None,
             command,
             environment,
             cwd: Some(cwd),

@@ -52,15 +52,15 @@ if (process.argv[1] === fileURLToPath(import.meta.url))
 // Native WebView tests run separately on the prepared native CI builder.
 export const NATIVE_PACKAGE = "studio-native-client";
 // Rust workspace build of the gate, as cargo arguments. Owner of the command: the `sweep` list
-// in the root Cargo.toml must hold it (tests/layr-sweep-parity.test.ts). `--lib` builds the
-// libraries that no other crate uses: nextest (`cargo test --no-run`) needs them, so a new line
-// that takes the cache compiles nothing for its first test run.
+// in the root Cargo.toml must hold it (tests/layr-sweep-parity.test.ts). `--tests` prepares
+// library test harnesses too. Explicit `--lib` also builds proc macros as normal root units,
+// changing their dependants from the host units used by nextest. Keep normal binaries and
+// examples for the supervisor, contracts and draft HTTP fixtures.
 export const RUST_WORKSPACE_BUILD_ARGS = [
   "build",
   "--workspace",
   "--exclude",
   NATIVE_PACKAGE,
-  "--lib",
   "--tests",
   "--bins",
   "--examples",

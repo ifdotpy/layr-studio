@@ -4404,6 +4404,7 @@ class AnalyticsTurnRecordModel {
     | null
     | undefined;
   at: AnalyticsTurnRecordDto["at"] | undefined;
+  boundaryTiming: AnalyticsTurnRecordDto["boundaryTiming"] | undefined;
   cyberAccessProgram:
     | NonNullable<AnalyticsTurnRecordDto["cyberAccessProgram"]>
     | null
@@ -4455,6 +4456,10 @@ class AnalyticsTurnRecordModel {
           ? null
           : dto.agentName;
     this.at = dto.at === undefined ? undefined : dto.at;
+    this.boundaryTiming =
+      dto.boundaryTiming === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.boundaryTiming));
     this.cyberAccessProgram =
       dto.cyberAccessProgram === undefined
         ? undefined
@@ -4547,6 +4552,7 @@ class AnalyticsTurnRecordModel {
       agentId: observableRef,
       agentName: observableRef,
       at: observableRef,
+      boundaryTiming: observableRef,
       cyberAccessProgram: observableRef,
       daybreakEnabled: observableRef,
       durationMs: observableRef,
@@ -4625,6 +4631,17 @@ class AnalyticsTurnRecordModel {
             ? dto.at
             : dto.at;
       if (this.at !== next) this.at = next;
+    }
+    {
+      const next =
+        dto.boundaryTiming === undefined
+          ? undefined
+          : this.boundaryTiming === undefined
+            ? freezePlain(structuredClone(dto.boundaryTiming))
+            : compareStructural(this.boundaryTiming, dto.boundaryTiming)
+              ? this.boundaryTiming
+              : freezePlain(structuredClone(dto.boundaryTiming));
+      if (this.boundaryTiming !== next) this.boundaryTiming = next;
     }
     {
       const next =

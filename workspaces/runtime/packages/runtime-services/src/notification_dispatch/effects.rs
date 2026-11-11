@@ -273,6 +273,8 @@ pub struct NotificationObservation {
     pub delivery: ProviderDeliveryIdentity,
     pub observed_at: ObservationTime,
     pub provider_at: ObservationTime,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -344,6 +346,8 @@ impl NotificationPublicationBatch {
 /// counters using these totals (without retaining each raw delta).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct NotificationStreamMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_delta_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     pub hours: Vec<NotificationHourMetrics>,
     pub bytes: u64,
     pub characters: u64,

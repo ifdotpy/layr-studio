@@ -1,13 +1,14 @@
 //! One provider task owns the command socket; its event pump owns a second
 //! supervisor socket for cancellable event waits. Writes and durable ACKs stay
 //! on the command socket. No automatic reconnect or write retry exists here.
-use crate::{provider_seam::*, provider_shared::*, *};
+use crate::{provider_seam::*, provider_shared::*, provider_stdio::CodexMethodDiagnostics, *};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::{collections::BTreeMap, future::Future, path::PathBuf, time::Duration};
 use studio_json::Value;
 use studio_runtime_providers::{
-    DecodedJournalPayload, Frame, RequestId, ResponseBody, decode_journal_entry_borrowed,
+    DecodedJournalPayload, Frame, ProviderKind, RequestId, ResponseBody,
+    decode_journal_entry_borrowed,
 };
 use studio_runtime_store::supervisor_journal::launch_signature;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -198,6 +199,8 @@ impl SupervisorProviderTaskFactory {
                 initialization: InitializationStatus::AwaitingReply,
             });
             let actor = AdapterTask {
+                provider: options.launch.provider,
+                codex_diagnostics: CodexMethodDiagnostics::default(),
                 activation,
                 inherit_cwd: options.launch.cwd.is_none(),
                 clock: options.clock,
@@ -459,6 +462,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Rpc<S> {
 }
 
 struct AdapterTask {
+    provider: Option<ProviderKind>,
+    codex_diagnostics: CodexMethodDiagnostics,
     account_store: Option<Arc<studio_runtime_store::RuntimeStore>>,
     inherit_cwd: bool,
     activation: Option<(oneshot::Sender<Generation>, oneshot::Receiver<Activation>)>,
@@ -645,6 +650,15 @@ impl AdapterTask {
         } else {
             None
         };
+        match self.provider {
+            Some(ProviderKind::Codex) => {
+                if let Some(result) = &self.cached_initialize {
+                    self.codex_diagnostics
+                        .initialize(result.get("userAgent").and_then(|value| value.as_str()));
+                }
+            }
+            Some(ProviderKind::Claude) | None => {}
+        }
         if self.cached_initialize.is_some() {
             self.initialization = InitializationStatus::InitializedWritePending;
         }
@@ -654,6 +668,8 @@ impl AdapterTask {
             pid: opened.pid,
             acknowledged: EventCursor(opened.acknowledged),
             resumed: opened.resumed,
+            spawn_started_at: opened.spawn_started_at,
+            initialized_at: opened.initialized_at,
         });
         if !opened.resumed
             && self
@@ -1061,10 +1077,14 @@ impl AdapterTask {
             Err(_) if !rpc.started => return Ok(CommandReceipt::NotSent),
             Err(error) => return Err(error),
         };
-        let (remote_id, duplicate) = match result {
+        let (remote_id, duplicate, written_at) = match result {
             WriteResult::Refused => return Ok(CommandReceipt::NotSent),
-            WriteResult::Fresh { remote_id, .. } => (remote_id, false),
-            WriteResult::Duplicate { remote_id, .. } => (remote_id, true),
+            WriteResult::Fresh {
+                remote_id,
+                written_at,
+                ..
+            } => (remote_id, false, written_at),
+            WriteResult::Duplicate { remote_id, .. } => (remote_id, true, None),
         };
         if rpc_request {
             let remote = rpc_remote_id(remote_id.as_ref()).ok_or(SupervisorError::InvalidFrame(
@@ -1085,6 +1105,7 @@ impl AdapterTask {
             // A reply can find a Python-written receipt with a text id; it is no RPC identity.
             remote_id: rpc_remote_id(remote_id.as_ref()),
             duplicate,
+            written_at,
         })
     }
 
@@ -1096,18 +1117,24 @@ impl AdapterTask {
         received_at_ms: u64,
     ) -> Result<JournalEntry, AdapterError> {
         let raw = event.payload.as_str();
+        let mut boundary_at = None;
         let payload = match event.kind {
-            EventKind::Stdout => match decode_stdout(raw) {
-                DecodedJournalPayload::Frame(mut frame) => {
-                    if let Frame::Response { id, body, .. } = &mut frame {
-                        self.settle_reply(id, body, event.generation);
+            EventKind::Stdout => {
+                let decoded = decode_stdout(raw);
+                boundary_at = decoded.boundary_at;
+                match decoded.payload {
+                    DecodedJournalPayload::Frame(mut frame) => {
+                        self.codex_diagnostics.record(self.provider, &frame);
+                        if let Frame::Response { id, body, .. } = &mut frame {
+                            self.settle_reply(id, body, event.generation);
+                        }
+                        JournalPayload::Frame(frame)
                     }
-                    JournalPayload::Frame(frame)
+                    DecodedJournalPayload::RawStdout { bytes, error } => {
+                        JournalPayload::RawStdout { bytes, error }
+                    }
                 }
-                DecodedJournalPayload::RawStdout { bytes, error } => {
-                    JournalPayload::RawStdout { bytes, error }
-                }
-            },
+            }
             EventKind::Stderr => JournalPayload::Stderr(parse_payload(raw)?),
             EventKind::Exit => JournalPayload::Exit(parse_payload(raw)?),
             EventKind::Unknown(kind) => JournalPayload::Other {
@@ -1116,6 +1143,7 @@ impl AdapterTask {
             },
         };
         Ok(JournalEntry {
+            boundary_at,
             received_at_ms,
             cursor: event.sequence,
             generation: event.generation,
@@ -1154,14 +1182,18 @@ impl AdapterTask {
 struct SupervisorRawStdout<'a> {
     #[serde(rename = "supervisorRaw", borrow)]
     raw: std::borrow::Cow<'a, str>,
+    #[serde(rename = "_studioBoundaryAt")]
+    boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 
-fn decode_stdout(raw: &str) -> DecodedJournalPayload {
-    let decoded = decode_journal_entry_borrowed(0, 0, raw.as_bytes()).payload;
-    if let DecodedJournalPayload::RawStdout { .. } = decoded
+fn decode_stdout(raw: &str) -> studio_runtime_providers::DecodedJournalEntry {
+    let decoded = decode_journal_entry_borrowed(0, 0, raw.as_bytes());
+    if let DecodedJournalPayload::RawStdout { .. } = decoded.payload
         && let Ok(wrapped) = studio_json::from_str::<SupervisorRawStdout<'_>>(raw)
     {
-        return decode_journal_entry_borrowed(0, 0, wrapped.raw.as_bytes()).payload;
+        let mut decoded = decode_journal_entry_borrowed(0, 0, wrapped.raw.as_bytes());
+        decoded.boundary_at = wrapped.boundary_at;
+        return decoded;
     }
     decoded
 }

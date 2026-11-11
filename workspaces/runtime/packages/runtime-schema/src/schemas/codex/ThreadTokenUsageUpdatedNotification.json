@@ -69,5 +69,5 @@
   "required": ["threadId", "tokenUsage", "turnId"],
   "title": "ThreadTokenUsageUpdatedNotification",
   "type": "object",
-  "$comment": "Owner: codex-cli 0.164.0; app-server generate-json-schema --experimental."
+  "$comment": "Owner: codex-cli 0.167.1; app-server generate-json-schema --experimental."
 }

@@ -1187,6 +1187,7 @@ mod tests {
                     | method @ Method::ThreadRealtimeClosed
                     | method @ Method::ThreadResume
                     | method @ Method::ThreadTurnsList
+                    | method @ Method::ThreadTurnsItemsList
                     | method @ Method::TurnStart
                     | method @ Method::TurnSteer
                     | method @ Method::TurnInterrupt

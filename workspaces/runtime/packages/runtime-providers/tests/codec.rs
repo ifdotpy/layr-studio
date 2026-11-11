@@ -413,3 +413,23 @@ fn claude_failure_sanitizer_preserves_unknown_methods_and_handles_turn_history()
         assert!(encoded.contains("media_removed"));
     }
 }
+
+#[test]
+fn claude_bridge_methods_match_the_shared_codec_subset() {
+    use studio_runtime_schema::provider_input::bridge::BridgeMethod;
+    let bridge = BridgeMethod::ALL
+        .iter()
+        .map(|method| method.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let shared = Method::all()
+        .iter()
+        .filter_map(|method| BridgeMethod::from_wire(method.as_str()).map(|_| method.as_str()))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(bridge, shared);
+    for method in BridgeMethod::ALL {
+        let shared = Method::from_wire(method.as_str())
+            .expect("Rust bridge owner must classify in shared codec");
+        assert_eq!(shared.as_str(), method.as_str());
+        assert_eq!(BridgeMethod::from_wire(shared.as_str()), Some(*method));
+    }
+}

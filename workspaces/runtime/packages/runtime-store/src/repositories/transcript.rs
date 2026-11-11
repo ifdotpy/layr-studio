@@ -1,9 +1,7 @@
 //! Persisted transcript rows, full text, and the current search projection.
 
 use crate::CachedSql;
-use crate::records::{
-    AgentRecord, RecordOrder, RecordPredicate, Table, TranscriptItemId, TranscriptItemRecord,
-};
+use crate::records::{RecordOrder, RecordPredicate, Table, TranscriptItemId, TranscriptItemRecord};
 use crate::repositories::sync_documents::SyncDocumentsRepository;
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
 use crate::stored_text::{StoredText, StoredTextValue};
@@ -121,6 +119,14 @@ pub struct TranscriptSearchKind<'a> {
 pub struct TranscriptRepository;
 
 impl TranscriptRepository {
+    pub fn agent(
+        connection: &Connection,
+        agent: &str,
+    ) -> TranscriptStoreResult<Option<crate::AgentRecord>> {
+        crate::AgentRepository::get(connection, &crate::AgentId::from(agent))
+            .map_err(map_store_error)
+    }
+
     /// Durable conversation content revision, independent of other agents.
     pub fn revision(connection: &Connection, agent: &str) -> crate::StoreResult<i64> {
         Ok(crate::peer_update_settings::canvas_read(connection)
@@ -164,13 +170,12 @@ impl TranscriptRepository {
         Ok(Vec::new())
     }
 
-    /// The checked agent row for transcript projection.
-    pub fn agent(
+    /// Conversation liveness without decoding unrelated agent fields.
+    pub fn agent_deleted(
         connection: &Connection,
         agent: &str,
-    ) -> TranscriptStoreResult<Option<AgentRecord>> {
-        crate::AgentRepository::get(connection, &crate::AgentId::from(agent))
-            .map_err(map_store_error)
+    ) -> TranscriptStoreResult<Option<bool>> {
+        crate::AgentRepository::deletion_status(connection, agent).map_err(map_store_error)
     }
 
     pub fn item(
@@ -1220,13 +1225,41 @@ mod tests {
 
     #[test]
     fn agent_read_returns_checked_record() {
-        let connection = Connection::open_in_memory().unwrap();
+        let mut connection = Connection::open_in_memory().unwrap();
         connection
             .execute_batch("CREATE TABLE runtime_agents(id TEXT, record TEXT)")
             .unwrap();
         let record: Option<crate::AgentRecord> =
             TranscriptRepository::agent(&connection, "missing").unwrap();
         assert!(record.is_none());
+
+        #[derive(studio_db_api::DbQuery)]
+        #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+            cardinality = none, result = (), tables(agents = crate::agent_tables::AgentsStorageRow),
+            columns(id = crate::agent_tables::AgentsStorageRow::ID, record = crate::agent_tables::AgentsStorageRow::RECORD),
+            sql = "INSERT INTO {agents}({id},{record}) VALUES('owner','[\"owner\",0]')")]
+        struct DeletionArray;
+        #[derive(studio_db_api::DbQuery)]
+        #[db_query(database = crate::peer_update_settings::Canvas, mode = write,
+            cardinality = none, result = (), tables(agents = crate::agent_tables::AgentsStorageRow),
+            columns(record = crate::agent_tables::AgentsStorageRow::RECORD),
+            sql = "UPDATE {agents} SET {record}='[\"owner\",\"owner\",1,\"idle\",0,null,\"default\",null,true,null,null,null,null,null,null,null,null]'")]
+        struct OwnerArray;
+
+        let tx = connection.transaction().unwrap();
+        let unavailable = |error: crate::StoreError| {
+            assert!(matches!(error, crate::StoreError::InvalidSyncObjectField {
+                scope, id, pointer, reason
+            } if scope == "runtime_agents" && id == "owner" && pointer.is_empty() && reason.starts_with("record_decode;")));
+        };
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&DeletionArray::QUERY, &DeletionArray)
+            .unwrap();
+        unavailable(crate::AgentRepository::deletion_status(&tx, "owner").unwrap_err());
+        crate::peer_update_settings::canvas_tx(&tx)
+            .named(&OwnerArray::QUERY, &OwnerArray)
+            .unwrap();
+        unavailable(crate::RulesRepository::owner(&tx, "owner").err().unwrap());
     }
 
     #[test]

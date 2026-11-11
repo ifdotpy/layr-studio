@@ -108,12 +108,9 @@ pub(super) async fn read_listing(
     let proof = held_response_proof(&state, &scope).await;
     store
         .read_async("runtime-http/routes/process_controls", move |tx| {
-            if studio_runtime_store::AgentRepository::get(
-                tx,
-                &studio_runtime_store::AgentId::from(scope.as_str()),
-            )
-            .map_err(ApiError::stored)?
-            .is_some_and(|agent| agent.is_deleted())
+            if studio_runtime_store::AgentRepository::deletion_status(tx, &scope)
+                .map_err(ApiError::stored)?
+                == Some(true)
             {
                 return Ok(studio_runtime_schema::process_controls::ProcessListing {
                     response_target: None,

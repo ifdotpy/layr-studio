@@ -95,7 +95,7 @@ impl Commit {
             ..
         } = self;
         let method = context.method;
-        let prepared = match crate::diagnostics::measure_runtime_stage_async(
+        let mut prepared = match crate::diagnostics::measure_runtime_stage_async(
             "turn_submission.prepare",
             control.prepare(RequestSpec {
                 id: id.clone(),
@@ -112,6 +112,15 @@ impl Commit {
             Ok(prepared) => prepared,
             Err(error) => return Err(error.into()),
         };
+        for event in &context.intent.events {
+            if let Some(stamp) = event.metadata.get("timing").and_then(|timing| {
+                timing.get(studio_runtime_schema::provider_timing::ACCEPTED_STAMP_FIELD)
+            }) {
+                prepared.queued_input(
+                    serde::Deserialize::deserialize(stamp).map_err(StoreError::from)?,
+                );
+            }
+        }
         let recovery = prepared.recovery_record();
         let context = Arc::new(context);
         let save_context = Arc::clone(&context);

@@ -27,6 +27,7 @@ impl From<&RecoveredRequest> for TransportRequest {
             deadline: request.deadline_ms,
             unknown: request.unknown,
             remote_id: request.remote_id,
+            boundary_timing: request.boundary_timing.clone(),
         }
     }
 }
@@ -47,6 +48,7 @@ impl TransportRequestExt for TransportRequest {
             deadline_ms: self.deadline,
             unknown: true,
             remote_id: self.remote_id,
+            boundary_timing: self.boundary_timing.clone(),
         }
     }
 }
@@ -1283,7 +1285,7 @@ mod replay_identity_tests {
                 source_account: "default".into(), thread_id: "thread-1".into(),
             });
             let key = call.key();
-            let request = RecoveredRequest {
+            let request = RecoveredRequest { boundary_timing: None,
                 ticket: RequestTicket { generation: 4, id: RequestId::String(key.clone()), method: call.method },
                 operation_id: OperationId(key), thread_id: None, lightweight: true,
                 deadline_ms: 1000, unknown: true, remote_id: None,
@@ -1306,7 +1308,7 @@ mod replay_identity_tests {
             let mut call = call();
             call.actor = None;
             let key = call.key();
-            let request = RecoveredRequest {
+            let request = RecoveredRequest { boundary_timing: None,
                 ticket: RequestTicket { generation: 4, id: RequestId::String(key.clone()), method: call.method },
                 operation_id: OperationId(key.clone()), thread_id: None, lightweight: true,
                 deadline_ms: 1000, unknown: true, remote_id: None,
@@ -1646,6 +1648,7 @@ mod replay_identity_tests {
                     call.params = params;
                     let key = call.key();
                     let request = RecoveredRequest {
+                        boundary_timing: None,
                         ticket: RequestTicket {
                             generation: 4,
                             id: studio_runtime_providers::RequestId::String(key.clone()),
@@ -1949,7 +1952,7 @@ mod replay_identity_tests {
             AgentRepository::put(tx,&studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"provider":"codex","id":"agent-1","rootId":"agent-1","epoch":7,"accountKey":"target","status":"queued","autoWake":true})).expect("actor"))?;
             let original = Call {operation:"monitor:watch".into(),method:Method::CommandExec,params:json!({"processId":"watch","command":["true"],"cwd":cwd}),..call()};
             let key=original.key();
-            let request=RecoveredRequest{ticket:RequestTicket{id:RequestId::String(key.clone()),generation:4,method:Method::CommandExec},operation_id:OperationId(key),thread_id:None,lightweight:true,deadline_ms:60000,unknown:true,remote_id:None};
+            let request=RecoveredRequest{ boundary_timing: None,ticket:RequestTicket{id:RequestId::String(key.clone()),generation:4,method:Method::CommandExec},operation_id:OperationId(key),thread_id:None,lightweight:true,deadline_ms:60000,unknown:true,remote_id:None};
             seed(tx,original,&request,false,None)?;
             let mut watch = monitor_fixture();
             watch.interactive = true;
@@ -2036,6 +2039,7 @@ mod replay_identity_tests {
         let recovered = |call: &Call| {
             let id = call.key();
             RecoveredRequest {
+                boundary_timing: None,
                 ticket: RequestTicket {
                     id: studio_runtime_providers::RequestId::String(id.clone()),
                     generation: call.scope.generation,

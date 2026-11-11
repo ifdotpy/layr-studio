@@ -1,6 +1,23 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Studio approval policy sent to the Claude bridge, independent of vendor policy types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApprovalPolicy {
+    Never,
+    OnRequest,
+}
+
+/// Studio sandbox scope sent to the Claude bridge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum SandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    DangerFullAccess,
+}
+
 /// Claude session permission modes accepted by settings and child creation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

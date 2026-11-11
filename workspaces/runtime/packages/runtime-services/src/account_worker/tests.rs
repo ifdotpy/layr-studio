@@ -3,6 +3,7 @@ mod account_transfer;
 mod agent_isolation;
 #[cfg(unix)]
 mod auth_hold;
+mod boundary_clocks;
 mod browser_skill;
 mod callback_handoff;
 mod callback_head_of_line;
@@ -503,6 +504,8 @@ impl Peer {
             handle: ProviderHandle::for_account(account),
             open_attempted: true,
             info: Some(AttachmentInfo {
+                spawn_started_at: None,
+                initialized_at: None,
                 handle: ProviderHandle::for_account(account),
                 generation,
                 pid: 1,
@@ -534,6 +537,7 @@ impl Peer {
                                 CommandReceipt::CachedInitialize(initialize_result.clone())
                             }
                             Some("initialized") => CommandReceipt::Written {
+                                written_at: None,
                                 remote_id: None,
                                 duplicate: false,
                             },
@@ -676,6 +680,7 @@ impl Peer {
         let wire = self.next_write().await;
         assert_eq!(wire.value["method"], method);
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -751,6 +756,7 @@ impl Peer {
         if wire.value["method"] == "thread/resume" {
             let resume = wire.value;
             let _ignored = wire.receipt.send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             });
@@ -760,6 +766,7 @@ impl Peer {
         }
         assert_eq!(wire.value["method"], "turn/start");
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -797,6 +804,7 @@ fn journal_frame(
     value: &Value,
 ) -> JournalEntry {
     JournalEntry {
+        boundary_at: None,
         received_at_ms: clock.now_ms(),
         cursor: EventCursor(cursor),
         generation,
@@ -1074,6 +1082,7 @@ impl State {
         if wire.value["method"] == "thread/resume" {
             let resume = wire.value;
             let _ignored = wire.receipt.send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             });
@@ -1100,6 +1109,7 @@ impl State {
             .unwrap();
         wire.receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -1568,7 +1578,7 @@ async fn unresolved_receipt_for_held_invalid_agent_does_not_block_recovery() {
                         method: Method::ThreadStart, operation: "uncertain-start".into(),
                         thread: None, compiled: None,
                     };
-                    let request = studio_runtime_schema::provider_call_contract::TransportRequest {
+                    let request = studio_runtime_schema::provider_call_contract::TransportRequest { boundary_timing: None,
                         id: studio_runtime_providers::RequestId::String("uncertain-start".into()), generation: 1,
                         method: Method::ThreadStart, operation: "uncertain-start".into(), thread: None,
                         lightweight: false, deadline: 60_000, unknown: true, remote_id: None,
@@ -1617,7 +1627,7 @@ async fn host_recovery_leaves_legacy_actor_receipt_unresolved() {
                 method: Method::ThreadStart, operation: "legacy-vm-start".into(),
                 thread: None, compiled: None,
             };
-            let request = studio_runtime_schema::provider_call_contract::TransportRequest {
+            let request = studio_runtime_schema::provider_call_contract::TransportRequest { boundary_timing: None,
                 id: studio_runtime_providers::RequestId::String("legacy-vm-start".into()), generation: 1,
                 method: Method::ThreadStart, operation: "legacy-vm-start".into(), thread: None,
                 lightweight: false, deadline: 60_000, unknown: true, remote_id: None,
@@ -1768,6 +1778,7 @@ async fn scenario_generation_closed_holds_the_old_submission() {
     let _start = state.start(&mut peer, &worker).await;
     peer.entries
         .send(JournalEntry {
+            boundary_at: None,
             received_at_ms: peer.clock.now_ms(),
             cursor: EventCursor(1),
             generation: Generation(2),
@@ -1802,6 +1813,7 @@ async fn scenario_restart_after_submitted_before_written_recovers_unknown_withou
                 .unwrap();
             let operation = format!("account:default:{}:turn/start", intent.attempt_id);
             let request = RecoveredRequest {
+                boundary_timing: None,
                 ticket: studio_runtime_providers::RequestTicket {
                     id: RequestId::String(operation.clone()),
                     generation: 1,
@@ -1908,6 +1920,7 @@ async fn restart_held_first_input_is_reconciled_by_the_first_worker() {
                     .unwrap();
                 let operation = format!("account:default:{}:turn/start", intent.attempt_id);
                 let request = RecoveredRequest {
+                    boundary_timing: None,
                     ticket: studio_runtime_providers::RequestTicket {
                         id: RequestId::String(operation.clone()),
                         generation: 1,
@@ -2108,6 +2121,7 @@ async fn unsupported_callback(method: &str) {
     assert_eq!(record_phases(&state).await, (cursor, true, true));
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -2407,6 +2421,7 @@ async fn managed_callback_same_account_provider_request_is_written_without_block
     callback
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -2498,6 +2513,7 @@ async fn shutdown_drains_completed_managed_callback_and_writes_response() {
     callback
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -2845,6 +2861,7 @@ async fn answer_history(peer: &mut Peer, wire: Wire) {
         );
     }
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -2908,6 +2925,7 @@ async fn prepared_turn_submits_while_provider_events_flow() {
     assert_eq!(wire.value["method"], "turn/start");
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -3037,6 +3055,7 @@ async fn first_request_after_wake(state: &State, peer: &mut Peer, worker: &Accou
     let wire = peer.next_write().await;
     let value = wire.value.clone();
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -3678,6 +3697,7 @@ async fn callback_replay_waits_for_initialization_before_admission() {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -3927,6 +3947,7 @@ async fn stop_and_wake_progress_with_a_replenished_event_lane() {
         for cursor in 34..66 {
             if entries
                 .send(JournalEntry {
+                    boundary_at: None,
                     cursor: EventCursor(cursor),
                     generation: Generation(1),
                     received_at_ms: clock.now_ms(),
@@ -4025,6 +4046,7 @@ async fn callback_burst_is_answered_without_worker_exit() {
             );
             entries
                 .send(JournalEntry {
+                    boundary_at: None,
                     cursor: EventCursor(cursor),
                     generation: Generation(1),
                     received_at_ms: clock.now_ms(),
@@ -4071,6 +4093,7 @@ async fn callback_burst_is_answered_without_worker_exit() {
         );
         wire.receipt
             .send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             })
@@ -4977,7 +5000,7 @@ async fn preparation_commit_rechecks_workspace_settings_and_input() {
                 Ok::<(), StoreError>(())
             }).await?;
             let operation = format!("account:default:{}:turn/start", intent.attempt_id);
-            let request = RecoveredRequest {
+            let request = RecoveredRequest { boundary_timing: None,
                 ticket: studio_runtime_providers::RequestTicket {
                     id: RequestId::String(operation.clone()), generation: 1, method: Method::TurnStart,
                 },

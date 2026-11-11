@@ -159,12 +159,12 @@ pub use records::{
     MonitorRecord, NativeFailureHold, NativeRelease, NativeReleaseScope, NativeReviewThread,
     NativeSafetyBuffering, NativeStatus, NativeThreadBlock, NativeTurnError, PlanRecord,
     QueueEvent, QueueEventId, QueueEventRepository, RecordKeyMode, RecordOrder, RecordPredicate,
-    RecordQueryShape, RequestRecord, RuleRecord, StartAttemptAction, StartAttemptView,
-    StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold, StoredTitleJob,
-    StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId, TaskRecord,
-    TaskRepository, TerminalFault, TerminalRecord, TitleJob, ToolResultRecord, TranscriptAssetId,
-    TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord, UnknownAgentStatus,
-    UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
+    RecordQueryShape, RequestRecord, RuleOwnerRecord, RuleRecord, StartAttemptAction,
+    StartAttemptView, StartIdentity, StartInterruptView, StartOutcomeHold, StoredStartOutcomeHold,
+    StoredTitleJob, StoredTransferObject, StoredTransferValue, StoredWorkerDefaults, Table, TaskId,
+    TaskRecord, TaskRepository, TerminalFault, TerminalRecord, TitleJob, ToolResultRecord,
+    TranscriptAssetId, TranscriptAssetRecord, TranscriptItemId, TranscriptItemRecord,
+    UnknownAgentStatus, UsageResumeRecord, VmAuthBootstrap, VmLaunch, WorkItemRecord, WorkStatus,
     WorkspaceOperationRecord, decode_agent_record, encode_open_record,
 };
 pub use repositories::agent_indexed_reads::{AgentIndexedReads, reserved_turn_input};

@@ -191,6 +191,22 @@ reserves serialized-capable methods when their parameter predicate is unreadable
 
 ## Provider contract sources
 
+`claude_permissions.rs` owns the Studio Claude bridge's closed `ApprovalPolicy`
+(`never`, `on-request`) and `SandboxMode` (`read-only`, `workspace-write`,
+`danger-full-access`) wire enums, and the shared `PermissionMode` settings enum.
+`provider_input/bridge.rs` references these owners; generated ingress validation
+rejects unknown values. The bridge exhaustively maps supported policies and
+sandbox scopes to SDK permission modes, retaining the existing defaults only
+when optional values are omitted.
+
+Accepted opaque exception: `config/read`, `command/exec`, `command/exec/write`,
+`command/exec/resize`, `command/exec/terminate` params/results and
+`command/exec/outputDelta` params remain forwarded native payloads in `commands.ts`.
+Command/config relay typing is deferred to wave C, which deletes that relay.
+Move bundles, native tool/plan payloads, and historical disk session casts retain
+their existing opaque boundaries; codec method spelling deduplication remains
+deferred to wave B.
+
 [`model_catalog.rs`](src/model_catalog.rs) owns the Studio-consumed model row
 fields. Provider ingress validates them before cache or admission; nullable
 upstream fields preserve omission and explicit null, and unknown metadata stays

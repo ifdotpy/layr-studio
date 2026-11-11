@@ -311,14 +311,47 @@ pub fn sync_unload_deadlines(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    apply_unload_deadlines(
+        connection,
+        records,
+        |thread| deadlines.get(thread).copied(),
+        now,
+    )
+}
+
+/// Event-driven reconciliation of only the threads whose existing idle clocks
+/// changed. A null deadline clears that thread; absent threads are untouched.
+pub(crate) fn sync_thread_unload_deadlines(
+    connection: &Connection,
+    account: &str,
+    deadlines: &BTreeMap<String, Option<f64>>,
+    now: f64,
+) -> Result<(), StoreError> {
+    if deadlines.is_empty() {
+        return Ok(());
+    }
+    let records = studio_runtime_store::AgentIndexedReads::thread_idle_deadline_changes(
+        connection, account, deadlines,
+    )?;
+    apply_unload_deadlines(
+        connection,
+        records,
+        |thread| deadlines.get(thread).copied().flatten(),
+        now,
+    )
+}
+
+fn apply_unload_deadlines(
+    connection: &Connection,
+    records: Vec<(String, String)>,
+    deadline: impl Fn(&str) -> Option<f64>,
+    now: f64,
+) -> Result<(), StoreError> {
     for (id, raw) in records {
         let mut agent: Value = studio_json::from_str(&raw)?;
         let mut episode: Episode = Episode::deserialize(&agent["idleCompactionEpisode"])
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-        let unload_at = agent["threadId"]
-            .as_str()
-            .and_then(|thread| deadlines.get(thread))
-            .copied();
+        let unload_at = agent["threadId"].as_str().and_then(&deadline);
         if episode.unload_at == unload_at {
             continue;
         }
@@ -723,7 +756,76 @@ mod tests {
         );
     }
 
+    #[test]
+    fn unload_deadline_sync_scoped_work_ignores_unchanged_agents() {
+        let (_, _, small) = deadline_sync_counts_scoped(100, true);
+        let (_, _, large) = deadline_sync_counts_scoped(200, true);
+        assert_eq!(
+            small, large,
+            "a thread-local reconciliation must not scan other agents"
+        );
+    }
+
+    #[test]
+    fn unload_deadline_thread_change_and_clear_preserve_other_threads() {
+        let db = studio_runtime_store::test_canvas();
+        let (_, episode, mut agent, _) = fixture();
+        agent["rootId"] = json!("agent");
+        agent["idleCompactionEpisode"] = json!(episode);
+        AgentRepository::put(&db, &AgentRecord::from_value(agent.clone()).unwrap()).unwrap();
+        let mut other = agent;
+        other["id"] = json!("other");
+        other["rootId"] = json!("other");
+        other["threadId"] = json!("other-thread");
+        other["idleCompactionEpisode"]["id"] = json!("other-episode");
+        AgentRepository::put(&db, &AgentRecord::from_value(other).unwrap()).unwrap();
+        let other_before = AgentRepository::get_raw(&db, &"other".into()).unwrap();
+        for deadline in [Some(1200.0), None] {
+            sync_thread_unload_deadlines(
+                &db,
+                "default",
+                &BTreeMap::from([("thread".into(), deadline)]),
+                1000.0,
+            )
+            .unwrap();
+            let saved = AgentRepository::get(&db, &"agent".into())
+                .unwrap()
+                .unwrap()
+                .value();
+            let actual: Episode = Episode::deserialize(&saved["idleCompactionEpisode"]).unwrap();
+            assert_eq!(actual.unload_at, deadline);
+            assert_eq!(actual.id, episode.id);
+            assert!(!actual.fired);
+            assert_eq!(
+                AgentRepository::get_raw(&db, &"other".into()).unwrap(),
+                other_before
+            );
+        }
+        let mut fired = AgentRepository::get(&db, &"agent".into())
+            .unwrap()
+            .unwrap()
+            .value();
+        fired["idleCompactionEpisode"]["fired"] = json!(true);
+        AgentRepository::put(&db, &AgentRecord::from_value(fired).unwrap()).unwrap();
+        let settled = AgentRepository::get_raw(&db, &"agent".into()).unwrap();
+        sync_thread_unload_deadlines(
+            &db,
+            "default",
+            &BTreeMap::from([("thread".into(), Some(1300.0))]),
+            1000.0,
+        )
+        .unwrap();
+        assert_eq!(
+            AgentRepository::get_raw(&db, &"agent".into()).unwrap(),
+            settled
+        );
+    }
+
     fn deadline_sync_counts(agents: usize) -> (usize, usize, i32) {
+        deadline_sync_counts_scoped(agents, false)
+    }
+
+    fn deadline_sync_counts_scoped(agents: usize, scoped: bool) -> (usize, usize, i32) {
         let db = studio_runtime_store::test_canvas();
         let (_, episode, mut agent, _) = fixture();
         agent["idleCompactionEpisode"] = json!(episode);
@@ -731,6 +833,7 @@ mod tests {
             let id = format!("agent-{n}");
             agent["id"] = json!(id);
             agent["rootId"] = json!(id);
+            agent["threadId"] = json!(format!("thread-{n}"));
             agent["idleCompactionEpisode"]["id"] = json!(format!("episode-{n}"));
             AgentRepository::put(&db, &AgentRecord::from_value(agent.clone()).unwrap()).unwrap();
         }
@@ -760,12 +863,22 @@ mod tests {
         DEADLINE_ROWS.with(|count| count.set(0));
         DEADLINE_STEPS.with(|count| count.set(0));
         let start = std::time::Instant::now();
-        sync_unload_deadlines(&db, "default", &BTreeMap::new(), 10.0).unwrap();
+        if scoped {
+            sync_thread_unload_deadlines(
+                &db,
+                "default",
+                &BTreeMap::from([("thread-0".into(), None)]),
+                10.0,
+            )
+            .unwrap();
+        } else {
+            sync_unload_deadlines(&db, "default", &BTreeMap::new(), 10.0).unwrap();
+        }
         let reads = DEADLINE_READS.with(std::cell::Cell::get);
         let rows = DEADLINE_ROWS.with(std::cell::Cell::get);
         let steps = DEADLINE_STEPS.with(std::cell::Cell::get);
         eprintln!(
-            "deadline sync: agents={agents} reads={reads} rows={rows} steps={steps} elapsed={:?}",
+            "deadline sync: scoped={scoped} agents={agents} reads={reads} rows={rows} steps={steps} elapsed={:?}",
             start.elapsed()
         );
         (reads, rows, steps)

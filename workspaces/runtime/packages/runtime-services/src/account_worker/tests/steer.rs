@@ -214,6 +214,7 @@ async fn steer(state: &State, peer: &mut Peer, worker: &AccountHandle) -> Value 
         .await
         .unwrap();
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1289,6 +1290,7 @@ async fn a_team_followup_reaches_the_running_turn(provider: &'static str) {
     assert_eq!(wire.value["method"], "turn/steer", "{}", wire.value);
     let request = wire.value.clone();
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });

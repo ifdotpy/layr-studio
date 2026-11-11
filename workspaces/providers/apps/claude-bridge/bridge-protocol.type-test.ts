@@ -159,7 +159,7 @@ export function exportedSession(
   return { ...session, moveProof: storedProof, dynamicToolsJson: "[]" };
 }
 export const legacyInputReceipt = {
-  cancelled: [undefined, null],
+  cancelled: [null, null],
   still_queued: [],
 } satisfies BridgeInterruptReceipt;
 export const forwardedPlan = {

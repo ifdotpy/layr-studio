@@ -59,6 +59,8 @@ pub struct RecoveredRequest {
     pub deadline_ms: u64,
     pub unknown: bool,
     pub remote_id: Option<u64>,
+    pub boundary_timing:
+        Option<Box<studio_runtime_schema::provider_timing::ProviderBoundaryTiming>>,
 }
 
 #[derive(Clone)]
@@ -81,8 +83,22 @@ pub struct PreparedRequest {
     write: Option<PreparedWrite>,
     generation: Generation,
     owner: mpsc::Sender<Command>,
+    boundary_timing: Option<Box<studio_runtime_schema::provider_timing::ProviderBoundaryTiming>>,
 }
 impl PreparedRequest {
+    /// Retain input queue time separately from validated request admission.
+    pub(crate) fn queued_input(
+        &mut self,
+        stamp: studio_runtime_schema::provider_timing::BoundaryStamp,
+    ) {
+        if let Some(timing) = &mut self.boundary_timing
+            && timing
+                .enqueued
+                .is_none_or(|old| stamp.same_boot(old) && stamp.monotonic_ns < old.monotonic_ns)
+        {
+            timing.enqueued = Some(stamp);
+        }
+    }
     /// Persist this absolute deadline with Submitted, before calling submit.
     pub fn deadline_ms(&self) -> u64 {
         self.prepared_at_ms.saturating_add(self.spec.timeout_ms)
@@ -102,6 +118,7 @@ impl PreparedRequest {
             deadline_ms: self.deadline_ms(),
             unknown: false,
             remote_id: None,
+            boundary_timing: self.boundary_timing.clone(),
         }
     }
 }
@@ -173,6 +190,7 @@ pub struct SessionEvent {
 pub struct SessionStatus {
     pub generation: Generation,
     pub initialization: InitializationStatus,
+    pub initialized_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     pub attachment: AttachmentStatus,
     /// Reply from this generation's exact initialize request, including a
     /// supervisor-cached reply from the retained process, not installed source.
@@ -362,6 +380,7 @@ impl SessionHandle {
                     send: SendState::Unknown,
                     write: None,
                     ready: false,
+                    boundary_timing: recovered.boundary_timing,
                 },
             );
         }
@@ -376,6 +395,7 @@ impl SessionHandle {
                 lightweight: false,
                 write: Some(initialize),
                 ready: true,
+                boundary_timing: None,
             },
         );
         let (commands, inbox) = mpsc::channel(LANE_CAPACITY);
@@ -385,6 +405,7 @@ impl SessionHandle {
         let (status, observed) = watch::channel(SessionStatus {
             generation: config.generation,
             initialization: InitializationStatus::AwaitingReply,
+            initialized_at: None,
             initialize_result: None,
             supervisor_write_deduplication: false,
             barrier_set: false,
@@ -509,12 +530,36 @@ impl SessionControl {
         });
         let write = PreparedWrite::new(spec.operation_id.clone(), &frame)?;
         let spec_method = spec.method;
+        let boundary_timing = (spec_method == Method::TurnStart).then(|| {
+            let status = self.status.borrow();
+            Box::new(
+                studio_runtime_schema::provider_timing::ProviderBoundaryTiming {
+                    request_id: Some(spec.operation_id.0.clone()),
+                    provider_handle: Some(status.attachment.handle.as_str().into()),
+                    generation: Some(status.generation.0),
+                    accepted: Some(studio_runtime_process::clock::boundary_stamp()),
+                    spawn_started: status
+                        .attachment
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.spawn_started_at),
+                    initialized: status
+                        .attachment
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.initialized_at)
+                        .or(status.initialized_at),
+                    ..Default::default()
+                },
+            )
+        });
         let prepared = PreparedRequest {
             spec,
             prepared_at_ms: self.clock.now_ms(),
             write: Some(write),
             generation: self.status.borrow().generation,
             owner: self.lane(spec_method).clone(),
+            boundary_timing,
         };
         let (reply, receipt) = oneshot::channel();
         self.lane(spec_method)
@@ -702,6 +747,7 @@ struct Record {
     lightweight: bool,
     write: Option<PreparedWrite>,
     ready: bool,
+    boundary_timing: Option<Box<studio_runtime_schema::provider_timing::ProviderBoundaryTiming>>,
 }
 struct PendingWrite {
     write: PreparedWrite,
@@ -1035,6 +1081,7 @@ impl SessionTask {
                                     .unwrap_or(0),
                                 unknown: record.unknown_reported,
                                 remote_id: None,
+                                boundary_timing: record.boundary_timing.clone(),
                             })
                         });
                         let kind = Flight::Write {
@@ -1294,9 +1341,11 @@ impl SessionTask {
             spec.thread_id.clone(),
             spec.lightweight,
         )?;
-        let write = match &mut self.retained.command {
-            Some(Command::Request { prepared, .. }) => prepared.write.take(),
-            _ => None,
+        let (write, boundary_timing) = match &mut self.retained.command {
+            Some(Command::Request { prepared, .. }) => {
+                (prepared.write.take(), prepared.boundary_timing.clone())
+            }
+            _ => (None, None),
         };
         self.records.insert(
             ticket.id.clone(),
@@ -1309,6 +1358,7 @@ impl SessionTask {
                 lightweight: spec.lightweight,
                 write,
                 ready: false,
+                boundary_timing,
             },
         );
         self.retained.actions = actions.into();
@@ -1499,9 +1549,17 @@ impl SessionTask {
             | CommandReceipt::Acknowledged(_)
             | CommandReceipt::CachedInitialize(_) => WriteOutcome::Unknown,
         };
-        let recovery = if let CommandReceipt::Written { remote_id, .. } = receipt {
+        let recovery = if let CommandReceipt::Written {
+            remote_id,
+            written_at,
+            ..
+        } = receipt
+        {
             recovery.clone().map(|mut r| {
                 r.remote_id = *remote_id;
+                if let Some(timing) = &mut r.boundary_timing {
+                    timing.written = timing.written.or(*written_at);
+                }
                 r.unknown |= self
                     .records
                     .get(&r.ticket.id)
@@ -1609,6 +1667,11 @@ impl SessionTask {
                 }
                 if initialized && matches!(receipt, CommandReceipt::Written { .. }) {
                     self.state.mark_initialized_notification_written()?;
+                    if let CommandReceipt::Written { written_at, .. } = receipt {
+                        self.status.send_modify(|status| {
+                            status.initialized_at = status.initialized_at.or(written_at);
+                        });
+                    }
                 }
                 if matches!(receipt, CommandReceipt::Unknown)
                     || ((initialized

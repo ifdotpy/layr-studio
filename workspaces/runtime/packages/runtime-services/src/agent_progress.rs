@@ -170,8 +170,7 @@ pub(crate) fn assignments(connection: &Connection, agent_id: &str) -> StoreResul
 
 /// Publish the owner after a managed-command write, including output-only updates.
 pub(crate) fn publish_owner(transaction: &Transaction<'_>, agent_id: &str) -> StoreResult<()> {
-    use studio_runtime_store::{AgentId, AgentRepository};
-    if AgentRepository::get(transaction, &AgentId::from(agent_id))?.is_none() {
+    if !studio_runtime_store::AgentRepository::exists(transaction, agent_id)? {
         return Ok(());
     }
     crate::sync_policy::publish_agent_projection(transaction, agent_id, false)

@@ -71,6 +71,7 @@ async fn reply_turn_history(peer: &mut Peer, status: &str) {
         .expect("provider session remains open");
     assert_eq!(first.value["method"], "thread/read", "{}", first.value);
     let _ignored = first.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });

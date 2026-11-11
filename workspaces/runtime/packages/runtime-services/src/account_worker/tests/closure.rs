@@ -490,6 +490,7 @@ pub(super) async fn scenario_old_generation_pending_text_is_materialized_and_rec
             let read = peer.next_write().await;
             assert_eq!(read.value["method"], "thread/read");
             let _written = read.receipt.send(CommandReceipt::Written {
+                written_at: None,
                 remote_id: None,
                 duplicate: false,
             });
@@ -615,6 +616,7 @@ async fn written_callback_replay_compacts_its_journal_without_resending() {
     let wire = peer.next_write().await;
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })

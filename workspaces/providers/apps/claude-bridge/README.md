@@ -11,14 +11,36 @@ are owned by this app's source and [`package.json`](package.json). Focused check
 `pnpm run test:server:bridge` from the repository root, as defined by the
 [root manifest](../../../../package.json).
 
-The small Rust-owned request extensions in
-[`provider_input.rs`](../../../runtime/packages/runtime-schema/src/provider_input.rs)
-are used by the producers and generated into `runtime-contract.generated.ts`.
-[`bridge-protocol.ts`](bridge-protocol.ts) owns fresh notification types, while
-[`session-state.ts`](session-state.ts) retains permissive legacy disk records.
+The Rust [bridge owner](../../../runtime/packages/runtime-schema/src/provider_input/bridge.rs)
+binds each method to its parameters and result, including callbacks and outbound
+notifications. `studio-contracts` generates `bridge-wire.generated.ts` and
+`bridge-wire-schema.generated.ts`; [bridge-protocol.ts](bridge-protocol.ts)
+provides derived aliases and internal SDK adapters. [bridge-decode.ts](bridge-decode.ts)
+uses the generated schemas with Zod. Requests carry object parameters, including
+an explicit `{}` for methods without parameters. Malformed callback replies keep
+the original waiter pending. The stdout writer accepts the generated outbound union.
+
+SDK declarations are pinned in [package.json](package.json).
+[sdk-dispositions.ts](sdk-dispositions.ts) records every Options key and Query
+member; [sdk-message-policy.ts](sdk-message-policy.ts) exhaustively handles message
+types and subtypes. Ignored entries explain the feature backlog. New declared
+keys, methods or variants fail compilation. Undeclared runtime variants produce
+an explicit Unknown decision and one stderr diagnostic per provider, installed
+SDK version and type/subtype. `just claude-sdk-drift` compares the pinned exports
+with the latest registry package; pass a local `sdk.d.ts` path for an offline comparison.
+
+[session-state.ts](session-state.ts) retains permissive historical disk records.
 Legacy items without identity remain readable but produce no item notification.
-Move overrides contain only the bridge's effort and service tier; omitted fields
-stay omitted in the saved session and move proof.
+The temporary [move-bundle boundary](legacy-move-bundle.ts) validates bundle headers;
+existing canonical, options-hash and snapshot-hash checks still precede side effects.
+Its two legacy assertions and the historical disk wrappers are removed with the
+mirror store and server-owned moves in wave C. Native tool arguments/results,
+raw plan step/status values remain opaque JSON because `Workspace.tsx` renders
+native steps as JSON when their text is not a string. Rate-limit evidence uses
+the normalized Rust `usage_limits::ClaudeRateLimit` owner; unused vendor fields
+are dropped. Task state, MCP status, session settings and the remaining Studio
+wire envelopes are typed DTOs.
+Move overrides contain only effort and service tier; omitted fields stay omitted.
 
 ## Installation requirements
 

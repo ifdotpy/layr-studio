@@ -5,7 +5,7 @@ use studio_json::Value;
 
 use crate::records::{EventMetadataRecord, QueueEventId, Table};
 use crate::{
-    StoreResult,
+    Connection, StoreResult,
     schema::{SchemaRequirements, TableRequirement},
 };
 
@@ -42,7 +42,47 @@ pub struct PendingEvent {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct QueueWriteRepository;
 
+/// Only the durable fields consumed by the queue projection.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueProjectionOwner {
+    pub id: crate::AgentId,
+    #[serde(deserialize_with = "crate::records::deserialize_agent_epoch")]
+    pub epoch: i64,
+    pub deleted_at: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "crate::records::deserialize_optional_safe_counter"
+    )]
+    pub queue_mutation_revision: Option<u64>,
+}
+
 impl QueueWriteRepository {
+    pub fn projection_owner(
+        connection: &Connection,
+        id: &str,
+    ) -> StoreResult<Option<QueueProjectionOwner>> {
+        let raw = crate::peer_update_settings::canvas_read(connection).named(
+            &queries::ProjectionOwner::QUERY,
+            &queries::ProjectionOwner { id },
+        )?;
+        raw.map(|raw| {
+            let owner: QueueProjectionOwner = studio_json::from_str(&raw).map_err(|_| {
+                crate::StoreError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: id.to_owned(),
+                }
+            })?;
+            if owner.id.0 != id {
+                return Err(crate::StoreError::InvalidStoredObject {
+                    table: "runtime_agents",
+                    id: id.to_owned(),
+                });
+            }
+            Ok(owner)
+        })
+        .transpose()
+    }
     pub fn pending_events(
         transaction: &Transaction<'_>,
         agent: &str,
@@ -132,6 +172,88 @@ impl QueueWriteRepository {
             }
         })?;
         Table::<EventMetadataRecord>::new(transaction).put_at(&key, &record)
+    }
+}
+
+#[studio_db_api::db_queries]
+mod queries {
+    use crate::agent_tables::AgentsStorageRow;
+    use crate::peer_update_settings::Canvas;
+    use studio_db_api::DbQuery;
+
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas, mode=read, cardinality=optional, result=String,
+        decode=AgentsStorageRow::ID, tables(agents=AgentsStorageRow),
+        columns(id=AgentsStorageRow::ID, record=AgentsStorageRow::RECORD),
+        sql="SELECT json_object('id',{record}->'$.id','epoch',{record}->'$.epoch',
+            'deletedAt',{record}->'$.deletedAt','queueMutationRevision',{record}->'$.queueMutationRevision') AS {id}
+            FROM {agents} WHERE {id}=?1")]
+    pub struct ProjectionOwner<'a> {
+        #[db(column=AgentsStorageRow::ID)]
+        pub id: &'a str,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queue_projection_fields_preserve_numeric_contracts() {
+        let mut db = crate::test_canvas();
+        queries::validate_queries(&db).unwrap();
+        for (field, value, valid) in [
+            ("epoch", Some("1"), true),
+            ("epoch", Some("-1"), false),
+            ("epoch", Some("1.0"), false),
+            ("epoch", Some("true"), false),
+            ("epoch", Some("null"), false),
+            ("epoch", None, false),
+            ("queueMutationRevision", Some("2"), true),
+            ("queueMutationRevision", Some("-1"), false),
+            ("queueMutationRevision", Some("9007199254740992"), false),
+            ("queueMutationRevision", Some("false"), false),
+            ("queueMutationRevision", Some("null"), true),
+            ("queueMutationRevision", None, true),
+            ("deletedAt", Some("1"), true),
+            ("deletedAt", Some("true"), false),
+            ("deletedAt", Some("null"), true),
+            ("deletedAt", None, true),
+        ] {
+            let mut record = studio_json::json!({"id":"agent","rootId":"agent","epoch":1,"provider":"codex","accountKey":"default","status":"idle","compactions":0});
+            if let Some(raw) = value {
+                record[field] = studio_json::from_str::<Value>(raw).unwrap();
+            } else {
+                record.as_object_mut().unwrap().remove(field);
+            }
+            let tx = db.transaction().unwrap();
+            crate::peer_update_settings::canvas_tx(&tx)
+                .named(
+                    &RawAgent::QUERY,
+                    &RawAgent {
+                        id: "agent",
+                        record: &record.to_string(),
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                QueueWriteRepository::projection_owner(&tx, "agent").is_ok(),
+                valid,
+                "{record}"
+            );
+        }
+    }
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database=crate::peer_update_settings::Canvas,mode=write,cardinality=none,result=(),
+        tables(agents=crate::agent_tables::AgentsStorageRow),
+        columns(id=crate::agent_tables::AgentsStorageRow::ID,record=crate::agent_tables::AgentsStorageRow::RECORD),
+        sql="INSERT INTO {agents}({id},{record}) VALUES(?1,?2)")]
+    struct RawAgent<'a> {
+        #[db(column=crate::agent_tables::AgentsStorageRow::ID)]
+        id: &'a str,
+        #[db(column=crate::agent_tables::AgentsStorageRow::ID)]
+        record: &'a str,
     }
 }
 inventory::submit! {

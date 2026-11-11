@@ -25,6 +25,7 @@ async fn live_limits_journal_pins_both_providers_and_suppresses_replay() {
                 panic!("notification");
             };
             let entry = JournalEntry {
+                boundary_at: None,
                 received_at_ms: 1,
                 cursor: EventCursor(1),
                 generation: Generation(7),

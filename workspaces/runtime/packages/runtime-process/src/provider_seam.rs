@@ -42,6 +42,7 @@ impl SessionClock {
 
 pub struct JournalEntry {
     pub received_at_ms: u64,
+    pub boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     pub cursor: EventCursor,
     pub generation: Generation,
     pub payload: JournalPayload,
@@ -176,6 +177,7 @@ pub enum CommandReceipt {
     Written {
         remote_id: Option<u64>,
         duplicate: bool,
+        written_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     },
     Acknowledged(EventCursor),
     /// Reserved control result: never sits behind the replay channel.
@@ -233,6 +235,8 @@ pub struct AttachmentInfo {
     pub pid: u32,
     pub acknowledged: EventCursor,
     pub resumed: bool,
+    pub spawn_started_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    pub initialized_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 
 #[derive(Clone, Debug)]

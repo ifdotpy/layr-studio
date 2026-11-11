@@ -1,9 +1,8 @@
+import { z } from "zod";
 import type {
   BridgeError,
   BridgeNotificationParams,
   BridgeRpcId,
-  BridgeSuccessResponse,
-  BridgeErrorResponse,
   BridgeMethod,
 } from "./bridge-protocol.ts";
 // Studio monitors use native command execution without a Codex model session.
@@ -32,13 +31,25 @@ type CommandParams = {
   processId?: string;
   [key: string]: unknown;
 };
-type CommandReply = Partial<
-  BridgeSuccessResponse<unknown> & BridgeErrorResponse
-> & { method?: string; params?: unknown };
 
+const commandReply = z.object({
+  id: z.union([z.string(), z.number()]).optional(),
+  method: z.string().optional(),
+  params: z.unknown().optional(),
+  result: z.unknown().optional(),
+  error: z
+    .object({
+      code: z.number(),
+      message: z.string(),
+      data: z.unknown().optional(),
+    })
+    .optional(),
+});
+type CommandReply = z.infer<typeof commandReply>;
 function readCommandReply(line: string): CommandReply {
-  // The native executor owns this JSON-RPC envelope; results remain opaque.
-  return JSON.parse(line);
+  // The native executor owns payloads; validate its transport envelope only.
+  const value: unknown = JSON.parse(line);
+  return commandReply.parse(value);
 }
 function nativeError(value: NativeFailure) {
   return Object.assign(new Error(value.message), value);

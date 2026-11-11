@@ -181,6 +181,7 @@ async fn scenario_many_agents_complete_two_exchanges(provider: &str, count: usiz
             };
             wire.receipt
                 .send(CommandReceipt::Written {
+                    written_at: None,
                     remote_id: None,
                     duplicate: false,
                 })
@@ -343,6 +344,7 @@ async fn serve_until(
             };
             wire.receipt
                 .send(CommandReceipt::Written {
+                    written_at: None,
                     remote_id: None,
                     duplicate: false,
                 })

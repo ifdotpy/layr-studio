@@ -970,6 +970,8 @@ fn capacity_failure(error: &Value) -> Option<CapacityFailure> {
             | UsageLimitExceeded
             | RateLimitExceeded
             | FlexUnavailable
+            | ModelNotFound
+            | PolicyCapacityUnavailable
             | CyberPolicy
             | MisalignmentPolicyViolation
             | TooManyDenials
@@ -999,6 +1001,8 @@ pub(crate) fn classify_usage_failure(
             ContextWindowExceeded
             | SessionBudgetExceeded
             | FlexUnavailable
+            | ModelNotFound
+            | PolicyCapacityUnavailable
             | ServerOverloaded
             | CyberPolicy
             | MisalignmentPolicyViolation

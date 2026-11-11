@@ -130,6 +130,7 @@ async fn answer_once(
     let wire = peer.next_write().await;
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -197,6 +198,7 @@ async fn a_worker_question_gets_the_orchestrator_refusal() {
     assert_eq!(wire.value["error"]["message"], ORCHESTRATOR_ONLY);
     wire.receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })

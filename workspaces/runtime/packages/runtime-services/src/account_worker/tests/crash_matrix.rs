@@ -157,7 +157,7 @@ async fn finish_replacement_recovery(peer: &mut Peer, worker: &AccountHandle, la
                 assert!(matches!(wire.value["method"].as_str(), Some("thread/read" | "thread/turns/list")),
                     "{label}: replacement recovery resent an unresolved operation: {}", wire.value);
                 assert_eq!(wire.value["params"]["threadId"], "fake-thread-0", "{label}: recovery reads only its original thread");
-                wire.receipt.send(CommandReceipt::Written { remote_id: None, duplicate: false }).ok().expect("recovery read receipt");
+                wire.receipt.send(CommandReceipt::Written { written_at: None, remote_id: None, duplicate: false }).ok().expect("recovery read receipt");
                 peer.frame(json!({"id":wire.value["id"],"result":fake_result(&wire.value)})).await;
             }
         }
@@ -357,7 +357,7 @@ async fn restart(context: &Context, label: &str) {
                     assert!(!old.iter().any(|value| value["method"] == "turn/start" && value["params"]["input"] == wire.value["params"]["input"]), "{label}: input resent");
                 }
                 }
-                wire.receipt.send(CommandReceipt::Written { remote_id: None, duplicate: false }).ok().unwrap();
+                wire.receipt.send(CommandReceipt::Written { written_at: None, remote_id: None, duplicate: false }).ok().unwrap();
                 peer.frame(json!({"id":wire.value["id"],"result":fake_result(&wire.value)})).await;
             }
         }

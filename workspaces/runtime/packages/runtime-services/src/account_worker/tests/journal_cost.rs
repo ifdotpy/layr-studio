@@ -15,6 +15,7 @@ pub(super) fn entry(cursor: u64, frame: Value) -> JournalEntry {
         panic!("fixture frame decodes");
     };
     JournalEntry {
+        boundary_at: None,
         received_at_ms: cursor,
         cursor: EventCursor(cursor),
         generation: Generation(GENERATION),
@@ -295,6 +296,7 @@ async fn journal_batch_work_at_the_publication_bound_reads_by_key() {
     const BATCH: u64 = super::JOURNAL_BATCH_MAX_EVENTS as u64;
     let capture = |cursor: u64| NotificationPostCommit::AnalyticsStream {
         observation: NotificationObservation {
+            boundary_at: None,
             agent: None,
             method: "item/agentMessage/delta".into(),
             params: SharedJson::new(

@@ -173,7 +173,9 @@ impl AccountSessionPort for CompletingSession {
                 Method::ThreadRead => {
                     json!({"thread":{"id":"source-thread","status":{"type":"notLoaded"},"path":self.native_path}})
                 }
-                Method::ThreadTurnsList => json!({"data":[],"nextCursor":null}),
+                Method::ThreadTurnsList | Method::ThreadTurnsItemsList => {
+                    json!({"data":[],"nextCursor":null})
+                }
                 Method::ThreadFork => {
                     let member = &operation(&self.store)["members"]["lead"];
                     assert_eq!(member["phase"], "lazy_submitted");

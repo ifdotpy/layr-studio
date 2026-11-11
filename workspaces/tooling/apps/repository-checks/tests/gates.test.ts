@@ -365,12 +365,18 @@ test("interrupt waits for running children and cancels unstarted dependents", as
 
 test("the real HTTP web fixture does not overlap Rust witness execution", async () => {
   const steps = gateSteps(process.cwd(), "test-fast").filter((step) =>
-    ["wasm", "renderer", "workspace", "rust-tests", "web unit tests"].includes(
-      step.id ?? "",
-    ),
+    [
+      "wasm",
+      "renderer",
+      "workspace",
+      "rust-tests",
+      "web unit tests",
+      "web HTTP fixtures",
+    ].includes(step.id ?? ""),
   );
   const started = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+  const webStarted = Promise.withResolvers<void>();
   const trace: (string | undefined)[] = [];
   const result = executeRecipe(process.cwd(), "test-fast", steps, {
     write: () => {},
@@ -381,34 +387,63 @@ test("the real HTTP web fixture does not overlap Rust witness execution", async 
         trace.push("Rust finished");
       }
       trace.push(options.label);
+      if (options.label === "web unit tests") webStarted.resolve();
       return { status: "passed", exitCode: 0, durationSeconds: 0 };
     },
   });
   await started.promise;
+  await Promise.race([
+    webStarted.promise,
+    new Promise((resolve) => setTimeout(resolve, 100)),
+  ]);
   try {
     assert.ok(
-      !trace.includes("web unit tests"),
+      trace.includes("web unit tests"),
+      "pure web tests overlap Rust witnesses",
+    );
+    assert.ok(
+      !trace.includes("web HTTP fixtures"),
       "the draft HTTP fixture must not compete with Rust witnesses",
     );
   } finally {
     release.resolve();
     await result;
   }
-  assert.ok(trace.indexOf("Rust finished") < trace.indexOf("web unit tests"));
+  assert.ok(
+    trace.indexOf("Rust finished") < trace.indexOf("web HTTP fixtures"),
+  );
   for (const name of ["test-fast", "test-comprehensive", "test-fast-rest"]) {
     assert.equal(
       gateSteps(process.cwd(), name).find(
         (step) => step.id === "web unit tests",
       )!.lane,
-      "rust",
+      "web",
     );
   }
   const nonRust = gateSteps(process.cwd(), "test-fast-rest-non-rust");
   assert.equal(
     nonRust.find((step) => step.id === "web unit tests")!.requires,
-    "workspace",
+    "wasm",
   );
   assert.ok(nonRust.every((step) => !step.requiresCargo));
+});
+
+test("web commands partition the real HTTP files from both pure selections", async () => {
+  const [http, pure, fast] = await Promise.all([
+    import("../../../../client/apps/web/vitest.http.config.ts"),
+    import("../../../../client/apps/web/vitest.pure.config.ts"),
+    import("../../../../client/apps/web/vitest.fast.config.ts"),
+  ]);
+  assert.deepEqual(http.HTTP_FIXTURE_TESTS, [
+    "src/renameRequest.test.ts",
+    "src/sync/client.entityServer.test.ts",
+    "src/sync/client.terminalServer.test.ts",
+  ]);
+  assert.deepEqual(http.default.test.include, http.HTTP_FIXTURE_TESTS);
+  for (const config of [pure.default, fast.default]) {
+    for (const file of http.HTTP_FIXTURE_TESTS)
+      assert.ok(config.test.exclude.includes(file));
+  }
 });
 
 test(
@@ -511,12 +546,14 @@ test("Cargo compilation is confined to the fixed Rust lane and both tiers use on
     assert.ok(!JSON.stringify(steps).includes("--release"));
     assert.equal(
       steps.find((s) => s.id === "web unit tests")!.requires,
-      "workspace",
+      "wasm",
     );
     const [workspaceCommand] =
       steps.find((s) => s.id === "workspace")?.commands ?? [];
     assert.ok(workspaceCommand);
     assert.ok(workspaceCommand[1].includes("--examples"));
+    assert.ok(workspaceCommand[1].includes("--tests"));
+    assert.ok(!workspaceCommand[1].includes("--lib"));
     for (const command of [workspaceCommand, rustCommand]) {
       const index = command[1].indexOf("--exclude");
       assert.equal(command[1][index + 1], "studio-native-client");

@@ -373,9 +373,11 @@ pub fn dispatch_notification_with_effects(
     dispatch_checked_notification(
         transaction,
         CheckedNotificationDispatch {
+            boundary_at: None,
             agent_id,
             agent: None,
             effects,
+            canonical_frame: None,
         },
         publication,
         streams,
@@ -390,6 +392,9 @@ pub(crate) struct CheckedNotificationDispatch<'a> {
     pub agent_id: &'a str,
     pub agent: Option<AgentRecord>,
     pub effects: &'a dyn NotificationEffects,
+    pub boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+    /// Canonical frame bytes already encoded for the journal digest.
+    pub canonical_frame: Option<&'a [u8]>,
 }
 
 pub(crate) fn dispatch_checked_notification(
@@ -405,6 +410,8 @@ pub(crate) fn dispatch_checked_notification(
         agent_id,
         mut agent,
         effects,
+        boundary_at,
+        canonical_frame,
     } = input;
     let mut next_streams = streams.clone();
     let (kind, params) = notification_parts(notification)?;
@@ -428,7 +435,18 @@ pub(crate) fn dispatch_checked_notification(
             {
                 return Err(NotificationDispatchError::invalid_account());
             }
-            let content_signature = notification_content_signature(agent_id, notification)?;
+            let canonical_frame = canonical_frame.filter(|_| match notification {
+                Frame::Notification(frame) => !frame.params.as_ref().is_some_and(Value::is_null),
+                Frame::UnknownMethod(frame) => {
+                    frame.fields.get("method").and_then(Value::as_str)
+                        == Some(frame.method.as_str())
+                }
+                Frame::Request(_) | Frame::Response { .. } => false,
+            });
+            let content_signature = match canonical_frame {
+                Some(bytes) => notification_signature_from_bytes(agent_id, bytes)?,
+                None => notification_content_signature(agent_id, notification)?,
+            };
             if crate::account_worker::store::notification_acknowledged(transaction, delivery)? {
                 return Ok(DispatchOutcome::Ignored {
                     reason: "acknowledged-journal-entry".into(),
@@ -551,7 +569,11 @@ pub(crate) fn dispatch_checked_notification(
                         .ok_or_else(NotificationDispatchError::invalid)?,
                     &DispatchOutcome::Written,
                 ) {
-                    if let NotificationPostCommit::Analytics { observation, .. } = effect {
+                    if let NotificationPostCommit::Analytics {
+                        mut observation, ..
+                    } = effect
+                    {
+                        observation.boundary_at = boundary_at;
                         next_streams.stage_analytics(key.clone(), observation)?;
                     }
                 }
@@ -907,6 +929,18 @@ pub(crate) fn dispatch_checked_notification(
                     .retain(|effect| !matches!(effect, NotificationPostCommit::Analytics { .. }));
             }
             for effect in &mut current {
+                match effect {
+                    NotificationPostCommit::Analytics { observation, .. }
+                    | NotificationPostCommit::AnalyticsStream { observation, .. } => {
+                        observation.boundary_at = boundary_at;
+                    }
+                    NotificationPostCommit::AnalyticsCaptured(_)
+                    | NotificationPostCommit::AnalyticsStreamCaptured(_)
+                    | NotificationPostCommit::TokenRateStream(_)
+                    | NotificationPostCommit::TokenRateAssociation(_)
+                    | NotificationPostCommit::TokenRateUsage(_)
+                    | NotificationPostCommit::Recovered { .. } => {}
+                }
                 if let NotificationPostCommit::Analytics { ledger_since, .. } = effect {
                     *ledger_since = studio_runtime_schema::usage::ledger::LedgerEpoch::Current;
                 }
@@ -1301,6 +1335,22 @@ fn notification_content_signature(
         notification: payload,
     })?;
     Ok(sha256_hex(&bytes))
+}
+
+/// The actor-bound settlement and frame-only journal digest have distinct
+/// scopes. Reuse their canonical frame encoding, retaining both exact hashes.
+fn notification_signature_from_bytes(
+    agent: &str,
+    frame: &[u8],
+) -> Result<String, NotificationDispatchError> {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    digest.update(b"{\"agent\":");
+    digest.update(studio_json::to_vec(agent)?);
+    digest.update(b",\"notification\":");
+    digest.update(frame);
+    digest.update(b"}");
+    Ok(data_encoding::HEXLOWER.encode(&digest.finalize()))
 }
 
 fn validate_agent(
@@ -2339,6 +2389,7 @@ mod tests {
             rates
                 .publish_observation(NotificationPostCommit::TokenRateUsage(
                     super::NotificationObservation {
+                        boundary_at: None,
                         agent: Some(super::SharedJson::new(
                             json!({"id":agent,"rootId":"root","turnId":"turn","provider":provider}),
                         )),
@@ -2610,6 +2661,25 @@ mod tests {
         assert_eq!(
             notification_content_signature("agent-1", frame).expect("borrowed signature"),
             "c856e9e04cfdaaee42b7540e6f9a4df35816e29c7bdf51a753fd8fe0b770a825"
+        );
+        let encoded = studio_runtime_providers::encode_line(frame).unwrap();
+        assert_eq!(
+            super::notification_signature_from_bytes(
+                "agent-1",
+                encoded.strip_suffix(b"\n").unwrap()
+            )
+            .unwrap(),
+            notification_content_signature("agent-1", frame).unwrap(),
+            "journal encoding retains the actor-bound settlement signature"
+        );
+        assert_ne!(
+            super::notification_signature_from_bytes(
+                "another-agent",
+                encoded.strip_suffix(b"\n").unwrap()
+            )
+            .unwrap(),
+            notification_content_signature("agent-1", frame).unwrap(),
+            "different actor scopes must not share their signature"
         );
     }
 

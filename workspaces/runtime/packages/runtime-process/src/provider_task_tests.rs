@@ -273,6 +273,8 @@ fn actor(
         initialization: InitializationStatus::AwaitingReply,
     };
     let actor = AdapterTask {
+        provider: None,
+        codex_diagnostics: CodexMethodDiagnostics::default(),
         account_store: None,
         activation: None,
         inherit_cwd: false,
@@ -513,6 +515,8 @@ async fn full_journal_lane_keeps_ack_commands_live_while_next_event_waits() {
     let shutdown = Shutdown::default();
     let (mut actor, commands, mut journal) = actor(&shutdown);
     actor.info = Some(AttachmentInfo {
+        spawn_started_at: None,
+        initialized_at: None,
         handle: actor.handle.clone(),
         generation: Generation(1),
         pid: 1,
@@ -529,6 +533,7 @@ async fn full_journal_lane_keeps_ack_commands_live_while_next_event_waits() {
             actor
                 .events
                 .try_send(JournalEntry {
+                    boundary_at: None,
                     received_at_ms: 0,
                     cursor: EventCursor(sequence),
                     generation: Generation(1),
@@ -806,6 +811,8 @@ async fn response_mapping_prunes_all_settled_entries() {
     let shutdown = Shutdown::default();
     let (mut actor, _commands, _journal) = actor(&shutdown);
     actor.info = Some(AttachmentInfo {
+        spawn_started_at: None,
+        initialized_at: None,
         handle: actor.handle.clone(),
         generation: Generation(1),
         pid: 1,
@@ -962,6 +969,8 @@ async fn stdout_journal_remaps_only_numeric_replies_and_preserves_raw_bytes() {
     let shutdown = Shutdown::default();
     let (mut actor, _commands, _journal) = actor(&shutdown);
     actor.info = Some(AttachmentInfo {
+        spawn_started_at: None,
+        initialized_at: None,
         handle: actor.handle.clone(),
         generation: Generation(1),
         pid: 1,
@@ -1280,4 +1289,41 @@ async fn retained_environment_wait_ends_on_shutdown() {
     .await;
     assert!(matches!(result, Err(AdapterError::Cancelled)));
     cancel.await.unwrap();
+}
+
+#[test]
+fn supervised_codex_ingress_classifies_once_and_preserves_raw_frame() {
+    for provider in [Some(ProviderKind::Codex), Some(ProviderKind::Claude), None] {
+        let (mut actor, _commands, _journal) = actor(&Shutdown::default());
+        actor.provider = provider;
+        actor
+            .codex_diagnostics
+            .initialize(Some("codex-cli/0.167.1"));
+        let wire = r#"{"method":"future/notification","params":{"opaque":[1,2]}}"#;
+        let entry = actor
+            .journal_entry_v2(
+                SupervisorEventV2 {
+                    sequence: EventCursor(1),
+                    generation: Generation(1),
+                    kind: EventKind::Stdout,
+                    payload: studio_json::OwnedRawJson::from_string(wire.into()).unwrap(),
+                },
+                0,
+            )
+            .unwrap();
+        let JournalPayload::Frame(frame) = entry.payload else {
+            panic!("preserved frame")
+        };
+        assert_eq!(
+            studio_json::from_slice::<Value>(
+                &studio_runtime_providers::encode_line(&frame).unwrap()
+            )
+            .unwrap(),
+            studio_json::from_str::<Value>(wire).unwrap()
+        );
+        assert_eq!(
+            actor.codex_diagnostics.observe(&frame).is_none(),
+            provider == Some(ProviderKind::Codex)
+        );
+    }
 }

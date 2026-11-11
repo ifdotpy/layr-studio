@@ -5,7 +5,7 @@ use crate::{child_priority::ChildPriority, operational_log::OperationalLog, prov
 use process_wrap::tokio::{CommandWrap, ProcessGroup};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{self, Write as IoWrite},
     process::Stdio,
     sync::{Arc, Mutex, OnceLock},
@@ -15,7 +15,8 @@ use studio_runtime_providers::provider_diagnostics::{
     StdinTimingDiagnostic,
 };
 use studio_runtime_providers::{
-    DecodedJournalPayload, Frame, Method, RequestId, ResponseBody, decode_journal_entry_borrowed,
+    CodexIncomingMethod, DecodedJournalPayload, Frame, Method, ProviderKind, RequestId,
+    ResponseBody, decode_journal_entry_borrowed,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -45,7 +46,7 @@ fn witnessed_method(write: &PreparedWrite) -> Option<Method> {
     write
         .message()
         .get("method")
-        .and_then(studio_json::Value::as_str)
+        .and_then(|value| value.as_str())
         .and_then(Method::from_wire)
         .filter(|method| WITNESSED_METHODS.contains(method))
 }
@@ -131,7 +132,7 @@ fn stdin_timing_diagnostic_line(
     diagnostic_line(STDIN_TIMING_DIAGNOSTIC_PREFIX.as_bytes(), &diagnostic)
 }
 
-fn write_stdin_timing_diagnostic_best_effort(line: &[u8]) {
+fn write_provider_diagnostic_best_effort(line: &[u8]) {
     // The verifier treats a missing diagnostic as incomplete; diagnostic I/O
     // errors must never alter provider write or receipt behavior.
     match io::stderr().lock().write_all(line) {
@@ -229,6 +230,7 @@ impl StdioProviderTaskFactory {
             let mut wrapped = CommandWrap::from(command);
             wrapped.wrap(ProcessGroup::leader());
             priority.apply_before_spawn(&mut wrapped);
+            let spawn_started_at = crate::clock::boundary_stamp();
             let mut child = wrapped.spawn().map_err(process_error)?;
             let (commands, mut inbox) = mpsc::channel(LANE_CAPACITY);
             let (entries, journal) = mpsc::channel(LANE_CAPACITY);
@@ -248,6 +250,8 @@ impl StdioProviderTaskFactory {
                     pid: child.id().unwrap_or(0),
                     acknowledged: EventCursor(0),
                     resumed: false,
+                    spawn_started_at: Some(spawn_started_at),
+                    initialized_at: None,
                 }),
                 initialization: InitializationStatus::AwaitingReply,
             });
@@ -278,7 +282,10 @@ impl StdioProviderTaskFactory {
                         generation,
                         frame_limit,
                         output_limit,
-                        reply_witness,
+                        ReaderProtocol {
+                            provider: options.launch.provider,
+                            reply_witness,
+                        },
                     )
                     .await
                 };
@@ -624,7 +631,7 @@ async fn write_commands(
                         enabled: stdin_timing_diagnostics_enabled(),
                         pending_replies: &pending_replies,
                         sample_timestamp: crate::clock::monotonic_ns,
-                        emit_diagnostic: write_stdin_timing_diagnostic_best_effort,
+                        emit_diagnostic: write_provider_diagnostic_best_effort,
                     },
                 )
                 .await?;
@@ -691,6 +698,7 @@ where
         .send(CommandReceipt::Written {
             remote_id: None,
             duplicate: false,
+            written_at: Some(crate::clock::boundary_stamp()),
         });
     if let Some(stdin_flushed_at_ns) = stdin_flushed_at_ns
         && let Some(line) = stdin_timing_diagnostic_line(
@@ -708,6 +716,77 @@ where
     observed.await.map_err(|_| AdapterError::ConsumerClosed)
 }
 
+#[derive(Default)]
+struct ReaderProtocol {
+    provider: Option<ProviderKind>,
+    reply_witness: Option<ReplyWitness>,
+}
+
+/// The initialize response's userAgent is the vendor's version identity. Keep
+/// it verbatim rather than guessing how future CLI version strings are encoded.
+#[derive(Serialize, Deserialize)]
+struct UnknownMethodDiagnostic<'a> {
+    provider: ProviderKind,
+    #[serde(rename = "cliVersion", borrow)]
+    cli_version: Option<&'a str>,
+    method: &'a str,
+}
+
+#[derive(Default)]
+pub(crate) struct CodexMethodDiagnostics {
+    user_agent: Option<String>,
+    unknown: HashSet<(Option<String>, String)>,
+}
+
+impl CodexMethodDiagnostics {
+    pub(crate) fn initialize(&mut self, user_agent: Option<&str>) {
+        if self.user_agent.is_none() {
+            self.user_agent = user_agent.map(str::to_owned);
+        }
+    }
+
+    pub(crate) fn record(&mut self, provider: Option<ProviderKind>, frame: &Frame) {
+        let line = match provider {
+            Some(ProviderKind::Codex) => self.observe(frame),
+            Some(ProviderKind::Claude) | None => None,
+        };
+        if let Some(line) = line {
+            write_provider_diagnostic_best_effort(&line);
+        }
+    }
+
+    pub(crate) fn observe(&mut self, frame: &Frame) -> Option<Vec<u8>> {
+        if self.user_agent.is_none()
+            && let Frame::Response {
+                body: ResponseBody::Result(result),
+                ..
+            } = frame
+            && let Some(user_agent) = result.get("userAgent").and_then(|value| value.as_str())
+        {
+            self.user_agent = Some(user_agent.to_owned());
+        }
+        let incoming = frame.codex_incoming_method()?;
+        let _disposition = incoming.disposition();
+        let CodexIncomingMethod::Unknown { method } = incoming else {
+            return None;
+        };
+        if !self
+            .unknown
+            .insert((self.user_agent.clone(), method.clone()))
+        {
+            return None;
+        }
+        diagnostic_line(
+            b"studio_provider_unknown_method ",
+            &UnknownMethodDiagnostic {
+                provider: ProviderKind::Codex,
+                cli_version: self.user_agent.as_deref(),
+                method: &method,
+            },
+        )
+    }
+}
+
 async fn read_entries(
     stdout: impl AsyncRead + Unpin,
     entries: mpsc::Sender<JournalEntry>,
@@ -715,8 +794,9 @@ async fn read_entries(
     generation: Generation,
     frame_limit: usize,
     output_limit: Option<usize>,
-    reply_witness: Option<ReplyWitness>,
+    protocol: ReaderProtocol,
 ) -> Result<(), AdapterError> {
+    let mut diagnostics = CodexMethodDiagnostics::default();
     let mut reader = BufReader::new(stdout);
     let mut total = 0_usize;
     let mut cursor = 0_u64;
@@ -734,14 +814,17 @@ async fn read_entries(
             return Err(SupervisorError::ConnectionLost.into());
         }
         cursor += 1;
+        let boundary_at = crate::clock::boundary_stamp();
         let decoded = decode_journal_entry_borrowed(cursor, generation.0, &line);
         let payload = match decoded.payload {
             DecodedJournalPayload::Frame(frame) => {
-                if let Some(line) = reply_witness
+                diagnostics.record(protocol.provider, &frame);
+                if let Some(line) = protocol
+                    .reply_witness
                     .as_ref()
                     .and_then(|witness| witness.line(&frame, crate::clock::monotonic_ns))
                 {
-                    write_stdin_timing_diagnostic_best_effort(&line);
+                    write_provider_diagnostic_best_effort(&line);
                 }
                 JournalPayload::Frame(frame)
             }
@@ -752,6 +835,7 @@ async fn read_entries(
         entries
             .send(JournalEntry {
                 received_at_ms: clock.now_ms(),
+                boundary_at: Some(boundary_at),
                 cursor: EventCursor(cursor),
                 generation,
                 payload,
@@ -816,6 +900,87 @@ async fn read_stdout_line<R: AsyncRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_codex_methods_log_once_per_initialize_version_and_method() {
+        let decode = |value| {
+            let decoded = studio_runtime_providers::decode_journal_value(1, 1, &value);
+            let DecodedJournalPayload::Frame(frame) = decoded.payload else {
+                panic!("frame")
+            };
+            frame
+        };
+        let unknown = decode(
+            studio_json::json!({"method":"future/notification","params":{"secret":"must not log"}}),
+        );
+        let mut diagnostics = CodexMethodDiagnostics::default();
+        let before = diagnostics.observe(&unknown).expect("first unknown");
+        fn parse(line: &[u8]) -> UnknownMethodDiagnostic<'_> {
+            studio_json::from_slice(
+                line.strip_prefix(b"studio_provider_unknown_method ")
+                    .unwrap(),
+            )
+            .unwrap()
+        }
+        assert_eq!(parse(&before).cli_version, None);
+        assert!(!String::from_utf8(before).unwrap().contains("must not log"));
+        assert!(diagnostics.observe(&unknown).is_none());
+        let initialized =
+            decode(studio_json::json!({"id":1,"result":{"userAgent":"codex-cli/0.167.1"}}));
+        assert!(diagnostics.observe(&initialized).is_none());
+        let after = diagnostics.observe(&unknown).expect("new version key");
+        assert_eq!(parse(&after).cli_version, Some("codex-cli/0.167.1"));
+        assert!(diagnostics.observe(&unknown).is_none());
+        let known = decode(
+            studio_json::json!({"method":"thread/name/updated","params":{"threadId":"t","threadName":"n"}}),
+        );
+        assert!(diagnostics.observe(&known).is_none());
+        let other = decode(studio_json::json!({"method":"future/other"}));
+        assert!(diagnostics.observe(&other).is_some());
+    }
+
+    #[tokio::test]
+    async fn codex_ingress_preserves_known_unknown_and_malformed_frames() {
+        let (entries, mut journal) = mpsc::channel(LANE_CAPACITY);
+        let input = b"{\"method\":\"thread/name/updated\",\"params\":{\"threadId\":\"t\",\"threadName\":\"n\"}}\n{\"method\":\"future/notification\",\"params\":{\"opaque\":1}}\nnot-json\n";
+        let result = read_entries(
+            &input[..],
+            entries,
+            SessionClock::default(),
+            Generation(1),
+            4096,
+            None,
+            ReaderProtocol {
+                provider: Some(ProviderKind::Codex),
+                reply_witness: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(AdapterError::Supervisor(SupervisorError::ConnectionLost))
+        ));
+        let first = journal.recv().await.unwrap();
+        let JournalPayload::Frame(frame) = first.payload else {
+            panic!("known frame")
+        };
+        assert!(matches!(
+            frame.codex_incoming_method(),
+            Some(CodexIncomingMethod::Notification(_))
+        ));
+        let second = journal.recv().await.unwrap();
+        let JournalPayload::Frame(frame) = second.payload else {
+            panic!("unknown frame")
+        };
+        assert!(matches!(
+            frame.codex_incoming_method(),
+            Some(CodexIncomingMethod::Unknown { .. })
+        ));
+        assert!(matches!(
+            journal.recv().await.unwrap().payload,
+            JournalPayload::RawStdout { .. }
+        ));
+    }
 
     #[tokio::test]
     async fn interrupted_stdin_write_counts_accepted_bytes_and_never_reports_them_not_sent() {
@@ -904,7 +1069,7 @@ mod tests {
                     Generation(1),
                     1024,
                     None,
-                    None,
+                    ReaderProtocol::default(),
                 ),
                 &mut inbox,
                 &shutdown.subscribe(),
@@ -949,7 +1114,7 @@ mod tests {
                         Generation(1),
                         1024,
                         None,
-                        None,
+                        ReaderProtocol::default(),
                     ),
                     &mut inbox,
                     &stop,
@@ -1605,7 +1770,7 @@ mod tests {
                 Generation(1),
                 16,
                 Some(20),
-                None
+                ReaderProtocol::default()
             )
             .await,
             Err(AdapterError::OutputLimit { limit: 20 })
@@ -1628,7 +1793,7 @@ mod tests {
                 Generation(1),
                 8,
                 Some(100),
-                None
+                ReaderProtocol::default()
             )
             .await,
             Err(AdapterError::OutputLimit { limit: 8 })
@@ -1648,7 +1813,7 @@ mod tests {
                 Generation(1),
                 16,
                 None,
-                None
+                ReaderProtocol::default()
             )
             .await,
             Err(AdapterError::Supervisor(SupervisorError::ConnectionLost))

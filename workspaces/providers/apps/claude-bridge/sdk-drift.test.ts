@@ -10,6 +10,7 @@ test("the actual consumers compile against the pinned SDK", () => {
       "features.ts",
       "usage.ts",
       "sdk-message-policy.ts",
+      "sdk-dispositions.ts",
       "command-background.ts",
     ]),
     [],
@@ -44,6 +45,18 @@ test("adding an SDK result subtype breaks the production outcome mapping", () =>
 });
 
 for (const { name, file, from, to } of [
+  {
+    name: "a new query option",
+    file: "sdk-dispositions.ts",
+    from: "export declare type Options = {",
+    to: "export declare type Options = { futureOption?: boolean;",
+  },
+  {
+    name: "a new query method",
+    file: "sdk-dispositions.ts",
+    from: "export declare interface Query extends AsyncGenerator<SDKMessage, void> {",
+    to: "export declare interface Query extends AsyncGenerator<SDKMessage, void> { futureMethod(): void;",
+  },
   {
     name: "a new top-level event",
     file: "sdk-message-policy.ts",
@@ -96,3 +109,69 @@ for (const { name, file, from, to } of [
     );
   });
 }
+
+import { createSdkMessageDiagnostics } from "./sdk-message-policy.ts";
+import { CLAUDE_SDK_VERSION } from "./sdk-dispositions.ts";
+import { sdkExportDrift, sdkPackMetadata } from "./sdk-drift.ts";
+import { readFileSync } from "node:fs";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+
+test("runtime SDK drift is explicit and diagnosed once per version and kind", () => {
+  const reports: string[] = [];
+  const disposition = createSdkMessageDiagnostics((text) => reports.push(text));
+  // @ts-expect-error A newer runtime can emit variants absent from pinned declarations.
+  const future: SDKMessage = { type: "system", subtype: "future_system" };
+  assert.deepEqual(disposition(future), {
+    kind: "Unknown",
+    provider: "claude",
+    version: CLAUDE_SDK_VERSION,
+    type: "system",
+    subtype: "future_system",
+  });
+  disposition(future);
+  // @ts-expect-error Unknown top-level types are a separate diagnostic kind.
+  disposition({ type: "future_message" });
+  assert.equal(reports.length, 2);
+  assert.ok(reports.every((report) => report.includes(CLAUDE_SDK_VERSION)));
+});
+
+test("the disposition version matches the manifest pin", () => {
+  const manifest: unknown = JSON.parse(
+    readFileSync(new URL("package.json", import.meta.url), "utf8"),
+  );
+  assert.ok(
+    manifest && typeof manifest === "object" && "dependencies" in manifest,
+  );
+  const dependencies = manifest.dependencies;
+  assert.ok(
+    dependencies &&
+      typeof dependencies === "object" &&
+      "@anthropic-ai/claude-agent-sdk" in dependencies,
+  );
+  assert.equal(
+    dependencies["@anthropic-ai/claude-agent-sdk"],
+    CLAUDE_SDK_VERSION,
+  );
+});
+
+test("the drift report identifies added removed and changed published exports", () => {
+  assert.deepEqual(
+    sdkExportDrift(
+      "export type A = string; export interface B {}",
+      "export type A = number; export type C = string;",
+    ),
+    { added: ["C"], removed: ["B"], changed: ["A"] },
+  );
+});
+
+test("SDK pack metadata accepts the installed npm named-package receipt", () => {
+  const metadata = { filename: "claude-agent-sdk.tgz", version: "0.3.308" };
+  assert.deepEqual(
+    sdkPackMetadata({ "@anthropic-ai/claude-agent-sdk": metadata }),
+    metadata,
+  );
+  assert.deepEqual(sdkPackMetadata([metadata]), metadata);
+  assert.throws(() =>
+    sdkPackMetadata([{ ...metadata, filename: "../outside.tgz" }]),
+  );
+});

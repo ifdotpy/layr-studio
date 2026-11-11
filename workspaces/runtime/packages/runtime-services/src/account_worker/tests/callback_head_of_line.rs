@@ -270,6 +270,7 @@ async fn write_of(peer: &mut Peer, method: &str) -> (Value, Vec<Value>) {
     loop {
         let wire = peer.next_write().await;
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -290,6 +291,7 @@ async fn assert_answer_written_once(stall: &mut Stall, last_cursor: u64) {
     answer
         .receipt
         .send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         })
@@ -404,6 +406,7 @@ async fn stop_of_the_agent_with_a_held_callback_interrupts_its_turn_and_withhold
     assert_eq!(interrupt.value["params"]["threadId"], "fake-thread-0");
     assert_eq!(interrupt.value["params"]["turnId"], "turn");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });

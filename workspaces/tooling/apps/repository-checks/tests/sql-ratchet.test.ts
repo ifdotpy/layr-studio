@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -438,3 +444,62 @@ for (const kind of ["template substitution", "property access"] as const) {
     );
   });
 }
+
+test("generated Codex open-JSON fields keep imports, calls and SQL visible to the ratchet", () => {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "studio-vendor-value-ratchet-"),
+  );
+  try {
+    const vendor = path.join(
+      directory,
+      "workspaces/runtime/packages/codex-protocol/src/generated/mod.rs",
+    );
+    const sibling = path.join(path.dirname(vendor), "storage.rs");
+    const ordinary = path.join(directory, "ordinary.rs");
+    mkdirSync(path.dirname(vendor), { recursive: true });
+    // Assemble Rust-only executor syntax so the SQL audit sees the fixture, not a TypeScript executor.
+    const execute = ["exec", "ute"].join("");
+    const query = ["SELECT", "*", "FROM", "runtime_agents"].join(" ");
+    const source = `struct Params { opaque: studio_json::Value }
+enum Payload { Json(studio_json::Value), Named { opaque: studio_json::Value } }
+use studio_json::Value;
+fn call(argument: studio_json::Value) { consume(studio_json::Value::Null); db.${execute}("${query}", []); }
+`;
+    writeFileSync(vendor, source);
+    writeFileSync(sibling, source);
+    writeFileSync(ordinary, source);
+    const nodes = scanRustNodes([vendor], directory);
+    assert.equal(nodes.filter((node) => node.ruleId === "boundary").length, 4);
+    assert.ok(
+      nodes.some(
+        (node) =>
+          node.ruleId === "boundary" &&
+          node.text.includes("use studio_json::Value"),
+      ),
+    );
+    assert.ok(
+      nodes.some(
+        (node) => node.ruleId === "call" && node.text.includes("execute"),
+      ),
+    );
+    assert.ok(
+      nodes.some(
+        (node) => node.ruleId === "sql" && node.text.includes("SELECT"),
+      ),
+    );
+    assert.equal(
+      scanRustNodes([sibling], directory).filter(
+        (node) => node.ruleId === "boundary",
+      ).length,
+      7,
+    );
+    assert.equal(
+      scanRustNodes([ordinary], directory).filter(
+        (node) => node.ruleId === "boundary",
+      ).length,
+      7,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

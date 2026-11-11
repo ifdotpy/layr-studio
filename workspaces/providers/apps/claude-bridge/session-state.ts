@@ -238,9 +238,9 @@ export interface Session {
   preview?: string | undefined;
   name?: string | null | undefined;
   model?: Options["model"] | undefined;
-  approvalPolicy?: string | undefined;
+  approvalPolicy?: import("./bridge-protocol.ts").BridgeParams<"thread/start">["approvalPolicy"];
   activePermissionProfile?: unknown | undefined;
-  sandbox?: string | undefined;
+  sandbox?: import("./bridge-protocol.ts").BridgeParams<"thread/start">["sandbox"];
   claude?: import("./thinking.ts").ClaudeSettings | undefined;
   developerInstructions?: string | undefined;
   dynamicTools?: ToolDefinition[] | undefined;
@@ -265,7 +265,7 @@ export interface SessionMetadata {
   preview: string;
   name: string | null;
   model: Session["model"];
-  approvalPolicy: string | null;
+  approvalPolicy: NonNullable<Session["approvalPolicy"]> | null;
   activePermissionProfile: unknown;
   revision: string;
 }

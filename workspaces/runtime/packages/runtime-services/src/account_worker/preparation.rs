@@ -187,6 +187,7 @@ impl PreparedTurn {
             prepared.method.as_str()
         );
         let request = RecoveredRequest {
+            boundary_timing: None,
             ticket: studio_runtime_providers::RequestTicket {
                 id: RequestId::String(request_id.into()),
                 generation,

@@ -38,6 +38,8 @@ pub(super) enum SpawnOutcome {
 
 pub(super) struct OwnedChild {
     pub pid: u32,
+    pub spawn_started_at: studio_runtime_schema::provider_timing::BoundaryStamp,
+    pub initialized_at: Mutex<Option<studio_runtime_schema::provider_timing::BoundaryStamp>>,
     pub signature: String,
     pub start: String,
     pub generation: u64,
@@ -54,7 +56,10 @@ pub(super) struct OwnedChild {
     exit_event_state: AtomicU8,
     exit_event_sequence: AtomicU64,
     append_lock: Mutex<()>,
-    writer: mpsc::SyncSender<(Vec<u8>, mpsc::SyncSender<std::io::Result<()>>)>,
+    writer: mpsc::SyncSender<(
+        Vec<u8>,
+        mpsc::SyncSender<std::io::Result<studio_runtime_schema::provider_timing::BoundaryStamp>>,
+    )>,
     journal: Arc<SupervisorJournal>,
     root: PathBuf,
     handle: String,
@@ -92,6 +97,7 @@ impl OwnedChild {
         if let Some(cwd) = cwd {
             command_builder.current_dir(cwd);
         }
+        let spawn_started_at = crate::clock::boundary_stamp();
         let mut process = match CommandWrap::from(command_builder)
             .wrap(ProcessGroup::leader())
             .spawn()
@@ -131,10 +137,16 @@ impl OwnedChild {
             .stderr()
             .take()
             .ok_or(Error::Refused("Missing child stderr"))?;
-        let (writer, receiver) =
-            mpsc::sync_channel::<(Vec<u8>, mpsc::SyncSender<std::io::Result<()>>)>(1);
+        let (writer, receiver) = mpsc::sync_channel::<(
+            Vec<u8>,
+            mpsc::SyncSender<
+                std::io::Result<studio_runtime_schema::provider_timing::BoundaryStamp>,
+            >,
+        )>(1);
         let child = Arc::new(Self {
             pid,
+            spawn_started_at,
+            initialized_at: Mutex::new(None),
             signature,
             start,
             generation,
@@ -176,7 +188,10 @@ impl OwnedChild {
         });
         thread::spawn(move || {
             while let Ok((bytes, reply)) = receiver.recv() {
-                let result = stdin.write_all(&bytes).and_then(|()| stdin.flush());
+                let result = stdin
+                    .write_all(&bytes)
+                    .and_then(|()| stdin.flush())
+                    .map(|()| crate::clock::boundary_stamp());
                 let failed = result.is_err();
                 if reply.send(result).is_err() { /* The receipt remains durable after timeout. */ }
                 if failed {
@@ -274,17 +289,20 @@ impl OwnedChild {
     pub(super) fn lock_append_for_test(&self) -> Result<std::sync::MutexGuard<'_, ()>> {
         lock(&self.append_lock)
     }
-    pub fn write(&self, message: &Value) -> Result<()> {
+    pub fn write(
+        &self,
+        message: &Value,
+    ) -> Result<studio_runtime_schema::provider_timing::BoundaryStamp> {
         let mut bytes = studio_json::to_vec(message)?;
         bytes.push(b'\n');
         let (sender, receiver) = mpsc::sync_channel(1);
         self.writer.try_send((bytes, sender)).map_err(|_| {
             Error::Refused("Child input unavailable; durable outcome remains unknown")
         })?;
-        receiver.recv_timeout(WRITE_TIMEOUT).map_err(|_| {
+        let stamp = receiver.recv_timeout(WRITE_TIMEOUT).map_err(|_| {
             Error::Refused("Child input deadline exceeded; durable outcome remains unknown")
         })??;
-        Ok(())
+        Ok(stamp)
     }
     fn stdout(&self, mut reader: impl BufRead) -> Result<()> {
         loop {
@@ -301,8 +319,13 @@ impl OwnedChild {
                     "Child stdout frame exceeds journal capacity",
                 ));
             }
+            let stamp = json!(crate::clock::boundary_stamp());
             let mut value = studio_json::from_slice::<Value>(&bytes)
                 .unwrap_or_else(|_| json!({"supervisorRaw":String::from_utf8_lossy(&bytes)}));
+            let name = studio_runtime_schema::provider_timing::BOUNDARY_STAMP_FIELD;
+            if value.is_object() {
+                value[name] = stamp;
+            }
             if value.get("method").is_some_and(Value::is_string) {
                 value["_studioSupervisorReceivedAt"] = json!(now()?);
             }

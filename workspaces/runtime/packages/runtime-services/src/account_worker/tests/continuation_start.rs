@@ -113,6 +113,7 @@ async fn next_turn_start(peer: &mut Peer) -> Value {
     if wire.value["method"] == "thread/resume" {
         let resume = wire.value;
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -125,6 +126,7 @@ async fn next_turn_start(peer: &mut Peer) -> Value {
     }
     assert_eq!(wire.value["method"], "turn/start", "{}", wire.value);
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -261,6 +263,7 @@ async fn capacity_retry_restart_unknown_reports_once_without_resending() {
                     .expect("retry claimed");
                 let operation = format!("account:default:{}:turn/start", intent.attempt_id);
                 let request = RecoveredRequest {
+                    boundary_timing: None,
                     ticket: studio_runtime_providers::RequestTicket {
                         id: RequestId::String(operation.clone()),
                         generation: 1,

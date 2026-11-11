@@ -232,23 +232,36 @@ pub(super) struct IdleClocks {
 }
 
 impl IdleClocks {
+    fn compaction_deadline(&self, thread: &str, delay: Duration) -> Option<Instant> {
+        self.threads
+            .get(thread)
+            .filter(|_| !self.released.contains(thread))
+            .map(|since| *since + self.unload_delay(thread, delay))
+    }
     fn compaction_deadlines(&mut self, delay: Duration) -> BTreeMap<String, f64> {
-        let (origin, wall) = *self
-            .wall_clock
+        self.wall_clock
             .get_or_insert_with(|| (Instant::now(), crate::idle_compaction::wall_now()));
         self.threads
-            .iter()
-            .filter(|(thread, _)| !self.released.contains(*thread))
-            .map(|(thread, since)| {
-                let deadline = *since + self.unload_delay(thread, delay);
-                let offset = if deadline >= origin {
-                    deadline.duration_since(origin).as_secs_f64()
-                } else {
-                    -origin.duration_since(deadline).as_secs_f64()
-                };
-                (thread.clone(), wall + offset)
+            .keys()
+            .filter_map(|thread| {
+                self.compaction_wall_deadline(thread, delay)
+                    .map(|deadline| (thread.clone(), deadline))
             })
             .collect()
+    }
+
+    fn compaction_wall_deadline(&self, thread: &str, delay: Duration) -> Option<f64> {
+        self.compaction_deadline(thread, delay).map(|deadline| {
+            let (origin, wall) = self
+                .wall_clock
+                .expect("wall clock initialized before deadline publication");
+            let offset = if deadline >= origin {
+                deadline.duration_since(origin).as_secs_f64()
+            } else {
+                -origin.duration_since(deadline).as_secs_f64()
+            };
+            wall + offset
+        })
     }
     /// The worker sent a request for `thread`; its idle time starts again.
     pub(super) fn touch(&mut self, thread: &str) {
@@ -487,20 +500,52 @@ impl Worker {
         }
     }
 
-    async fn sync_sleep_compaction(&mut self, delay: Duration) -> Result<(), WorkerError> {
-        let deadlines = self.idle_clocks.compaction_deadlines(delay);
+    async fn sync_sleep_compaction(
+        &mut self,
+        delay: Duration,
+        threads: Option<BTreeSet<String>>,
+    ) -> Result<(), WorkerError> {
+        if threads.as_ref().is_some_and(BTreeSet::is_empty) {
+            return Ok(());
+        }
+        self.idle_clocks
+            .wall_clock
+            .get_or_insert_with(|| (Instant::now(), crate::idle_compaction::wall_now()));
+        let changes = threads.map(|threads| {
+            threads
+                .into_iter()
+                .map(|thread| {
+                    let deadline = self.idle_clocks.compaction_wall_deadline(&thread, delay);
+                    (thread, deadline)
+                })
+                .collect::<BTreeMap<_, _>>()
+        });
+        let deadlines = if changes.is_none() {
+            self.idle_clocks.compaction_deadlines(delay)
+        } else {
+            BTreeMap::new()
+        };
         let account = self.account.clone();
         self.db(
             "sleep_compaction_unload_deadlines",
             move |store| async move {
                 Ok(store
                     .transaction(move |tx| {
-                        crate::idle_compaction::sync_unload_deadlines(
-                            tx,
-                            &account,
-                            &deadlines,
-                            crate::idle_compaction::wall_now(),
-                        )
+                        if let Some(changes) = changes {
+                            crate::idle_compaction::sync_thread_unload_deadlines(
+                                tx,
+                                &account,
+                                &changes,
+                                crate::idle_compaction::wall_now(),
+                            )
+                        } else {
+                            crate::idle_compaction::sync_unload_deadlines(
+                                tx,
+                                &account,
+                                &deadlines,
+                                crate::idle_compaction::wall_now(),
+                            )
+                        }
                     })
                     .await?)
             },
@@ -508,9 +553,15 @@ impl Worker {
         .await?;
         Ok(())
     }
-    pub(super) fn idle_thread_touched(&mut self, thread: &str) {
+    pub(super) async fn idle_thread_touched(&mut self, thread: &str) -> Result<(), WorkerError> {
+        let had_deadline = self.idle_clocks.threads.contains_key(thread);
         self.idle_clocks.touch(thread);
         self.idle_deadline = next_deadline(&self.idle_clocks, self.idle_delay);
+        if had_deadline && let Some(delay) = self.idle_delay {
+            self.sync_sleep_compaction(delay, Some(BTreeSet::from([thread.to_owned()])))
+                .await?;
+        }
+        Ok(())
     }
 
     pub(super) async fn idle_sweep(&mut self, now: Instant) -> Result<(), WorkerError> {
@@ -542,6 +593,7 @@ impl Worker {
         for thread in &requested {
             self.idle_clocks.block(thread, IdleBlocker::Local);
         }
+        self.sync_sleep_compaction(delay, Some(requested)).await?;
         self.idle_clocks.retry_at = None;
         self.idle_check_threads(now, delay, due).await
     }
@@ -566,7 +618,7 @@ impl Worker {
                 self.idle_clocks = IdleClocks::default();
                 self.idle_delay = None;
                 self.idle_deadline = None;
-                self.sync_sleep_compaction(Duration::ZERO).await?;
+                self.sync_sleep_compaction(Duration::ZERO, None).await?;
                 return Ok(());
             }
             Err(error) => {
@@ -601,6 +653,7 @@ impl Worker {
                 delay,
             );
         }
+        self.sync_sleep_compaction(delay, None).await?;
         self.idle_check_process(now, delay, Some(usage), false)
             .await
     }
@@ -612,6 +665,7 @@ impl Worker {
         threads: BTreeSet<String>,
     ) -> Result<(), WorkerError> {
         let mut retry = false;
+        let mut changed = BTreeSet::new();
         for thread in &threads {
             if self.closing {
                 return Ok(());
@@ -620,18 +674,24 @@ impl Worker {
                 continue;
             }
             let unused = self.thread_unused(thread).await?;
+            let before = self.idle_clocks.compaction_deadline(thread, delay);
             if self
                 .idle_clocks
                 .eligibility_changed(thread, unused, now, delay)
             {
-                self.sync_sleep_compaction(delay).await?;
+                self.sync_sleep_compaction(delay, Some(BTreeSet::from([thread.clone()])))
+                    .await?;
                 match self.unload_thread(thread).await? {
                     UnloadResult::Unloaded => self.idle_clocks.release(thread),
                     UnloadResult::Busy(reason) => self.idle_clocks.block(thread, reason),
                     UnloadResult::Retry => retry = true,
                 }
             }
+            if before != self.idle_clocks.compaction_deadline(thread, delay) {
+                changed.insert(thread.clone());
+            }
         }
+        self.sync_sleep_compaction(delay, Some(changed)).await?;
         self.idle_check_process(now, delay, None, retry).await
     }
 
@@ -644,7 +704,6 @@ impl Worker {
         usage_snapshot: Option<IdleUsageSnapshot>,
         retry: bool,
     ) -> Result<(), WorkerError> {
-        self.sync_sleep_compaction(delay).await?;
         let all_released = self
             .idle_clocks
             .loaded()
@@ -740,17 +799,28 @@ impl Worker {
         let Some(delay) = self.idle_delay else {
             return Ok(());
         };
+        let mut changed = BTreeSet::new();
         for thread in blocked {
+            let before = self.idle_clocks.compaction_deadline(&thread, delay);
             let requested = self.thread_requested(&thread);
             self.idle_clocks
                 .set_immediate(&thread, usage.immediate_threads.contains(&thread));
-            self.idle_clocks.eligibility_changed(
-                &thread,
-                !requested && !usage.busy_threads.contains(&thread),
-                now,
-                delay,
-            );
+            if requested {
+                // Request completion rechecks local blockers; a snapshot cannot make them durable.
+                self.idle_clocks.block(&thread, IdleBlocker::Local);
+            } else {
+                self.idle_clocks.eligibility_changed(
+                    &thread,
+                    !usage.busy_threads.contains(&thread),
+                    now,
+                    delay,
+                );
+            }
+            if before != self.idle_clocks.compaction_deadline(&thread, delay) {
+                changed.insert(thread);
+            }
         }
+        self.sync_sleep_compaction(delay, Some(changed)).await?;
         self.idle_check_process(now, delay, Some(usage), false)
             .await
     }
@@ -782,7 +852,9 @@ impl Worker {
         };
         let now = Instant::now();
         let usage = self.idle_usage_snapshot(blocked.clone()).await?;
+        let mut changed = BTreeSet::new();
         for thread in blocked {
+            let before = self.idle_clocks.compaction_deadline(&thread, delay);
             let requested = self.thread_requested(&thread);
             self.idle_clocks
                 .set_immediate(&thread, usage.immediate_threads.contains(&thread));
@@ -792,7 +864,11 @@ impl Worker {
                 now,
                 delay,
             );
+            if before != self.idle_clocks.compaction_deadline(&thread, delay) {
+                changed.insert(thread);
+            }
         }
+        self.sync_sleep_compaction(delay, Some(changed)).await?;
         self.idle_check_process(now, delay, Some(usage), false)
             .await
     }
@@ -826,7 +902,7 @@ impl Worker {
             self.idle_delay = None;
             self.idle_clocks = IdleClocks::default();
             self.idle_deadline = None;
-            self.sync_sleep_compaction(Duration::ZERO).await?;
+            self.sync_sleep_compaction(Duration::ZERO, None).await?;
             return Ok(());
         };
         let newly_enabled = self.idle_delay.is_none();
@@ -834,6 +910,7 @@ impl Worker {
         if newly_enabled || !self.idle_clocks.is_initialized() {
             self.idle_snapshot(now, delay).await
         } else {
+            self.sync_sleep_compaction(delay, None).await?;
             self.idle_deadline = next_deadline(&self.idle_clocks, self.idle_delay);
             self.idle_state_changed(now);
             Ok(())
@@ -858,6 +935,10 @@ impl Worker {
             self.forget_thread_proofs(thread);
             self.idle_clocks.remove_loaded(thread, Instant::now());
             self.idle_deadline = next_deadline(&self.idle_clocks, self.idle_delay);
+            if let Some(delay) = self.idle_delay {
+                self.sync_sleep_compaction(delay, Some(BTreeSet::from([thread.to_owned()])))
+                    .await?;
+            }
             return Ok(());
         }
         self.idle_clocks.loaded.insert(thread.to_owned());
@@ -870,10 +951,11 @@ impl Worker {
             let unused = self.thread_unused(thread).await?;
             self.idle_clocks
                 .eligibility_changed(thread, unused, Instant::now(), delay);
-            self.sync_sleep_compaction(delay).await?;
+            self.sync_sleep_compaction(delay, Some(BTreeSet::from([thread.to_owned()])))
+                .await?;
             self.idle_deadline = next_deadline(&self.idle_clocks, self.idle_delay);
         } else {
-            self.idle_thread_touched(thread);
+            self.idle_thread_touched(thread).await?;
         }
         Ok(())
     }
@@ -1221,6 +1303,7 @@ mod tests {
         let generation = Generation(7);
         let handle = ProviderHandle::for_account("default");
         let mut status = SessionStatus {
+            initialized_at: None,
             supervisor_write_deduplication: false,
             barrier_set: false,
             held_entries: 0,
@@ -1232,6 +1315,8 @@ mod tests {
                 open_attempted: true,
                 initialization: InitializationStatus::Ready,
                 info: Some(AttachmentInfo {
+                    spawn_started_at: None,
+                    initialized_at: None,
                     handle,
                     generation,
                     pid: 1,

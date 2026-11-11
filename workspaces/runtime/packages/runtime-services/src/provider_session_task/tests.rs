@@ -14,12 +14,64 @@ pub(super) fn panic_at(point: u8) {
 struct Factory(std::sync::Mutex<Option<ProviderAttachment>>);
 
 #[test]
+fn queued_input_keeps_admission_boundary() {
+    use studio_runtime_schema::provider_timing::{BoundaryStamp, ProviderBoundaryTiming};
+    let accepted = BoundaryStamp {
+        boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+        unix_seconds: 1000.,
+        monotonic_ns: 600_000_000_000,
+    };
+    let queued = BoundaryStamp {
+        boot_id: Some("00000000-0000-0000-0000-000000000001".parse().unwrap()),
+        unix_seconds: 400.,
+        monotonic_ns: 0,
+    };
+    let (owner, _inbox) = mpsc::channel(1);
+    let mut prepared = PreparedRequest {
+        spec: RequestSpec {
+            id: RequestId::Number(1),
+            operation_id: OperationId("request".into()),
+            method: Method::TurnStart,
+            params: studio_json::json!({}),
+            thread_id: Some("thread".into()),
+            lightweight: false,
+            timeout_ms: 1000,
+        },
+        prepared_at_ms: 1000,
+        write: None,
+        generation: Generation(7),
+        owner,
+        boundary_timing: Some(Box::new(ProviderBoundaryTiming {
+            accepted: Some(accepted),
+            ..Default::default()
+        })),
+    };
+    prepared.queued_input(queued);
+    let mut timing = prepared.recovery_record().boundary_timing.unwrap();
+    timing.derive_durations();
+    assert_eq!(timing.accepted, Some(accepted));
+    assert_eq!(timing.enqueued, Some(queued));
+    assert_eq!(timing.enqueued_to_accepted_ms, Some(600_000.));
+    prepared.boundary_timing.as_mut().unwrap().enqueued = None;
+    prepared.queued_input(BoundaryStamp {
+        boot_id: Some("00000000-0000-0000-0000-000000000002".parse().unwrap()),
+        monotonic_ns: 60_000_000_000,
+        ..queued
+    });
+    let mut timing = prepared.recovery_record().boundary_timing.unwrap();
+    timing.derive_durations();
+    assert_eq!(timing.accepted, Some(accepted));
+    assert_eq!(timing.enqueued_to_accepted_ms, None);
+}
+
+#[test]
 fn lifecycle_capability_requires_exact_ready_connection_and_boolean_proof() {
     use studio_runtime_process::provider_seam::AttachmentInfo;
     use studio_runtime_schema::provider_lifecycle::CLAUDE_STEER_COMPLETION_RECEIPTS as CAPABILITY;
     let handle = ProviderHandle::for_account("owner");
     let generation = Generation(7);
     let status = SessionStatus {
+        initialized_at: None,
         supervisor_write_deduplication: false,
         generation,
         initialization: InitializationStatus::Ready,
@@ -34,6 +86,8 @@ fn lifecycle_capability_requires_exact_ready_connection_and_boolean_proof() {
             // Direct stdio has no supervisor handshake state. SessionState owns readiness.
             initialization: InitializationStatus::AwaitingReply,
             info: Some(AttachmentInfo {
+                spawn_started_at: None,
+                initialized_at: None,
                 handle: handle.clone(),
                 generation,
                 pid: 42,
@@ -122,6 +176,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
                         CommandReceipt::CachedInitialize(studio_json::json!({}))
                     } else {
                         CommandReceipt::Written {
+                            written_at: None,
                             remote_id: None,
                             duplicate: false,
                         }
@@ -205,6 +260,7 @@ async fn panic_after_take_after_mutation_and_with_outstanding_receipt_retains_ev
         FAULT.with(|fault| fault.set(point));
         entries
             .send(JournalEntry {
+                boundary_at: None,
                 received_at_ms: if point == 4 { 200 } else { 1 },
                 cursor: EventCursor(1),
                 generation: Generation(1),
@@ -256,6 +312,7 @@ async fn closure_panic_unknown_batch_does_not_return_unknown_twice() {
         {
             reply
                 .send(CommandReceipt::Written {
+                    written_at: None,
                     remote_id: None,
                     duplicate: false,
                 })
@@ -301,6 +358,7 @@ async fn closure_panic_unknown_batch_does_not_return_unknown_twice() {
             initialize_operation: OperationId("init".into()),
             request_id_prefix: None,
             recovered: vec![RecoveredRequest {
+                boundary_timing: None,
                 ticket: recovered_ticket.clone(),
                 operation_id: OperationId("r44".into()),
                 thread_id: None,
@@ -317,6 +375,7 @@ async fn closure_panic_unknown_batch_does_not_return_unknown_twice() {
     FAULT.with(|f| f.set(2));
     entries
         .send(JournalEntry {
+            boundary_at: None,
             cursor: EventCursor(1),
             generation: Generation(1),
             received_at_ms: 1,

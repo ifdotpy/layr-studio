@@ -38,6 +38,38 @@ function rawReplies(bridge: BridgeHarness, requests: object[]) {
 
 const fixture = new URL("./stop-receipts.fixture.mts", import.meta.url);
 
+for (const approvalPolicy of ["never", "on-request"] as const) {
+  for (const sandbox of [
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+  ] as const) {
+    test(`${approvalPolicy} and ${sandbox} map to the expected SDK permission mode`, async () => {
+      const bridge = await startBridge(
+        new URL("./live-permissions.fixture.mts", import.meta.url),
+        "permission-wire-",
+        { thread: { approvalPolicy, sandbox } },
+      );
+      try {
+        await bridge.call("turn/start", {
+          threadId: bridge.thread,
+          input: [{ type: "text", text: "check permission mode" }],
+        });
+        assert.equal(
+          (await bridge.note("fixture/options")).params.mode,
+          approvalPolicy === "never"
+            ? "bypassPermissions"
+            : sandbox === "read-only"
+              ? "plan"
+              : "default",
+        );
+      } finally {
+        await bridge.close();
+      }
+    });
+  }
+}
+
 // Boundary hardening: these deliberately malformed envelopes are test inputs,
 // not evidence that the Rust caller produces them.
 for (const malformed of [
@@ -45,6 +77,9 @@ for (const malformed of [
   { result: null, error: { code: -1, message: "ambiguous" } },
   { error: null },
   { error: { code: -1 } },
+  { result: null },
+  { result: { action: "invented" } },
+  { result: { action: "accept", content: 4 } },
 ]) {
   test(`a malformed callback keeps its waiter: ${JSON.stringify(malformed)}`, async () => {
     const bridge = await startBridge(
@@ -68,12 +103,12 @@ for (const malformed of [
       bridge.process.stdin?.write(
         JSON.stringify({
           id: request.id,
-          result: null,
+          result: { action: "cancel" },
           fixtureCallback: true,
         }) + "\n",
       );
       assert.deepEqual((await bridge.note("fixture/callback")).params, {
-        value: null,
+        value: { action: "cancel" },
         decodes: 1,
       });
     } finally {
@@ -84,7 +119,9 @@ for (const malformed of [
 
 test("callback success and errors decode once and ignore unmatched ids", async () => {
   for (const reply of [
-    { result: null },
+    { result: { action: "cancel" } },
+    { result: { action: "decline", content: null } },
+    { result: { action: "cancel", content: null } },
     { result: { action: "accept", content: {} } },
     { error: { code: -1, message: "fixture refusal" } },
   ]) {
@@ -116,7 +153,13 @@ test("callback success and errors decode once and ignore unmatched ids", async (
         (await bridge.note("fixture/callback")).params,
         reply.error
           ? { error: reply.error.message, decodes: 1 }
-          : { value: reply.result, decodes: 1 },
+          : {
+              value:
+                reply.result.content === null
+                  ? { action: reply.result.action }
+                  : reply.result,
+              decodes: 1,
+            },
       );
     } finally {
       await bridge.close();
@@ -124,15 +167,15 @@ test("callback success and errors decode once and ignore unmatched ids", async (
   }
 });
 
-test("requests without params retain the empty parameter default", async () => {
+test("requests must carry the generated object parameter contract", async () => {
   const bridge = await startBridge(fixture);
   try {
     const [reply] = await rawReplies(bridge, [
       { id: "raw-list", method: "thread/list" },
     ]);
     assert.ok(reply);
-    assert.equal(reply.error, undefined);
-    assert.ok(reply.result);
+    assert.ok(reply.error);
+    assert.equal(reply.result, undefined);
   } finally {
     await bridge.close();
   }
@@ -206,6 +249,18 @@ test("concurrent interrupts revalidate a reserved turn after session lookup", as
   } finally {
     await fs.writeFile(path.join(bridge.root, ".release-save"), "");
     await pending;
+    await bridge.close();
+  }
+});
+
+test("nonobject parameters never become an empty initialization request", async () => {
+  const bridge = await startBridge(fixture);
+  try {
+    const [reply] = await rawReplies(bridge, [
+      { id: "raw-invalid-params", method: "initialize", params: null },
+    ]);
+    assert.ok(reply && "error" in reply && !("result" in reply));
+  } finally {
     await bridge.close();
   }
 });

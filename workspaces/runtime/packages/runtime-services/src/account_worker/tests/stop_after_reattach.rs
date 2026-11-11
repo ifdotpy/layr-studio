@@ -280,6 +280,7 @@ async fn ending_after_worker_reattach_ends_the_turn_work(ending: Ending) {
         json!({"threadId":"fake-thread-0","turnId":"turn"})
     );
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -293,6 +294,7 @@ async fn ending_after_worker_reattach_ends_the_turn_work(ending: Ending) {
     assert_eq!(clean.value["method"], "thread/backgroundTerminals/clean");
     assert_eq!(clean.value["params"], json!({"threadId":"fake-thread-0"}));
     let _ignored = clean.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -378,6 +380,7 @@ async fn deletion_with_refused_stop_work(method: studio_runtime_providers::Metho
         let interrupt = peer.next_write().await;
         assert_eq!(interrupt.value["method"], "turn/interrupt");
         let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -427,6 +430,7 @@ async fn deletion_with_refused_stop_work(method: studio_runtime_providers::Metho
     };
     assert_eq!(retry.value["method"], expected);
     let _ignored = retry.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -435,6 +439,7 @@ async fn deletion_with_refused_stop_work(method: studio_runtime_providers::Metho
         let cleanup = peer.next_write().await;
         assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
         let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -513,6 +518,7 @@ async fn late_interrupt_confirmation_cleans_without_reattach() {
     let interrupt = peer.next_write().await;
     assert_eq!(interrupt.value["method"], "turn/interrupt");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -522,6 +528,7 @@ async fn late_interrupt_confirmation_cleans_without_reattach() {
     let cleanup = peer.next_write().await;
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -588,6 +595,7 @@ async fn late_cleanup_confirmation_settles_without_reattach() {
     let interrupt = peer.next_write().await;
     assert_eq!(interrupt.value["method"], "turn/interrupt");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -595,6 +603,7 @@ async fn late_cleanup_confirmation_settles_without_reattach() {
     let cleanup = peer.next_write().await;
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -684,6 +693,7 @@ async fn disconnected_late_interrupt_confirmation_cleans_without_another_reattac
     let interrupt = peer.next_write().await;
     assert_eq!(interrupt.value["method"], "turn/interrupt");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -695,6 +705,7 @@ async fn disconnected_late_interrupt_confirmation_cleans_without_another_reattac
     let cleanup = peer.next_write().await;
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -753,6 +764,7 @@ async fn deletion_lost_interrupt_reply_stays_unconfirmed_without_resending() {
     let wire = peer.next_write().await;
     assert_eq!(wire.value["method"], "turn/interrupt");
     let _ignored = wire.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -773,6 +785,7 @@ async fn deletion_lost_interrupt_reply_stays_unconfirmed_without_resending() {
     let cleanup = peer.next_write().await;
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -849,6 +862,7 @@ async fn delete_settled_turn_cleans_its_running_background_command() {
     };
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1143,6 +1157,7 @@ async fn remote_delete_waits_for_the_remote_provider_stop() {
     let interrupt = peer.next_write().await;
     assert_eq!(interrupt.value["method"], "turn/interrupt");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1150,6 +1165,7 @@ async fn remote_delete_waits_for_the_remote_provider_stop() {
     let cleanup = peer.next_write().await;
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1224,6 +1240,7 @@ async fn deleted_command_without_process_id_accepts_its_completion() {
         let wire = peer.next_write().await;
         assert_eq!(wire.value["method"], expected);
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });
@@ -1284,6 +1301,7 @@ async fn completed_interrupted_turn_does_not_send_a_second_cleanup() {
     let interrupt = peer.next_write().await;
     assert_eq!(interrupt.value["method"], "turn/interrupt");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1305,6 +1323,7 @@ async fn completed_interrupted_turn_does_not_send_a_second_cleanup() {
         .await
         .unwrap();
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1399,6 +1418,7 @@ async fn project_delete_stops_settled_background_commands_once() {
     };
     assert_eq!(cleanup.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = cleanup.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1520,6 +1540,7 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending, refuse
         json!({"threadId":"fake-thread-0","turnId":"turn"})
     );
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1552,6 +1573,7 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending, refuse
         return;
     }
     let _ignored = clean.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1732,6 +1754,7 @@ async fn stop_while_a_retained_provider_has_no_worker_ends_its_turn_once(window:
         json!({"threadId":"fake-thread-0","turnId":"turn"})
     );
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1740,6 +1763,7 @@ async fn stop_while_a_retained_provider_has_no_worker_ends_its_turn_once(window:
     assert_eq!(clean.value["method"], "thread/backgroundTerminals/clean");
     assert_eq!(clean.value["params"], json!({"threadId":"fake-thread-0"}));
     let _ignored = clean.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1832,6 +1856,7 @@ async fn proven_unsent_interrupt_reuses_stop_identity_after_reattach() {
     let retry = tokio::select! { wire = peer.next_write() => wire, () = worker_barrier(&worker) => panic!("known-unsent interrupt was stranded") };
     assert_eq!(retry.value["method"], "turn/interrupt");
     let _ignored = retry.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1839,6 +1864,7 @@ async fn proven_unsent_interrupt_reuses_stop_identity_after_reattach() {
     let clean = peer.next_write().await;
     assert_eq!(clean.value["method"], "thread/backgroundTerminals/clean");
     let _ignored = clean.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1890,6 +1916,7 @@ async fn stop_interrupt_with_a_lost_reply_is_not_sent_again_after_reattach() {
     };
     assert_eq!(interrupt.value["method"], "turn/interrupt");
     let _ignored = interrupt.receipt.send(CommandReceipt::Written {
+        written_at: None,
         remote_id: None,
         duplicate: false,
     });
@@ -1931,6 +1958,7 @@ async fn stop_interrupt_with_a_lost_reply_is_not_sent_again_after_reattach() {
             _ => {}
         }
         let _ignored = wire.receipt.send(CommandReceipt::Written {
+            written_at: None,
             remote_id: None,
             duplicate: false,
         });

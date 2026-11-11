@@ -7,11 +7,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+studio-codex-protocol = { path = "../codex-protocol" }
 studio-db-api = { path = "../db-api", optional = true }
 studio-observable-codegen = { path = "../observable-codegen" }
 studio-client-domain = { path = "../../../client/packages/client-domain" }
 studio-request-signing = { path = "../request-signing" }
-schemars.workspace = true
+schemars = { workspace = true, features = ["uuid1"] }
 data-encoding = { workspace = true }
 jsonschema = { workspace = true }
 regex.workspace = true

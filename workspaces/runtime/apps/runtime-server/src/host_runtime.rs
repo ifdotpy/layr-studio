@@ -942,6 +942,8 @@ mod voice_composition_tests {
                 handle: handle.clone(),
                 open_attempted: true,
                 info: Some(AttachmentInfo {
+                    spawn_started_at: None,
+                    initialized_at: None,
                     handle: handle.clone(),
                     generation,
                     pid: 42,
@@ -997,6 +999,7 @@ mod voice_composition_tests {
                                 }
                             }
                             let _ignored = reply.send(CommandReceipt::Written {
+                                written_at: None,
                                 remote_id: None,
                                 duplicate: false,
                             });
@@ -1027,6 +1030,7 @@ mod voice_composition_tests {
                             cursor += 1;
                             if events
                                 .send(JournalEntry {
+                                    boundary_at: None,
                                     received_at_ms: cursor,
                                     cursor: EventCursor(cursor),
                                     generation,

@@ -72,6 +72,7 @@ impl RetainedAccountSession for CodexSession {
             | other @ Method::ThreadResume
             | other @ Method::ThreadRead
             | other @ Method::ThreadTurnsList
+            | other @ Method::ThreadTurnsItemsList
             | other @ Method::TurnStart
             | other @ Method::TurnSteer
             | other @ Method::TurnInterrupt

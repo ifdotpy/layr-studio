@@ -1,6 +1,8 @@
+pub(crate) use crate::agent_columns::typed::record::deserialize_agent_epoch;
 use crate::cached_sql::CachedSql;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
+use studio_runtime_schema::queue_command::Field;
 
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
@@ -1698,6 +1700,54 @@ impl JsonRecord for WorkspaceOperationRecord {
         Some(&self.id)
     }
 }
+/// The same types and omission rules as AgentRecord for rule decision fields.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleOwnerRecord {
+    id: AgentId,
+    root_id: AgentId,
+    #[serde(deserialize_with = "crate::records::deserialize_agent_epoch")]
+    epoch: i64,
+    status: crate::AgentStatus,
+    #[serde(
+        default,
+        deserialize_with = "crate::records::deserialize_optional_safe_counter"
+    )]
+    compactions: Option<u64>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    archived: Field<bool>,
+    account_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thread_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_wake: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deleted_at: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    restart_recovery: Option<studio_runtime_schema::recovery_record::RecoveryFields>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disconnect_recovery: Option<studio_runtime_schema::recovery_record::RecoveryFields>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    native_failure_hold: Field<crate::records::NativeFailureHold>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approval_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox: Option<crate::records::AgentSandbox>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    profile: Field<Value>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    role: Field<studio_runtime_schema::creation_intent::AgentRole>,
+}
+
+impl RuleOwnerRecord {
+    pub fn id(&self) -> &AgentId {
+        &self.id
+    }
+    pub fn value(&self) -> Value {
+        crate::projection_value(self)
+    }
+}
+
 pub use studio_runtime_schema::rule_record::RuleRecord;
 impl JsonRecord for RuleRecord {
     type Id = String;
@@ -2524,6 +2574,15 @@ pub fn decode_agent_record(
     encoded: &str,
 ) -> StoreResult<AgentRecord> {
     AgentRecord::decode_stored(connection, row_id, encoded)
+}
+
+pub(crate) fn decode_agent_projection<R: DeserializeOwned>(
+    row_id: &str,
+    encoded: &str,
+) -> StoreResult<R> {
+    studio_json::from_str::<studio_runtime_schema::json_object::JsonObject<R>>(encoded)
+        .map(|record| record.0)
+        .map_err(|_| invalid_agent_field(row_id, "", "record_decode", None))
 }
 
 pub(crate) fn parse_agent_record(row_id: &str, encoded: &str) -> StoreResult<AgentRecord> {

@@ -1,8 +1,20 @@
+import { CLAUDE_RUNTIME_SDK_VERSION } from "./sdk-version.ts";
+import {
+  decodeLegacyMoveProof,
+  decodeLegacyMoveSession,
+} from "./legacy-move-bundle.ts";
+import { definedFields } from "./sdk-wire-values.ts";
+import {
+  decodeBridgeInput,
+  decodeBridgeServerResult,
+  InvalidBridgeRequest,
+  decodeBridgeOutbound,
+  decodeBridgeProviderOptions,
+} from "./bridge-decode.ts";
 import type {
   BridgeMethod,
   BridgeResult,
   BridgeRequest,
-  BridgeResponse,
   BridgeRpcId,
   BridgeServerMethod,
   BridgeServerParams,
@@ -15,6 +27,7 @@ import type {
   BridgeNotificationMethod,
   BridgeNotificationParams,
   BridgeHistoricalItemEvent,
+  BridgeOutbound,
 } from "./bridge-protocol.ts";
 import type { CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import type { AskUserQuestionInput } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
@@ -43,10 +56,7 @@ import type {
 import type { InputGroup, StudioInputMessage } from "./input-messages.ts";
 import type { Limits } from "./features.ts";
 import { sdkSettings } from "./sdk-contract-gaps.ts";
-import {
-  handledSdkMessages,
-  handledSdkSystemMessages,
-} from "./sdk-message-policy.ts";
+import { createSdkMessageDiagnostics } from "./sdk-message-policy.ts";
 import {
   claudeTurnStatus,
   isClaudeResultLifecycle,
@@ -260,13 +270,15 @@ const externalConfigs = new Map<
   Awaited<ReturnType<typeof externalCatalog>>["configs"]
 >();
 
-type BridgeProviderOptions = Pick<
-  import("./runtime-contract.generated.ts").ClaudeSessionSettings,
-  "autoCompactWindow" | "customModels"
-> &
-  Pick<Options, "extraArgs">;
-const providerOptions: BridgeProviderOptions = JSON.parse(
+type BridgeProviderOptions =
+  import("./bridge-wire.generated.ts").BridgeProviderOptions;
+const providerOptions: BridgeProviderOptions = decodeBridgeProviderOptions(
   process.env.STUDIO_CLAUDE_OPTIONS || "{}",
+);
+
+const sdkMessageDiagnostics = createSdkMessageDiagnostics(
+  (text) => process.stderr.write(text),
+  CLAUDE_RUNTIME_SDK_VERSION,
 );
 
 const STUDIO_INPUT_NAMESPACE = "8d95e191-763a-4ee2-a462-7d27f981f138";
@@ -351,11 +363,12 @@ const queries = new Map<string, ActiveQuery>(),
     {
       method: BridgeServerMethod;
       params: BridgeServerParams<BridgeServerMethod>;
-      resolve: (reply: BridgeResponse) => void;
+      resolve: (result: unknown) => void;
       reject: (error: unknown) => void;
     }
   >();
 const pendingTurnReceipts = new Set<string>();
+const firstModelOutputs = new WeakSet<Turn>();
 const PREPARATION_TIMEOUT_MS = 20_000;
 const PASSIVE_ACCOUNT_TIMEOUT_MS = 8_000;
 // A cold Claude process can need more than 20 seconds under launchd limits.
@@ -473,7 +486,7 @@ function stdoutRoom() {
 process.on("exit", () => {
   if (stdoutLines.length) process.stdout.write(stdoutLines.join(""));
 });
-const send = (value: unknown) => {
+const send = (value: BridgeOutbound) => {
   const line = JSON.stringify(value) + "\n";
   stdoutLines.push(line);
   stdoutQueued += line.length;
@@ -485,7 +498,7 @@ const send = (value: unknown) => {
 const emit = <M extends BridgeNotificationMethod>(
   method: M,
   params: BridgeNotificationParams<M>,
-) => send({ method, params });
+) => send(decodeBridgeOutbound({ method, params }));
 const commands = createCommandTransport({ root, emit });
 const limits = stallLimits();
 // Outstanding Studio requests per thread. While Studio owns a wait (an
@@ -533,10 +546,13 @@ const request = <M extends BridgeServerMethod>(
     pending.set(id, {
       method,
       params,
-      resolve: (reply) => {
+      resolve: (value) => {
+        // Validate before removing the waiter or applying any effects. A bad
+        // reply does not settle the request or authorize repeating it.
+        const result = decodeBridgeServerResult(method, value);
+        pending.delete(id);
         cleanup();
-        // The decoded envelope's id selects this method's payload contract.
-        if ("result" in reply) resolve(reply.result as BridgeServerResult<M>);
+        resolve(result);
       },
       reject: (error) => {
         cleanup();
@@ -544,7 +560,7 @@ const request = <M extends BridgeServerMethod>(
       },
     });
     signal?.addEventListener("abort", abort, { once: true });
-    send({ id, method, params });
+    send(decodeBridgeOutbound({ id, method, params }));
   });
 const persist = sessionStore.persist;
 // A full disk must not end a running turn: the session stays in memory and the
@@ -613,7 +629,7 @@ function nativeReviewerEnvironment(
 const settings = (s: Pick<Session, "cwd"> & Partial<Session>): Options =>
   fileCheckpointOptions({
     cwd: s.cwd,
-    ...(s.claude?.sandbox ? { sandbox: s.claude.sandbox } : {}),
+    ...(s.claude?.sandbox ? { sandbox: definedFields(s.claude.sandbox) } : {}),
     pathToClaudeCodeExecutable: process.env.STUDIO_CLAUDE_BIN || "claude",
     settingSources: s.moveProof ? [] : ["user", "project", "local"],
     ...(s.moveProof
@@ -1047,7 +1063,9 @@ async function currentExternalProof(
     ? expected.map((server) => server.alias)
     : externalAliases(proof);
   if (!aliases.length) return { catalogs: [], configs: {}, transports: {} };
-  return movableExternalCatalog(aliases, () => provenExternalCatalog(s, expected, aliases, proof));
+  return movableExternalCatalog(aliases, () =>
+    provenExternalCatalog(s, expected, aliases, proof),
+  );
 }
 async function provenExternalCatalog(
   s: Pick<Session, "cwd" | "moveProof"> & Partial<Pick<Session, "id">>,
@@ -1227,7 +1245,7 @@ function historicalItemEvent(
     item: { ...item, id: item.id, type: item.type },
     ...receiptTimes,
   } satisfies BridgeHistoricalItemEvent;
-  send({ method, params });
+  send(decodeBridgeOutbound({ method, params }));
 }
 // A submitted steer whose echo arrives after its turn ended.
 function submittedSteer(s: Session, nativeId: string | undefined) {
@@ -1315,13 +1333,24 @@ function limitReached(
 const permissionMode = (
   s: Pick<Session, "claude" | "approvalPolicy" | "sandbox">,
   p: Pick<Session, "approvalPolicy"> = {},
-) =>
-  s.claude?.permissionMode ||
-  ((p.approvalPolicy || s.approvalPolicy) === "never"
-    ? "bypassPermissions"
-    : s.sandbox === "read-only"
-      ? "plan"
-      : "default");
+): NonNullable<Options["permissionMode"]> => {
+  if (s.claude?.permissionMode) return s.claude.permissionMode;
+  // Omitted values preserve the existing interactive, writable-session policy.
+  const approvalPolicy = p.approvalPolicy ?? s.approvalPolicy ?? "on-request";
+  const sandbox = s.sandbox ?? "workspace-write";
+  switch (approvalPolicy) {
+    case "never":
+      return "bypassPermissions";
+    case "on-request":
+      switch (sandbox) {
+        case "read-only":
+          return "plan";
+        case "workspace-write":
+        case "danger-full-access":
+          return "default";
+      }
+  }
+};
 async function flags(
   s: Pick<Session, "model" | "claude">,
   p: Partial<BridgeTurnParams> = {},
@@ -1442,7 +1471,7 @@ function finishTurn(
           status,
           error: turn.error,
           ...(state.unappliedSteers.length
-            ? { unappliedSteers: state.unappliedSteers }
+            ? { unappliedSteers: state.unappliedSteers.map((id) => id ?? null) }
             : {}),
           ...(turn.startOutcome === "not_applied"
             ? {
@@ -1953,8 +1982,8 @@ async function sessionOptions(
           }
         : { behavior: "cancelled" };
     },
-    onElicitation: (value, options) =>
-      request(
+    onElicitation: async (value, options) => {
+      const { content, ...result } = await request(
         "mcpServer/elicitation/request",
         {
           threadId: s.id,
@@ -1965,7 +1994,10 @@ async function sessionOptions(
           ...(value as Omit<typeof value, "serverName">),
         },
         options.signal,
-      ),
+      );
+      // Rust sends null for declined/cancelled cards; the SDK expects omission.
+      return content == null ? result : { ...result, content };
+    },
   };
   return { options, externalMcpServers, mode };
 }
@@ -2264,6 +2296,8 @@ async function startSession(
     admit!();
     active.readyResolve();
     for await (const m of q) {
+      const disposition = sdkMessageDiagnostics(m);
+      if (disposition.kind === "Ignored") continue;
       if (m.type === "result" && !isClaudeResultLifecycle(m)) {
         // AsyncIteratorClose can wait for the native process. Retire its query
         // ownership now so timers and in-flight tool recovery cannot finalize it.
@@ -2275,6 +2309,7 @@ async function startSession(
         // reconciliation. Throwing would route through finishTurn as failed.
         return;
       }
+      if (disposition.kind === "Unknown") continue;
       const parentToolUseId =
         "parent_tool_use_id" in m ? m.parent_tool_use_id : undefined;
       const room = stdoutRoom();
@@ -2288,7 +2323,6 @@ async function startSession(
       if (queries.get(s.id) !== active) break;
       active.lastEventAt = Date.now();
       if (active.toolClocks.size) armStallWatch();
-      if (handledSdkMessages[m.type] === false) continue;
       if (
         active.turn &&
         (m.type === "assistant" ||
@@ -2420,7 +2454,6 @@ async function startSession(
         continue;
       }
       if (m.type === "system") {
-        if (handledSdkSystemMessages[m.subtype] === false) continue;
         if (
           m.subtype === "status" &&
           m.status === "requesting" &&
@@ -2606,6 +2639,22 @@ async function startSession(
           });
       } else if (m.type === "stream_event") {
         const e = m.event;
+        if (
+          e.type === "content_block_delta" &&
+          !firstModelOutputs.has(turn) &&
+          ((e.delta.type === "text_delta" && e.delta.text.length > 0) ||
+            (e.delta.type === "thinking_delta" &&
+              e.delta.thinking.length > 0) ||
+            (e.delta.type === "input_json_delta" &&
+              e.delta.partial_json.length > 0))
+        ) {
+          firstModelOutputs.add(turn);
+          emit("item/modelOutput/firstDelta", {
+            threadId: s.id,
+            turnId: turn.id,
+          });
+        }
+
         if (e.type === "message_start") {
           active.messageId = e.message.id;
           active.idleRequest = {
@@ -3051,6 +3100,7 @@ async function handle(
   const { method, params: p } = request;
   if (
     isRecord(p) &&
+    "threadId" in p &&
     typeof p.threadId === "string" &&
     p.threadId &&
     [
@@ -3063,6 +3113,7 @@ async function handle(
     assertNativeSessionReady(await session(p.threadId));
   if (
     isRecord(p) &&
+    "threadId" in p &&
     typeof p.threadId === "string" &&
     p.threadId &&
     [
@@ -3229,7 +3280,7 @@ async function handle(
 
     case "claude/movePreflight": {
       const { method, params: p } = request;
-      const source = p.proof;
+      const source = decodeLegacyMoveProof(p.proof);
       if (source.session.model !== p.model)
         throw new Error("The saved Claude model differs from preflight");
       const proof = await proofOptions(
@@ -3273,21 +3324,22 @@ async function handle(
 
     case "claude/moveImport": {
       const { method, params: p } = request;
+      const imported = decodeLegacyMoveSession(p.session);
       const existing = await sessionStore
-        .metadata(p.session.id)
+        .metadata(imported.id)
         .catch(() => null);
-      const active = queries.get(p.session.id);
+      const active = queries.get(imported.id);
       if (active && (active.turn || active.tasks.size || queryHasInput(active)))
         throw new Error("The destination Claude session is active");
-      const owner = existing && (await session(p.session.id));
+      const owner = existing && (await session(imported.id));
       if (
         owner &&
-        (owner.nativeId || owner.id) !== (p.session.nativeId || p.session.id)
+        (owner.nativeId || owner.id) !== (imported.nativeId || imported.id)
       )
         throw new Error(
           "The destination Claude session has a different native identity",
         );
-      let s: Session = exactSession({ ...p.session, cwd: p.cwd });
+      let s: Session = exactSession({ ...imported, cwd: p.cwd });
       if (!s.moveProof) throw new Error("Claude move proof is missing");
       s.moveProof = exactProof(s.moveProof);
       const saved = await savedPromptProof(p.path, s);
@@ -3301,7 +3353,7 @@ async function handle(
           "The effective target tool options changed before import",
         );
       const destination = await nativeDestination(s.nativeId || s.id, p.cwd);
-      discardQuery(p.session.id, active);
+      discardQuery(imported.id, active);
       await publishNative(p.path, destination, !!existing);
       if (existing) {
         const cached = await session(s.id);
@@ -3423,7 +3475,7 @@ async function handle(
               ].includes(waiting.method)
             ) {
               pending.delete(id);
-              waiting.resolve({ id, result: { decision: "accept" } });
+              waiting.resolve({ decision: "accept" });
               emit("serverRequest/resolved", { threadId: s.id, requestId: id });
             }
           }
@@ -4157,7 +4209,10 @@ async function handle(
             data: { interruptReceipt: receipt },
           },
         );
-      return receipt satisfies HandlerResult<typeof method>;
+      return {
+        cancelled: receipt.cancelled.map((id) => id ?? null),
+        still_queued: receipt.still_queued.map((id) => id ?? null),
+      } satisfies HandlerResult<typeof method>;
     }
 
     case "thread/name/set": {
@@ -4295,41 +4350,34 @@ function errorText(error: unknown): string | undefined {
   const text = errorField(error, "message");
   return typeof text === "string" ? text : undefined;
 }
-function readBridgeInput(line: string): BridgeRequest | BridgeResponse {
-  const value: unknown = JSON.parse(line);
-  if (!isRecord(value)) throw new Error("Invalid Claude bridge message");
-  if ("method" in value && !isRecord(value.params)) value.params = {};
-  if (!("method" in value)) {
-    if (
-      (typeof value.id !== "string" && typeof value.id !== "number") ||
-      "result" in value === "error" in value ||
-      ("error" in value &&
-        (!isRecord(value.error) ||
-          typeof value.error.code !== "number" ||
-          typeof value.error.message !== "string"))
-    )
-      throw new Error("Invalid Claude bridge response");
-  }
-  // Studio and this bridge own the protocol; the envelope is checked here once.
-  // Payload types come from the shared wire owner, as in the scripted child boundary.
-  return value as BridgeRequest | BridgeResponse;
-}
 
 const operations = new Map<string, Promise<unknown>>();
 const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   let message;
   try {
-    message = readBridgeInput(line);
-  } catch {
+    message = decodeBridgeInput(line);
+  } catch (error) {
+    if (error instanceof InvalidBridgeRequest && error.id !== undefined)
+      send({
+        id: error.id,
+        error: { code: error.code, message: error.message },
+      });
     return;
   }
   if (!("method" in message)) {
     const waiting = pending.get(message.id);
     if (waiting) {
-      pending.delete(message.id);
-      if ("error" in message) waiting.reject(new Error(message.error.message));
-      else waiting.resolve(message);
+      if ("error" in message) {
+        pending.delete(message.id);
+        waiting.reject(new Error(message.error.message));
+      } else {
+        try {
+          waiting.resolve(message.result);
+        } catch {
+          /* Keep an invalid reply pending. */
+        }
+      }
     }
     return;
   }
@@ -4363,9 +4411,11 @@ lines.on("line", (line) => {
         send({
           id: message.id,
           error: {
-            code: Number.isInteger((error as BridgeFailure).code)
-              ? (error as BridgeFailure).code
-              : -32000,
+            code:
+              typeof errorField(error, "code") === "number" &&
+              Number.isInteger(errorField(error, "code"))
+                ? Number(errorField(error, "code"))
+                : -32000,
             message: (error as Error).message,
             ...(error.data === undefined ? {} : { data: error.data }),
           },

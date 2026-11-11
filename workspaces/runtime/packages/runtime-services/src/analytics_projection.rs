@@ -264,6 +264,7 @@ mod tests {
     fn effect(cursor: u64, method: &str, params: Value) -> NotificationPostCommit {
         NotificationPostCommit::Analytics {
             observation: NotificationObservation {
+                boundary_at: None,
                 agent: Some(SharedJson::new(agent())),
                 method: method.into(),
                 params: SharedJson::new(params),

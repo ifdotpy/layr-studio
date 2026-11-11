@@ -1630,7 +1630,7 @@ mod request_tests {
             tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
                 [crate::monitor_policy::complete_test_monitor(json!({"id":"watch","agent":"lead","epoch":1,"status":"running","operation":{"agent":"lead","epoch":1,"accountKey":"source","connectionId":"original","rootRequestId":root,"providerRequest":admitted}})).to_string()])?;
             let key=studio_runtime_schema::provider_call_contract::transport_key("source","monitor:watch");
-            let prepared = studio_runtime_schema::provider_call_contract::TransportRequest {
+            let prepared = studio_runtime_schema::provider_call_contract::TransportRequest { boundary_timing: None,
                 id:studio_runtime_schema::provider_input::RequestId::String(key.clone()),generation:4,method,
                 operation:key.clone(),thread:None,lightweight:true,deadline:60000,unknown:false,remote_id:None,
             };

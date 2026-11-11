@@ -1,12 +1,13 @@
 //! Read persisted rule and owner records for the rules list.
 
+use crate::agent_tables::AgentsStorageRow;
 use rusqlite::{Connection, Transaction};
 
 use crate::StoreResult;
 use crate::json_record_codec::RawJsonRecord;
 use crate::peer_update_settings::{canvas_read, canvas_tx};
 use crate::planning_work::RuleRow;
-use crate::records::{AgentId, AgentRecord, RuleRecord, Table};
+use crate::records::{AgentId, AgentRecord, RuleOwnerRecord, RuleRecord, Table};
 use crate::schema::{SchemaRequirements, TableRequirement};
 
 const RULE_TABLE: TableRequirement = TableRequirement {
@@ -38,6 +39,47 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 pub struct RulesRepository;
 
 impl RulesRepository {
+    /// Owner fields that can invalidate a sampled rule decision.
+    pub const OWNER_FIELDS: &[&str] = &[
+        "epoch",
+        "status",
+        "archived",
+        "accountKey",
+        "threadId",
+        "autoWake",
+        "deletedAt",
+        "restartRecovery",
+        "disconnectRecovery",
+        "nativeFailureHold",
+        "approvalPolicy",
+        "sandbox",
+        "profile",
+        "role",
+    ];
+
+    /// Decode only decision fields and preserve source duplicate-field errors.
+    pub fn owner(connection: &Connection, id: &str) -> StoreResult<Option<RuleOwnerRecord>> {
+        let raw = studio_db_api::db_query!(
+            canvas_read(connection),
+            AgentsStorageRow,
+            scalar_raw(AgentsStorageRow::RECORD),
+            filter(AgentsStorageRow::ID.eq_ref(id))
+        )?;
+        raw.map(|raw| {
+            let owner: RuleOwnerRecord = crate::records::decode_agent_projection(id, &raw)?;
+            if owner.id().as_ref() != id {
+                return Err(crate::records::invalid_agent_field(
+                    id,
+                    "/id",
+                    "row_id_mismatch",
+                    None,
+                ));
+            }
+            Ok(owner)
+        })
+        .transpose()
+    }
+
     pub fn list(connection: &Connection) -> StoreResult<(Vec<RuleRecord>, Vec<AgentRecord>)> {
         Ok((
             // The existing physical rowid order has no db_query ordering clause.
@@ -125,6 +167,48 @@ mod tests {
                 .iter()
                 .any(|table| table.name == "runtime_agents")
         );
+    }
+
+    #[test]
+    fn rule_owner_projection_matches_the_decision_fields_of_the_full_record() {
+        let db = crate::fresh_state::test_canvas();
+        for fields in [
+            studio_json::json!({}),
+            studio_json::json!({"deletedAt":0,"archived":true,"autoWake":false}),
+            studio_json::json!({"deletedAt":1.5,"archived":false,"autoWake":true}),
+            studio_json::json!({"threadId":null,"deletedAt":null,"sandbox":null,"restartRecovery":null}),
+            studio_json::json!({"restartRecovery":{"epoch":1,"stage":"pending","autoWake":true,"threadId":null}}),
+            studio_json::json!({"threadId":"thread","archived":null,"nativeFailureHold":true,
+                "approvalPolicy":"never","sandbox":{"type":"dangerFullAccess"},
+                "profile":{"name":"profile"},"role":"implementer",
+                "disconnectRecovery":{"epoch":1,"stage":"pending","autoWake":true,"accountKey":"default","threadId":"thread"}}),
+        ] {
+            let mut raw = studio_json::json!({"id":"owner","rootId":"owner","epoch":1,"status":"idle","compactions":0,"accountKey":"default","provider":"codex","autoWake":true,"unrelatedHistory":{"text":"large transcript"}});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let agent = crate::AgentRecord::from_value(raw).unwrap();
+            crate::AgentRepository::put(&db, &agent).unwrap();
+            let full = RulesRepository::agent(&db, "owner")
+                .unwrap()
+                .unwrap()
+                .into_value();
+            let scope = crate::agent_volatile::publication_work::scope();
+            let owner = RulesRepository::owner(&db, "owner")
+                .unwrap()
+                .unwrap()
+                .value();
+            assert_eq!(
+                crate::agent_volatile::publication_work::take_full_decodes(),
+                0
+            );
+            drop(scope);
+            assert!(owner.get("unrelatedHistory").is_none());
+            for field in RulesRepository::OWNER_FIELDS {
+                assert_eq!(owner.get(field), full.get(field), "{field}");
+            }
+        }
+        assert!(RulesRepository::owner(&db, "missing").unwrap().is_none());
     }
 
     #[test]

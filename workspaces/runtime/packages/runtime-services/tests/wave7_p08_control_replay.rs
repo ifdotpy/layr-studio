@@ -61,6 +61,7 @@ impl ClaudeSessionPort for RetainedOwner {
                 | Method::ThreadResume
                 | Method::ThreadRead
                 | Method::ThreadTurnsList
+                | Method::ThreadTurnsItemsList
                 | Method::TurnStart
                 | Method::TurnSteer
                 | Method::TurnInterrupt

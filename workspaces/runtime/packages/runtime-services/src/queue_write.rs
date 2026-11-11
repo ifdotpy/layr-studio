@@ -44,6 +44,21 @@ mod receipt_tests {
             stored
         );
     }
+
+    #[test]
+    fn queue_publication_does_not_decode_the_full_agent() {
+        use studio_runtime_store::{
+            AgentRecord, AgentRepository, agent_volatile::publication_work,
+        };
+        let mut db = studio_runtime_store::test_canvas();
+        let agent = AgentRecord::from_value(studio_json::json!({"id":"agent","rootId":"agent","epoch":1,"compactions":0,"provider":"codex","accountKey":"default","status":"idle","future":{"retained":"x".repeat(65536)}})).unwrap();
+        AgentRepository::put(&db, &agent).unwrap();
+        let _scope = publication_work::scope();
+        let tx = db.transaction().unwrap();
+        super::publish_queue(&tx, "agent").unwrap();
+        assert_eq!(publication_work::take_full_decodes(), 0);
+        tx.commit().unwrap();
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -376,16 +391,27 @@ pub fn queue_snapshot(
     connection: &Connection,
     agent: &AgentRecord,
 ) -> Result<QueueSnapshot, QueueWriteError> {
-    let prepared = crate::work_policy::prepare_queue(WorkItemsRepository::queue(
+    queue_snapshot_fields(
         connection,
         &agent.id.0,
         agent.epoch,
-    )?)
-    .map_err(|error| match error {
-        crate::work_policy::WorkPolicyError::InvalidStoredObject { object, id } => {
-            invalid_stored(object, &id)
-        }
-    })?;
+        agent.queue_mutation_revision,
+    )
+}
+
+fn queue_snapshot_fields(
+    connection: &Connection,
+    agent_id: &str,
+    epoch: i64,
+    queue_mutation_revision: Option<u64>,
+) -> Result<QueueSnapshot, QueueWriteError> {
+    let prepared =
+        crate::work_policy::prepare_queue(WorkItemsRepository::queue(connection, agent_id, epoch)?)
+            .map_err(|error| match error {
+                crate::work_policy::WorkPolicyError::InvalidStoredObject { object, id } => {
+                    invalid_stored(object, &id)
+                }
+            })?;
     let assets = WorkItemsRepository::assets(connection, &prepared.asset_ids)?;
     let assets = assets
         .into_iter()
@@ -407,12 +433,12 @@ pub fn queue_snapshot(
         })
         .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
     for owner in owners {
-        let record = AgentRepository::get(connection, &AgentId::from(owner))
+        let record = QueueWriteRepository::projection_owner(connection, owner)
             .map_err(QueueWriteError::Store)?;
         let Some(record) = record else {
             return Err(invalid_stored("runtime_agents", owner));
         };
-        if !is_live(&record) {
+        if record.deleted_at.is_some_and(|at| at != 0.0) {
             return Err(invalid_stored("runtime_agents", owner));
         }
     }
@@ -453,8 +479,8 @@ pub fn queue_snapshot(
             return Err(invalid_stored("runtime_events", &id));
         }
     }
-    let revision_number = agent.queue_mutation_revision.unwrap_or(0);
-    let bytes = studio_json::to_vec(&json!([agent.epoch, revision_number, items]))?;
+    let revision_number = queue_mutation_revision.unwrap_or(0);
+    let bytes = studio_json::to_vec(&json!([epoch, revision_number, items]))?;
     let revision = studio_runtime_store::sha256_hex(&bytes);
     Ok(QueueSnapshot { items, revision })
 }
@@ -468,10 +494,17 @@ pub fn publish_queue(
     transaction: &Transaction<'_>,
     id: &str,
 ) -> studio_runtime_store::StoreResult<()> {
-    let agent = AgentRepository::get(transaction, &AgentId::from(id))?;
-    let (value, deleted) = match agent.filter(is_live) {
+    let agent = QueueWriteRepository::projection_owner(transaction, id)?;
+    let (value, deleted) = match agent.filter(|agent| !agent.deleted_at.is_some_and(|at| at != 0.0))
+    {
         Some(agent) => {
-            let snapshot = queue_snapshot(transaction, &agent).map_err(|error| match error {
+            let snapshot = queue_snapshot_fields(
+                transaction,
+                &agent.id.0,
+                agent.epoch,
+                agent.queue_mutation_revision,
+            )
+            .map_err(|error| match error {
                 QueueWriteError::Store(error) => error,
                 QueueWriteError::RequestResult(error) => {
                     StoreError::SchemaMismatch(error.to_string())

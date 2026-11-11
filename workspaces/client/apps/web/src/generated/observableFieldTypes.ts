@@ -312,6 +312,9 @@ export type AnalyticsTurnRecordFields = {
     | null
     | undefined;
   at?: components["schemas"]["AnalyticsTurnRecord"]["at"] | undefined;
+  boundaryTiming?:
+    | components["schemas"]["AnalyticsTurnRecord"]["boundaryTiming"]
+    | undefined;
   cyberAccessProgram?:
     | NonNullable<
         components["schemas"]["AnalyticsTurnRecord"]["cyberAccessProgram"]

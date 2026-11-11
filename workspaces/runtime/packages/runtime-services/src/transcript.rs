@@ -396,8 +396,7 @@ fn read_time_cursor(
     after: i64,
 ) -> Result<ReadTimeCursor, TranscriptError> {
     let after = after.max(0);
-    let actor = TranscriptRepository::agent(transaction, agent)?;
-    let deleted = actor.as_ref().is_none_or(|a| a.is_deleted());
+    let deleted = TranscriptRepository::agent_deleted(transaction, agent)?.unwrap_or(true);
     let through = studio_runtime_store::durable_seq::transcript_change_cursor(transaction, agent)?;
     let workspace_id = studio_runtime_store::SyncDocumentsRepository::workspace_id(transaction)?;
     if after > 0 && after >= through {
@@ -453,10 +452,7 @@ fn pull_scope_cached_in(
             "checkpoint": {"seq": high}
         })));
     }
-    let actor = TranscriptRepository::agent(transaction, agent)?;
-    let deleted = actor
-        .as_ref()
-        .is_none_or(studio_runtime_store::AgentRecord::is_deleted);
+    let deleted = TranscriptRepository::agent_deleted(transaction, agent)?.unwrap_or(true);
     let cache = transaction
         .query_row(
             "SELECT payload FROM sync_entities WHERE collection=?1 AND id='@revision' AND hash=?2 AND deleted=0",
@@ -494,10 +490,7 @@ fn pull_scope_in(
     if let Some(result) = pull_scope_cached_in(transaction, scope, agent, after)? {
         return Ok(result);
     }
-    let actor = TranscriptRepository::agent(transaction, agent)?;
-    let deleted = actor
-        .as_ref()
-        .is_none_or(studio_runtime_store::AgentRecord::is_deleted);
+    let deleted = TranscriptRepository::agent_deleted(transaction, agent)?.unwrap_or(true);
     let revision = TranscriptRepository::revision(transaction, agent)?;
     let payload = if deleted {
         json!({})
@@ -546,9 +539,9 @@ pub async fn item(
 }
 
 fn item_in(connection: &Connection, agent: &str, identity: &str) -> Result<Value, TranscriptError> {
-    let actor =
-        TranscriptRepository::agent(connection, agent)?.ok_or(TranscriptError::UnknownMessage)?;
-    if actor.is_deleted() {
+    let deleted = TranscriptRepository::agent_deleted(connection, agent)?
+        .ok_or(TranscriptError::UnknownMessage)?;
+    if deleted {
         return Err(TranscriptError::DeletedConversation);
     }
     let row = TranscriptRepository::resolve_item(connection, agent, identity)?
@@ -596,9 +589,9 @@ fn search_in(
 ) -> Result<Value, TranscriptError> {
     let query = query.trim();
     let limit = limit.clamp(1, 500) as usize;
-    let actor =
-        TranscriptRepository::agent(connection, agent)?.ok_or(TranscriptError::UnknownMessage)?;
-    if actor.is_deleted() {
+    let deleted = TranscriptRepository::agent_deleted(connection, agent)?
+        .ok_or(TranscriptError::UnknownMessage)?;
+    if deleted {
         return Err(TranscriptError::DeletedConversation);
     }
     if query.is_empty() {

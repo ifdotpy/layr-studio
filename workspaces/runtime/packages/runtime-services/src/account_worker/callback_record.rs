@@ -708,6 +708,7 @@ mod tests {
 
     fn request(cursor: u64, params: Value) -> JournalEntry {
         JournalEntry {
+            boundary_at: None,
             received_at_ms: 1,
             cursor: EventCursor(cursor),
             generation: Generation(7),

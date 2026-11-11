@@ -958,14 +958,15 @@ done
         matches!(&request.payload, JournalPayload::Frame(Frame::Request(frame)) if frame.id == RequestId::String(bridge.into()))
     );
     let reply = json!({"id":bridge,"result":{"contentItems":[],"success":true}});
+    let before_write = studio_runtime_process::clock::boundary_stamp();
     let written = real_write(&attachment, "tool-reply:claude", reply.clone()).await;
-    assert!(matches!(
-        written,
-        CommandReceipt::Written {
-            remote_id: None,
-            duplicate: false
-        }
-    ));
+    let after_write = studio_runtime_process::clock::boundary_stamp();
+    let CommandReceipt::Written { written_at:Some(stamp), remote_id:None, duplicate:false } = written else { panic!("fresh write carries its stdin clock") };
+    assert!(stamp.unix_seconds > 0.);
+    assert!(stamp.monotonic_ns >= before_write.monotonic_ns);
+    assert!(stamp.monotonic_ns <= after_write.monotonic_ns);
+    assert!(stamp.same_boot(before_write));
+    assert!(stamp.same_boot(after_write));
     let delivered = attachment.journal.recv().await.unwrap();
     let JournalPayload::Frame(Frame::UnknownMethod(frame)) = &delivered.payload else {
         panic!("the reply must reach the child once");

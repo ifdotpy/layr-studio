@@ -176,6 +176,7 @@ impl EventWriteRepository {
         connection: &Connection,
         id: &str,
         monotonic_ns: u128,
+        accepted: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
     ) -> StoreResult<()> {
         let key = QueueEventId::from(id);
         let table = Table::<EventMetadataRecord>::new(connection);
@@ -192,6 +193,12 @@ impl EventWriteRepository {
             }
         };
         timing.insert("enqueuedAt".to_owned(), studio_json::json!(monotonic_ns));
+        if let Some(accepted) = accepted {
+            timing.insert(
+                studio_runtime_schema::provider_timing::ACCEPTED_STAMP_FIELD.into(),
+                studio_json::json!(accepted),
+            );
+        }
         table.put_at(&key, &record)
     }
 
@@ -312,7 +319,8 @@ mod tests {
                 "CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);",
             )
             .expect("metadata table creates");
-        EventWriteRepository::mark_event_enqueued(&connection, "e", 42).expect("timing writes");
+        EventWriteRepository::mark_event_enqueued(&connection, "e", 42, None)
+            .expect("timing writes");
         let record: String = connection
             .query_row(
                 "SELECT record FROM runtime_event_meta WHERE id='e'",
@@ -342,7 +350,7 @@ mod tests {
                 [original.to_string()],
             )
             .unwrap();
-        EventWriteRepository::mark_event_enqueued(&connection, "e", 42).unwrap();
+        EventWriteRepository::mark_event_enqueued(&connection, "e", 42, None).unwrap();
         let raw: String = connection
             .query_row(
                 "SELECT record FROM runtime_event_meta WHERE id='e'",
@@ -368,7 +376,7 @@ mod tests {
             )
             .expect("corrupt metadata fixture inserts");
         assert!(matches!(
-            EventWriteRepository::mark_event_enqueued(&connection, "e", 42),
+            EventWriteRepository::mark_event_enqueued(&connection, "e", 42, None),
             Err(StoreError::InvalidStoredObject { table: "runtime_event_meta", id }) if id == "e"
         ));
         let stored: String = connection
