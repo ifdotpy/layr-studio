@@ -642,39 +642,34 @@ fn context_repair_absent_schema_is_named_without_writes() {
 }
 
 fn memory_fixture(case: &Value) -> rusqlite::Connection {
-    let db = rusqlite::Connection::open_in_memory().expect("memory fixture");
-    db.execute_batch(&studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-        CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,epoch INTEGER,kind TEXT,text TEXT,status TEXT,created REAL,turn_id TEXT,error TEXT);
-        CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT);
-        CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT,created REAL,record TEXT);
-        CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT);
-        CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-        CREATE TABLE sync_documents(seq INTEGER);
-        CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")).expect("fixture schema");
-    db.execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
-        .expect("volatile agent table creates");
+    let mut db = studio_runtime_store::test_canvas();
     ContextRepairRepository::put_agent(&db, &case["agent"]).expect("record stores");
     let row = &case["events"][0];
-    db.execute(
-        "INSERT INTO runtime_events VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-        rusqlite::params![
-            row["id"].as_str(),
-            row["agent"].as_str(),
-            row["epoch"].as_i64(),
-            row["kind"].as_str(),
-            row["text"].as_str(),
-            row["status"].as_str(),
-            row["created"].as_f64(),
-            row["turn_id"].as_str(),
-            row["error"].as_str()
-        ],
+    studio_runtime_store::QueueEventRepository::put(
+        &db,
+        &studio_runtime_store::QueueEvent {
+            id: row["id"].as_str().expect("event id").into(),
+            agent: row["agent"].as_str().expect("event agent").into(),
+            kind: row["kind"].as_str().expect("event kind").into(),
+            text: row["text"].as_str().expect("event text").into(),
+            status: row["status"].as_str().expect("event status").into(),
+            created: row["created"].as_f64().expect("event creation"),
+            epoch: row["epoch"].as_i64().expect("event epoch"),
+            turn_id: row["turn_id"].as_str().map(str::to_owned),
+            error: row["error"].as_str().map(str::to_owned),
+        },
     )
     .expect("row stores");
-    db.execute(
-        "INSERT INTO sync_entities VALUES('agent','agent',1,'fixture',?1,0)",
-        [json!({"collection":"agent","id":"agent","value":case["agent"]}).to_string()],
+    let tx = db.transaction().expect("publication transaction");
+    studio_runtime_store::SyncDocumentsRepository::put_entity(
+        &tx,
+        "agent",
+        "agent",
+        &case["agent"],
+        false,
     )
     .expect("projection fixture");
+    tx.commit().expect("projection committed");
     db
 }
 #[test]
@@ -703,11 +698,23 @@ fn context_repair_transaction_failpoints_and_replay_fast_witness() {
             db.execute("UPDATE runtime_events SET text='changed'", [])
                 .expect("interleaved event edit");
         }
+        if cut == "before-sync" {
+            use studio_runtime_store::test_fixtures::canvas::{
+                FailpointOperation, FailpointPartition, set_failpoint,
+            };
+            set_failpoint(
+                &db,
+                FailpointPartition::Changes(
+                    studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows,
+                ),
+                FailpointOperation::Insert,
+                true,
+            )
+            .expect("sync failpoint");
+        }
         if let Some((table, event)) = match cut {
             "before-event" => Some(("runtime_events", "UPDATE")),
             "before-agent" => Some(("runtime_agents", "UPDATE")),
-            // The agent views mark: an upsert, so the insert trigger always fires.
-            "before-sync" => Some(("durable_rows", "INSERT")),
             _ => None,
         } {
             db.execute_batch(&format!("CREATE TRIGGER fixture_fail BEFORE {event} ON {table} BEGIN SELECT RAISE(ABORT,'fixture-cut'); END")).expect("failpoint");

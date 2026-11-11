@@ -11,10 +11,41 @@ use studio_runtime_schema::persistence::{
     RequestIdentity,
 };
 
+use crate::consolidation_kinds::CanvasMetadataKind;
+use crate::metadata_schema::Metadata;
+use crate::peer_update_settings::{Canvas, canvas_read};
+use studio_db_api::DbQuery;
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=optional,result=i64,decode=crate::settings_schema::ClientCommandWatermarks::APPLIED,
+ tables(metadata=Metadata),columns(kind=Metadata::KIND,identity=Metadata::IDENTITY,record=Metadata::FEDERATION_RECORD,value=crate::settings_schema::ClientCommandWatermarks::APPLIED),
+ sql="SELECT json_extract({record},'$.enabled') AS {value} FROM {metadata} WHERE {kind}=?1 AND {identity}=?2")]
+struct FederationEnabled {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::IDENTITY)]
+    identity: Vec<u8>,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=optional,result=String,decode=crate::settings_schema::SidebarOrder::RECORD,
+ tables(metadata=Metadata),columns(kind=Metadata::KIND,identity=Metadata::IDENTITY,record=Metadata::FEDERATION_RECORD,value=crate::settings_schema::SidebarOrder::RECORD),
+ sql="SELECT {record} AS {value} FROM {metadata} WHERE {kind}=?1 AND {identity}=?2")]
+struct FederationRecord {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::IDENTITY)]
+    identity: Vec<u8>,
+}
+
 const TABLES: &[TableRequirement] = &[
     TableRequirement {
-        name: "runtime_federation_settings",
-        columns: &["id", "record"],
+        name: <crate::metadata_schema::Metadata as studio_db_api::Table>::NAME,
+        columns: &[
+            crate::metadata_schema::Metadata::__DB_COLUMN_KIND,
+            crate::metadata_schema::Metadata::__DB_COLUMN_IDENTITY,
+            crate::metadata_schema::Metadata::__DB_COLUMN_FEDERATION_RECORD,
+        ],
     },
     TableRequirement {
         name: "runtime_federation_identity",
@@ -70,8 +101,19 @@ struct OutboxRecord {
 
 impl FederationRepository {
     pub fn snapshot(connection: &Connection) -> StoreResult<Value> {
-        // Raw SQL: the legacy reader uses last-key-wins JSON admission for historical settings.
-        let settings = record(connection, "runtime_federation_settings", "global")?
+        let settings = canvas_read(connection)
+            .named(
+                &FederationRecord::QUERY,
+                &FederationRecord {
+                    kind: CanvasMetadataKind::FederationSettings,
+                    identity: crate::consolidation_codec::nullable_text_identity(
+                        &Some("global".into()),
+                        0,
+                    ),
+                },
+            )?
+            .map(|raw| parse_record("runtime_federation_settings", "global", &raw))
+            .transpose()?
             .unwrap_or_else(|| json!({"enabled":false}));
         let enabled = settings
             .get("enabled")
@@ -125,19 +167,29 @@ impl FederationRepository {
     }
 
     pub fn set_enabled(tx: &Transaction<'_>, enabled: bool) -> StoreResult<()> {
+        let before = tx.total_changes();
         let updated = now()?;
-        #[derive(serde::Serialize)]
-        struct SettingsWrite {
-            enabled: bool,
-            updated: f64,
+        let payload = crate::settings_schema::FederationSettingsPayload {
+            fields: crate::settings_schema::FederationSettingsFields { enabled },
+            extensions: std::collections::BTreeMap::from([(
+                "updated".into(),
+                studio_json::OwnedRawJson::from_string(studio_json::to_string(&updated)?)?,
+            )]),
+        };
+        crate::peer_update_settings::canvas_tx(tx)
+            .partition::<crate::metadata_schema::FederationSettings>()
+            .put(&crate::metadata_schema::FederationSettings {
+                identity: crate::consolidation_codec::nullable_text_identity(
+                    &Some("global".into()),
+                    0,
+                ),
+                source_rowid: 0,
+                text_key: Some("global".into()),
+                federation_record: crate::json_record_codec::ExactJson::from_value(&payload)?,
+            })?;
+        if tx.total_changes() != before {
+            crate::record_settings_change(CanvasMetadataKind::FederationSettings);
         }
-        let raw = studio_json::to_string(&SettingsWrite { enabled, updated })?;
-        crate::peer_update_settings::canvas_tx(tx).upsert(
-            &crate::settings_schema::FederationSettings {
-                id: "global".to_owned(),
-                record: crate::json_record_codec::ExactJson::from_stored(raw)?,
-            },
-        )?;
         Ok(())
     }
 
@@ -332,7 +384,24 @@ impl FederationRepository {
                 "federation room members must be unique".into(),
             ));
         }
-        if !tx.query_row("SELECT json_extract(record,'$.enabled') FROM runtime_federation_settings WHERE id='global'",[],|r|r.get::<_,bool>(0)).optional()?.unwrap_or(false){return Err(StoreError::SchemaMismatch("federation must be enabled before room changes".into()));}
+        if canvas_read(tx)
+            .named(
+                &FederationEnabled::QUERY,
+                &FederationEnabled {
+                    kind: CanvasMetadataKind::FederationSettings,
+                    identity: crate::consolidation_codec::nullable_text_identity(
+                        &Some("global".into()),
+                        0,
+                    ),
+                },
+            )?
+            .unwrap_or(0)
+            == 0
+        {
+            return Err(StoreError::SchemaMismatch(
+                "federation must be enabled before room changes".into(),
+            ));
+        }
         let (id,label,public_key)=tx.query_row("SELECT json_extract(record,'$.stateId'),json_extract(record,'$.label'),json_extract(record,'$.publicKey') FROM runtime_federation_identity WHERE id='local'",[],|r|Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?))).optional()?.ok_or_else(||StoreError::SchemaMismatch("missing local federation identity".into()))?;
         let state_id = id.ok_or_else(|| {
             StoreError::SchemaMismatch("missing local federation identity".into())
@@ -672,6 +741,118 @@ fn now() -> StoreResult<f64> {
 mod tests {
     use super::OutboxRecord;
     use studio_runtime_schema::persistence::FederationDeliveryState;
+
+    fn settings_database() -> rusqlite::Connection {
+        use super::*;
+        use studio_db_api::Table;
+        let db = Connection::open_in_memory().unwrap();
+        crate::canvas_schema::install(
+            &db,
+            &[
+                crate::metadata_schema::Metadata::descriptor(),
+                crate::access_tables::FederationPeersRow::descriptor(),
+                crate::access_tables::FederationInvitesRow::descriptor(),
+                crate::access_tables::FederationRoomsRow::descriptor(),
+                crate::access_tables::FederationIdentityRow::descriptor(),
+                crate::receipt_tables::OutboxStorageRow::descriptor(),
+            ],
+        )
+        .unwrap();
+        db
+    }
+
+    #[derive(studio_db_api::DbQuery)]
+    #[db_query(database=super::Canvas,mode=write,cardinality=none,result=(),
+      tables(metadata=super::Metadata),columns(kind=super::Metadata::KIND,identity=super::Metadata::IDENTITY,key=super::Metadata::TEXT_KEY,rowid=super::Metadata::SOURCE_ROWID,record=super::Metadata::FEDERATION_RECORD),
+      sql="INSERT INTO {metadata}({kind},{identity},{key},{rowid},{record}) VALUES(?1,?2,'global',0,?3) ON CONFLICT({kind},{identity}) DO UPDATE SET {record}=excluded.{record}")]
+    struct CorruptSettings {
+        #[db(column=super::Metadata::KIND)]
+        kind: crate::consolidation_kinds::CanvasMetadataKind,
+        #[db(column=super::Metadata::IDENTITY)]
+        identity: Vec<u8>,
+        #[db(column=crate::settings_schema::SidebarOrder::RECORD)]
+        raw: String,
+    }
+    #[test]
+    fn invalid_settings_are_refused_and_room_fence_keeps_sqlite_selection() {
+        use super::*;
+        let mut db = settings_database();
+        let tx = db.transaction().unwrap();
+        let action = studio_runtime_schema::federation_ingress::FederationRequest::CreateRoom {
+            peer_id: "peer".into(),
+            local_members: studio_json::from_str(r#"["agent"]"#).unwrap(),
+            share_names: false,
+            share_status: false,
+        };
+        for (raw, field) in [
+            (r#"{"enabled":null}"#, "enabled"),
+            (r#"{"enabled":2}"#, "enabled"),
+            (r#"{"enabled":"true"}"#, "enabled"),
+            (r#"{"enabled":false,"enabled":true}"#, "duplicate"),
+            ("not JSON", "record"),
+            ("[]", "record"),
+        ] {
+            crate::peer_update_settings::canvas_tx(&tx)
+                .named(
+                    &CorruptSettings::QUERY,
+                    &CorruptSettings {
+                        kind: CanvasMetadataKind::FederationSettings,
+                        identity: crate::consolidation_codec::nullable_text_identity(
+                            &Some("global".into()),
+                            0,
+                        ),
+                        raw: raw.into(),
+                    },
+                )
+                .unwrap();
+            if field == "duplicate" {
+                assert_eq!(
+                    FederationRepository::snapshot(&tx).unwrap()["enabled"],
+                    true,
+                    "last member wins in snapshot"
+                );
+            } else {
+                assert!(
+                    matches!(FederationRepository::snapshot(&tx), Err(StoreError::SchemaMismatch(message)) if message == format!("invalid stored object runtime_federation_settings/global: {field}"))
+                );
+            }
+            if raw.contains("false") {
+                assert!(
+                    matches!(FederationRepository::room_action(&tx,&action),Err(StoreError::SchemaMismatch(message)) if message=="federation must be enabled before room changes")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn settings_missing_disabled_and_enabled_updates_preserve_room_fence() {
+        use super::*;
+        let mut db = settings_database();
+        assert_eq!(
+            FederationRepository::snapshot(&db).unwrap()["enabled"],
+            false
+        );
+        let tx = db.transaction().unwrap();
+        let action = studio_runtime_schema::federation_ingress::FederationRequest::CreateRoom {
+            peer_id: "peer".into(),
+            local_members: studio_json::from_str(r#"["agent"]"#).unwrap(),
+            share_names: false,
+            share_status: false,
+        };
+        assert!(
+            matches!(FederationRepository::room_action(&tx, &action), Err(StoreError::SchemaMismatch(message)) if message == "federation must be enabled before room changes")
+        );
+        FederationRepository::set_enabled(&tx, true).unwrap();
+        assert_eq!(
+            FederationRepository::snapshot(&tx).unwrap()["enabled"],
+            true
+        );
+        FederationRepository::set_enabled(&tx, false).unwrap();
+        assert_eq!(
+            FederationRepository::snapshot(&tx).unwrap()["enabled"],
+            false
+        );
+    }
 
     #[test]
     fn outbox_record_accepts_persisted_shape_and_rejects_unknown_kind() {

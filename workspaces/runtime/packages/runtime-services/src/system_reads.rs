@@ -165,9 +165,6 @@ pub fn ui_summary(
         "Linux"
     };
     let mut result = json!({"ready":false,"busy":false,"system":system,"agentsRunning":0,"projects":[],"chats":[],"alerts":[],"accounts":accounts});
-    if !records::exists(connection, "sync_entities")? {
-        return Ok(result);
-    }
     // Requests are built from the approvals table at read time, so every collection
     // is read through the one entity reader, not from sync_entities.
     let mut documents = crate::entity_scope::live_documents(
@@ -241,10 +238,7 @@ pub fn ui_summary(
     let mut chats = Vec::new();
     let mut alerts = Vec::new();
     for (id, agent) in &agents {
-        if agent["source"] == "managed"
-            && truthy(agent.get("isLead"))
-            && !truthy(agent.get("sharedRoomId"))
-        {
+        if truthy(agent.get("isLead")) && !truthy(agent.get("sharedRoomId")) {
             let path = fallback(agent, "hostProjectPath", fallback(agent, "cwd", ""));
             if !projects.iter().any(|p| {
                 (truthy(p.get("id"))
@@ -417,6 +411,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn canonical_summary_is_ready_and_shows_chats() {
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        studio_runtime_store::AgentRepository::put(
+            &tx,
+            &studio_runtime_store::AgentRecord::from_value(json!({
+                "id":"chat","rootId":"chat","epoch":0,"status":"idle",
+                "compactions":0,"accountKey":"default","provider":"codex","name":"Chat","isLead":true
+            })).unwrap(),
+        ).unwrap();
+        let summary = ui_summary(&tx, None).unwrap();
+        assert_eq!(summary["ready"], true);
+        let chats = summary["chats"].as_array().unwrap();
+        assert_eq!(chats.len(), 1);
+        assert_eq!(chats[0]["id"], "chat");
+        assert_eq!(chats[0]["name"], "Chat");
+    }
+
+    #[test]
     fn summary_shows_pending_approval_questions_and_excludes_deferred_and_answering() {
         let mut db = studio_runtime_store::test_canvas();
         let agent = json!({"compactions":0,"id":"a","rootId":"a","epoch":0,"status":"idle",
@@ -484,8 +497,7 @@ mod tests {
 
     #[test]
     fn account_projection_preserves_provider_order_and_empty_labels() {
-        let mut connection =
-            rusqlite::Connection::open_in_memory().expect("fixture operation succeeds");
+        let mut connection = studio_runtime_store::test_canvas();
         let snapshot = crate::account_policy::AccountsSnapshot {
             accounts: vec![
                 json!({"id":"z","provider":"claude","status":"","label":"","email":null,"plan":null,"home":"/private/profile","credentials":{"accessToken":"must-not-leak"}}),

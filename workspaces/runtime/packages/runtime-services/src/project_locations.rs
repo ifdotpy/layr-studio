@@ -2,6 +2,7 @@
 use crate::event_write::{python_json, truthy};
 pub use crate::relocation::RelocationError as LocationError;
 use crate::relocation::{invalid, timestamp, validate};
+#[allow(unused_imports)]
 use rusqlite::{OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use studio_json::{Value, json};
@@ -144,6 +145,8 @@ mod receipt_tests {
             crate::relocation::MAX_RECORD_BYTES + 1
         );
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
         let tx = db.transaction().expect("transaction");
         assert!(
             matches!(complete_snapshot_in_transaction(&tx, "request", "peer", &body, &receipt, "local", 0.0), Err(LocationError::InvalidStored { pointer, .. }) if pointer == "record size")
@@ -254,11 +257,16 @@ mod receipt_tests {
         .expect("identity");
         let now_ms = identity.issued_ms();
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
-        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-            CREATE TABLE sync_documents(seq INTEGER);
-            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-            CREATE TABLE runtime_orchestration_settings(id TEXT,record TEXT);").expect("schema");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
+        db.execute_batch(
+            "CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            
+            
+              
+            ",
+        )
+        .expect("schema");
         studio_runtime_store::receipt_schema::create(&db).expect("request schema");
         let tx = db.transaction().expect("transaction");
         let Admission::Fresh(admitted) =
@@ -1000,10 +1008,10 @@ pub fn location_admission(
     project: &str,
     actor: Option<(&str, i64)>,
 ) -> Result<LocationAdmission, LocationError> {
-    let seq=db.query_row(
-        "SELECT s.seq FROM sync_entities s JOIN runtime_projects p ON p.id=s.id WHERE s.collection='project' AND s.id=?1 AND s.deleted=0",
-        [project],|row|row.get::<_,i64>(0),
-    ).optional()?.ok_or(LocationError::Refused("The project changed before location reservation"))?;
+    let seq = studio_runtime_store::ProjectionPublicationQueries::location_sequence(db, project)?
+        .ok_or(LocationError::Refused(
+        "The project changed before location reservation",
+    ))?;
     Ok(LocationAdmission {
         project: project.into(),
         seq,
@@ -1046,4 +1054,47 @@ pub(crate) fn check_location_admission(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_location_admission_requires_live_project_and_source_record() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "project",
+                    "canonical",
+                    (),
+                    false,
+                )?;
+                assert!(super::location_admission(tx, "canonical", None).is_err());
+                studio_runtime_store::ProjectsRepository::put_project(
+                    tx,
+                    &studio_json::json!({"id":"canonical","name":"Canonical","path":"canonical"}),
+                )?;
+                let expected = studio_runtime_store::SyncDocumentsRepository::entity_sequence(tx)?;
+                let admission =
+                    super::location_admission(tx, "canonical", Some(("actor", 7))).unwrap();
+                assert_eq!(admission.seq, expected);
+                assert_eq!(admission.actor.as_deref(), Some("actor"));
+                assert_eq!(admission.epoch, Some(7));
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "project",
+                    "canonical",
+                    (),
+                    true,
+                )?;
+                assert!(super::location_admission(tx, "canonical", None).is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 }

@@ -150,9 +150,8 @@ async fn fixture() -> (
     store
         .transaction(move |tx| {
             AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
-            tx.execute(
-                "INSERT INTO sync_entities VALUES('agent','worker',1,'fixture',?1,0)",
-                [json!({"collection":"agent","id":"worker","value":agent}).to_string()],
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx, "agent", "worker", agent, false,
             )?;
             Ok(())
         })

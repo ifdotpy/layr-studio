@@ -226,23 +226,12 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
     let reader = store
         .test_reader()
         .expect("cross-runtime test operation succeeds");
-    let rust_numeric_rows = {
-        let mut statement = reader
-            .prepare("SELECT seq,payload,hash,deleted FROM sync_entities WHERE collection='event' AND id LIKE 'numeric-created-%' ORDER BY id")
-            .expect("cross-runtime test operation succeeds");
-        statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            })
-            .expect("cross-runtime test operation succeeds")
-            .collect::<Result<Vec<_>, _>>()
-            .expect("cross-runtime test operation succeeds")
-    };
+    let rust_numeric_rows =
+        studio_runtime_store::SyncDocumentsRepository::entities_after(&reader, 0, 1000)
+            .expect("canonical publications")
+            .into_iter()
+            .filter(|row| row.collection == "event" && row.id.starts_with("numeric-created-"))
+            .collect::<Vec<_>>();
     let agent = AgentRepository::get(&reader, &AgentId::from(agent_id.as_str()))
         .expect("cross-runtime test operation succeeds")
         .expect("Rust-written agent remains readable in Rust");
@@ -284,7 +273,8 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
 
     assert_eq!(rust_numeric_rows.len(), NUMERIC_CREATED.len());
     let mut numeric_created = std::collections::BTreeMap::new();
-    for (_, encoded, _, _) in &rust_numeric_rows {
+    for row in &rust_numeric_rows {
+        let encoded = row.payload.as_ref().expect("event payload");
         let payload: Value = studio_json::from_str(encoded).expect("Rust sync payload is JSON");
         let id = payload["id"].as_str().expect("sync payload has an id");
         let created = payload["value"]["created"]

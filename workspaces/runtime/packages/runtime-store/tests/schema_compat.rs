@@ -184,10 +184,6 @@ async fn renamed_sync_table_with_equivalent_structure_opens() {
     let state = state_directory.path();
     create_from_live_schema(state);
     let canvas = state.join("canvas.sqlite3");
-    let initial_store = RuntimeStore::open(Some(state))
-        .await
-        .expect("fixture prepares on open");
-    drop(initial_store);
     let identity = Connection::open(&canvas)
         .expect("fixture DB opens")
         .query_row("SELECT id FROM sync_identity", [], |row| {
@@ -206,12 +202,10 @@ async fn renamed_sync_table_with_equivalent_structure_opens() {
         .await
         .expect("structurally equivalent table opens");
     assert_eq!(
-        store
-            .test_reader()
-            .expect("reader opens")
-            .query_row("SELECT id FROM sync_identity", [], |row| row
-                .get::<_, String>(0))
-            .expect("identity remains readable"),
+        studio_runtime_store::SyncDocumentsRepository::workspace_id(
+            &store.test_reader().expect("reader opens")
+        )
+        .expect("identity remains readable"),
         identity
     );
     drop(store);
@@ -290,26 +284,17 @@ async fn noncanonical_tombstone_triggers_are_replaced() {
     drop(canonical_store);
     let canvas = state.join("canvas.sqlite3");
     let canonical = stored_sql(&canvas, trigger);
+    assert!(canonical.contains("ON \"publications\""));
+    assert!(!canonical.contains("sync_entities"));
 
     for whitespace_variant in [true, false] {
-        let id = if whitespace_variant {
-            "whitespace-tombstone"
-        } else {
-            "unicode-tombstone"
-        }
-        .to_owned();
+        let id = "@revision".to_owned();
         let database = Connection::open(&canvas).expect("fixture DB opens");
         let original = stored_sql(&canvas, trigger);
         let changed = if whitespace_variant {
-            original.replace(
-                "UPDATE OF deleted,collection",
-                "UPDATE OF deleted,   collection",
-            )
+            original.replace("AFTER UPDATE", "AFTER   UPDATE")
         } else {
-            original.replace(
-                "UPDATE OF deleted,collection",
-                &format!("UPDATE OF deleted,{}collection", '\u{00a0}'),
-            )
+            original.replace("THEN 1 ELSE -1 END", "THEN 2 ELSE -2 END")
         };
         assert_ne!(changed, original, "fixture trigger contains target text");
         database
@@ -318,6 +303,11 @@ async fn noncanonical_tombstone_triggers_are_replaced() {
         database
             .execute_batch(&changed)
             .expect("SQLite accepts the noncanonical trigger");
+        // F1 finish_authority calls this exact producer installer in its authority transaction.
+        let authority = database.unchecked_transaction().expect("authority refresh");
+        studio_runtime_store::test_fixtures::canvas::install_current_producers(&authority)
+            .expect("authority replaces noncanonical producer");
+        authority.commit().expect("authority commits atomically");
         drop(database);
 
         let store = RuntimeStore::open(Some(state))
@@ -327,38 +317,39 @@ async fn noncanonical_tombstone_triggers_are_replaced() {
         let insert_id = id.clone();
         store
             .transaction(move |tx| {
+                studio_runtime_store::SyncDocumentsRepository::put_entity_hash(tx, "transcript:test", &insert_id, &studio_runtime_store::sha256_hex(b"fixture"), true)?;
                 tx.execute(
-                    "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('transcript:test',?1,1,'h','{}',1)",
-                    [insert_id.as_str()],
-                )?;
-                tx.execute(
-                    "UPDATE sync_entities SET collection='event' WHERE collection='transcript:test' AND id=?1",
+                    "UPDATE publications SET collection_order='event' WHERE collection_order='transcript:test' AND entity_id=?1",
                     [insert_id.as_str()],
                 ).expect_err("collection identity cannot change on update");
-                tx.execute("DELETE FROM sync_entities WHERE collection='transcript:test' AND id=?1", [insert_id.as_str()])?;
-                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('event',?1,1,'h','{}',1)", [insert_id.as_str()])?;
+                studio_runtime_store::ProjectionPublicationQueries::delete_entity(tx, "transcript:test", &insert_id)?;
+                studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "event", &insert_id, json!({}), true)?;
                 Ok(())
             }).await
             .expect("repaired trigger handles explicit delete and insert");
         assert_eq!(
-            store
-                .test_reader()
-                .expect("reader opens")
-                .query_row(
-                    "SELECT value FROM sync_entity_meta WHERE key='entity_tombstone_count'",
-                    [],
-                    |row| row.get::<_, String>(0),
-                )
-                .expect("tombstone count reads"),
-            "1"
+            studio_runtime_store::clock_schema::SyncEntityMeta::value(
+                &store.test_reader().expect("reader opens"),
+                "entity_tombstone_count"
+            )
+            .expect("tombstone count reads")
+            .as_deref(),
+            Some("1")
         );
         let delete_id = id.clone();
         store
             .transaction(move |tx| {
-                tx.execute(
-                    "DELETE FROM sync_entities WHERE id=?1",
-                    [delete_id.as_str()],
+                studio_runtime_store::ProjectionPublicationQueries::delete_entity(
+                    tx, "event", &delete_id,
                 )?;
+                assert_eq!(
+                    studio_runtime_store::clock_schema::SyncEntityMeta::value(
+                        tx,
+                        "entity_tombstone_count"
+                    )?
+                    .as_deref(),
+                    Some("0")
+                );
                 Ok(())
             })
             .await
@@ -390,17 +381,65 @@ fn drop_sync_family(path: &Path) {
 
 fn sync_seed_rows(path: &Path) -> Vec<String> {
     let db = Connection::open(path).expect("fixture DB opens");
-    db.prepare(
-        "SELECT json_array('identity',id) FROM sync_identity
-         UNION ALL SELECT json_array('generation',id,value) FROM sync_generation
-         UNION ALL SELECT json_array('meta',key,value) FROM sync_entity_meta WHERE key != 'migration_catalog'
-         UNION ALL SELECT json_array('document',seq,scope,id,payload,deleted) FROM sync_documents
-         UNION ALL SELECT json_array('entity',collection,id,seq,hash,payload,deleted) FROM sync_entities
-         UNION ALL SELECT json_array('event',id,agent,kind,text,status,created,epoch,turn_id,error) FROM runtime_events
-         ORDER BY 1",
-    ).expect("sync snapshot prepares")
-        .query_map([], |row| row.get(0)).expect("sync snapshot reads")
-        .collect::<Result<Vec<_>, _>>().expect("sync snapshot rows")
+    use studio_runtime_store::{
+        SyncDocumentsRepository as Publications, peer_update_settings::canvas_read,
+        queue_schema::EventsRow,
+    };
+    let mut rows = vec![
+        Publications::workspace_id(&db).expect("canonical snapshot row reads"),
+        format!(
+            "{:?}",
+            studio_runtime_store::durable_seq::high_and_floor(&db)
+                .expect("canonical snapshot row reads")
+        ),
+        format!(
+            "{:?}",
+            studio_runtime_store::clock_schema::SyncEntityMeta::value(&db, "event_window_seq")
+                .expect("canonical snapshot row reads")
+        ),
+        format!(
+            "{:?}",
+            studio_runtime_store::clock_schema::SyncEntityMeta::value(
+                &db,
+                "entity_tombstone_count"
+            )
+            .expect("canonical snapshot row reads")
+        ),
+        format!(
+            "{:?}",
+            studio_runtime_store::clock_schema::SyncEntityMeta::value(
+                &db,
+                "entity_tombstone_floor"
+            )
+            .expect("canonical snapshot row reads")
+        ),
+    ];
+    rows.extend(
+        studio_runtime_store::test_fixtures::canvas::publications(&db)
+            .expect("canonical snapshot row reads")
+            .into_iter()
+            .map(|row| format!("{row:?}")),
+    );
+    for row in
+        studio_db_api::db_query!(canvas_read(&db), EventsRow).expect("canonical snapshot row reads")
+    {
+        rows.push(format!(
+            "{:?}",
+            (
+                row.id,
+                row.agent,
+                row.kind,
+                row.text,
+                row.status,
+                row.created,
+                row.epoch,
+                row.turn_id,
+                row.error
+            )
+        ));
+    }
+    rows.sort();
+    rows
 }
 
 #[tokio::test]
@@ -416,11 +455,7 @@ async fn current_event_windows_remain_atomic_when_reopened_by_rust() {
     let store = RuntimeStore::open(Some(state))
         .await
         .expect("Rust reopens the current event-window schema");
-    let window = include_str!("../src/sync_schema.sql")
-        .lines()
-        .find_map(|line| line.strip_prefix("-- event-window-size: "))
-        .and_then(|size| size.parse::<usize>().ok())
-        .expect("generated SQL identifies codex_entity_contracts.EVENT_WINDOW");
+    let window = RuntimeStore::event_window_rows();
     store
         .transaction(move |tx| {
             for index in 0..window + 2 {
@@ -439,24 +474,23 @@ async fn current_event_windows_remain_atomic_when_reopened_by_rust() {
                     },
                 )?;
             }
-            let live: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM sync_entities WHERE collection='event' AND deleted=0",
-                [],
-                |row| row.get(0),
-            )?;
+            let rows = studio_runtime_store::SyncDocumentsRepository::entities_after(tx, 0, 1000)?
+                .into_iter()
+                .filter(|row| row.collection == "event")
+                .collect::<Vec<_>>();
+            let live = rows.iter().filter(|row| !row.deleted).count();
             assert_eq!(
-                live,
-                i64::try_from(window).expect("event window fits SQLite count"),
+                live, window,
                 "the source writer commits an exact bounded window"
             );
-            let distinct: i64 = tx.query_row(
-                "SELECT COUNT(DISTINCT seq) FROM sync_entities WHERE collection='event'",
-                [],
-                |row| row.get(0),
-            )?;
+            let distinct = rows
+                .iter()
+                .map(|row| row.sequence)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len();
             assert_eq!(
                 distinct,
-                i64::try_from(window + 2).expect("event fixture count fits SQLite count"),
+                window + 2,
                 "every event and displacement has its own sequence"
             );
             Ok(())

@@ -854,6 +854,32 @@ async fn rejected_ordinary_stop_can_be_stopped_by_deletion() {
 }
 
 fn table_rows(connection: &rusqlite::Connection, table: &str, order: &str) -> studio_json::Value {
+    if table == "sync_entities" {
+        return json!(studio_runtime_store::test_fixtures::canvas::entities(connection)
+            .expect("entity snapshot")
+            .into_iter()
+            .map(|studio_runtime_store::test_fixtures::canvas::EntitySnapshot {collection,id,seq,hash,payload,deleted,..}| json!({"collection":collection,"id":id,"seq":seq,"hash":hash,"payload":payload,"deleted":deleted}))
+            .collect::<Vec<_>>());
+    }
+    if table == "sync_documents" {
+        let mut rows = studio_runtime_store::test_fixtures::canvas::documents(connection)
+            .expect("document snapshot");
+        rows.sort_by(|a, b| (&a.scope, &a.id, a.seq).cmp(&(&b.scope, &b.id, b.seq)));
+        return json!(
+            rows.into_iter()
+                .map(
+                    |studio_runtime_store::test_fixtures::canvas::DocumentSnapshot {
+                         seq,
+                         scope,
+                         id,
+                         payload,
+                         deleted,
+                         ..
+                     }| json!({"seq":seq,"scope":scope,"id":id,"payload":payload,"deleted":deleted})
+                )
+                .collect::<Vec<_>>()
+        );
+    }
     let mut statement = connection
         .prepare(&format!("SELECT * FROM {table} ORDER BY {order}"))
         .expect("table snapshot query");

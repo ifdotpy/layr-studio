@@ -31,42 +31,60 @@ fn registered_parent_tables() -> Vec<&'static str> {
     tables
 }
 
-pub(crate) fn prepare_sync_schema(transaction: &Transaction<'_>) -> StoreResult<()> {
-    if crate::schema::table_exists(transaction, "sync_versions")? {
-        transaction.execute_batch("CREATE TABLE IF NOT EXISTS sync_generation (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);
-            INSERT OR IGNORE INTO sync_generation VALUES(1,0);
-            UPDATE sync_generation SET value=MAX(value,(SELECT COALESCE(MAX(seq),0) FROM sync_versions)) WHERE id=1;
-            DROP TRIGGER IF EXISTS summary_plan_delete;
-            DROP TRIGGER IF EXISTS summary_annotation_delete;
-            DROP TRIGGER IF EXISTS summary_messageReceipt_delete;
-            DROP TRIGGER IF EXISTS summary_task_delete;
-            DROP TRIGGER IF EXISTS summary_questionHistory_delete;
-            DROP TRIGGER IF EXISTS summary_retainedWorktree_delete;
-            DROP TABLE sync_versions;")?;
-    }
-    let sections = parse_sections(SYNC_SCHEMA)?;
-    let has_runtime_items = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_items' COLLATE NOCASE)",
-        [],
-        |row| row.get::<_, bool>(0),
-    )?;
-    let (expected, findings) = expected_catalog(transaction, sections, has_runtime_items)?;
-    if let Some(finding) = findings.into_iter().next() {
-        return Err(schema_object_mismatch(&finding.object, &finding.reason));
-    }
+#[cfg(any(test, feature = "test-support"))]
+#[path = "bootstrap_legacy_fixture.rs"]
+pub(crate) mod legacy_fixture;
 
-    reconcile_derived_objects(transaction, &expected)?;
-    crate::clock_schema::prepare_sync_tables(transaction)?;
-    crate::queue_schema::install_index::<crate::queue_schema::EventsRow>(
-        transaction,
-        "runtime_event_created_id",
-    )?;
-    transaction.execute_batch(sections[0])?;
-    transaction.execute_batch(sections[1])?;
-    transaction.execute_batch(sections[2])?;
-    if has_runtime_items {
-        transaction.execute_batch(sections[3])?;
+/// One fixed execution point for descriptor-owned current producer factories.
+/// Called only within fresh installation or the final authority transaction.
+pub(crate) fn install_current_producers(transaction: &Connection) -> StoreResult<()> {
+    let _write = crate::peer_update_settings::canvas_write(transaction)?;
+    use crate::{
+        change_schema::Changes, metadata_schema::Metadata, publication_schema::Publications,
+    };
+    use studio_db_api::Table;
+    for descriptor in [
+        Metadata::descriptor(),
+        Changes::descriptor(),
+        Publications::descriptor(),
+    ] {
+        descriptor.install_if_absent(transaction)?;
     }
+    let read = crate::peer_update_settings::canvas_read(transaction);
+    let mut sql = String::new();
+    if read.table_exists::<crate::agent_tables::AgentsStorageRow>()? {
+        sql.push_str(&crate::clock_schema::target_agent_clock_sql());
+    }
+    if read.table_exists::<crate::agent_tables::AgentVolatileStorageRow>()? {
+        sql.push_str(&crate::agent_volatile::clock_trigger_sql());
+    }
+    // Both transcript source tables exist in a supported Canvas. Small schema
+    // fixtures may expose just one; install its owned names without a new branch policy.
+    if read.table_exists::<crate::agent_tables::AgentsStorageRow>()?
+        && read.table_exists::<crate::item_monitor_terminal::ItemsRow>()?
+    {
+        sql.push_str(&crate::clock_schema::target_transcript_clock_sql());
+    }
+    sql.push_str(&crate::repositories::sync_documents::tombstone_counter_sql());
+    sql.push_str(&crate::entity_scopes::publication_trigger_sql());
+    if read.table_exists::<crate::queue_schema::EventsRow>()?
+        && read.table_exists::<crate::planning_work::TaskRow>()?
+    {
+        sql.push_str(&crate::feature_schema::summary_delete_trigger_sql());
+    }
+    if read.table_exists::<crate::queue_schema::EventsRow>()? {
+        sql.push_str(&crate::event_publication_triggers::trigger_sql());
+    }
+    for table in crate::durable_seq::DURABLE_TABLES {
+        if crate::schema::table_exists(transaction, table.name)? {
+            sql.push_str(&crate::durable_seq::trigger_sql(
+                table.name,
+                table.record_only,
+                table.team_fence,
+            ));
+        }
+    }
+    transaction.execute_batch(&sql)?;
     Ok(())
 }
 
@@ -131,6 +149,28 @@ pub(crate) struct SchemaFinding {
 /// database and returns every table difference without writing to `connection`.
 #[allow(dead_code)] // Used by the pre-cutover state check when that checker is added.
 pub(crate) fn inspect_sync_tables(connection: &Connection) -> StoreResult<Vec<SchemaFinding>> {
+    use studio_db_api::Table;
+    let read = crate::peer_update_settings::canvas_read(connection);
+    if !read.table_exists::<crate::settings_schema::PayloadMigrations>()?
+        && read.table_exists::<crate::metadata_schema::Metadata>()?
+    {
+        let expected = Connection::open_in_memory()?;
+        let mut findings = Vec::new();
+        for descriptor in [
+            crate::metadata_schema::Metadata::descriptor(),
+            crate::change_schema::Changes::descriptor(),
+            crate::publication_schema::Publications::descriptor(),
+        ] {
+            descriptor.install_if_absent(&expected)?;
+            if !same_table_layout(&expected, connection, descriptor.name)? {
+                findings.push(SchemaFinding {
+                    object: descriptor.name.into(),
+                    reason: "canonical partition table layout differs".into(),
+                });
+            }
+        }
+        return Ok(findings);
+    }
     let sections = parse_sections(SYNC_SCHEMA)?;
     let has_runtime_items = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_items' COLLATE NOCASE)",
@@ -323,37 +363,6 @@ pub(crate) fn same_table_layout(
     Ok(table_layout(expected, name)? == table_layout(actual, name)?)
 }
 
-fn reconcile_derived_objects(
-    transaction: &Transaction<'_>,
-    expected: &[CatalogObject],
-) -> StoreResult<()> {
-    for (kind, expected_name, expected_sql) in expected {
-        let existing = transaction
-            .query_row(
-                "SELECT name,sql FROM sqlite_master WHERE type=?1 AND name=?2 COLLATE NOCASE",
-                [kind, expected_name],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-            )
-            .optional()?;
-        match existing {
-            Some((_, Some(sql))) if sql == *expected_sql => {}
-            Some((name, _)) => {
-                transaction.execute_batch(&format!(
-                    "DROP {} {}",
-                    kind.to_ascii_uppercase(),
-                    quote_identifier(&name)
-                ))?;
-            }
-            None => {}
-        }
-    }
-    Ok(())
-}
-
-fn quote_identifier(identifier: &str) -> String {
-    format!("\"{}\"", identifier.replace('"', "\"\""))
-}
-
 fn schema_object_mismatch(object: &str, reason: &str) -> StoreError {
     StoreError::SchemaObjectMismatch {
         database: "canvas.sqlite3".to_owned(),
@@ -382,7 +391,7 @@ mod tests {
         let transaction = connection
             .transaction()
             .expect("bootstrap transaction starts");
-        prepare_sync_schema(&transaction).expect("sync schema prepares");
+        legacy_fixture::prepare_sync_schema(&transaction).expect("legacy source schema prepares");
         transaction.commit().expect("bootstrap commits");
         let sql = SYNC_SCHEMA.to_ascii_uppercase();
         assert!(

@@ -467,12 +467,57 @@ mod tests {
         struct Object {
             name: String,
             table: String,
+            sql: String,
             create_order: i64,
             #[serde(rename = "type")]
             kind: String,
         }
-        let catalog: Catalog =
-            studio_json::from_str(&crate::storage_catalog::generate().unwrap()).unwrap();
+        let db = crate::fresh_state::test_canvas();
+        let catalog = Catalog {
+            canvas: Database {
+                sqlite_master: studio_db_api::catalog::export(&db)
+                    .expect("catalog exports")
+                    .into_iter()
+                    .map(|entry| Object {
+                        name: entry.name,
+                        sql: entry.sql,
+                        table: entry.table,
+                        kind: entry.r#type,
+                        create_order: entry.create_order,
+                    })
+                    .collect(),
+            },
+        };
+
+        assert!(
+            !crate::peer_update_settings::canvas_read(&db)
+                .table_exists::<crate::clock_schema::SyncEntities>()
+                .unwrap()
+        );
+        assert!(
+            !crate::peer_update_settings::canvas_read(&db)
+                .table_exists::<crate::clock_schema::SyncEntityMeta>()
+                .unwrap()
+        );
+        for trigger in catalog
+            .canvas
+            .sqlite_master
+            .iter()
+            .filter(|object| object.name.starts_with("sync_entity_event_"))
+        {
+            assert!(
+                trigger.sql.contains("\"publications\""),
+                "{} targets current publications",
+                trigger.name
+            );
+            assert!(
+                trigger.sql.contains("\"metadata\""),
+                "{} targets current metadata",
+                trigger.name
+            );
+            assert!(!trigger.sql.contains("sync_entities"));
+            assert!(!trigger.sql.contains("sync_entity_meta"));
+        }
         let order = |table: &str, kind: &str| {
             let mut entries: Vec<_> = catalog
                 .canvas
@@ -505,13 +550,13 @@ mod tests {
             [
                 "runtime_event_revision",
                 "runtime_event_revision_cleanup",
+                "immutable_scope_runtime_events",
+                "immutable_scope_runtime_events_insert",
                 "summary_messageReceipt_delete",
                 "sync_entity_event_INSERT",
                 "sync_entity_event_UPDATE",
                 "sync_entity_event_UPDATE_WINDOW",
                 "sync_entity_event_DELETE",
-                "immutable_scope_runtime_events",
-                "immutable_scope_runtime_events_insert"
             ],
             "runtime_events historical trigger order"
         );

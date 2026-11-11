@@ -2033,6 +2033,8 @@ mod account_wake_index_tests {
         connection
             .execute_batch(&crate::domain::tables_sql())
             .expect("domain tables create");
+        crate::test_fixtures::canvas::install_canonical(&connection)
+            .expect("canonical scheduler storage");
         connection
     }
 

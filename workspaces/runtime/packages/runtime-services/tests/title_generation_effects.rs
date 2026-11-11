@@ -506,16 +506,17 @@ async fn admission_failures_roll_back_before_provider_dispatch() {
 #[tokio::test]
 async fn durable_written_title_recovers_after_final_transaction_failure() {
     for statement in [
-        "CREATE TRIGGER title_final_fail BEFORE UPDATE ON runtime_agents WHEN json_extract(NEW.record,'$.name')='Recovered title' BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
-        "CREATE TRIGGER title_final_fail AFTER INSERT ON request_results BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
-        "CREATE TRIGGER title_final_fail AFTER DELETE ON runtime_outbox BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
-        "CREATE TRIGGER title_final_fail BEFORE INSERT ON durable_rows WHEN NEW.tbl='agent_views' BEGIN SELECT RAISE(ABORT,'final failpoint'); END",
+        "CREATE TRIGGER title_final_fail BEFORE UPDATE ON runtime_agents WHEN json_extract(NEW.record,'$.name')='Recovered title' BEGIN SELECT RAISE(ABORT,'final failpoint'); END".to_owned(),
+        "CREATE TRIGGER title_final_fail AFTER INSERT ON request_results BEGIN SELECT RAISE(ABORT,'final failpoint'); END".to_owned(),
+        "CREATE TRIGGER title_final_fail AFTER DELETE ON runtime_outbox BEGIN SELECT RAISE(ABORT,'final failpoint'); END".to_owned(),
+        format!("CREATE TRIGGER title_final_fail BEFORE INSERT ON changes WHEN NEW.kind={kind} AND NEW.source_label='{source}' BEGIN SELECT RAISE(ABORT,'final failpoint'); END", kind=studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows as i64, source=studio_runtime_store::durable_seq::AGENT_VIEW_MARK),
     ] {
         let (root, store) = fixture().await;
         let id = request_id();
+        let trigger = statement.clone();
         store
             .transaction(move |tx| {
-                tx.execute_batch(statement)?;
+                tx.execute_batch(&trigger)?;
                 Ok(())
             })
             .await

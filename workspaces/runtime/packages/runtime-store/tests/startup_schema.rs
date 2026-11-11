@@ -43,58 +43,64 @@ async fn current_item_index_and_retired_receipt_tables_converge() {
 #[tokio::test]
 async fn current_settings_and_overflow_receipts_exist_on_fresh_and_completed_stores() {
     let state = tempfile::tempdir().expect("state");
-    drop(RuntimeStore::open(Some(state.path())).await.expect("fresh"));
-    let canvas = Connection::open(state.path().join("canvas.sqlite3")).expect("canvas");
-    let analytics = Connection::open(state.path().join("analytics.sqlite3")).expect("analytics");
-    canvas
-        .execute("INSERT INTO runtime_peer_update_settings VALUES(1,0)", [])
+    let store = RuntimeStore::open(Some(state.path())).await.expect("fresh");
+    store
+        .transaction(|tx| {
+            studio_runtime_store::peer_update_settings::PeerUpdateSettings {
+                id: 1,
+                auto_update: 0,
+            }
+            .upsert(tx)?;
+            Ok(())
+        })
+        .await
         .expect("peer setting");
+    drop(store);
+    let analytics = Connection::open(state.path().join("analytics.sqlite3")).expect("analytics");
     analytics
         .execute(
             "INSERT INTO analytics_publication_overflow_receipts VALUES('receipt',2,3)",
             [],
         )
         .expect("overflow receipt");
-    drop(canvas);
     drop(analytics);
-    drop(
-        RuntimeStore::open(Some(state.path()))
-            .await
-            .expect("reopen"),
-    );
-    let canvas = Connection::open(state.path().join("canvas.sqlite3")).expect("canvas");
+    let store = RuntimeStore::open(Some(state.path()))
+        .await
+        .expect("reopen");
+    store
+        .transaction(|tx| {
+            assert_eq!(
+                studio_runtime_store::peer_update_settings::PeerUpdateSettings::get(tx)?
+                    .unwrap()
+                    .auto_update,
+                0
+            );
+            assert!(
+                !studio_runtime_store::peer_update_settings::canvas_read(tx)
+                    .table_exists::<studio_runtime_store::peer_update_settings::PeerUpdateSettings>(
+                )?
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
     let analytics = Connection::open(state.path().join("analytics.sqlite3")).expect("analytics");
-    assert_eq!(
-        canvas
-            .query_row(
-                "SELECT auto_update FROM runtime_peer_update_settings WHERE id=1",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        0
-    );
     assert_eq!(analytics.query_row("SELECT analytics_overflow FROM analytics_publication_overflow_receipts WHERE receipt_id='receipt'", [], |row| row.get::<_, i64>(0)).unwrap(), 2);
-    canvas
-        .execute_batch("DROP TABLE runtime_peer_update_settings")
-        .expect("older canvas");
     analytics
         .execute_batch("DROP TABLE analytics_publication_overflow_receipts")
         .expect("older analytics");
-    drop(canvas);
     drop(analytics);
     drop(
         RuntimeStore::open(Some(state.path()))
             .await
             .expect("upgrade missing tables"),
     );
-    for (file, table) in [
-        ("canvas.sqlite3", "runtime_peer_update_settings"),
-        (
+    {
+        let (file, table) = (
             "analytics.sqlite3",
             "analytics_publication_overflow_receipts",
-        ),
-    ] {
+        );
         let db = Connection::open(state.path().join(file)).expect("database");
         let present: bool = db
             .query_row(

@@ -589,7 +589,7 @@ async fn durable_results_win_over_stalls_across_every_write_failure_and_restart(
                 finished: 2000.0,
             };
             monitor_receipts::persist(store.root(), &receipt).expect("native receipt before DB");
-            store.transaction(move |tx| { for operation in ["INSERT", "UPDATE"] { tx.execute_batch(&format!("CREATE TRIGGER injected_{operation} {boundary} {operation} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END"))?; } Ok(()) }).await.expect("failure");
+            store.transaction(move |tx| { for operation in ["INSERT", "UPDATE"] { if table == "sync_entities" && boundary == "BEFORE" { let operation = if operation == "INSERT" {studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert} else {studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update}; studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), operation, true)?; } else { tx.execute_batch(&format!("CREATE TRIGGER injected_{operation} {boundary} {operation} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'injected'); END", table=if table=="sync_entities" {"publications"} else {table}, partition_predicate=if table=="sync_entities" {format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)} else {String::new()}))?; } } Ok(()) }).await.expect("failure");
             let port = Arc::new(Port::default());
             assert!(
                 runtime(&store, &port).tick(2000.0).await.is_err(),
@@ -599,7 +599,7 @@ async fn durable_results_win_over_stalls_across_every_write_failure_and_restart(
             assert_eq!(fixtures::events(&store), json!([]));
             store
                 .transaction(move |tx| {
-                    tx.execute_batch("DROP TRIGGER injected_INSERT; DROP TRIGGER injected_UPDATE")?;
+                    if table == "sync_entities" && boundary == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, false)?;studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch("DROP TRIGGER injected_INSERT; DROP TRIGGER injected_UPDATE")?; }
                     Ok(())
                 })
                 .await
@@ -1017,13 +1017,13 @@ async fn cancelled_intent_is_committed_before_transport_and_rolls_back_on_each_w
             let runtime = runtime(&store, &port);
             let id = case["before"]["id"].as_str().expect("id");
             let original = record(&store, id);
-            store.transaction(move |tx| { for operation in ["INSERT", "UPDATE"] { tx.execute_batch(&format!("CREATE TRIGGER injected_{operation} {timing} {operation} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END"))?; } Ok(()) }).await.expect("inject");
+            store.transaction(move |tx| { for operation in ["INSERT", "UPDATE"] { if table=="durable_rows" && timing=="BEFORE" {studio_runtime_store::test_fixtures::canvas::set_failpoint(tx,studio_runtime_store::test_fixtures::canvas::FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows),if operation=="INSERT" {studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert}else{studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update},true)?;} else {tx.execute_batch(&format!("CREATE TRIGGER injected_{operation} {timing} {operation} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'injected'); END", table=if table=="durable_rows" {"changes"} else {&table}, partition_predicate=if table=="durable_rows" {format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows as i64)} else {String::new()}))?;} } Ok(()) }).await.expect("inject");
             assert!(runtime.cancel(id, None, 2000.0).await.is_err());
             assert!(port.submitted.lock().expect("submitted").is_empty());
             assert_eq!(record(&store, id), original);
             store
                 .transaction(move |tx| {
-                    tx.execute_batch("DROP TRIGGER injected_INSERT; DROP TRIGGER injected_UPDATE")?;
+                    if table=="durable_rows" && timing=="BEFORE" {for operation in [studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert,studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update]{studio_runtime_store::test_fixtures::canvas::set_failpoint(tx,studio_runtime_store::test_fixtures::canvas::FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows),operation,false)?;}}else{tx.execute_batch("DROP TRIGGER injected_INSERT; DROP TRIGGER injected_UPDATE")?;}
                     Ok(())
                 })
                 .await

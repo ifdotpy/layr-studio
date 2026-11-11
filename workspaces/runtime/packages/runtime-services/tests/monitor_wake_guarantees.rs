@@ -361,13 +361,13 @@ async fn answered_approval_retires_card_and_replays_without_another_start() {
             studio_runtime_services::entity_scope::direct_document(&reader, "request", "approval")
                 .expect("read")
                 .is_none();
-        let seq: i64 = reader
-            .query_row(
-                "SELECT seq FROM durable_rows WHERE tbl='approvals' AND id='approval'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("card update");
+        let seq = studio_runtime_store::EntityScopeQueries::direct_sequence(
+            &reader,
+            "approvals",
+            "approval",
+        )
+        .expect("card update")
+        .expect("card sequence");
         assert!(deleted, "answered card must be removed from sync");
         assert!(seq > pending_seq, "removal must reach existing subscribers");
         let starts = studio_runtime_services::monitor_driver::pending_start_ids(&store)
@@ -392,15 +392,13 @@ async fn answered_approval_retires_card_and_replays_without_another_start() {
                 .expect("replayed starts"),
             starts
         );
-        let replay_seq: i64 = store
-            .test_reader()
-            .expect("reader")
-            .query_row(
-                "SELECT seq FROM durable_rows WHERE tbl='approvals' AND id='approval'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("card sequence");
+        let replay_seq = studio_runtime_store::EntityScopeQueries::direct_sequence(
+            &store.test_reader().expect("reader"),
+            "approvals",
+            "approval",
+        )
+        .expect("card sequence")
+        .expect("retained card sequence");
         assert_eq!(replay_seq, seq);
         let other = if decision == "accept" {
             "decline"

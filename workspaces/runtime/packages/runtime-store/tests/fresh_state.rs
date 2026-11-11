@@ -569,11 +569,7 @@ async fn scheduler_indexes_recreated_on_reopen() {
 #[tokio::test]
 async fn open_removes_retired_entity_scope_fingerprint_indexes() {
     let directory = temporary_state("entity-scope-index");
-    drop(
-        RuntimeStore::open(Some(directory.path()))
-            .await
-            .expect("fresh state"),
-    );
+    super::migration_baseline::write_supported_fixture(directory.path());
     let connection = Connection::open(directory.path().join("canvas.sqlite3")).expect("canvas");
     connection
         .execute_batch(

@@ -191,7 +191,7 @@ async fn stream_flush_batch_publishes_each_agent_once() {
 async fn journal_projection_failure_rolls_back_sources_and_receipts() {
     let (_directory, store) = fixture().await;
     store.transaction(|tx| {
-        tx.execute_batch("CREATE TRIGGER reject_agent_projection BEFORE INSERT ON agent_publication_state BEGIN SELECT RAISE(ABORT,'projection failure'); END;")?;
+        tx.execute_batch(&format!("CREATE TRIGGER reject_agent_projection BEFORE INSERT ON metadata WHEN NEW.kind={kind} BEGIN SELECT RAISE(ABORT,'projection failure'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasMetadataKind::DB_CODE_AGENTPUBLICATIONSTATE))?;
         Ok(())
     }).await.expect("publication failpoint");
     let result = store::journal_batch(

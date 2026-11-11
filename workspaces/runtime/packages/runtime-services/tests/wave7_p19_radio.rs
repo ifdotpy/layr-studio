@@ -13,6 +13,26 @@ use studio_runtime_store::{
     AgentId, AgentRecord, QueueEvent, QueueEventId, QueueEventRepository, RuntimeStore,
 };
 
+#[tokio::test]
+async fn sidebar_order_writer_round_trips_on_canonical_storage() {
+    let root = tempfile::tempdir().expect("canonical sidebar fixture");
+    let store = RuntimeStore::open(Some(root.path()))
+        .await
+        .expect("canonical store");
+    store
+        .transaction(|tx| {
+            let order = json!({"revision":1,"groups":[]});
+            studio_runtime_store::ProjectsRepository::put_sidebar_order(tx, &order)?;
+            assert_eq!(
+                studio_runtime_store::ProjectsRepository::sidebar_order(tx)?,
+                order
+            );
+            Ok(())
+        })
+        .await
+        .expect("canonical sidebar writer");
+}
+
 struct Ingress;
 impl RadioIngress for Ingress {
     fn enqueue(
@@ -310,7 +330,13 @@ fn copy_template(corpus: &RadioCorpus, root: &Path) {
         fs::write(root.join(name), contents).expect("copy template database");
     }
     let db = rusqlite::Connection::open(root.join("canvas.sqlite3")).expect("template identity");
-    db.execute_batch("DELETE FROM sync_identity; INSERT INTO sync_identity(id) VALUES(lower(hex(randomblob(16))))").expect("fresh identity");
+    let tx = db.unchecked_transaction().expect("identity transaction");
+    studio_runtime_store::test_fixtures::canvas::reset_identity(
+        &tx,
+        Some(&uuid::Uuid::new_v4().simple().to_string()),
+    )
+    .expect("fresh identity");
+    tx.commit().expect("identity committed");
 }
 async fn seed(store: &RuntimeStore, snapshot: &Value) {
     let snapshot = snapshot.clone();
@@ -376,10 +402,35 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
                     }
                     continue;
                 }
+                if table == "sync_entities" {
+                    for row in studio_runtime_store::test_fixtures::canvas::entities(db)? {
+                        studio_runtime_store::ProjectionPublicationQueries::delete_entity(db, &row.collection, &row.id)?;
+                    }
+                    for (index, row) in rows.as_array().expect("entity rows").iter().enumerate() {
+                        studio_runtime_store::test_fixtures::canvas::seed_entity(db, &studio_runtime_store::clock_schema::SyncEntities {
+                            collection: row["collection"].as_str().expect("collection").into(),
+                            id: row["id"].as_str().expect("entity id").into(),
+                            seq: row["seq"].as_i64().expect("entity sequence"),
+                            hash: row["hash"].as_str().expect("entity hash").into(),
+                            payload: row["payload"].as_str().map(str::to_owned),
+                            deleted: row["deleted"].as_i64().expect("entity deletion"),
+                        }, index as i64 + 1)?;
+                    }
+                    continue;
+                }
+                if table == "sidebar_order" {
+                    let rows = rows.as_array().expect("sidebar rows");
+                    if rows.is_empty() {
+                        assert!(studio_runtime_store::ProjectsRepository::sidebar_order_record(db)?.is_none(), "empty sidebar fixture retains absence");
+                    }
+                    for row in rows {
+                        let order: Value = studio_json::from_str(row["record"].as_str().expect("sidebar record"))?;
+                        studio_runtime_store::ProjectsRepository::put_sidebar_order(db, &order)?;
+                    }
+                    continue;
+                }
                 let table_name = match table.as_str() {
-                    "sync_entities" => "sync_entities".to_owned(),
                     "approvals" => "approvals".to_owned(),
-                    "sidebar_order" => "runtime_sidebar_order".to_owned(),
                     _ => format!("runtime_{table}"),
                 };
                 db.execute(&format!("DELETE FROM {table_name}"), [])?;
@@ -459,6 +510,31 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
     super::agent_view_fixtures::assert_agent_view_projections(&db);
     let mut result = studio_json::Map::new();
     for table in tables.as_object().expect("tables").keys() {
+        if table == "sidebar_order" {
+            let rows = studio_runtime_store::ProjectsRepository::sidebar_order_record(&db)
+                .expect("sidebar row")
+                .map(|raw| json!({"id":"current","record":raw}))
+                .into_iter()
+                .collect::<Vec<_>>();
+            result.insert(table.clone(), json!(rows));
+            continue;
+        }
+        if table == "sync_entities" {
+            let mut rows = studio_runtime_store::test_fixtures::canvas::entities(&db)
+                .expect("entity snapshot")
+                .into_iter()
+                .map(|studio_runtime_store::test_fixtures::canvas::EntitySnapshot {collection,id,seq,hash,payload,deleted,..}| json!({"collection":collection,"id":id,"seq":seq,"hash":hash,"payload":payload,"deleted":deleted}))
+                .collect::<Vec<_>>();
+            for row in studio_runtime_services::entity_scope::agent_snapshot(&db)
+                .expect("agent views")
+                .into_iter()
+                .filter(|row| row.collection == "agent")
+            {
+                rows.push(json!({"collection":row.collection,"id":row.id,"seq":row.sequence,"hash":"","payload":row.payload,"deleted":0}));
+            }
+            result.insert(table.clone(), json!(rows));
+            continue;
+        }
         if table == "operation_receipts" {
             // Replay and conflict checks below exercise the current request_results owner.
             result.insert(table.clone(), json!([]));
@@ -491,15 +567,11 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
         }
         let order = if table == "chat_messages" {
             "seq"
-        } else if table == "sync_entities" {
-            "collection,id"
         } else {
             "id"
         };
         let table_name = match table.as_str() {
-            "sync_entities" => "sync_entities".to_owned(),
             "approvals" => "approvals".to_owned(),
-            "sidebar_order" => "runtime_sidebar_order".to_owned(),
             _ => format!("runtime_{table}"),
         };
         let mut query = db
@@ -542,20 +614,6 @@ fn state(store: &RuntimeStore, tables: &Value) -> Value {
             .expect("rows")
             .collect::<Result<Vec<_>, _>>()
             .expect("rows read");
-        let mut rows = rows;
-        if table == "sync_entities" {
-            // The agent views are built at read time; compare them as the old copies.
-            for row in studio_runtime_services::entity_scope::agent_snapshot(&db)
-                .expect("agent views")
-                .into_iter()
-                .filter(|row| row.collection == "agent")
-            {
-                rows.push(
-                    json!({"collection":row.collection,"id":row.id,"seq":row.sequence,
-                    "hash":"","payload":row.payload,"deleted":0}),
-                );
-            }
-        }
         result.insert(table.clone(), json!(rows));
     }
     Value::Object(result)
@@ -988,7 +1046,7 @@ async fn failpoints_rollback_then_restart(name: &str, tables: &[&str]) {
     for table in tables {
         let trigger_table = table.to_string();
         store.transaction(move |db| {
-            db.execute_batch(&format!("CREATE TRIGGER p19_fail_insert AFTER INSERT ON {trigger_table} BEGIN SELECT RAISE(ABORT,'P19 failpoint'); END; CREATE TRIGGER p19_fail_update AFTER UPDATE ON {trigger_table} BEGIN SELECT RAISE(ABORT,'P19 failpoint'); END;"))?;
+            db.execute_batch(&format!("CREATE TRIGGER p19_fail_insert AFTER INSERT ON {trigger_table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'P19 failpoint'); END; CREATE TRIGGER p19_fail_update AFTER UPDATE ON {trigger_table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'P19 failpoint'); END;", trigger_table=if trigger_table=="sync_entities" {"publications"} else {&trigger_table}, partition_predicate=if trigger_table=="sync_entities" {format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)} else {String::new()}))?;
             Ok(())
         }).await.expect("failpoint");
         assert!(
@@ -1065,14 +1123,12 @@ fn database_rows(store: &RuntimeStore) -> Vec<(String, Vec<Vec<SqlValue>>)> {
     tables
         .into_iter()
         .map(|name| {
-            let mut sql = studio_runtime_store::agent_columns::select_declared_sql(&db, &name)
+            let sql = studio_runtime_store::agent_columns::select_declared_sql(&db, &name)
                 .expect("columns");
-            if name == "sync_entity_meta" {
-                sql.push_str(" WHERE key != 'migration_catalog'");
-            }
             let mut query = db.prepare(&sql).expect("snapshot table");
             let count = query.column_count();
-            let rows = query
+            let catalog_columns = (name == "metadata").then(|| (query.column_index("kind").expect("metadata kind"), query.column_index("text_key").expect("metadata key")));
+            let mut rows = query
                 .query_map([], |r| {
                     (0..count)
                         .map(|i| r.get::<_, SqlValue>(i))
@@ -1081,6 +1137,9 @@ fn database_rows(store: &RuntimeStore) -> Vec<(String, Vec<Vec<SqlValue>>)> {
                 .expect("snapshot rows")
                 .collect::<Result<Vec<_>, _>>()
                 .expect("snapshot values");
+            if let Some((kind,key)) = catalog_columns {
+                rows.retain(|row| !(row[kind] == SqlValue::Integer(studio_runtime_store::consolidation_kinds::CanvasMetadataKind::SyncEntityMeta as i64) && row[key] == SqlValue::Text("migration_catalog".into())));
+            }
             (name, rows)
         })
         .collect()

@@ -1297,7 +1297,7 @@ mod maintenance_tests {
             .expect("project source is stored");
         store
             .transaction(|transaction| {
-                transaction.execute("DELETE FROM sync_entity_meta WHERE key='seeded'", [])?;
+                studio_runtime_store::test_fixtures::canvas::set_meta(transaction, "seeded", None)?;
                 Ok(())
             })
             .await

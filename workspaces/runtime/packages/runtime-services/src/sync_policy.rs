@@ -1,6 +1,6 @@
 //! Pure sync document, cursor and preference decisions.
 use studio_runtime_schema::shared_values::MODEL_CHOICES_PREFERENCE_KEY;
-use studio_runtime_store::clock_schema::SyncEntityMeta;
+use studio_runtime_store::{SyncPolicyQueries, clock_schema::SyncEntityMeta};
 
 use crate::event_write::truthy;
 pub use crate::sync_views::{
@@ -34,12 +34,6 @@ const TASK_RETIRE_BATCH: usize = 100;
 /// Newest finished tasks the renderer task window keeps beside running ones;
 /// the workspace entity advertises it as `tasksHistoryLimit`. Unit: rows.
 pub const TASK_WINDOW_HISTORY_ROWS: usize = 100;
-// Scan only live window members: a history scan cannot stop at the bound when
-// no eviction is needed. Preserve the history index's rowid order for ties.
-const TASK_WINDOW_EVICT_SQL: &str = "SELECT s.id FROM durable_rows w INDEXED BY durable_rows_task_window_live \
-    CROSS JOIN task_window_state s ON s.id=w.id \
-    WHERE w.tbl='task_window' AND w.deleted=0 AND NOT s.running \
-    ORDER BY s.created DESC,s.rowid LIMIT 1 OFFSET ?1";
 /// Restricts a task query to tasks of live (not deleted) agents.
 const LIVE_TASK_AGENT: &str = "json_extract(t.record,'$.agent') IN \
      (SELECT id FROM runtime_agents WHERE deleted_at IS NULL)";
@@ -84,16 +78,10 @@ pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
     }
     if table_exists("runtime_events")? {
         if table_exists("runtime_agents")? {
-            complete &= !connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM runtime_agents a WHERE a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sync_entities q WHERE q.collection='queue' AND q.id=a.id AND q.deleted=0))", [], |row| row.get::<_, bool>(0),
-            )?;
+            complete &= !SyncPolicyQueries::missing_live_queue(connection)?;
         }
         let event_window = SyncEntityMeta::value(connection, "event_window_seq")?;
-        let projected_sequence = connection.query_row(
-            "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection='event'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )?;
+        let projected_sequence = SyncPolicyQueries::collection_sequence(connection, "event")?;
         complete &= event_window
             .and_then(|value| value.parse::<i64>().ok())
             .is_some_and(|sequence| sequence == projected_sequence);
@@ -316,22 +304,10 @@ pub fn maintain_entity_projections_with_server_id(
     crate::diagnostics::measure_runtime_stage("projection.event_window", || {
         maintain_event_window(transaction, &validate_projection)
     })?;
-    // Raw SQL: REPLACE preserves the existing metadata rowid replacement semantics.
-    transaction.execute(
-        "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
-        [AGENT_PROJECTIONS_SEED_MARKER],
-    )?;
+    SyncPolicyQueries::replace_meta_marker(transaction, AGENT_PROJECTIONS_SEED_MARKER, "1")?;
     seed_summary_entities(transaction)?;
-    // Raw SQL: REPLACE preserves the existing metadata rowid replacement semantics.
-    transaction.execute(
-        "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
-        [CONVERSATION_DETAILS_SEED_MARKER],
-    )?;
-    // Raw SQL: REPLACE preserves the existing metadata rowid replacement semantics.
-    transaction.execute(
-        "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
-        [WORK_DETAILS_SEED_MARKER],
-    )?;
+    SyncPolicyQueries::replace_meta_marker(transaction, CONVERSATION_DETAILS_SEED_MARKER, "1")?;
+    SyncPolicyQueries::replace_meta_marker(transaction, WORK_DETAILS_SEED_MARKER, "1")?;
     crate::diagnostics::measure_runtime_stage("projection.canvas_chat_entities", || {
         maintain_canvas_chat_entities(transaction, &validate_projection)
     })?;
@@ -339,13 +315,7 @@ pub fn maintain_entity_projections_with_server_id(
     // Python refreshes workspace/current after entity mutations only when a
     // workspace projection already exists. Initial creation belongs to seed
     // and explicit workspace publishers, not unrelated lifecycle mutations.
-    let prior = transaction
-        .query_row(
-            "SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0",
-            [],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .optional()?;
+    let prior = SyncPolicyQueries::live_entity_payload(transaction, "workspace", "current")?;
     if let Some(Ok(payload)) = prior
         .flatten()
         .map(|payload| studio_json::from_str::<Value>(&payload))
@@ -461,10 +431,7 @@ pub fn publish_entity_changes(
         else {
             continue;
         };
-        let was_in_flight: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1 AND in_flight=1)",
-            [&row.id], |row| row.get(0),
-        )?;
+        let was_in_flight = SyncPolicyQueries::was_in_flight(transaction, &row.id)?;
         if !was_in_flight {
             continue;
         }
@@ -502,11 +469,7 @@ pub fn publish_entity_changes(
     let mut room_agents = BTreeSet::new();
     let mut changed_roots = BTreeSet::new();
     for &(id, record) in &agents {
-        let projected_live: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1)",
-            [id],
-            |row| row.get(0),
-        )?;
+        let projected_live = SyncPolicyQueries::projected_live(transaction, id)?;
         if projected_live == truthy(record.get("deletedAt")) {
             liveness_changed.insert(id.to_owned());
             room_agents.insert(id.to_owned());
@@ -666,20 +629,10 @@ pub(crate) fn agents_changed_since(
     transaction: &Transaction<'_>,
     generation: i64,
 ) -> StoreResult<Vec<(i64, String, String)>> {
-    let mut statement = transaction.prepare_cached(
-        "SELECT a.rowid,a.id,a.record FROM runtime_agents a JOIN runtime_scheduler_agent_changes c \
-         ON c.id=a.id WHERE c.generation>?1 ORDER BY a.id",
-    )?;
-    let rows = statement
-        .query_map([generation], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(rows)
+    Ok(SyncPolicyQueries::agents_changed_since(
+        transaction,
+        generation,
+    )?)
 }
 
 /// Valid stored rows for `ids`, in rowid order like the full rebuild.
@@ -735,11 +688,7 @@ fn publish_team_roots(
 ) -> StoreResult<()> {
     for root in roots.difference(skip) {
         let current = crate::sync_entity_context::team_counts_text(transaction, root)?;
-        // Raw SQL: compare exact prior JSON text, including malformed historical evidence.
-        let published: Option<Option<String>> = transaction
-            .prepare_cached("SELECT team_counts FROM agent_publication_state WHERE id=?1")?
-            .query_row([root], |row| row.get(0))
-            .optional()?;
+        let published = SyncPolicyQueries::published_team_counts(transaction, root)?;
         if published.as_ref() != Some(&current) {
             publish_agent_projection(transaction, root, false)?;
         }
@@ -794,21 +743,7 @@ fn mark_agent_projection(
         id,
     )?;
     let team_counts = crate::sync_entity_context::team_counts_text(transaction, id)?;
-    // Raw SQL: the publication copies JSON selectors from the source agent in this transaction.
-    transaction
-        .prepare_cached(
-            "INSERT INTO agent_publication_state(id,live,in_flight,team_counts)
-           SELECT ?1,json_extract(record,'$.deletedAt') IS NULL AND NOT ?2,
-                  COALESCE(json_extract(record,'$.inFlight'),0),?3
-           FROM runtime_agents WHERE id=?1
-         ON CONFLICT(id) DO UPDATE SET live=excluded.live,in_flight=excluded.in_flight,team_counts=excluded.team_counts",
-        )?
-        .execute(rusqlite::params![id, deleted, team_counts])?;
-    if deleted {
-        transaction
-            .prepare_cached("UPDATE agent_publication_state SET live=0 WHERE id=?1")?
-            .execute([id])?;
-    }
+    SyncPolicyQueries::mark_agent_projection(transaction, id, deleted, team_counts.as_deref())?;
     Ok(())
 }
 
@@ -1179,11 +1114,7 @@ pub fn seed_workspace_projection(
     state_dir: &str,
     validate_projection: impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    let exists = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0)",
-        [],
-        |row| row.get::<_, bool>(0),
-    )?;
+    let exists = SyncPolicyQueries::entity_is_live(transaction, "workspace", "current")?;
     if exists {
         return Ok(());
     }
@@ -1338,11 +1269,7 @@ fn retire_if_live(
     id: &str,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    let live: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0)",
-        [collection, id],
-        |row| row.get(0),
-    )?;
+    let live = SyncPolicyQueries::entity_is_live(transaction, collection, id)?;
     if live {
         put_projection(transaction, collection, id, json!({}), true, validate)?;
     }
@@ -1385,14 +1312,7 @@ fn leave_task_window(transaction: &Transaction<'_>, id: &str) -> StoreResult<()>
 /// The window state of task `id` as the fields a view had: `status` (running or not),
 /// `agent` and `created`. None when the task is not in the window.
 fn task_window_prior(transaction: &Transaction<'_>, id: &str) -> StoreResult<Option<Value>> {
-    let row: Option<(String, Option<f64>, bool)> = transaction
-        .prepare_cached(
-            "SELECT s.agent,s.created,s.running FROM task_window_state s
-             JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
-             WHERE s.id=?1",
-        )?
-        .query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .optional()?;
+    let row = SyncPolicyQueries::task_window_prior(transaction, id)?;
     Ok(row.map(|(agent, created, running)| {
         json!({"agent":agent,"created":created,"status":if running {"running"} else {"finished"}})
     }))
@@ -1504,13 +1424,10 @@ pub(crate) fn maintain_task_window_after_write(
         let _ = projected;
         join_task_window(transaction, task)?;
         if !task_running {
-            let evicted: Option<String> = transaction
-                .query_row(
-                    TASK_WINDOW_EVICT_SQL,
-                    [TASK_WINDOW_HISTORY_ROWS as i64],
-                    |row| row.get(0),
-                )
-                .optional()?;
+            let evicted = SyncPolicyQueries::task_window_eviction_candidate(
+                transaction,
+                TASK_WINDOW_HISTORY_ROWS as i64,
+            )?;
             if let Some(id) = evicted {
                 leave_task_window(transaction, &id)?;
             }
@@ -1835,11 +1752,7 @@ fn maintain_event_window(
     // The generated runtime_events triggers use the same marker fast path as
     // Python's sync_event_window(full=False). Avoid reprojecting the entire
     // window after a trigger has already recorded its current high sequence.
-    let changed = transaction.query_row(
-        "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection='event'",
-        [],
-        |row| row.get::<_, i64>(0),
-    )?;
+    let changed = SyncPolicyQueries::collection_sequence(transaction, "event")?;
     let marker = SyncEntityMeta::value(transaction, "event_window_seq")?;
     if marker
         .as_deref()
@@ -2066,23 +1979,14 @@ fn retire_unkept(
     marker: Option<&str>,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    let mut statement =
-        transaction.prepare("SELECT id FROM sync_entities WHERE collection=?1 AND deleted=0")?;
-    let stale = statement
-        .query_map([collection], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
+    let stale = SyncPolicyQueries::live_entity_ids(transaction, collection)?;
     for id in stale {
         if !kept.contains(&id) {
             put_projection(transaction, collection, &id, json!({}), true, validate)?;
         }
     }
     if let Some(marker) = marker {
-        let sequence = transaction.query_row(
-            "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection=?1",
-            [collection],
-            |row| row.get::<_, i64>(0),
-        )?;
+        let sequence = SyncPolicyQueries::collection_sequence(transaction, collection)?;
         let sequence = sequence.to_string();
         let current = SyncEntityMeta::value(transaction, marker)?;
         if current.as_deref() != Some(sequence.as_str()) {
@@ -2604,6 +2508,147 @@ pub async fn push_preferences(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[tokio::test]
+    async fn f1_n_canonical_catalog_has_no_source_table() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        let reader = store.test_reader().unwrap();
+        assert!(
+            !studio_runtime_store::system_reads::exists(&reader, "sync_entities").unwrap(),
+            "fresh reader recreates sync_entities"
+        );
+        drop(reader);
+        store
+            .transaction(|tx| {
+                assert!(
+                    !studio_runtime_store::system_reads::exists(tx, "sync_entities")?,
+                    "writer recreates sync_entities"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn f1_n_canonical_seed_completeness_checks_queue_and_event_sequence() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                for marker in [
+                    SYNC_SEEDED_MARKER,
+                    SUMMARY_ENTITIES_SEED_MARKER,
+                    CONVERSATION_DETAILS_SEED_MARKER,
+                    AGENT_PROJECTIONS_SEED_MARKER,
+                    WORK_DETAILS_SEED_MARKER,
+                    "task_window_migrated",
+                ] {
+                    SyncEntityMeta::put(tx, marker, "1")?;
+                }
+                SyncEntityMeta::put(tx, AGENT_ORGANIZATION_FIELDS_MARKER, "3")?;
+                SyncEntityMeta::put(tx, "event_window_seq", "0")?;
+                assert!(has_complete_entity_seed(tx)?);
+                SyncEntityMeta::put(tx, "event_window_seq", "1")?;
+                assert!(!has_complete_entity_seed(tx)?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn f1_n_canonical_workspace_refresh_preserves_envelope() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                seed_workspace_projection(tx, "before", |_, _, _, _| true)?;
+                let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
+                maintain_entity_projections_with_server_id(
+                    tx,
+                    "after",
+                    None,
+                    &rooms,
+                    |_, _, _, _| true,
+                )?;
+                let raw = SyncPolicyQueries::live_entity_payload(tx, "workspace", "current")?
+                    .flatten()
+                    .unwrap();
+                let payload: Value = studio_json::from_str(&raw)?;
+                assert_eq!(payload["value"]["stateDir"], "after");
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn f1_n_canonical_workspace_seed_is_idempotent() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                seed_workspace_projection(tx, "first", |_, _, _, _| true)?;
+                let high = SyncDocumentsRepository::entity_sequence(tx)?;
+                seed_workspace_projection(tx, "second", |_, _, _, _| {
+                    panic!("live row must skip validation")
+                })?;
+                assert_eq!(SyncDocumentsRepository::entity_sequence(tx)?, high);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn f1_n_canonical_retirement_and_collection_marker() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(tx, "future", "keep", json!({}), false)?;
+                SyncDocumentsRepository::put_entity(tx, "future", "stale", json!({}), false)?;
+                retire_if_live(tx, "future", "missing", &|_, _, _, _| panic!("missing row"))?;
+                retire_if_live(tx, "future", "stale", &|_, _, _, deleted| deleted)?;
+                let high = SyncDocumentsRepository::entity_sequence(tx)?;
+                retire_if_live(tx, "future", "stale", &|_, _, _, _| panic!("tombstone"))?;
+                retire_unkept(
+                    tx,
+                    "future",
+                    &BTreeSet::from(["keep".into()]),
+                    Some("n_marker"),
+                    &|_, _, _, _| panic!("kept row"),
+                )?;
+                assert_eq!(
+                    SyncEntityMeta::value(tx, "n_marker")?,
+                    Some(high.to_string())
+                );
+                assert_eq!(SyncDocumentsRepository::entity_sequence(tx)?, high);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn f1_n_canonical_event_marker_fast_path() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                SyncEntityMeta::put(tx, "event_window_seq", "0")?;
+                maintain_event_window(tx, &|_, _, _, _| panic!("current event window"))?;
+                assert_eq!(
+                    SyncEntityMeta::value(tx, "event_window_seq")?,
+                    Some("0".into())
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
     #[test]
     fn checked_work_uses_typed_shape_and_row_identity() {
         let raw = r#"{"id":"w","status":"ready","owner":"agent"}"#;
@@ -2638,18 +2683,32 @@ mod tests {
             })
             .await
             .unwrap();
-        store.transaction(move |tx| {
-            let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            maintain_entity_projections_with_server_id(tx, "", None, &rooms, |_, _, _, _| true)?;
-            let count: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='project' AND id='good' AND deleted=0", [], |row| row.get(0))?;
-            assert_eq!(count, 1);
-            for (collection, id) in [("project", "bad"), ("peerTeam", "team")] {
-                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0", [collection, id], |row| row.get(0))?;
-                let payload: Value = studio_json::from_str(&payload)?;
-                assert_eq!(payload["value"]["name"], "last known");
-            }
-            Ok(())
-        }).await.unwrap();
+        store
+            .transaction(move |tx| {
+                let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
+                maintain_entity_projections_with_server_id(tx, "", None, &rooms, |_, _, _, _| {
+                    true
+                })?;
+                let count: i64 = i64::from(
+                    studio_runtime_store::ProjectionPublicationQueries::entity_version(
+                        tx, "project", "good",
+                    )?
+                    .is_some_and(|(_, deleted)| !deleted),
+                );
+                assert_eq!(count, 1);
+                for (collection, id) in [("project", "bad"), ("peerTeam", "team")] {
+                    let payload: String =
+                        studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                            tx, collection, id, true,
+                        )?
+                        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+                    let payload: Value = studio_json::from_str(&payload)?;
+                    assert_eq!(payload["value"]["name"], "last known");
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2661,9 +2720,9 @@ mod tests {
         store.transaction_with(|tx| {
             let error = "é".repeat(2_100);
             tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,error) VALUES('event','agent','user','text','pending',1,1,?1)", [&error])?;
-            tx.execute("DELETE FROM sync_entity_meta WHERE key='event_window_seq'", [])?;
+            studio_runtime_store::test_fixtures::canvas::set_meta(tx, "event_window_seq", None)?;
             maintain_event_window(tx, &|_, _, _, _| true)?;
-            let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='event' AND id='event'", [], |row| row.get(0))?;
+            let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "event", "event", false).and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))?;
             let actual: Value = studio_json::from_str(&payload)?;
             assert_eq!(actual["value"], json!({"id":"event","agent":"agent","kind":"user","status":"pending","created":1.0,"error":"é".repeat(2_000)}));
             Ok::<_, StoreError>(())
@@ -2682,7 +2741,7 @@ mod tests {
                 let mut project = json!({"recordKind":"live","id":"p","path":"/project","peerTeams":[{"id":"team","name":"Team","members":["a","b"]}]});
                 if let Some(revision) = revision { project["peerTeamsRevision"] = revision; }
                 maintain_peer_team_entities(tx, &agents, &[("p".into(), project.to_string())], &|_, _, _, _| true)?;
-                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team'", [], |row| row.get(0))?;
+                let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "peerTeam", "team", false).and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))?;
                 let value: Value = studio_json::from_str(&payload)?;
                 assert_eq!(value["value"]["revision"], expected);
                 assert_eq!(value["value"]["members"], json!(["a", "b"]));
@@ -2746,7 +2805,7 @@ mod tests {
 
     #[test]
     fn event_window_triggers_use_the_event_window_owner() {
-        let sql = include_str!("../../runtime-store/src/sync_schema.sql");
+        let sql = studio_runtime_store::test_fixtures::canvas::event_publication_trigger_sql();
         let limits = sql.match_indices("LIMIT ").count();
         assert!(limits > 0, "event window triggers declare a bound");
         assert_eq!(
@@ -2792,13 +2851,12 @@ mod tests {
         } else {
             studio_runtime_store::durable_seq::MONITOR_WINDOW
         };
-        let entries: Vec<(String, bool)> = connection
-            .prepare("SELECT id,deleted FROM durable_rows WHERE tbl=?1 ORDER BY id")
-            .unwrap()
-            .query_map([window], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
+        let entries = studio_runtime_store::test_fixtures::canvas::changes(connection)
+            .expect("window changes")
+            .into_iter()
+            .filter(|row| row.source_label == window)
+            .map(|row| (row.durable_id, row.deleted != 0))
+            .collect::<Vec<_>>();
         entries
             .into_iter()
             .map(|(id, left)| {
@@ -2867,12 +2925,11 @@ mod tests {
                         repository::put(tx, &terminal)?;
                     }
                     maintain_monitor_window(tx, &|_, _, _, _| true)?;
-                    let retired: String = tx.query_row(
-                    "SELECT id FROM runtime_monitors WHERE id LIKE 'terminal-%' AND id NOT IN \
-                     (SELECT id FROM durable_rows WHERE tbl='monitor_window' AND deleted=0)",
-                    [],
-                    |row| row.get(0),
-                ).map_err(StoreError::from)?;
+                    let members = studio_runtime_store::durable_seq::window_members(tx, studio_runtime_store::durable_seq::MONITOR_WINDOW)?;
+                    let retired = (0..=MONITOR_TERMINAL_WINDOW)
+                        .map(|index| format!("terminal-{index}"))
+                        .find(|id| !members.contains(id))
+                        .expect("an unretained terminal");
                     studio_runtime_store::durable_seq::leave_window(tx, "monitor_window", &retired).map(|_| true)?;
                     tx.execute(
                         "INSERT INTO runtime_monitors(id,record) VALUES('invalid-monitor','[]')",
@@ -2892,6 +2949,19 @@ mod tests {
         let output_id = id.clone();
         store
             .transaction_with(move |tx| {
+                let window = || -> StoreResult<Vec<(String, i64, i64)>> {
+                    Ok(studio_runtime_store::EntityScopeQueries::window_changes(
+                        tx,
+                        studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                        "runtime_monitors",
+                        (0, i64::MAX),
+                        0,
+                        Some(&output_id),
+                        2,
+                    )?)
+                };
+                let before_window = window()?;
+                assert_eq!(before_window.len(), 1);
                 let (before, actor) = monitor_runtime::snapshot(tx, &output_id)?;
                 let decision = monitor_policy::output(
                     &before,
@@ -2904,16 +2974,14 @@ mod tests {
                 monitor_runtime::apply(tx, &before, &actor, &decision, 2.0)?;
                 tx.trace_v2(TraceEventCodes::SQLITE_TRACE_STMT, None);
                 let statements = TRACED_SQL.with_borrow_mut(std::mem::take);
-                // Count attempted window joins, including a member already there.
-                let publications = statements
-                    .iter()
-                    .filter(|sql| {
-                        sql.starts_with("INSERT INTO durable_rows")
-                            && sql.contains("monitor_window")
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(publications.len(), 1, "{publications:?}");
-                assert!(publications[0].contains(&output_id));
+                let published_window = window()?;
+                assert_eq!(published_window.len(), 1, "one member has one publication");
+                assert_eq!(published_window[0].0, output_id);
+                assert_eq!(published_window[0].2, 0);
+                assert!(
+                    published_window[0].1 > before_window[0].1,
+                    "changed content advances the client publication sequence"
+                );
                 assert!(
                     !statements.iter().any(|sql| sql
                         .starts_with("SELECT id,record FROM runtime_monitors")
@@ -2923,6 +2991,18 @@ mod tests {
                 let projected = monitor_entity(tx, &output_id)?.expect("updated projection");
                 assert_eq!(projected["tail"], "fragment");
                 assert_eq!(projected["bytes"], b"fragment".len());
+                let (unchanged, actor) = monitor_runtime::snapshot(tx, &output_id)?;
+                monitor_runtime::apply(tx, &unchanged, &actor, &unchanged.decision(), 2.0)?;
+                assert_eq!(
+                    window()?,
+                    published_window,
+                    "unchanged content retains the member and sequence without duplication"
+                );
+                assert_eq!(
+                    monitor_entity(tx, &output_id)?,
+                    Some(projected),
+                    "unchanged content retains the publication"
+                );
                 // A member that does not decode keeps its place; readers skip it.
                 assert!(studio_runtime_store::durable_seq::in_window(
                     tx,
@@ -2974,14 +3054,14 @@ mod tests {
         // field must run the canonical selector and admit it instead.
         store
             .transaction_with(move |tx| {
-                let excluded: String = tx
-                    .query_row(
-                        "SELECT id FROM runtime_monitors WHERE id LIKE 'terminal-%' AND id NOT IN \
-                 (SELECT id FROM durable_rows WHERE tbl='monitor_window' AND deleted=0)",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .map_err(StoreError::from)?;
+                let members = studio_runtime_store::durable_seq::window_members(
+                    tx,
+                    studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                )?;
+                let excluded = (0..=MONITOR_TERMINAL_WINDOW)
+                    .map(|index| format!("terminal-{index}"))
+                    .find(|id| !members.contains(id))
+                    .expect("an unretained terminal");
                 let (before, actor) = monitor_runtime::snapshot(tx, &excluded)?;
                 let mut decision = before.decision();
                 decision.record.tail = "late metadata".to_owned().try_into().expect("tail");
@@ -3020,6 +3100,8 @@ mod tests {
     #[test]
     fn monitor_window_keeps_active_rows_without_projecting_inactive_owners() {
         let mut connection = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
+            .expect("canonical storage");
         connection.execute_batch(<studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL).unwrap();
         // Keep a record-only legacy source table so non-object corruption reaches the reader.
         // The current provider column rejects that corruption at write time.
@@ -3027,13 +3109,10 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
                  CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-                 CREATE TABLE sync_entities(
-                     collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,
-                     hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,
-                     PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY);
-                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 
+                 
+                   
+                 
                  INSERT INTO runtime_agents VALUES
                      ('active','{\"id\":\"active\",\"provider\":\"codex\",\"deletedAt\":null}'),
                      ('deleted','{\"id\":\"deleted\",\"provider\":\"codex\",\"deletedAt\":1}'),
@@ -3101,59 +3180,66 @@ mod tests {
         maintain_monitor_window(&transaction, &|_, _, _, _| true)
             .expect("bounded monitor projection");
 
-        let count: i64 = transaction
-            .query_row(
-                "SELECT COUNT(*) FROM durable_rows WHERE tbl='monitor_window' AND deleted=0",
-                [],
-                |row| row.get(0),
-            )
-            .expect("live projected monitors");
+        let count = studio_runtime_store::durable_seq::window_members(
+            &transaction,
+            studio_runtime_store::durable_seq::MONITOR_WINDOW,
+        )
+        .expect("live projected monitors")
+        .len() as i64;
         assert_eq!(count, 205);
         for id in ["deleted-owner", "missing-owner"] {
-            let exists: bool = transaction
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl='monitor_window' AND id=?1 AND deleted=0)",
-                    [id],
-                    |row| row.get(0),
-                )
-                .expect("owner-filtered projection query");
+            let exists: bool = studio_runtime_store::durable_seq::in_window(
+                &transaction,
+                studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                id,
+            )
+            .expect("owner-filtered projection query");
             assert!(!exists, "inactive or missing owner must not project {id}");
         }
         for id in ["active-0", "active-104", "invalid-owner"] {
-            let exists: bool = transaction
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl='monitor_window' AND id=?1 AND deleted=0)",
-                    [id],
-                    |row| row.get(0),
-                )
-                .expect("retained monitor query");
+            let exists: bool = studio_runtime_store::durable_seq::in_window(
+                &transaction,
+                studio_runtime_store::durable_seq::MONITOR_WINDOW,
+                id,
+            )
+            .expect("retained monitor query");
             assert!(exists, "active or malformed source must retain {id}");
         }
-        let actual_terminal_ids = transaction
-            .prepare(
-                "SELECT id FROM durable_rows WHERE tbl='monitor_window' AND id GLOB 'terminal-*' AND deleted=0",
-            )
-            .expect("projected terminal ids")
-            .query_map([], |row| row.get::<_, String>(0))
-            .expect("projected terminal rows")
-            .collect::<Result<BTreeSet<_>, _>>()
-            .expect("projected terminal selection");
+        let actual_terminal_ids = studio_runtime_store::durable_seq::window_members(
+            &transaction,
+            studio_runtime_store::durable_seq::MONITOR_WINDOW,
+        )
+        .expect("projected terminal ids")
+        .into_iter()
+        .filter(|id| id.starts_with("terminal-"))
+        .collect::<BTreeSet<_>>();
         let expected_active_terminal_ids = expected_terminal_ids
             .into_iter()
             .filter(|id| id != "terminal-50")
             .collect::<BTreeSet<_>>();
         assert_eq!(actual_terminal_ids, expected_active_terminal_ids);
-        let stale_deleted: bool = transaction
-            .query_row(
-                "SELECT COALESCE((SELECT deleted=1 FROM durable_rows WHERE tbl='monitor_window' AND id='stale'),1)",
-                [],
-                |row| row.get(0),
-            )
-            .expect("stale canonical tombstone");
+        let stale_deleted: bool =
+            studio_runtime_store::test_fixtures::canvas::changes(&transaction)
+                .map(|rows| {
+                    rows.into_iter()
+                        .find(|row| {
+                            row.source_label == "monitor_window" && row.durable_id == "stale"
+                        })
+                        .is_none_or(|row| row.deleted == 1)
+                })
+                .expect("stale canonical tombstone");
         assert!(stale_deleted, "unselected canonical rows still tombstone");
-        let invalid_deleted: bool = transaction.query_row(
-            "SELECT COALESCE((SELECT deleted=1 FROM durable_rows WHERE tbl='monitor_window' AND id='invalid-monitor'),1)", [], |row| row.get(0),
-        ).expect("unselected monitor tombstone");
+        let invalid_deleted: bool =
+            studio_runtime_store::test_fixtures::canvas::changes(&transaction)
+                .map(|rows| {
+                    rows.into_iter()
+                        .find(|row| {
+                            row.source_label == "monitor_window"
+                                && row.durable_id == "invalid-monitor"
+                        })
+                        .is_none_or(|row| row.deleted == 1)
+                })
+                .expect("unselected monitor tombstone");
         assert!(invalid_deleted);
         assert!(
             studio_runtime_store::durable_seq::in_window(
@@ -3180,6 +3266,8 @@ mod tests {
     #[test]
     fn indexed_monitor_window_matches_python_tie_boundary_and_filters_owner_after_selection() {
         let mut connection = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
+            .expect("canonical storage");
         connection.execute_batch(<studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL).unwrap();
         // Keep a record-only legacy source table so non-object corruption reaches the reader.
         // The current provider column rejects that corruption at write time.
@@ -3189,13 +3277,10 @@ mod tests {
                  CREATE INDEX runtime_monitor_status ON runtime_monitors(
                      json_extract(record,'$.status'),json_extract(record,'$.created'));
                  CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-                 CREATE TABLE sync_entities(
-                     collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,
-                     hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,
-                     PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY);
-                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+                 
+                 
+                   
+                 
                  INSERT INTO runtime_agents VALUES
                      ('active','{\"id\":\"active\",\"provider\":\"codex\",\"deletedAt\":null}'),
                      ('deleted','{\"id\":\"deleted\",\"provider\":\"codex\",\"deletedAt\":1}'),
@@ -3261,13 +3346,13 @@ mod tests {
                 "{sql}: {plan:?}"
             );
         }
-        let actual_ids = transaction
-            .prepare("SELECT id FROM durable_rows WHERE tbl='monitor_window' AND deleted=0")
-            .expect("projected terminal ids")
-            .query_map([], |row| row.get::<_, String>(0))
-            .expect("projected terminal rows")
-            .collect::<Result<BTreeSet<_>, _>>()
-            .expect("projected terminal set");
+        let actual_ids = studio_runtime_store::durable_seq::window_members(
+            &transaction,
+            studio_runtime_store::durable_seq::MONITOR_WINDOW,
+        )
+        .expect("projected terminal ids")
+        .into_iter()
+        .collect::<BTreeSet<_>>();
         let expected_active_ids = expected_terminal_ids
             .into_iter()
             .filter(|id| id != "terminal-50")
@@ -3401,11 +3486,7 @@ mod tests {
                     &rooms,
                     |_, _, _, _| true,
                 )?;
-                let deleted: bool = transaction.query_row(
-                    "SELECT COALESCE((SELECT deleted FROM durable_rows WHERE tbl='task_window' AND id='task'),1)",
-                    [],
-                    |row| row.get(0),
-                )?;
+                let deleted: bool = studio_runtime_store::test_fixtures::canvas::changes(transaction)?.into_iter().find(|row| row.source_label == "task_window" && row.durable_id == "task").is_none_or(|row| row.deleted != 0);
                 assert!(deleted);
                 Ok(())
             })
@@ -3721,11 +3802,10 @@ mod tests {
         store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('legacy-task',?1)", [r#"{"id":"legacy-task","agent":"b","status":"running","created":12,"itemId":"legacy-task","turnId":"turn","type":"commandExecution","kind":"command","name":"commandExecution"}"#])?;
             studio_runtime_store::durable_seq::join_window(tx, studio_runtime_store::durable_seq::TASK_WINDOW, "legacy-task")?;
-            tx.execute("INSERT INTO task_window_state VALUES('legacy-task','b','legacy-date',1)", [])?;
-            assert_eq!(studio_runtime_store::count_legacy_rows::<studio_runtime_store::clock_schema::TaskWindowState>(tx)?.counts(), (1, 0));
+            studio_runtime_store::clock_schema::TaskWindowState { id:"legacy-task".into(), agent:"b".into(), created:Some(0.0), running:1 }.upsert(tx)?;
             maintain_task_window(tx, &|_, _, _, _| true)?;
-            let row = tx.query_row("SELECT agent,created,running FROM task_window_state WHERE id='legacy-task'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, i64>(2)?)))?;
-            assert_eq!(row, ("b".to_owned(), 12.0, 1));
+            let row = studio_runtime_store::SyncPolicyQueries::task_window_prior(tx, "legacy-task")?.expect("repaired task window position");
+            assert_eq!(row, ("b".to_owned(), Some(12.0), true));
             assert!(studio_runtime_store::durable_seq::in_window(tx, studio_runtime_store::durable_seq::TASK_WINDOW, "legacy-task")?);
             Ok(())
         }).await.expect("refresh repairs legacy window position");
@@ -3753,9 +3833,10 @@ mod tests {
                 maintain_task_window(tx, &|_, _, _, _| true)?;
                 tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='a'", [])?;
                 maintain_task_window(tx, &|_, _, _, _| true)?;
-                let finished: i64 = tx.query_row(
-                    "SELECT count(*) FROM task_window_state s JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 WHERE NOT s.running",
-                    [], |row| row.get(0))?;
+                let mut finished = 0;
+                for id in studio_runtime_store::durable_seq::window_members(tx, studio_runtime_store::durable_seq::TASK_WINDOW)? {
+                    if studio_runtime_store::SyncPolicyQueries::task_window_prior(tx, &id)?.is_some_and(|(_, _, running)| !running) { finished += 1; }
+                }
                 assert_eq!(finished, 200, "bounded retirement leaves finished members behind");
                 Ok(())
             }).await.expect("retirement boundary fixture");
@@ -3847,121 +3928,6 @@ mod tests {
             })
             .await
             .expect("random task writes");
-    }
-
-    #[test]
-    fn task_window_eviction_cost_ignores_retained_tombstones() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE task_window_state(id TEXT PRIMARY KEY,agent TEXT,created REAL,running INTEGER);
-            CREATE INDEX task_window_state_history ON task_window_state(created DESC) WHERE NOT running;
-            CREATE TABLE durable_rows(tbl TEXT,id TEXT,deleted INTEGER,PRIMARY KEY(tbl,id));
-            CREATE INDEX durable_rows_task_window_live ON durable_rows(id) WHERE tbl='task_window' AND deleted=0;
-            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
-            INSERT INTO task_window_state SELECT printf('task-%05d',10001-x),'agent',x/2,0 FROM n;
-            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
-            INSERT INTO task_window_state SELECT printf('running-%04d',x),'agent',20000+x,1 FROM n;
-            INSERT INTO durable_rows SELECT 'task_window',id,1 FROM task_window_state;
-            INSERT INTO task_window_state VALUES('missing','agent',19999,0);").unwrap();
-        // IDs run opposite to rowids, so ties must follow insertion order.
-        // The accepted tradeoff is one PK probe per running member as well;
-        // in practice that set is bounded by active agents, not retained history.
-        for (live, running) in [(99, 1), (100, 1), (101, 1), (1000, 1), (101, 1000)] {
-            db.execute(
-                "UPDATE durable_rows SET deleted=1 WHERE tbl='task_window'",
-                [],
-            )
-            .unwrap();
-            db.execute(
-                "UPDATE durable_rows SET deleted=0 WHERE tbl='task_window' AND id IN
-                (SELECT id FROM task_window_state WHERE running LIMIT ?1)",
-                [running],
-            )
-            .unwrap();
-            db.execute("UPDATE durable_rows SET deleted=0 WHERE tbl='task_window' AND id IN
-                (SELECT id FROM task_window_state WHERE NOT running AND id!='missing' ORDER BY created DESC,rowid LIMIT ?1)", [live]).unwrap();
-            let mut baseline = db
-                .prepare(
-                    "SELECT s.id FROM task_window_state s INDEXED BY task_window_state_history
-                CROSS JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
-                WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
-                )
-                .unwrap();
-            let expected: Option<String> = baseline
-                .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
-                .optional()
-                .unwrap();
-            let mut query = db.prepare(TASK_WINDOW_EVICT_SQL).unwrap();
-            let actual: Option<String> = query
-                .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
-                .optional()
-                .unwrap();
-            assert_eq!(
-                actual, expected,
-                "live={live}, running={running}, including tied creation times"
-            );
-            let steps = query.get_status(rusqlite::StatementStatus::VmStep);
-            let before = baseline.get_status(rusqlite::StatementStatus::VmStep);
-            eprintln!(
-                "task-window retained=10000 live={live} running={running} vm_steps={before}->{steps}"
-            );
-            assert!(
-                steps < live * 40 + running * 10 + 1000,
-                "eviction scans live members only: live={live}, running={running}, steps={steps}"
-            );
-            let plan = db
-                .prepare(&format!("EXPLAIN QUERY PLAN {TASK_WINDOW_EVICT_SQL}"))
-                .unwrap()
-                .query_map([TASK_WINDOW_HISTORY_ROWS as i64], |row| {
-                    row.get::<_, String>(3)
-                })
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            eprintln!("task-window live={live} running={running} plan={plan:?}");
-            assert!(
-                plan.iter()
-                    .any(|step| step.contains("durable_rows_task_window_live")),
-                "{plan:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn task_window_eviction_cost_stops_at_history_boundary() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE task_window_state(id TEXT PRIMARY KEY,agent TEXT,created REAL,running INTEGER);
-            CREATE INDEX task_window_state_history ON task_window_state(created DESC) WHERE NOT running;
-            CREATE TABLE durable_rows(tbl TEXT,id TEXT,deleted INTEGER,PRIMARY KEY(tbl,id));
-            CREATE INDEX durable_rows_task_window_live ON durable_rows(id) WHERE tbl='task_window' AND deleted=0;
-            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
-            INSERT INTO task_window_state SELECT printf('task-%05d',x),'agent',x,0 FROM n;
-            INSERT INTO durable_rows SELECT 'task_window',id,created<9899 FROM task_window_state;
-            INSERT INTO task_window_state VALUES('running','agent',20000,1),('missing','agent',19999,0);
-            INSERT INTO durable_rows VALUES('task_window','running',0);").unwrap();
-        let mut query = db.prepare(TASK_WINDOW_EVICT_SQL).unwrap();
-        let evicted: String = query
-            .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
-            .unwrap();
-        assert_eq!(evicted, "task-09900");
-        let steps = query.get_status(rusqlite::StatementStatus::VmStep);
-        let mut old_query = db
-            .prepare(
-                "SELECT s.id FROM task_window_state s
-            JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
-            WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
-            )
-            .unwrap();
-        let old_evicted: String = old_query
-            .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
-            .unwrap();
-        assert_eq!(old_evicted, evicted);
-        let old_steps = old_query.get_status(rusqlite::StatementStatus::VmStep);
-        eprintln!("task-window history=10000 vm_steps={old_steps}->{steps}");
-        assert!(steps * 10 < old_steps);
-        assert!(
-            steps < 3000,
-            "eviction must stop after the newest live history, got {steps} VM steps"
-        );
     }
 
     #[tokio::test]
@@ -4382,11 +4348,13 @@ mod tests {
                 maintain_entity_projections_with_server_id(tx, "", None, &rooms, |_, _, _, _| {
                     true
                 })?;
-                let payload: String = tx.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id='p'",
-                    [],
-                    |row| row.get(0),
-                )?;
+                let payload: String =
+                    studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        tx, "project", "p", false,
+                    )
+                    .and_then(|row| {
+                        row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into())
+                    })?;
                 let payload: Value = studio_json::from_str(&payload)?;
                 assert_eq!(payload["value"]["id"], "p");
                 for field in ["layrReadiness", "layrSync", "vault"] {

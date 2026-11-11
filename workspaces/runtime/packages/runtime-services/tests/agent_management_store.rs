@@ -111,21 +111,20 @@ async fn seed(store: &RuntimeStore, records: Records) {
 fn state(store: &RuntimeStore) -> Value {
     let db = store.test_reader().expect("reader");
     let records = agent_management::read(&db).expect("records");
-    let mut statement = db.prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities ORDER BY collection,id").expect("sync read");
-    let sync = statement
-        .query_map([], |r| {
-            Ok(json!([
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, i64>(5)?
-            ]))
+    let sync = studio_runtime_store::test_fixtures::canvas::entities(&db)
+        .expect("canonical entity snapshot")
+        .into_iter()
+        .map(|row| {
+            json!([
+                row.collection,
+                row.id,
+                row.seq,
+                row.hash,
+                row.payload,
+                row.deleted
+            ])
         })
-        .expect("rows")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("sync rows");
+        .collect::<Vec<_>>();
     json!({"tables":records,"sync":sync})
 }
 
@@ -193,7 +192,21 @@ async fn lifecycle_failure_case(case_name: &str, tables: &[&str]) {
             "UPDATE"
         };
         let trigger = format!(
-            "CREATE TRIGGER lifecycle_fail AFTER {event} ON {table} BEGIN SELECT RAISE(ABORT,'lifecycle failpoint'); END"
+            "CREATE TRIGGER lifecycle_fail AFTER {event} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'lifecycle failpoint'); END",
+            table = if *table == "durable_rows" {
+                "changes"
+            } else {
+                &table
+            },
+            partition_predicate = if *table == "durable_rows" {
+                format!(
+                    " WHEN NEW.kind={}",
+                    studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows
+                        as i64
+                )
+            } else {
+                String::new()
+            }
         );
         store
             .transaction(move |tx| {
@@ -323,7 +336,14 @@ async fn deleted_team_broadcast_projection_survives_repeated_delete() {
         .await
         .expect("delete");
     let room = |store: &RuntimeStore| -> Value {
-        let raw:String=store.test_reader().expect("reader").query_row("SELECT payload FROM sync_entities WHERE collection='room' AND id='broadcast' AND deleted=0",[],|r| r.get(0)).expect("retained broadcast");
+        let raw = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().expect("reader"),
+            "room",
+            "broadcast",
+            true,
+        )
+        .expect("room projection")
+        .expect("retained broadcast");
         studio_json::from_str::<Value>(&raw).expect("payload")["value"].clone()
     };
     let before = room(&store);
@@ -790,14 +810,11 @@ async fn synthetic_store(root: &Path, leads: usize, tasks: usize) -> std::sync::
 /// Current entity hashes and tombstone flags, keyed by collection and id.
 fn entities(store: &RuntimeStore) -> std::collections::BTreeMap<(String, String), (String, i64)> {
     let db = store.test_reader().expect("reader");
-    let mut statement = db
-        .prepare("SELECT collection,id,hash,deleted FROM sync_entities")
-        .expect("entity read");
-    statement
-        .query_map([], |r| Ok(((r.get(0)?, r.get(1)?), (r.get(2)?, r.get(3)?))))
-        .expect("entity rows")
-        .collect::<Result<_, _>>()
+    studio_runtime_store::test_fixtures::canvas::entities(&db)
         .expect("entity values")
+        .into_iter()
+        .map(|row| ((row.collection, row.id), (row.hash, row.deleted)))
+        .collect()
 }
 
 /// Lifecycle actions publish only the changed rows and their dependent views,

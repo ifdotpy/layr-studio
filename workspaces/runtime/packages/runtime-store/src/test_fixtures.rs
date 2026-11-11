@@ -1189,3 +1189,4 @@ pub fn historical_agent(value: &impl serde::Serialize) -> crate::StoreResult<cra
 pub fn retire_agent_keys(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
     crate::migrations::retire_agent_fixture_keys(tx)
 }
+pub mod canvas;

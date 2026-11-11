@@ -655,6 +655,7 @@ pub(crate) fn account_notice(
     identity: &super::ProviderDeliveryIdentity,
     at: f64,
 ) -> Result<(), NotificationDispatchError> {
+    #[allow(unused_imports)]
     use rusqlite::{OptionalExtension, params};
     use studio_runtime_store::SyncDocumentsRepository;
     let account = identity
@@ -691,7 +692,13 @@ pub(crate) fn account_notice(
     }
     // Preserve unrelated volatile sources and other accounts' notices. Replace
     // only this connection owner's portion of the existing renderer projection.
-    let workspace: Option<String> = tx.query_row_cached("SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [], |row| row.get(0)).optional().map_err(studio_runtime_store::StoreError::from)?;
+    let workspace: Option<String> =
+        studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            tx,
+            "workspace",
+            "current",
+            true,
+        )?;
     if let Some(raw) = workspace {
         let workspace: Value = studio_json::from_str(&raw)
             .map_err(|_| super::stored("sync_entities", "workspace:current"))?;
@@ -845,5 +852,42 @@ mod tests {
         );
         assert_eq!(error.get("code"), Some(&json!("bio_policy")));
         assert_eq!(error.get("studioRawEvidence"), Some(&raw));
+    }
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_account_notice_updates_workspace_projection() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction_with(|tx| {
+                let identity = crate::notification_dispatch::ProviderDeliveryIdentity {
+                    provider_handle: "account:default".into(),
+                    generation: 1,
+                    cursor: 1,
+                };
+                super::account_notice(
+                    tx,
+                    "warning",
+                    &studio_json::json!({"message":"Canonical notice"}),
+                    &identity,
+                    1.0,
+                )?;
+                let raw = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                    tx,
+                    "workspace",
+                    "current",
+                    true,
+                )?
+                .unwrap();
+                assert!(raw.contains("Canonical notice"));
+                Ok::<_, crate::notification_dispatch::NotificationDispatchError>(())
+            })
+            .await
+            .unwrap();
     }
 }

@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use studio_json::json;
 
 pub(super) fn database() -> Connection {
-    let connection = Connection::open_in_memory().expect("memory database opens");
+    let mut connection = Connection::open_in_memory().expect("memory database opens");
     crate::receipt_schema::create(&connection).expect("receipt schema");
     connection
         .execute_batch(
@@ -29,6 +29,8 @@ pub(super) fn database() -> Connection {
     connection
         .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
         .expect("volatile agent table creates");
+    crate::test_fixtures::canvas::install_canonical(&connection)
+        .expect("canonical scheduler storage");
     AgentRepository::put(
         &connection,
         &AgentRecord {
@@ -45,18 +47,18 @@ pub(super) fn database() -> Connection {
         },
     )
     .expect("agent fixture writes");
-    connection
-        .execute(
-            "INSERT INTO sync_entities VALUES('agent','agent',1,'hash',?1,0)",
-            [json!({
-                "collection":"agent", "id":"agent",
-                "value":{"id":"agent", "status":"queued", "overview":{
-                    "result":"", "resultTruncated":false, "resultTurnId":null
-                }}
-            })
-            .to_string()],
-        )
-        .expect("agent sync projection fixture writes");
+    let transaction = connection.transaction().expect("projection transaction");
+    crate::SyncDocumentsRepository::put_entity(
+        &transaction,
+        "agent",
+        "agent",
+        json!({"id":"agent", "status":"queued", "overview":{
+            "result":"", "resultTruncated":false, "resultTurnId":null
+        }}),
+        false,
+    )
+    .expect("agent sync projection fixture writes");
+    transaction.commit().expect("projection commits");
     for (id, created) in [("later", 2.0), ("first", 1.0), ("tie", 1.0)] {
         connection
             .execute(

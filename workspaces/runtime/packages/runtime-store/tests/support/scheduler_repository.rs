@@ -615,9 +615,21 @@ fn snapshot(connection: &Connection) -> studio_json::Value {
         .expect("metadata snapshot queries")
         .collect::<Result<Vec<_>, _>>()
         .expect("metadata snapshot reads");
-    let sync = connection.prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities ORDER BY collection,id").expect("sync snapshot prepares")
-            .query_map([], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?,row.get::<_,i64>(5)?)))
-            .expect("sync snapshot queries").collect::<Result<Vec<_>,_>>().expect("sync snapshot reads");
+    let sync = crate::test_fixtures::canvas::entities(connection)
+        .expect("sync snapshot reads")
+        .into_iter()
+        .map(|row| {
+            (
+                row.collection,
+                row.id,
+                row.seq,
+                row.hash,
+                row.payload,
+                row.deleted,
+                row.source_rowid,
+            )
+        })
+        .collect::<Vec<_>>();
     let completed = connection
         .prepare("SELECT chat||':'||provider_turn FROM turns WHERE state='completed' ORDER BY 1")
         .expect("completed-turn snapshot prepares")
@@ -625,13 +637,20 @@ fn snapshot(connection: &Connection) -> studio_json::Value {
         .expect("completed-turn snapshot queries")
         .collect::<Result<Vec<_>, _>>()
         .expect("completed-turn snapshot reads");
-    let sync_documents = connection
-        .prepare("SELECT seq FROM sync_documents ORDER BY seq")
-        .expect("sync-document snapshot prepares")
-        .query_map([], |row| row.get::<_, i64>(0))
-        .expect("sync-document snapshot queries")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("sync-document snapshot reads");
+    let sync_documents = crate::test_fixtures::canvas::documents(connection)
+        .expect("sync-document snapshot reads")
+        .into_iter()
+        .map(|row| {
+            (
+                row.seq,
+                row.scope,
+                row.id,
+                row.payload,
+                row.deleted,
+                row.source_rowid,
+            )
+        })
+        .collect::<Vec<_>>();
     json!({"agent":agent,"events":events,"metadata":metadata,"sync":sync,
         "completed":completed,"syncDocuments":sync_documents})
 }

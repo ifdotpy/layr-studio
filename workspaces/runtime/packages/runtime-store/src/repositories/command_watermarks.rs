@@ -4,7 +4,48 @@
 //! older than the `request_results` window whose number is at or below the watermark was
 //! applied once and must never run again as a new command.
 
+use crate::consolidation_kinds::CanvasMetadataKind;
+use crate::metadata_schema::Metadata;
+use crate::peer_update_settings::{Canvas, canvas_read, canvas_tx};
 use rusqlite::{Connection, Transaction, params};
+use studio_db_api::DbQuery;
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=write,cardinality=none,result=(),
+ tables(metadata=Metadata),columns(kind=Metadata::KIND,identity=Metadata::IDENTITY,client=Metadata::TEXT_KEY,applied=Metadata::APPLIED),
+ sql="INSERT INTO {metadata}({kind},{identity},{client},{applied}) VALUES(?1,?2,?3,?4) ON CONFLICT({kind},{identity}) DO UPDATE SET {applied}=max({applied},excluded.{applied})")]
+struct AdvanceWatermark {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::IDENTITY)]
+    identity: Vec<u8>,
+    #[db(column=Metadata::TEXT_KEY)]
+    client: Option<String>,
+    #[db(column=Metadata::APPLIED)]
+    applied: Option<i64>,
+}
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=write,cardinality=none,result=(),
+ tables(metadata=Metadata),columns(kind=Metadata::KIND,identity=Metadata::IDENTITY,key=Metadata::TEXT_KEY,rowid=Metadata::SOURCE_ROWID,record=Metadata::ORCHESTRATION_RECORD),
+ sql="INSERT INTO {metadata}({kind},{identity},{key},{rowid},{record}) VALUES(?1,?2,'global',0,json_object('sendAdmissionCutoverMs',?3)) ON CONFLICT({kind},{identity}) DO UPDATE SET {record}=json_insert({record},'$.sendAdmissionCutoverMs',?3)")]
+struct InstallSendCutover {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::IDENTITY)]
+    identity: Vec<u8>,
+    #[db(column=crate::settings_schema::ClientCommandWatermarks::APPLIED)]
+    now_ms: i64,
+}
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,result=i64,decode=crate::settings_schema::ClientCommandWatermarks::APPLIED,
+ tables(metadata=Metadata),columns(kind=Metadata::KIND,identity=Metadata::IDENTITY,record=Metadata::ORCHESTRATION_RECORD,value=crate::settings_schema::ClientCommandWatermarks::APPLIED),
+ sql="SELECT json_extract({record},'$.sendAdmissionCutoverMs') AS {value} FROM {metadata} WHERE {kind}=?1 AND {identity}=?2")]
+struct SendCutover {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::IDENTITY)]
+    identity: Vec<u8>,
+}
 
 pub struct CommandWatermarks;
 
@@ -17,12 +58,31 @@ pub(crate) fn prepare_send_admissions(connection: &Connection) -> rusqlite::Resu
 impl CommandWatermarks {
     pub fn install_send_admissions(tx: &Transaction<'_>, now_ms: i64) -> rusqlite::Result<()> {
         prepare_send_admissions(tx)?;
-        tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_insert(record,'$.sendAdmissionCutoverMs',?1)", [now_ms])?;
+        canvas_tx(tx).named(
+            &InstallSendCutover::QUERY,
+            &InstallSendCutover {
+                kind: CanvasMetadataKind::OrchestrationSettings,
+                identity: crate::consolidation_codec::nullable_text_identity(
+                    &Some("global".into()),
+                    0,
+                ),
+                now_ms,
+            },
+        )?;
         Ok(())
     }
     /// Migration time in Unix milliseconds; stored once so restarts keep the boundary.
     pub fn send_cutover(conn: &Connection) -> rusqlite::Result<i64> {
-        conn.query_row("SELECT json_extract(record,'$.sendAdmissionCutoverMs') FROM runtime_orchestration_settings WHERE id='global'", [], |row| row.get(0))
+        canvas_read(conn).named(
+            &SendCutover::QUERY,
+            &SendCutover {
+                kind: CanvasMetadataKind::OrchestrationSettings,
+                identity: crate::consolidation_codec::nullable_text_identity(
+                    &Some("global".into()),
+                    0,
+                ),
+            },
+        )
     }
     /// Reserve the original fingerprint for the lifetime of the replay window.
     pub fn reserve_send(
@@ -47,7 +107,9 @@ impl CommandWatermarks {
     /// The highest applied number of `client`, or 0 when it never applied a command.
     pub fn applied(conn: &Connection, client: &str) -> rusqlite::Result<i64> {
         Ok(crate::peer_update_settings::canvas_read(conn)
-            .get::<crate::settings_schema::ClientCommandWatermarks>(&(client.to_owned(),))?
+            .get::<crate::metadata_schema::ClientCommandWatermarks>(&(
+                studio_db_api::migration::encode_key(&(client.to_owned(),)),
+            ))?
             .map_or(0, |row| row.applied))
     }
 
@@ -63,11 +125,14 @@ impl CommandWatermarks {
 
     /// Raise the watermark to `number`. It never moves down.
     pub fn advance(tx: &Transaction<'_>, client: &str, number: i64) -> rusqlite::Result<()> {
-        // Raw SQL: raise the existing watermark with an atomic MAX expression.
-        tx.execute(
-            "INSERT INTO client_command_watermarks(client,applied) VALUES(?1,?2)
-             ON CONFLICT(client) DO UPDATE SET applied=max(applied,excluded.applied)",
-            params![client, number],
+        canvas_tx(tx).named(
+            &AdvanceWatermark::QUERY,
+            &AdvanceWatermark {
+                kind: CanvasMetadataKind::ClientCommandWatermarks,
+                identity: studio_db_api::migration::encode_key(&(client.to_owned(),)),
+                client: Some(client.into()),
+                applied: Some(number),
+            },
         )?;
         Ok(())
     }
@@ -78,12 +143,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn send_cutover_preserves_sqlite_presence_types_and_first_duplicate() {
+        use studio_db_api::Table;
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        assert!(matches!(
+            CommandWatermarks::send_cutover(&db),
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        ));
+        for (raw, expected) in [
+            ("{}", Some(99)),
+            (r#"{"sendAdmissionCutoverMs":null}"#, None),
+            (r#"{"sendAdmissionCutoverMs":"7"}"#, None),
+            (r#"{"sendAdmissionCutoverMs":1.5}"#, None),
+            (r#"{"sendAdmissionCutoverMs":true}"#, Some(1)),
+            (
+                r#"{"sendAdmissionCutoverMs":7,"sendAdmissionCutoverMs":9}"#,
+                Some(7),
+            ),
+        ] {
+            let tx = db.transaction().unwrap();
+            crate::peer_update_settings::canvas_tx(&tx)
+                .partition::<crate::metadata_schema::OrchestrationSettings>()
+                .put(&crate::metadata_schema::OrchestrationSettings {
+                    identity: crate::consolidation_codec::nullable_text_identity(
+                        &Some("global".into()),
+                        0,
+                    ),
+                    source_rowid: 0,
+                    text_key: Some("global".into()),
+                    orchestration_record:
+                        crate::metadata_values::OrchestrationSettingsEvidence::from_stored(
+                            raw.into(),
+                        )
+                        .unwrap(),
+                })
+                .unwrap();
+            CommandWatermarks::install_send_admissions(&tx, 99).unwrap();
+            assert_eq!(CommandWatermarks::send_cutover(&tx).ok(), expected, "{raw}");
+            tx.rollback().unwrap();
+        }
+    }
+
+    #[test]
     fn send_cutover_is_recorded_once() {
         let mut db = Connection::open_in_memory().expect("database");
-        db.execute_batch(
-            "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-        )
-        .expect("settings");
+        use studio_db_api::Table;
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .expect("settings");
         let tx = db.transaction().expect("transaction");
         CommandWatermarks::install_send_admissions(&tx, 123).expect("first migration");
         CommandWatermarks::install_send_admissions(&tx, 456).expect("repeated migration");
@@ -94,7 +204,7 @@ mod tests {
     fn watermark_starts_at_zero_and_never_moves_down() {
         let mut db = Connection::open_in_memory().expect("database");
         use studio_db_api::Table;
-        crate::settings_schema::ClientCommandWatermarks::descriptor()
+        crate::metadata_schema::Metadata::descriptor()
             .install_if_absent(&db)
             .expect("schema");
         assert_eq!(CommandWatermarks::applied(&db, "a").unwrap(), 0);
@@ -102,6 +212,9 @@ mod tests {
         CommandWatermarks::advance(&tx, "a", 5).unwrap();
         CommandWatermarks::advance(&tx, "a", 3).unwrap();
         CommandWatermarks::advance(&tx, "b", 1).unwrap();
+        assert!(CommandWatermarks::advance(&tx, "a", -1).is_err());
+        assert!(CommandWatermarks::advance(&tx, "new", -1).is_err());
+        assert_eq!(CommandWatermarks::applied(&tx, "new").unwrap(), 0);
         tx.commit().unwrap();
         assert_eq!(CommandWatermarks::applied(&db, "a").unwrap(), 5);
         assert_eq!(CommandWatermarks::applied(&db, "b").unwrap(), 1);

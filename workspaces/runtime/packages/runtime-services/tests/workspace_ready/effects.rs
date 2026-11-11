@@ -1,7 +1,7 @@
 use super::*;
 use std::process::Command;
 use studio_runtime_store::path_identity::CanonicalPath;
-use studio_runtime_store::{AgentRecord, AgentRepository};
+use studio_runtime_store::{AgentRecord, AgentRepository, SyncDocumentsRepository};
 
 /// The reservation snapshot through an independent test reader.
 fn snapshot(store: &RuntimeStore, id: &str) -> Result<WorkspaceSnapshot, WorkspaceError> {
@@ -137,7 +137,7 @@ impl Fixture {
         store.transaction(move |tx| {
             let actor = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"workspace-fixture","rootId":"workspace-fixture","epoch":0,"status":"queued","cwd":cwd,"autoWake":true,"worktree":true,"worktreeReady":false,"workspaceMode":"worktree"});
             AgentRepository::put(tx, &AgentRecord::from_value(actor.clone())?)?;
-            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent','workspace-fixture',1,'fixture',?1,0)", [json!({"collection":"agent","id":"workspace-fixture","value":actor}).to_string()])?;
+            SyncDocumentsRepository::put_entity(tx, "agent", "workspace-fixture", &actor, false)?;
             tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('workspace-input','workspace-fixture','user','fixture','pending',1,0)", [])?;
             Ok(())
         }).await.expect("workspace fixture");
@@ -1981,8 +1981,7 @@ async fn concurrent_workers_and_lead_of_one_repository_all_reach_ready() {
         .transaction(move |tx| {
             for record in records {
                 let id = record["id"].as_str().expect("id").to_owned();
-                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent',?1,1,'fixture',?2,0)",
-                    rusqlite::params![id, json!({"collection":"agent","id":id,"value":record}).to_string()])?;
+                SyncDocumentsRepository::put_entity(tx, "agent", &id, &record, false)?;
                 AgentRepository::put(tx, &AgentRecord::from_value(record)?)?;
             }
             Ok(())
@@ -2139,8 +2138,7 @@ async fn seed_children(fixture: &Fixture, count: usize) -> Vec<String> {
         .transaction(move |tx| {
             for record in records {
                 let id = record["id"].as_str().expect("id").to_owned();
-                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent',?1,1,'fixture',?2,0)",
-                    rusqlite::params![id, json!({"collection":"agent","id":id,"value":record}).to_string()])?;
+                SyncDocumentsRepository::put_entity(tx, "agent", &id, &record, false)?;
                 AgentRepository::put(tx, &AgentRecord::from_value(record)?)?;
             }
             Ok(())

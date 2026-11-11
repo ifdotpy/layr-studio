@@ -154,8 +154,29 @@ fn events(store: &RuntimeStore) -> Vec<(String, String)> {
 }
 fn projection(store: &RuntimeStore) -> Vec<String> {
     let db = store.test_reader().expect("store read");
-    ["SELECT json_group_array(json_array(collection,id,seq,hash,payload,deleted)) FROM (SELECT * FROM sync_entities ORDER BY collection,id)","SELECT json_group_array(json_array(key,value)) FROM (SELECT * FROM sync_entity_meta WHERE key!='migration_catalog' ORDER BY key)"]
-        .iter().map(|sql|db.query_row(sql,[],|row|row.get(0)).expect("projection read")).collect()
+    let entities = studio_runtime_store::test_fixtures::canvas::entities(&db)
+        .expect("projection read")
+        .into_iter()
+        .map(|row| {
+            (
+                row.collection,
+                row.id,
+                row.seq,
+                row.hash,
+                row.payload,
+                row.deleted,
+            )
+        })
+        .collect::<Vec<_>>();
+    let metadata = studio_runtime_store::test_fixtures::canvas::meta_entries(&db)
+        .expect("metadata read")
+        .into_iter()
+        .filter(|(key, _)| key != "migration_catalog")
+        .collect::<Vec<_>>();
+    vec![
+        studio_json::to_string(&entities).expect("entity snapshot"),
+        studio_json::to_string(&metadata).expect("metadata snapshot"),
+    ]
 }
 #[tokio::test]
 async fn committed_recovery_check_keeps_unconfirmed_receipt() {
@@ -802,7 +823,7 @@ async fn start_absence_failpoints_roll_back_restore_wait_and_hold() {
             let queue = events(&store);
             let renderer = projection(&store);
             let op = if table == "turns" { "INSERT" } else { "UPDATE" };
-            store.transaction(move |tx| {tx.execute_batch(&format!("CREATE TRIGGER recovery_fail {timing} {op} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END;"))?;Ok(())}).await.expect("trigger");
+            store.transaction(move |tx| {if table == "sync_entities" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, true)?; } else { tx.execute_batch(&format!("CREATE TRIGGER recovery_fail {timing} {op} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END;"))?; }Ok(())}).await.expect("trigger");
             let observation: studio_runtime_services::recovery_absence::RecoveryObservation =
                 studio_json::from_value(case["observation"].clone()).expect("observation");
             let current_observation = observation.clone();
@@ -992,6 +1013,11 @@ async fn seed_task(store: &Arc<RuntimeStore>, case: &studio_json::Value) {
             "INSERT INTO runtime_items(id,agent,record,created) VALUES('agent:item','agent',?1,10)",
             [json!({"id":"agent:item","turnId":"turn","toolStatus":"inProgress"}).to_string()],
         )?;
+        studio_runtime_store::durable_seq::join_window(
+            tx,
+            studio_runtime_store::durable_seq::TASK_WINDOW,
+            "agent:item",
+        )?;
         if case["observation"]["completed_turn"] == "agent:turn" {
             studio_runtime_store::domain::complete_turn(tx, "agent", "turn")?;
         }
@@ -1154,15 +1180,16 @@ async fn task_absence_consumer_matches_python_lost_and_persists_named_hold() {
             case["name"]
         );
         let rows = task_rows(&store);
-        let projected: String = store
-            .test_reader()
-            .expect("read")
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='task' AND id='agent:item'",
-                [],
-                |r| r.get(0),
-            )
-            .expect("visible task");
+        let projected = studio_runtime_services::entity_scope::live_documents(
+            &store.test_reader().expect("read"),
+            r#"["task"]"#,
+        )
+        .expect("task projections")
+        .into_iter()
+        .find(|row| row.id == "agent:item")
+        .expect("visible task")
+        .payload
+        .expect("task payload");
         let projected: studio_json::Value = studio_json::from_str(&projected).expect("projection");
         assert_eq!(projected["value"]["status"], rows[0]["status"]);
         // Error is an existing task-detail field, deliberately absent from TaskEntityDto.
@@ -1206,7 +1233,13 @@ async fn task_absence_failpoints_and_stale_proofs_preserve_rows() {
         }
         let db = rusqlite::Connection::open(root.path().join("canvas.sqlite3"))
             .expect("fixture identity");
-        db.execute_batch("DELETE FROM sync_identity; INSERT INTO sync_identity(id) VALUES(lower(hex(randomblob(16))))").expect("fresh identity");
+        let tx = db.unchecked_transaction().expect("identity transaction");
+        studio_runtime_store::test_fixtures::canvas::reset_identity(
+            &tx,
+            Some(&uuid::Uuid::new_v4().simple().to_string()),
+        )
+        .expect("fresh identity");
+        tx.commit().expect("identity committed");
         drop(db);
         root
     }
@@ -1250,7 +1283,7 @@ async fn task_absence_failpoints_and_stale_proofs_preserve_rows() {
             .expect("snapshot");
             let rows = task_rows(&store);
             let renderer = projection(&store);
-            store.transaction(move |tx|{tx.execute_batch(&format!("CREATE TRIGGER recovery_fail {timing} {} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END;", if table=="sync_entities" {"INSERT"} else {"UPDATE"}))?;Ok(())}).await.expect("trigger");
+            store.transaction(move |tx|{tx.execute_batch(&format!("CREATE TRIGGER recovery_fail {timing} {} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'injected'); END;", if table=="sync_entities" {"INSERT"} else {"UPDATE"}, table=if table=="sync_entities" {"publications"} else {table}, partition_predicate=if table=="sync_entities" {format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)} else {String::new()}))?;Ok(())}).await.expect("trigger");
             let observation: RecoveryObservation =
                 studio_json::from_value(case["observation"].clone()).expect("observation");
             let current_observation = observation.clone();

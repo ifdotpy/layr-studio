@@ -85,6 +85,7 @@ mod tests {
     use rusqlite::Connection;
     use std::fs;
     use std::path::Path;
+    use studio_db_api::Table;
     use studio_json::json;
     use sync_documents::SyncDocumentsRepository;
 
@@ -104,6 +105,12 @@ mod tests {
             }
         }
         for (name, columns) in tables {
+            if name == crate::publication_schema::Publications::NAME {
+                crate::publication_schema::Publications::descriptor()
+                    .install_if_absent(&connection)
+                    .expect("declared publication owner");
+                continue;
+            }
             let columns = columns
                 .iter()
                 .map(|column| {
@@ -248,13 +255,22 @@ mod tests {
         MessageRepository::get(&db, &message.id).expect("message read uses declared objects");
 
         let db = database_with(&account_state::REQUIREMENTS);
-        db.execute(
-            "INSERT INTO sync_entities(collection, id, payload, deleted) VALUES ('workspace', 'current', ?1, 0)",
-            [json!({"value": {"rateLimitsByAccount": {
-                "alpha": {"accountKey": "alpha", "data": {"status": "ready"}}
-            }}}).to_string()],
+        let tx = db.unchecked_transaction().expect("publication fixture");
+        crate::HttpPublicationQueries::test_seed_entity(
+            &tx,
+            "workspace",
+            "current",
+            1,
+            0,
+            Some(
+                &json!({"collection":"workspace","id":"current","value": {"rateLimitsByAccount": {
+                    "alpha": {"accountKey": "alpha", "data": {"status": "ready"}}
+                }}})
+                .to_string(),
+            ),
         )
         .expect("fixture row uses declared columns");
+        tx.commit().expect("publication fixture commits");
         db.execute_batch(
             "CREATE TABLE runtime_usage_resumes(id TEXT PRIMARY KEY,agent TEXT,record TEXT)",
         )
@@ -269,36 +285,53 @@ mod tests {
 
     #[test]
     fn sync_repository_sql_uses_only_declared_tables() {
+        use studio_db_api::Table;
         let mut db = Connection::open_in_memory().expect("memory SQLite opens");
-        db.execute_batch(
-            "CREATE TABLE sync_identity (id TEXT PRIMARY KEY);
-             CREATE TABLE sync_generation (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);
-             CREATE TABLE durable_rows (
-                 tbl TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,
-                 deleted INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(tbl,id));
-             CREATE TABLE sync_documents (
-                 seq INTEGER PRIMARY KEY, scope TEXT NOT NULL, id TEXT NOT NULL,
-                 payload TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
-                 UNIQUE(scope,id));
-             CREATE TABLE sync_entities (
-                 collection TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,
-                 hash TEXT NOT NULL, payload TEXT, deleted INTEGER NOT NULL DEFAULT 0,
-                 PRIMARY KEY(collection,id));
-             CREATE TABLE sync_entity_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             INSERT INTO sync_identity(id) VALUES ('workspace-a');
-             INSERT INTO sync_entity_meta(key,value) VALUES ('entity_tombstone_floor','0');",
-        )
-        .expect("only declared sync tables create");
+        for descriptor in [
+            crate::metadata_schema::Metadata::descriptor(),
+            crate::change_schema::Changes::descriptor(),
+            crate::publication_schema::Publications::descriptor(),
+        ] {
+            descriptor
+                .install_if_absent(&db)
+                .expect("declared canonical owner");
+        }
+        let tx = db.transaction().expect("identity fixture");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .partition::<crate::metadata_schema::SyncIdentity>()
+            .put(&crate::metadata_schema::SyncIdentity {
+                identity: crate::consolidation_codec::nullable_text_identity(
+                    &Some("workspace-a".into()),
+                    1,
+                ),
+                source_rowid: 1,
+                text_key: Some("workspace-a".into()),
+            })
+            .expect("workspace identity");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .partition::<crate::metadata_schema::SyncGeneration>()
+            .put(&crate::metadata_schema::SyncGeneration {
+                identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                source_rowid: 1,
+                integer_key: 1,
+                sync_generation: 0,
+            })
+            .expect("publication clock");
+        tx.commit().expect("identity fixture commits");
         assert_eq!(
             SyncDocumentsRepository::workspace_id(&db).expect("identity reads"),
             "workspace-a"
         );
 
-        db.execute(
-            "INSERT INTO sync_documents(seq,scope,id,payload,deleted) VALUES (1,'drafts','phone:chat',?1,0)",
-            ["{\"device\":\"phone\",\"session\":\"chat\"}"],
+        let tx = db.transaction().expect("draft fixture");
+        SyncDocumentsRepository::put_draft(
+            &tx,
+            "phone:chat",
+            "{\"device\":\"phone\",\"session\":\"chat\"}",
+            false,
         )
         .expect("draft fixture inserts");
+        tx.commit().expect("draft fixture commits");
         let drafts = SyncDocumentsRepository::pull_drafts(&db, 0, 100).expect("drafts read");
         assert_eq!(drafts.len(), 1);
         assert_eq!(drafts[0].id, "phone:chat");

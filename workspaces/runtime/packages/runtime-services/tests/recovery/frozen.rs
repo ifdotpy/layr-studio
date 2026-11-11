@@ -1,4 +1,4 @@
-//! Import preserved corpus rows into disposable databases built by current schema owners.
+//! Import preserved corpus rows into supported historical databases before startup migration.
 use std::{path::Path, sync::OnceLock};
 
 use rusqlite::{Connection, config::DbConfig};
@@ -8,29 +8,16 @@ const DATABASES: [&str; 3] = ["canvas.sqlite3", "analytics.sqlite3", "supervisor
 fn baseline() -> &'static [Vec<u8>; 3] {
     static BASELINE: OnceLock<[Vec<u8>; 3]> = OnceLock::new();
     BASELINE.get_or_init(|| {
-        // These synchronous helpers also run within Tokio tests. Keep their isolated
-        // bootstrap runtime on another thread rather than nesting block_on.
-        std::thread::spawn(|| {
-            let root = tempfile::tempdir().expect("baseline directory");
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("baseline runtime");
-            runtime.block_on(async {
-                let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
-                    .await
-                    .expect("current baseline opens");
-                store
-                    .checkpoint_wal_passive()
-                    .await
-                    .expect("baseline checkpoint");
-                drop(store);
-            });
-            drop(runtime);
-            DATABASES.map(|name| std::fs::read(root.path().join(name)).expect("closed baseline"))
-        })
-        .join()
-        .expect("baseline bootstrap thread")
+        let root = tempfile::tempdir().expect("baseline directory");
+        studio_runtime_store::test_fixtures::canvas::write_supported_fixture(root.path())
+            .expect("supported historical baseline");
+        let source =
+            studio_runtime_store::test_fixtures::canvas::open_supported_canvas(root.path())
+                .expect("legacy baseline opens");
+        studio_runtime_store::test_fixtures::canvas::install_legacy_source_schema(&source)
+            .expect("legacy source schema");
+        drop(source);
+        DATABASES.map(|name| std::fs::read(root.path().join(name)).expect("closed baseline"))
     })
 }
 
@@ -94,8 +81,9 @@ pub(crate) fn import(root: &Path, name: &str, source: &Path) {
     drop(old);
 
     let destination = root.join(name);
-    std::fs::write(&destination, &baseline()[index]).expect("copy current schema and real markers");
-    let mut db = Connection::open(destination).expect("current corpus database opens");
+    std::fs::write(&destination, &baseline()[index])
+        .expect("copy historical schema and real markers");
+    let mut db = Connection::open(destination).expect("historical corpus database opens");
     studio_runtime_store::sqlite_durability::configure_writer(&db).expect("fixture durability");
     db.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false)
         .expect("preserve captured projections");
@@ -179,4 +167,74 @@ pub(crate) fn import(root: &Path, name: &str, source: &Path) {
 pub(crate) fn state(root: &Path, canvas: &str, analytics: &str) {
     database(root, "canvas.sqlite3", canvas);
     database(root, "analytics.sqlite3", analytics);
+    // Both imports must close before startup can publish canonical authority.
+    // A separate runtime keeps this synchronous fixture usable within Tokio tests.
+    let root = root.to_owned();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("migration runtime");
+        runtime.block_on(async {
+            let store = studio_runtime_store::test_fixtures::canvas::migrate_legacy(&root)
+                .await
+                .expect("imported corpus migrates");
+            store
+                .checkpoint_wal_passive()
+                .await
+                .expect("migrated corpus checkpoint");
+            drop(store);
+        });
+    })
+    .join()
+    .expect("corpus migration thread");
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn frozen_import_migrates_captured_publications_and_settings() {
+        let root = tempfile::tempdir().unwrap();
+        super::state(
+            root.path(),
+            include_str!("canvas.sql"),
+            include_str!("analytics.sql"),
+        );
+        let store = studio_runtime_store::test_fixtures::canvas::migrate_legacy(root.path())
+            .await
+            .unwrap();
+        let db = store.test_reader().unwrap();
+        assert!(
+            !studio_runtime_store::peer_update_settings::canvas_read(&db)
+                .table_exists::<studio_runtime_store::clock_schema::SyncEntities>()
+                .unwrap()
+        );
+        let publications = studio_runtime_store::test_fixtures::canvas::entities(&db).unwrap();
+        assert!(
+            publications
+                .iter()
+                .any(|row| row.collection == "event" && row.id == "event")
+        );
+        assert_eq!(
+            studio_runtime_store::request_results::RequestResults::expired_before_ms(&db).unwrap(),
+            1_793_451_953_925
+        );
+    }
+
+    #[test]
+    fn frozen_baseline_preserves_legacy_sources_until_startup() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("canvas.sqlite3"), &super::baseline()[0]).unwrap();
+        let db = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(root.path())
+            .unwrap();
+        let read = studio_runtime_store::peer_update_settings::canvas_read(&db);
+        assert!(
+            read.table_exists::<studio_runtime_store::clock_schema::SyncEntities>()
+                .unwrap()
+        );
+        assert!(
+            read.table_exists::<studio_runtime_store::clock_schema::SyncEntityMeta>()
+                .unwrap()
+        );
+    }
 }

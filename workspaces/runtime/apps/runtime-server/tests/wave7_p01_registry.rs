@@ -766,8 +766,10 @@ fn radio_queue_snapshot() -> Value {
 }
 
 #[allow(clippy::disallowed_methods)]
-async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
-    let project_root = fixture._root.path().join("radio-project");
+async fn seed_radio_interrupt(snapshot: &Value) -> Fixture {
+    let root = tempfile::tempdir().unwrap();
+    studio_runtime_store::test_fixtures::canvas::write_supported_fixture(root.path()).unwrap();
+    let project_root = root.path().join("radio-project");
     fs::create_dir_all(&project_root).unwrap();
     // A project id is its resolved path, as Python stores it. The radio skips a
     // project whose id differs from its resolved path, such as one that names
@@ -778,17 +780,13 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
         .current_dir(&project_root)
         .status()
         .unwrap();
-    let identity = fixture.store.root().join("multi-server");
+    let identity = root.path().join("multi-server");
     fs::create_dir_all(&identity).unwrap();
     fs::write(
         identity.join("identity.json"),
         r#"{"serverId":"local-test","label":"fixture","publicKey":"fixture"}"#,
     )
     .unwrap();
-    fixture
-        .store
-        .set_local_server_id(Some("local-test".to_owned()))
-        .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -801,99 +799,115 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
     }
     let snapshot = snapshot.clone();
     let stored_project_root = project_root.clone();
-    fixture
-        .store
-        .transaction(move |db| {
-            for (table, rows) in snapshot.as_object().unwrap() {
-                // Historical ingress receipts and completed turns are retired in a current
-                // store (completed turns live in `turns`).
-                if table == "operation_receipts" || table == "completed_turns" {
-                    continue;
+    let mut connection =
+        studio_runtime_store::test_fixtures::canvas::open_supported_canvas(root.path()).unwrap();
+    studio_runtime_store::test_fixtures::canvas::install_legacy_source_schema(&connection).unwrap();
+    let db = connection.transaction().unwrap();
+    {
+        for (table, rows) in snapshot.as_object().unwrap() {
+            // Historical ingress receipts and completed turns are retired in a current
+            // store (completed turns live in `turns`).
+            if table == "operation_receipts" || table == "completed_turns" {
+                continue;
+            }
+            let table_name = match table.as_str() {
+                "sync_entities" => "sync_entities".to_owned(),
+                "sidebar_order" => "runtime_sidebar_order".to_owned(),
+                _ => format!("runtime_{table}"),
+            };
+            db.execute(&format!("DELETE FROM {table_name}"), [])
+                .unwrap();
+            if table == "agents" {
+                db.execute("DELETE FROM chats", []).unwrap();
+            }
+            for row in rows.as_array().unwrap() {
+                let mut row = row.clone();
+                if table == "projects" {
+                    let record: Value =
+                        studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
+                    let mut record = record;
+                    record["recordKind"] = json!("live");
+                    record["id"] = json!(stored_project_root.to_string_lossy());
+                    record["path"] = json!(stored_project_root.to_string_lossy());
+                    record["locations"] = json!([{
+                        "serverId": "local-test",
+                        "path": stored_project_root.to_string_lossy(),
+                        "projectId": stored_project_root.to_string_lossy()
+                    }]);
+                    row["id"] = json!(stored_project_root.to_string_lossy());
+                    row["record"] = json!(record.to_string());
                 }
-                let table_name = match table.as_str() {
-                    "sync_entities" => "sync_entities".to_owned(),
-                    "sidebar_order" => "runtime_sidebar_order".to_owned(),
-                    _ => format!("runtime_{table}"),
-                };
-                db.execute(&format!("DELETE FROM {table_name}"), [])?;
                 if table == "agents" {
-                    db.execute("DELETE FROM chats", [])?;
-                }
-                for row in rows.as_array().unwrap() {
-                    let mut row = row.clone();
-                    if table == "projects" {
-                        let record: Value =
-                            studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
-                        let mut record = record;
-                        record["recordKind"] = json!("live");
-                        record["id"] = json!(stored_project_root.to_string_lossy());
-                        record["path"] = json!(stored_project_root.to_string_lossy());
-                        record["locations"] = json!([{
-                            "serverId": "local-test",
-                            "path": stored_project_root.to_string_lossy(),
-                            "projectId": stored_project_root.to_string_lossy()
-                        }]);
-                        row["id"] = json!(stored_project_root.to_string_lossy());
-                        row["record"] = json!(record.to_string());
+                    let mut record: Value =
+                        studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
+                    record["compactions"] = json!(0);
+                    record["cwd"] = json!(stored_project_root.to_string_lossy());
+                    if record.get("projectId").is_some() {
+                        record["projectId"] = json!(stored_project_root.to_string_lossy());
                     }
-                    if table == "agents" {
-                        let mut record: Value =
-                            studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
-                        record["compactions"] = json!(0);
-                        record["cwd"] = json!(stored_project_root.to_string_lossy());
-                        if record.get("projectId").is_some() {
-                            record["projectId"] = json!(stored_project_root.to_string_lossy());
+                    row["record"] = json!(record.to_string());
+                }
+                if table == "rooms" {
+                    let mut record: Value =
+                        studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
+                    record["projectPath"] = json!(stored_project_root.to_string_lossy());
+                    record["radio"]["direct"] = json!(false);
+                    row["record"] = json!(record.to_string());
+                }
+                let fields = row.as_object().unwrap();
+                let names = fields.keys().cloned().collect::<Vec<_>>().join(",");
+                let placeholders = vec!["?"; fields.len()].join(",");
+                let values = fields
+                    .values()
+                    .map(|value| match value {
+                        Value::Null => rusqlite::types::Value::Null,
+                        Value::String(value) => rusqlite::types::Value::Text(value.clone()),
+                        Value::Number(value) if value.is_i64() => {
+                            rusqlite::types::Value::Integer(value.as_i64().unwrap())
                         }
-                        let current = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
-                            row["id"].as_str().expect("radio agent id"), &record.to_string(),
-                        )?;
-                        row["record"] = json!(current);
-                    }
-                    if table == "rooms" {
-                        let mut record: Value =
-                            studio_json::from_str(row["record"].as_str().unwrap()).unwrap();
-                        record["projectPath"] = json!(stored_project_root.to_string_lossy());
-                        record["radio"]["direct"] = json!(false);
-                        row["record"] = json!(record.to_string());
-                    }
-                    let fields = row.as_object().unwrap();
-                    let names = fields.keys().cloned().collect::<Vec<_>>().join(",");
-                    let placeholders = vec!["?"; fields.len()].join(",");
-                    let values = fields
-                        .values()
-                        .map(|value| match value {
-                            Value::Null => rusqlite::types::Value::Null,
-                            Value::String(value) => rusqlite::types::Value::Text(value.clone()),
-                            Value::Number(value) if value.is_i64() => {
-                                rusqlite::types::Value::Integer(value.as_i64().unwrap())
-                            }
-                            Value::Number(value) => {
-                                rusqlite::types::Value::Real(value.as_f64().unwrap())
-                            }
-                            Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
-                                panic!("unsupported radio fixture SQL value")
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    db.execute(
-                        &format!("INSERT INTO {table_name}({names}) VALUES({placeholders})"),
-                        rusqlite::params_from_iter(values),
-                    )?;
-                    if table == "agents" {
-                        // The state was opened once, so the chat row follows the record.
-                        db.execute(
-                            "INSERT OR REPLACE INTO chats(id,state,status,auto_wake,execution_mode) \
-                             SELECT id,'active',record->>'$.status',record->>'$.autoWake',record->>'$.executionMode' \
-                             FROM runtime_agents WHERE id=?1",
-                            [row["id"].as_str().unwrap()],
-                        )?;
-                    }
-                }
+                        Value::Number(value) => {
+                            rusqlite::types::Value::Real(value.as_f64().unwrap())
+                        }
+                        Value::Bool(_) | Value::Array(_) | Value::Object(_) => {
+                            panic!("unsupported radio fixture SQL value")
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                db.execute(
+                    &format!("INSERT INTO {table_name}({names}) VALUES({placeholders})"),
+                    rusqlite::params_from_iter(values),
+                )
+                .unwrap();
+            }
+        }
+    }
+    db.commit().unwrap();
+    drop(connection);
+    let (store, changes) = store_with_change_signal(root.path()).await;
+    // Rebuild chat projections through the ordinary writer after migrating the
+    // frozen agent rows. The corpus loader bypasses that writer deliberately.
+    store
+        .transaction(move |tx| {
+            for row in snapshot["agents"].as_array().unwrap() {
+                let id = studio_runtime_store::AgentId::from(row["id"].as_str().unwrap());
+                let agent = studio_runtime_store::AgentRepository::get(tx, &id)?
+                    .expect("migrated radio agent");
+                studio_runtime_store::AgentRepository::put(tx, &agent)?;
             }
             Ok(())
         })
         .await
         .unwrap();
+    store
+        .set_local_server_id(Some("local-test".to_owned()))
+        .unwrap();
+    Fixture {
+        _root: root,
+        store,
+        agents: Value::Null,
+        changes,
+        event_ids: Mutex::new(BTreeMap::new()),
+    }
 }
 
 #[tokio::test]
@@ -1082,9 +1096,8 @@ async fn concurrent_ensure_session_starts_one_cold_account_worker() {
 
 #[tokio::test]
 async fn production_reconcile_delivers_radio_interrupt_once_with_deterministic_clock() {
-    let fixture = Fixture::new().await;
     let snapshot = radio_interrupt_snapshot();
-    seed_radio_interrupt(&fixture, &snapshot).await;
+    let fixture = seed_radio_interrupt(&snapshot).await;
     let (launcher, _writes) = scripted();
     let mut registry =
         AccountRegistry::new(fixture.store.clone(), launcher, test_registry_config())
@@ -1115,9 +1128,8 @@ async fn production_reconcile_delivers_radio_interrupt_once_with_deterministic_c
 
 #[tokio::test]
 async fn production_reconcile_admits_radio_queue_event_to_retained_worker() {
-    let fixture = Fixture::new().await;
     let snapshot = radio_queue_snapshot();
-    seed_radio_interrupt(&fixture, &snapshot).await;
+    let fixture = seed_radio_interrupt(&snapshot).await;
     let (launcher, mut writes) = scripted_with_resume_recording(true, true);
     let mut registry = AccountRegistry::new(
         fixture.store.clone(),
@@ -1264,9 +1276,8 @@ async fn production_reconcile_admits_radio_queue_event_to_retained_worker() {
 
 #[tokio::test]
 async fn production_reconcile_keeps_closed_worker_interrupt_unknown_without_resending() {
-    let fixture = Fixture::new().await;
     let snapshot = radio_interrupt_snapshot();
-    seed_radio_interrupt(&fixture, &snapshot).await;
+    let fixture = seed_radio_interrupt(&snapshot).await;
     let (launcher, _writes) = scripted();
     let mut registry =
         AccountRegistry::new(fixture.store.clone(), launcher, test_registry_config())

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
-use rusqlite::{Connection, OptionalExtension};
 use studio_json::{Value, json};
+use studio_runtime_store::Connection;
 
 const RUN_LIMIT: usize = 25;
 const RELATED_LIMIT: usize = 100;
@@ -109,83 +109,47 @@ pub fn durable_input_pending(connection: &Connection) -> Result<i64, rusqlite::E
 /// Read durable migration cursors using the Python diagnostics field names.
 pub fn migration_status(connection: &Connection) -> Result<Value, rusqlite::Error> {
     let mut status = studio_json::Map::new();
-    if table_exists(connection, "runtime_search_rollout")? {
-        let row = connection
-            .query_row(
-                "SELECT phase,cursor,updated FROM runtime_search_rollout WHERE id=1",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, f64>(2)?,
-                    ))
-                },
-            )
-            .optional()?;
-        if let Some((phase, cursor, updated)) = row {
-            status.insert(
-                "search".to_owned(),
-                json!({"phase": phase, "cursor": cursor, "updated": updated,
-                    "error": null, "lastBatchBytes": null}),
-            );
-        }
-    }
-    if table_exists(connection, "runtime_payload_migrations")? {
-        let row = connection.query_row(
-            "SELECT cursor,complete,status,updated,error FROM runtime_payload_migrations WHERE name='payload-v1:tasks'",
-            [],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<f64>>(3)?, row.get::<_, Option<String>>(4)?)),
-        ).optional()?;
-        let payload = row.map_or_else(
-            || json!({"cursor": 0, "complete": false, "status": "pending", "updated": null, "error": null}),
-            |(cursor, complete, saved_status, updated, error)| json!({
-                "cursor": cursor,
-                "complete": complete,
-                "status": saved_status,
-                "updated": updated,
-                "error": error,
-            }),
-        );
-        status.insert("payloads".to_owned(), json!({"tasks": payload}));
-    } else {
-        status.insert("payloads".to_owned(), json!({
-            "tasks": {"cursor": 0, "complete": false, "status": "pending", "updated": null, "error": null}
-        }));
-    }
-    if table_exists(connection, "runtime_payload_migrations")? {
-        let online = studio_runtime_store::online_migration::progress(connection)?;
-        if !online.is_empty() {
-            let by_name = online
-                .into_iter()
-                .map(|p| {
-                    (
-                        p.name,
-                        json!({"cursor": p.cursor, "complete": p.complete, "status": p.status,
-                            "updated": p.updated, "error": p.error, "dirty": p.dirty}),
-                    )
-                })
-                .collect::<studio_json::Map<_, _>>();
-            status.insert("online".to_owned(), Value::Object(by_name));
-        }
-    }
-    if table_exists(connection, "sync_entity_meta")? {
-        let mut values = connection.prepare(
-            "SELECT key,value FROM sync_entity_meta WHERE key IN ('entity_tombstone_count','entity_tombstone_floor')",
-        )?;
-        let rows = values
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    use studio_runtime_store::DiagnosticPublicationQueries as Queries;
+    if let Some((phase, cursor, updated)) = Queries::search_status(connection)? {
         status.insert(
-            "entityTombstones".to_owned(),
-            json!({
-                "count": rows.get("entity_tombstone_count").and_then(|value| value.parse::<i64>().ok()).unwrap_or_default(),
-                "floor": rows.get("entity_tombstone_floor").and_then(|value| value.parse::<i64>().ok()).unwrap_or_default(),
-                "pruning": {"status": "notStarted", "updated": 0, "deleted": 0},
-            }),
+            "search".to_owned(),
+            json!({"phase":phase,"cursor":cursor,"updated":updated,
+            "error":null,"lastBatchBytes":null}),
         );
+    }
+    let row = Queries::task_migration_status(connection)?;
+    let payload = row.map_or_else(
+        || json!({"cursor":0,"complete":false,"status":"pending","updated":null,"error":null}),
+        |(cursor, complete, saved_status, updated, error)| json!({
+            "cursor":cursor,"complete":complete,"status":saved_status,"updated":updated,"error":error
+        }),
+    );
+    status.insert("payloads".to_owned(), json!({"tasks":payload}));
+    let online = Queries::online_progress(connection)?;
+    if !online.is_empty() {
+        let by_name = online
+            .into_iter()
+            .map(|p| {
+                (
+                    p.name,
+                    json!({
+                        "cursor":p.cursor,"complete":p.complete,"status":p.status,
+                        "updated":p.updated,"error":p.error,"dirty":p.dirty,
+                    }),
+                )
+            })
+            .collect::<studio_json::Map<_, _>>();
+        status.insert("online".to_owned(), Value::Object(by_name));
+    }
+    if Queries::metadata_available(connection)? {
+        let rows = Queries::tombstones(connection)?
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        status.insert("entityTombstones".to_owned(),json!({
+            "count":rows.get("entity_tombstone_count").and_then(|v| v.parse::<i64>().ok()).unwrap_or_default(),
+            "floor":rows.get("entity_tombstone_floor").and_then(|v| v.parse::<i64>().ok()).unwrap_or_default(),
+            "pruning":{"status":"notStarted","updated":0,"deleted":0},
+        }));
     }
     Ok(Value::Object(status))
 }
@@ -304,5 +268,31 @@ mod online_migration_status_tests {
             json!({"cursor": 500, "complete": false, "status": "running",
                 "updated": 1.5, "error": null, "dirty": 0})
         );
+    }
+}
+
+#[cfg(test)]
+mod f1_canonical_tests {
+    use super::*;
+    #[tokio::test]
+    async fn f1_diagnostics_store_canonical_caller_without_source_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(
+                    !studio_runtime_store::peer_update_settings::canvas_read(tx)
+                        .table_exists::<studio_runtime_store::clock_schema::SyncEntities>()?
+                );
+
+                let status = migration_status(tx).unwrap();
+                assert_eq!(status["entityTombstones"]["count"], 0);
+                assert_eq!(status["payloads"]["tasks"]["status"], "pending");
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

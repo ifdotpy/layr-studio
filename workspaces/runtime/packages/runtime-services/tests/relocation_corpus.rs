@@ -205,6 +205,26 @@ fn snapshot(store: &RuntimeStore) -> Value {
         "runtime_tool_requests",
         "sync_entities",
     ] {
+        if table == "sync_entities" {
+            result.insert(
+                table.to_owned(),
+                json!(
+                    studio_runtime_store::test_fixtures::canvas::entities(&db)
+                        .expect("entity snapshot")
+                        .into_iter()
+                        .map(|row| (
+                            row.collection,
+                            row.id,
+                            row.seq,
+                            row.hash,
+                            row.payload,
+                            row.deleted
+                        ))
+                        .collect::<Vec<_>>()
+                ),
+            );
+            continue;
+        }
         let mut statement = db
             .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
             .expect("snapshot statement");
@@ -426,7 +446,14 @@ async fn python_location_and_move_corpus_through_consumers() {
                 .expect("result");
                 assert_eq!(json!(result.reply), case["expected"]["registration"]);
                 if !case["project"].is_null() {
-                    let payload:String=db.query_row("SELECT payload FROM sync_entities WHERE collection='project' AND id='/home-project'",[],|r|r.get(0)).expect("project sync published");
+                    let payload = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        &db,
+                        "project",
+                        "/home-project",
+                        false,
+                    )
+                    .expect("project sync read")
+                    .expect("project sync published");
                     let payload: Value = studio_json::from_str(&payload).expect("payload");
                     assert_eq!(
                         payload["value"]["locations"],
@@ -630,11 +657,21 @@ async fn location_commit_failpoints_reopen_and_apply_once() {
                 .await
                 .expect("restart after seeding");
             let trigger = format!(
-                "CREATE TRIGGER relocation_fault {timing} {verb} ON {table} BEGIN SELECT RAISE(ABORT,'relocation failpoint'); END"
+                "CREATE TRIGGER relocation_fault {timing} {verb} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'relocation failpoint'); END",
+                table = if table == "sync_entities" {
+                    "publications"
+                } else {
+                    table
+                },
+                partition_predicate = if table == "sync_entities" {
+                    format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)
+                } else {
+                    String::new()
+                }
             );
             store
                 .transaction(move |tx| {
-                    tx.execute_batch(&trigger)?;
+                    if table == "sync_entities" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, true)?; } else { tx.execute_batch(&trigger)?; }
                     Ok(())
                 })
                 .await
@@ -661,8 +698,8 @@ async fn location_commit_failpoints_reopen_and_apply_once() {
                 .expect("restart after failed transaction");
             assert_eq!(snapshot(&store), before);
             store
-                .transaction(|tx| {
-                    tx.execute_batch("DROP TRIGGER relocation_fault")?;
+                .transaction(move |tx| {
+                    if table == "sync_entities" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch("DROP TRIGGER relocation_fault")?; }
                     Ok(())
                 })
                 .await
@@ -1111,11 +1148,21 @@ async fn move_expiry_and_cache_failpoints_reopen_without_partial_effects() {
                 let (path, store) = fixture.store(&format!("{name}-{index}-{timing}")).await;
                 fixture.seed(&store, case).await;
                 let trigger = format!(
-                    "CREATE TRIGGER move_fault {timing} {verb} ON {table} BEGIN SELECT RAISE(ABORT,'move failpoint'); END"
+                    "CREATE TRIGGER move_fault {timing} {verb} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'move failpoint'); END",
+                    table = if table == "sync_entities" {
+                        "publications"
+                    } else {
+                        table
+                    },
+                    partition_predicate = if table == "sync_entities" {
+                        format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)
+                    } else {
+                        String::new()
+                    }
                 );
                 store
                     .transaction(move |tx| {
-                        tx.execute_batch(&trigger)?;
+                        if table == "sync_entities" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, true)?; } else { tx.execute_batch(&trigger)?; }
                         Ok(())
                     })
                     .await
@@ -1132,8 +1179,8 @@ async fn move_expiry_and_cache_failpoints_reopen_without_partial_effects() {
                     .expect("restart before retry");
                 assert_eq!(snapshot(&store), before);
                 store
-                    .transaction(|tx| {
-                        tx.execute_batch("DROP TRIGGER move_fault")?;
+                    .transaction(move |tx| {
+                        if table == "sync_entities" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, false)?; } else { tx.execute_batch("DROP TRIGGER move_fault")?; }
                         Ok(())
                     })
                     .await

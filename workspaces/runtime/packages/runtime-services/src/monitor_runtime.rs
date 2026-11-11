@@ -1800,8 +1800,10 @@ mod recovery_selection_tests {
         use studio_runtime_schema::persistence::{REQUEST_RESULT_TTL_MS, RequestIdentity};
         use studio_runtime_store::request_results::{Admission, RequestResults, ResultEnvelope};
         let mut db = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
         studio_runtime_store::receipt_schema::create(&db).expect("schema");
-        db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)").expect("owners");
+        db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);").expect("monitor owner");
         let issued = REQUEST_RESULT_TTL_MS * 2;
         let root =
             uuid::Uuid::from_u128(((issued as u128) << 80) | (7 << 76) | (2 << 62)).to_string();

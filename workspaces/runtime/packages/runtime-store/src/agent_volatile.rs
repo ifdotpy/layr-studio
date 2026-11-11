@@ -242,6 +242,29 @@ pub fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     Ok(())
 }
 
+/// Replace volatile clock producers in the same transaction as writer authority.
+pub(crate) fn clock_trigger_sql() -> String {
+    let mut sql = String::new();
+    for trigger in TRIGGERS[..2].iter().chain(&TRANSCRIPT_TRIGGERS) {
+        let name = studio_db_api::migration::identifier(trigger.name);
+        let table = studio_db_api::migration::identifier(trigger.table);
+        let event = trigger.event;
+        let body = if trigger.name == TRIGGERS[0].name || trigger.name == TRIGGERS[1].name {
+            crate::clock_schema::target_journal_body(
+                crate::clock_schema::ClockSource::Volatile,
+                crate::clock_schema::AgentJournalEvent::Insert,
+            )
+        } else {
+            crate::clock_schema::target_transcript_body(
+                crate::clock_schema::ClockSource::Volatile,
+                crate::clock_schema::AgentJournalEvent::Insert,
+            )
+        };
+        sql.push_str(&format!("DROP TRIGGER IF EXISTS {name}; CREATE TRIGGER {name} {event} ON {table} BEGIN {body} END;"));
+    }
+    sql
+}
+
 /// The agents table whose records omit the volatile fields.
 pub const AGENT_TABLE: &str = "runtime_agents";
 
@@ -579,6 +602,81 @@ pub fn update(connection: &Connection, id: &str, agent: &Value) -> StoreResult<b
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn canonical_volatile_clocks_keep_noop_generation_revision_and_rollback() {
+        use crate::peer_update_settings::{canvas_read, canvas_tx};
+        use crate::{change_schema as changes, metadata_schema as metadata};
+        use studio_db_api::Table;
+        let mut db = Connection::open_in_memory().unwrap();
+        for descriptor in [
+            metadata::Metadata::descriptor(),
+            changes::Changes::descriptor(),
+            crate::agent_tables::AgentVolatileStorageRow::descriptor(),
+        ] {
+            descriptor.install_if_absent(&db).unwrap();
+        }
+        let transaction = db.transaction().unwrap();
+        crate::clock_schema::seed_fresh_clock_rows(&transaction).unwrap();
+        let singleton = studio_db_api::migration::encode_key(&(1_i64,));
+        canvas_tx(&transaction)
+            .partition::<metadata::AgentRecordGeneration>()
+            .put(&metadata::AgentRecordGeneration {
+                identity: singleton.clone(),
+                source_rowid: 1,
+                integer_key: 1,
+                agent_record_generation: 0,
+            })
+            .unwrap();
+        canvas_tx(&transaction)
+            .partition::<metadata::SchedulerAgentChangeState>()
+            .put(&metadata::SchedulerAgentChangeState {
+                identity: singleton,
+                source_rowid: 1,
+                integer_key: 1,
+                scheduler_floor: 0,
+                scheduler_generation: 0,
+                scheduler_entries: 0,
+                scheduler_total: 0,
+            })
+            .unwrap();
+        crate::bootstrap::install_current_producers(&transaction).unwrap();
+        for (tail, expected) in [("first", 1), ("first", 1), ("second", 2)] {
+            put_fields(
+                &transaction,
+                "worker",
+                json!({"tail":tail}).as_object().unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                crate::clock_schema::AgentRecordGeneration::get(&transaction)
+                    .unwrap()
+                    .unwrap()
+                    .value,
+                expected
+            );
+            assert_eq!(
+                crate::repositories::transcript::TranscriptRepository::revision(
+                    &transaction,
+                    "worker"
+                )
+                .unwrap(),
+                expected
+            );
+        }
+        let state = canvas_read(&transaction)
+            .get::<metadata::SchedulerAgentChangeState>(&(studio_db_api::migration::encode_key(&(
+                1_i64,
+            )),))
+            .unwrap()
+            .unwrap();
+        assert_eq!((state.scheduler_entries, state.scheduler_total), (1, 2));
+        transaction.rollback().unwrap();
+        assert_eq!(
+            crate::repositories::transcript::TranscriptRepository::revision(&db, "worker").unwrap(),
+            0
+        );
+    }
+
     use super::*;
     use studio_json::json;
 

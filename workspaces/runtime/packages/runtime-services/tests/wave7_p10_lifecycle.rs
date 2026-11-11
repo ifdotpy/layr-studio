@@ -725,21 +725,20 @@ fn state(store: &RuntimeStore) -> Value {
     let db = store.test_reader().expect("reader");
     let records = agent_management::read(&db).expect("records");
     super::agent_view_fixtures::assert_agent_view_projections(&db);
-    let mut statement = db.prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities ORDER BY collection,id").expect("sync read");
-    let sync = statement
-        .query_map([], |r| {
-            Ok(json!([
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, i64>(5)?
-            ]))
+    let sync = studio_runtime_store::test_fixtures::canvas::entities(&db)
+        .expect("canonical entity snapshot")
+        .into_iter()
+        .map(|row| {
+            json!([
+                row.collection,
+                row.id,
+                row.seq,
+                row.hash,
+                row.payload,
+                row.deleted
+            ])
         })
-        .expect("rows")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("sync rows");
+        .collect::<Vec<_>>();
     // Work documents and agent views have no copy in sync_entities; a reader builds
     // them at read time.
     let mut sync = sync;
@@ -1364,7 +1363,7 @@ async fn lifecycle_store_failpoints_and_missing_consumer_leave_no_writes() {
             let root = tempfile::tempdir().expect("case");
             let store = Arc::new(clone_store(base.path(), root.path()).await);
             let before = state(&store);
-            store.transaction(move |tx| { tx.execute_batch(&format!("CREATE TRIGGER failpoint {boundary} {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'stop failure'); END"))?; Ok(()) }).await.expect("failpoint");
+            store.transaction(move |tx| { if table == "sync_entities" && boundary == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, true)?; } else { tx.execute_batch(&format!("CREATE TRIGGER failpoint {boundary} {operation} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT, 'stop failure'); END", table=if table=="sync_entities" {"publications"} else {&table}, partition_predicate=if table=="sync_entities" {format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)} else {String::new()}))?; } Ok(()) }).await.expect("failpoint");
             let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
             assert!(
                 agent_lifecycle_runtime::execute(
@@ -1381,8 +1380,8 @@ async fn lifecycle_store_failpoints_and_missing_consumer_leave_no_writes() {
             let store = Arc::new(fixture_store(Some(root.path())).await.expect("restart"));
             assert_eq!(state(&store), before);
             store
-                .transaction(|tx| {
-                    tx.execute_batch("DROP TRIGGER failpoint")?;
+                .transaction(move |tx| {
+                    if table == "sync_entities" && boundary == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch("DROP TRIGGER failpoint")?; }
                     Ok(())
                 })
                 .await
@@ -1496,10 +1495,10 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             let before = state(&store);
             store
             .transaction(move |tx| {
-                tx.execute_batch(&format!(
-                    "CREATE TRIGGER interrupt_projection_fail {boundary} INSERT ON sync_entities BEGIN SELECT RAISE(ABORT,'projection failure'); END; \
-                     CREATE TRIGGER interrupt_projection_update_fail {boundary} UPDATE ON sync_entities BEGIN SELECT RAISE(ABORT,'projection failure'); END"
-                ))?;
+                if boundary == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, true)?;studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, true)?; } else { tx.execute_batch(&format!(
+                    "CREATE TRIGGER interrupt_projection_fail {boundary} INSERT ON publications WHEN NEW.kind={kind} BEGIN SELECT RAISE(ABORT,'projection failure'); END; \
+                     CREATE TRIGGER interrupt_projection_update_fail {boundary} UPDATE ON publications WHEN NEW.kind={kind} BEGIN SELECT RAISE(ABORT,'projection failure'); END", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64
+                ))?; }
                 Ok(())
             }).await
             .expect("install projection failpoint");
@@ -1533,10 +1532,10 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             );
             assert!(broker.calls.lock().expect("calls lock").is_empty());
             store
-                .transaction(|tx| {
-                    tx.execute_batch(
+                .transaction(move |tx| {
+                    if boundary == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, false)?;studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch(
                         "DROP TRIGGER interrupt_projection_fail; DROP TRIGGER interrupt_projection_update_fail",
-                    )?;
+                    )?; }
                     Ok(())
                 })
                 .await

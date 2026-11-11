@@ -155,12 +155,18 @@ impl Corpus {
         store
             .transaction(move |tx| {
                 studio_runtime_store::receipt_schema::create(tx)?;
-                tx.execute("UPDATE runtime_orchestration_settings SET record=json_set(record,'$.expired_before_ms',0) WHERE id='global'",[])?;
+                studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(
+                    tx,
+                    r#"{"expired_before_ms":0}"#,
+                )?;
                 tx.execute(
                     "INSERT INTO runtime_federation_identity VALUES('local',?1)",
                     [identity.to_string()],
                 )?;
-                Repo::put(tx, Table::Settings, "global", "", &json!({"enabled":true}))?;
+                studio_runtime_store::test_fixtures::canvas::seed_federation_settings(
+                    tx,
+                    r#"{"enabled":true}"#,
+                )?;
                 Repo::put(
                     tx,
                     Table::Peer,
@@ -390,6 +396,18 @@ async fn replay_and_nonce() {
 async fn authenticated_consumer() {
     let corpus = &Corpus::new();
     let (_, store) = corpus.store("auth", false).await;
+    store
+        .transaction(|tx| {
+            let settings = json!({"enabled":true});
+            Repo::put(tx, Table::Settings, "global", "", &settings)?;
+            assert_eq!(
+                Repo::record(tx, Table::Settings, "global", "")?,
+                Some(settings)
+            );
+            Ok(())
+        })
+        .await
+        .expect("canonical federation settings round trip");
     let identity = corpus.signing_identity();
     let body =
         studio_json::to_vec(&json!({"protocol":1,"envelope":corpus.data["cases"][0]["envelope"]}))
@@ -946,7 +964,16 @@ async fn legacy_federated_conflict_does_not_poison_original_command() {
     .await
     .expect("original");
     let cutoff = chrono::Utc::now().timestamp_millis() + 60_000;
-    store.transaction(move |tx| { tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [cutoff])?; Ok(()) }).await.expect("cutover");
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(
+                tx,
+                &json!({"expired_before_ms":0,"sendAdmissionCutoverMs":cutoff}).to_string(),
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("cutover");
     let command = |delivery: &str| -> studio_runtime_schema::command::CommandRequest {
         studio_json::from_str(&format!(r#"{{"id":"{id}","client":"web-1","number":1,"kind":"send","target":"{}","body":{{"text":"user message","delivery":"{delivery}"}}}}"#, corpus.room())).expect("command")
     };
@@ -1074,8 +1101,8 @@ async fn malformed_records() {
         store
             .transaction(move |tx| {
                 tx.execute(
-                    "UPDATE runtime_federation_settings SET record=?1",
-                    [value.to_string()],
+                    "UPDATE metadata SET federation_record=?1 WHERE kind=?2",
+                    params![value.to_string(), studio_runtime_store::consolidation_kinds::CanvasMetadataKind::FederationSettings as i64],
                 )?;
                 Ok(())
             })

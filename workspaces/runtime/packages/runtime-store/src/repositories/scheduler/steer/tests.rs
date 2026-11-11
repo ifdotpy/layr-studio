@@ -177,6 +177,8 @@ fn database() -> Connection {
     connection
         .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
         .expect("volatile agent table creates");
+    crate::test_fixtures::canvas::install_canonical(&connection)
+        .expect("canonical scheduler storage");
     let transaction = connection.transaction().expect("index transaction begins");
     SchedulerRepository::prepare_account_wake_index(&transaction).expect("wake index prepares");
     transaction.commit().expect("index commits");

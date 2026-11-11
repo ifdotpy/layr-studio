@@ -94,18 +94,12 @@ pub(crate) fn feature_schema_sql() -> String {
     sql
 }
 
-fn feature_statements() -> [String; 3] {
-    [
-        feature_schema_sql(),
-        SEARCH_SCHEMA.to_owned(),
-        PAYLOAD_MIGRATIONS_SCHEMA.to_owned(),
-    ]
+fn feature_statements() -> [String; 2] {
+    [feature_schema_sql(), SEARCH_SCHEMA.to_owned()]
 }
 
 pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     crate::receipt_tables::prepare_features(transaction)?;
-    crate::clock_schema::prepare_features(transaction)?;
-    crate::settings_schema::prepare_features(transaction)?;
     for descriptor in [
         crate::agent_tables::LeadRequestsStorageRow::descriptor(),
         crate::agent_tables::AgentMovesStorageRow::descriptor(),
@@ -129,14 +123,7 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     for schema in feature_statements() {
         transaction.execute_batch(&schema)?;
     }
-    crate::peer_update_settings::canvas_tx(transaction).insert_new(
-        &crate::settings_schema::AccessSettings {
-            id: 1,
-            auto_pair: 1,
-        },
-    )?;
-    crate::stored_text_compaction::prepare_batches(transaction)?;
-    install_summary_delete_triggers(transaction)?;
+    crate::stored_text_compaction::prepare_canvas_batches(transaction)?;
     // Removing a transcript or its metadata can change materialization even
     // though the event itself is unchanged. Journal that event through its
     // source row; semantic event triggers ignore this value-preserving update.
@@ -144,34 +131,57 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     Ok(())
 }
 
-/// Shared owner of feature summary tombstones and their catalog definitions.
-pub(crate) fn install_summary_delete_triggers(
-    connection: &rusqlite::Connection,
-) -> rusqlite::Result<()> {
-    // A deleted row is no longer readable by the writer journal. Its source
-    // trigger owns the corresponding summary tombstone in the same transaction.
-    for (table, collection) in [
-        ("runtime_events", "messageReceipt"),
-        ("runtime_tasks", "task"),
+pub(crate) fn summary_delete_trigger_sql() -> String {
+    use crate::consolidation_kinds::{
+        CanvasMetadataKind as MetaKind, CanvasPublicationsKind as PubKind,
+    };
+    use crate::{metadata_schema::Metadata, publication_schema::Publications};
+    use studio_db_api::{migration::identifier, query_column as column};
+    let target = identifier(Publications::NAME);
+    let kind = column::<crate::peer_update_settings::Canvas, _>(Publications::KIND);
+    let label = column::<crate::peer_update_settings::Canvas, _>(Publications::COLLECTION_ORDER);
+    let id = column::<crate::peer_update_settings::Canvas, _>(Publications::ENTITY_ID);
+    let seq = column::<crate::peer_update_settings::Canvas, _>(Publications::PUBLICATION_SEQ);
+    let hash = column::<crate::peer_update_settings::Canvas, _>(Publications::ENTITY_HASH);
+    let payload = column::<crate::peer_update_settings::Canvas, _>(Publications::ENTITY_PAYLOAD);
+    let deleted = column::<crate::peer_update_settings::Canvas, _>(Publications::DELETED);
+    let entity_kind = PubKind::DB_CODE_SYNCENTITIES;
+    let metadata = identifier(Metadata::NAME);
+    let meta_kind = column::<crate::peer_update_settings::Canvas, _>(Metadata::KIND);
+    let integer = column::<crate::peer_update_settings::Canvas, _>(Metadata::INTEGER_KEY);
+    let generation = column::<crate::peer_update_settings::Canvas, _>(Metadata::SYNC_GENERATION);
+    let generation_kind = MetaKind::DB_CODE_SYNCGENERATION;
+    let next = crate::clock_schema::next_sequence_sql();
+    let high = crate::clock_schema::queries::High::QUERY
+        .sql()
+        .replace("?1", generation_kind);
+    let mut sql = String::new();
+    let receipt =
+        studio_runtime_schema::generated::SyncMessageReceiptEntityPayloadCollection::default();
+    let task = studio_runtime_schema::generated::SyncTaskEntityPayloadCollection::default();
+    for (table, source_id, collection) in [
+        (
+            crate::queue_schema::EventsRow::NAME,
+            column::<crate::peer_update_settings::Canvas, _>(crate::queue_schema::EventsRow::ID),
+            receipt.as_str(),
+        ),
+        (
+            crate::planning_work::TaskRow::NAME,
+            column::<crate::peer_update_settings::Canvas, _>(crate::planning_work::TaskRow::ID),
+            task.as_str(),
+        ),
     ] {
+        let table = identifier(table);
+        let name = identifier(&format!("summary_{collection}_delete"));
         let function = crate::entity_scopes::SCOPE_TOMBSTONE_FUNCTION;
-        let tombstone = format!(
-            "{function}('{collection}',OLD.id,(SELECT payload FROM sync_entities WHERE collection='{collection}' AND id=OLD.id),(SELECT deleted FROM sync_entities WHERE collection='{collection}' AND id=OLD.id))"
-        );
-        connection.execute_batch(&format!(
-            "CREATE TRIGGER IF NOT EXISTS summary_{collection}_delete AFTER DELETE ON {table} BEGIN
-             INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
-             SELECT '{collection}',OLD.id,(SELECT max(seq)+1 FROM (
-                 SELECT COALESCE(MAX(seq),0) seq FROM sync_entities UNION ALL
-                 SELECT MAX(COALESCE(MAX(seq),0),COALESCE((SELECT value FROM sync_generation WHERE id=1),0)) FROM sync_documents UNION ALL
-                 SELECT COALESCE(MAX(seq),0) FROM durable_rows)),
-                 sync_entity_hash({tombstone}),{tombstone},1
-             WHERE EXISTS(SELECT 1 FROM sync_entities WHERE collection='{collection}' AND id=OLD.id AND deleted=0)
-             ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,hash=excluded.hash,payload=excluded.payload,deleted=1;
-             END;"
-        ))?;
+        let tombstone = format!("{function}('{collection}',OLD.{source_id},{payload},{deleted})");
+        sql.push_str(&format!("DROP TRIGGER IF EXISTS {name}; CREATE TRIGGER {name} AFTER DELETE ON {table} BEGIN
+            UPDATE {target} SET {seq}={next},{hash}=sync_entity_hash({tombstone}),{payload}={tombstone},{deleted}=1
+            WHERE {kind}={entity_kind} AND {label}='{collection}' AND {id}=OLD.{source_id} AND {deleted}=0;
+            UPDATE {metadata} SET {generation}=MAX({generation},({high})) WHERE {meta_kind}={generation_kind} AND {integer}=1 AND {generation}<({high});
+            END;"));
     }
-    Ok(())
+    sql
 }
 
 pub(crate) const RECEIPT_TRANSCRIPT_TRIGGERS: &str = "CREATE TRIGGER IF NOT EXISTS summary_receipt_meta_delete AFTER DELETE ON runtime_event_meta BEGIN
@@ -183,6 +193,105 @@ pub(crate) const RECEIPT_TRANSCRIPT_TRIGGERS: &str = "CREATE TRIGGER IF NOT EXIS
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn canonical_summary_delete_preserves_scope_source_rowid_order_and_rollback() {
+        use crate::peer_update_settings::{canvas_read, canvas_tx};
+        use crate::{
+            change_schema::Changes, metadata_schema::Metadata, publication_schema as publications,
+        };
+        use studio_db_api::Table;
+        use studio_db_api::migration::encode_key;
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::schema::register_python_trigger_functions(&db).unwrap();
+        for descriptor in [
+            Metadata::descriptor(),
+            Changes::descriptor(),
+            publications::Publications::descriptor(),
+            crate::queue_schema::EventsRow::descriptor(),
+            crate::planning_work::TaskRow::descriptor(),
+        ] {
+            descriptor.install_if_absent(&db).unwrap();
+        }
+        let transaction = db.transaction().unwrap();
+        crate::clock_schema::seed_fresh_clock_rows(&transaction).unwrap();
+        crate::bootstrap::install_current_producers(&transaction).unwrap();
+        let source = crate::queue_schema::EventsRow {
+            id: "receipt".into(),
+            agent: "worker".into(),
+            kind: studio_runtime_schema::persistence::EventKind::User,
+            text: "receipt".into(),
+            status: studio_runtime_schema::persistence::EventStatus::Pending,
+            created: 1.0,
+            epoch: 1,
+            turn_id: None,
+            error: None,
+            receipt_enum_guard: None,
+        };
+        canvas_tx(&transaction).insert(&source).unwrap();
+        let collection =
+            studio_runtime_schema::generated::SyncMessageReceiptEntityPayloadCollection::default();
+        let collection = collection.as_str();
+        let key = encode_key(&(collection.to_owned(), "receipt".to_owned()));
+        canvas_tx(&transaction)
+            .partition::<publications::SyncEntities>()
+            .put(&publications::SyncEntities {
+                identity: key.clone(),
+                source_rowid: 72,
+                publication_seq: 10,
+                deleted: crate::metadata_values::StoredBoolean::Valid(false),
+                collection_order: crate::publication_collection::CollectionName::from_stored(
+                    collection.into(),
+                ),
+                collection_kind: crate::publication_collection::CollectionKind::MessageReceipt,
+                collection_agent: None,
+                entity_id: "receipt".into(),
+                entity_hash: "live".into(),
+                entity_payload: publications::EntityValue::from_stored(
+                    collection,
+                    "receipt",
+                    crate::metadata_values::StoredBoolean::Valid(false),
+                    None,
+                )
+                .unwrap(),
+                non_transcript: true,
+            })
+            .unwrap();
+        canvas_tx(&transaction)
+            .delete::<crate::queue_schema::EventsRow>(&("receipt".to_owned(),))
+            .unwrap();
+        let deleted = canvas_read(&transaction)
+            .get::<publications::SyncEntities>(&(key.clone(),))
+            .unwrap()
+            .unwrap();
+        assert_eq!((deleted.deleted.as_stored(), deleted.source_rowid), (1, 72));
+        let event = canvas_read(&transaction)
+            .get::<publications::SyncEntities>(&(encode_key(&(
+                "event".to_owned(),
+                "receipt".to_owned(),
+            )),))
+            .unwrap()
+            .unwrap();
+        assert!(
+            deleted.publication_seq > event.publication_seq,
+            "event tombstone precedes its receipt summary"
+        );
+        assert_eq!(
+            deleted.entity_payload.value().raw(),
+            Some(
+                crate::entity_scopes::tombstone_payload(collection, "receipt", None, Some(false))
+                    .unwrap()
+                    .as_str()
+            )
+        );
+        transaction.rollback().unwrap();
+        assert!(
+            canvas_read(&db)
+                .get::<publications::SyncEntities>(&(key,))
+                .unwrap()
+                .is_none()
+        );
+    }
+
     use super::feature_statements;
     use crate::repositories::schema_registrations;
     use rusqlite::Connection;

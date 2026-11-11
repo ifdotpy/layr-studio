@@ -10,6 +10,29 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 
 const CHAT: &str = "published-chat";
 
+fn null_entity_payload(
+    tx: &rusqlite::Transaction<'_>,
+    collection: &str,
+    id: &str,
+) -> Result<(), StoreError> {
+    let row = studio_runtime_store::test_fixtures::canvas::entities(tx)?
+        .into_iter()
+        .find(|row| row.collection == collection && row.id == id)
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    studio_runtime_store::test_fixtures::canvas::seed_entity(
+        tx,
+        &studio_runtime_store::clock_schema::SyncEntities {
+            collection: row.collection,
+            id: row.id,
+            seq: row.seq,
+            hash: row.hash,
+            payload: None,
+            deleted: row.deleted,
+        },
+        row.source_rowid,
+    )
+}
+
 #[tokio::test]
 #[ignore = "manual fixture timing"]
 async fn agent_read_fixture_timing() {
@@ -227,11 +250,13 @@ async fn repair_account_with_scope_shaped_unknown_fields(startup: bool) {
             } else {
                 crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
             }
-            let payload: String = tx.query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='acct'",
-                [],
-                |row| row.get(0),
-            )?;
+            let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                tx,
+                "rateLimit",
+                "acct",
+                false,
+            )
+            .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))?;
             let (_, unreadable) = studio_runtime_store::account_state::normalized_limits_view(
                 "acct",
                 payload.as_bytes(),
@@ -257,14 +282,23 @@ async fn account_startup_repairs_scope_shaped_unknown_fields() {
 #[tokio::test]
 async fn null_limits_payload_does_not_block_publication_or_startup() {
     let (_dir, store) = store().await;
-    store.transaction(|tx| {
-        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "broken", json!({"unexpected": true}), false)?;
-        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
-        crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
-        tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='broken'", [])?;
-        crate::account_session_runtime::limits::seed_agents(tx)?;
-        Ok(())
-    }).await.unwrap();
+    store
+        .transaction(|tx| {
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "rateLimit",
+                "broken",
+                json!({"unexpected": true}),
+                false,
+            )?;
+            null_entity_payload(tx, "rateLimit", "broken")?;
+            crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
+            null_entity_payload(tx, "rateLimit", "broken")?;
+            crate::account_session_runtime::limits::seed_agents(tx)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -285,12 +319,16 @@ async fn agent_limit_failure_republishes_account_recovery() {
     }).await.unwrap();
     let before: i64 = store
         .test_read_transaction(|tx| {
-            tx.query_row(
-                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
+            studio_runtime_store::ProjectionPublicationQueries::entity_version(
+                tx,
+                "rateLimit",
+                "default",
             )
-            .map_err(Into::into)
+            .map_err(studio_runtime_store::StoreError::from)
+            .and_then(|row| {
+                row.map(|(seq, _)| seq)
+                    .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into())
+            })
         })
         .unwrap();
     store
@@ -305,12 +343,16 @@ async fn agent_limit_failure_republishes_account_recovery() {
         .unwrap();
     let after: i64 = store
         .test_read_transaction(|tx| {
-            tx.query_row(
-                "SELECT seq FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
+            studio_runtime_store::ProjectionPublicationQueries::entity_version(
+                tx,
+                "rateLimit",
+                "default",
             )
-            .map_err(Into::into)
+            .map_err(studio_runtime_store::StoreError::from)
+            .and_then(|row| {
+                row.map(|(seq, _)| seq)
+                    .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into())
+            })
         })
         .unwrap();
     let (_, view) = client_entity(&store, "rateLimit", "default").unwrap();
@@ -750,7 +792,15 @@ async fn agent_projections_decode_accounts_once_with_identical_output() {
         tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountKey','other') WHERE id='batch-1'", [])?;
         tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.error',json(?1)) WHERE id LIKE 'batch-%'", [r#"{"codexErrorInfo":"rateLimitExceeded"}"#])?;
         let output = || -> Result<Vec<(String, i64, String)>, StoreError> {
-            Ok(tx.prepare("SELECT collection||':'||id,seq,payload FROM sync_entities WHERE collection='rateLimit' UNION ALL SELECT tbl||':'||id,seq,CAST(deleted AS TEXT) FROM durable_rows WHERE tbl='agent_views' ORDER BY 1")?.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?.collect::<Result<Vec<_>, _>>()?)
+            let mut rows = studio_runtime_store::test_fixtures::canvas::entities(tx)?.into_iter()
+                .filter(|row| row.collection == "rateLimit")
+                .map(|row| Ok((format!("{}:{}", row.collection, row.id), row.seq, row.payload.ok_or(rusqlite::Error::InvalidColumnType(2, "payload".into(), rusqlite::types::Type::Null))?)))
+                .collect::<Result<Vec<_>, StoreError>>()?;
+            rows.extend(studio_runtime_store::test_fixtures::canvas::changes(tx)?.into_iter()
+                .filter(|row| row.source_label == "agent_views")
+                .map(|row| (format!("{}:{}", row.source_label, row.durable_id), row.seq, row.deleted.to_string())));
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            Ok(rows)
         };
         tx.execute_batch("SAVEPOINT publication_reference")?;
         ACCOUNT_VIEW_DECODES.set(0);
@@ -778,15 +828,22 @@ async fn agent_projections_repair_unreadable_accounts_once_per_batch() {
     seed_chat(&store, chat(json!({}))).await;
     seed_chat(&store, chat(json!({"id":"second","rootId":"second"}))).await;
     store.transaction_with(|tx| {
-        tx.execute_batch("CREATE TEMP TABLE repairs(id TEXT); CREATE TEMP TRIGGER count_repairs AFTER DELETE ON main.sync_entities WHEN OLD.collection='rateLimit' BEGIN INSERT INTO repairs VALUES(OLD.id); END;")?;
+        tx.execute_batch(&format!("CREATE TEMP TABLE repairs(id TEXT); CREATE TEMP TRIGGER count_repairs AFTER DELETE ON main.publications WHEN OLD.kind={kind} AND OLD.collection_order='rateLimit' BEGIN INSERT INTO repairs VALUES(OLD.entity_id); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::DB_CODE_SYNCENTITIES))?;
         let sequences = || -> Result<Vec<(String, i64)>, StoreError> {
-            Ok(tx.prepare("SELECT collection||':'||id,seq FROM sync_entities WHERE collection='rateLimit' UNION ALL SELECT tbl||':'||id,seq FROM durable_rows WHERE tbl='agent_views' ORDER BY 1")?.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<_>, _>>()?)
+            let mut rows = studio_runtime_store::test_fixtures::canvas::entities(tx)?.into_iter()
+                .filter(|row| row.collection == "rateLimit")
+                .map(|row| (format!("{}:{}", row.collection, row.id), row.seq)).collect::<Vec<_>>();
+            rows.extend(studio_runtime_store::test_fixtures::canvas::changes(tx)?.into_iter()
+                .filter(|row| row.source_label == "agent_views")
+                .map(|row| (format!("{}:{}", row.source_label, row.durable_id), row.seq)));
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            Ok(rows)
         };
         for null_payload in [false, true] {
         studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", json!({}), false)?;
         if null_payload {
             studio_runtime_store::seed_legacy_reparented_rows(tx, || {
-            tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='default'", [])?;
+            null_entity_payload(tx, "rateLimit", "default")?;
                 Ok(())
             })?;
         }
@@ -801,7 +858,7 @@ async fn agent_projections_repair_unreadable_accounts_once_per_batch() {
             ..Default::default()
         }, None, &|_, _, _, _| true)?;
         assert_eq!(tx.query_row("SELECT count(*) FROM repairs", [], |row| row.get::<_, i64>(0))?, 1);
-        let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0))?;
+        let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "rateLimit", "default", false).and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))?;
         let (value, unreadable) = studio_runtime_store::account_state::normalized_limits_view("default", payload.as_bytes(), 0.0);
         assert!(!unreadable);
         assert_eq!(value.projection.agents.len(), 2);
@@ -989,7 +1046,7 @@ async fn work_written_without_a_publisher_is_read_before_any_pull() {
         AgentRepository::put(tx,&AgentRecord::from_value(chat(json!({"taskDefaultGate":{"command":"upgrade-check","timeout_ms":1234}})))?)?;
         tx.execute("INSERT INTO runtime_work(id,record) VALUES(?1,?2)", rusqlite::params![id,json!({"id":id,"rootId":CHAT,"title":"Old assignment","status":"review","created":1,"updated":1,"version":1,"results":[{"id":"old-result","agent":CHAT,"text":"Old evidence","checks":"Checked","revision":"abc","files":[],"created":1}]}).to_string()])?;
         reconcile_work_history(tx, id)?;
-        tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
+        studio_runtime_store::test_fixtures::canvas::set_meta(tx, studio_runtime_store::WORK_DETAILS_SEED_MARKER, None)?;
         Ok(())
     }).await.expect("pre-upgrade sources without a publisher");
     super::install(&store)
@@ -1123,12 +1180,17 @@ async fn work_detail_publishes_full_review_state_at_commit_and_retires_on_delete
     );
     let history_seq = store
         .test_read_transaction(|tx| {
-            tx.query_row(
-                "SELECT seq FROM durable_rows WHERE tbl='runtime_work_results' AND id='assignment:0'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(StoreError::from)
+            studio_runtime_store::test_fixtures::canvas::changes(tx)
+                .and_then(|rows| {
+                    rows.into_iter()
+                        .find(|row| {
+                            row.source_label == "runtime_work_results"
+                                && row.durable_id == "assignment:0"
+                        })
+                        .map(|row| row.seq)
+                        .ok_or(rusqlite::Error::QueryReturnedNoRows)
+                })
+                .map_err(StoreError::from)
         })
         .expect("result sequence");
     assert_eq!(
@@ -1151,7 +1213,22 @@ async fn work_detail_publishes_full_review_state_at_commit_and_retires_on_delete
             .1["status"],
         "review"
     );
-    assert_eq!(store.test_read_transaction(|tx| tx.query_row("SELECT seq FROM durable_rows WHERE tbl='runtime_work_results' AND id='assignment:0'", [], |row| row.get::<_, i64>(0)).map_err(StoreError::from)).expect("unchanged result sequence"), history_seq, "status changes do not replay full histories");
+    assert_eq!(
+        store
+            .test_read_transaction(
+                |tx| studio_runtime_store::test_fixtures::canvas::changes(tx)
+                    .and_then(|rows| rows
+                        .into_iter()
+                        .find(|row| row.source_label == "runtime_work_results"
+                            && row.durable_id == "assignment:0")
+                        .map(|row| row.seq)
+                        .ok_or(rusqlite::Error::QueryReturnedNoRows))
+                    .map_err(StoreError::from)
+            )
+            .expect("unchanged result sequence"),
+        history_seq,
+        "status changes do not replay full histories"
+    );
     write(
         &store,
         "DELETE FROM runtime_work WHERE id=?1",
@@ -1281,9 +1358,10 @@ async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
                 old_summary,
                 false,
             )?;
-            tx.execute(
-                "DELETE FROM sync_entity_meta WHERE key=?1",
-                [studio_runtime_store::AGENT_PROJECTIONS_SEED_MARKER],
+            studio_runtime_store::test_fixtures::canvas::set_meta(
+                tx,
+                studio_runtime_store::AGENT_PROJECTIONS_SEED_MARKER,
+                None,
             )?;
             Ok(())
         })
@@ -2162,19 +2240,22 @@ fn assert_published_list(store: &studio_runtime_store::RuntimeStore) {
                 .iter()
                 .map(|row| (row["id"].as_str().expect("id").to_owned(), row.clone()))
                 .collect::<std::collections::BTreeMap<_, _>>();
-            let mut statement = tx.prepare(
-                "SELECT id,payload FROM sync_entities WHERE collection='studioError' AND deleted=0",
-            )?;
-            let published = statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .map(|row| {
-                    let (id, payload) = row?;
-                    let payload: Value = studio_json::from_str(&payload).expect("entity JSON");
-                    Ok((id, payload["value"].clone()))
-                })
-                .collect::<Result<std::collections::BTreeMap<_, _>, StoreError>>()?;
+            let published = studio_runtime_store::test_fixtures::canvas::entities(tx)?
+                .into_iter()
+                .filter(|row| row.collection == "studioError" && row.deleted == 0)
+                .map(
+                    |studio_runtime_store::test_fixtures::canvas::EntitySnapshot {
+                         id,
+                         payload,
+                         ..
+                     }| {
+                        let payload: Value =
+                            studio_json::from_str(&payload.expect("live entity payload"))
+                                .expect("entity JSON");
+                        (id, payload["value"].clone())
+                    },
+                )
+                .collect::<std::collections::BTreeMap<_, _>>();
             Ok((listed, published))
         })
         .expect("list and entities read");
@@ -2345,8 +2426,43 @@ async fn studio_error_schedule_pointers_keep_conservative_rebuilds() {
 
 #[tokio::test]
 async fn studio_error_existing_liveness_keeps_conservative_rebuilds() {
-    assert_failed_agent_liveness_dependency_rebuilds(json!({}),
-        "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) SELECT collection,'liveness:fixture',seq,hash,json_set(payload,'$.id','liveness:fixture','$.value.id','liveness:fixture'),0 FROM sync_entities WHERE collection='studioError' AND id='agent:'||?1||':'").await;
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"status":"failed","error":"unclassified"})),
+    )
+    .await;
+    store
+        .transaction(|tx| {
+            let raw = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                tx,
+                "studioError",
+                &format!("agent:{CHAT}:"),
+                true,
+            )?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+            let mut entity: Value = studio_json::from_str(&raw)?;
+            entity["value"]["id"] = json!("liveness:fixture");
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "studioError",
+                "liveness:fixture",
+                entity["value"].clone(),
+                false,
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("liveness dependency fixture");
+    let before = full_publications(&store).await;
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.model','changed') WHERE id=?1",
+        vec![CHAT.into()],
+    )
+    .await;
+    assert_eq!(full_publications(&store).await, before + 1);
+    assert_published_list(&store);
 }
 
 #[tokio::test]

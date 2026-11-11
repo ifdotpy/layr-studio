@@ -92,6 +92,88 @@ default-filter = '''
     (package(=studio-runtime-providers) & kind(lib) & test(boundary_metadata_tests::)) |
     (package(=studio-runtime-process) & kind(test) & binary(=integration) & test(real_supervisor_keeps_claude_string_ids_and_writes_a_reply_once)) |
     (package(=studio-runtime-services) & kind(lib) & (test(analytics_capture::boundary_timing_tests::) | test(account_worker::boundary::tests::) | test(boundary_clocks::) | test(analytics_index_and_byte_counters_track_aggregation_and_flush))) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_reopen_keeps_schema_version_and_catalog_bytes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_sidebar_write_updates_workspace_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_sidebar_write_does_not_create_an_absent_workspace)) |
+    (package(=studio-runtime-server) & kind(lib) & test(canonical_limits_reset_callback_reads_only_live_rate_limits)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_windows_hash_only_isolation_and_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_retention_advances_floor_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_search_phase_preserves_legacy_text_and_missing_id)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_delta_uses_original_rowid_for_sequence_ties)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_window_and_retention_plans_have_flat_unrelated_history_cost)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_revision_cache_keeps_hash_sequence_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_recent_chat_plan_and_flat_unrelated_changes_cost)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_transcript_recent_chats_reads_changes_and_excludes_requested_ids)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_commands_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_diagnostics_store_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_maintenance_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_process_controls_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_provider_versions_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_studio_errors_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_projection_preserves_missing_null_deleted_and_raw_text)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_error_scans_keep_integer_selectors_source_order_and_json_scalar_policy)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_monitor_liveness_and_source_visibility_use_canonical_rows)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_task_visit_streams_source_order_and_restores_visitor_error)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_command_rows_bound_bytes_preserve_full_length_sequence_and_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_metadata_keeps_historical_phase_integer_boolean_and_nullable_progress)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_hot_read_plans_and_vm_cost_ignore_retained_tombstones)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=account_session_runtime::limits::canonical_publication_tests::canonical_limits_views_read_publication_and_seed_agents)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=coordination_reads::canonical_publication_tests::canonical_delete_room_retires_empty_projection)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=federation::canonical_publication_tests::canonical_federation_disabled_is_business_error)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=federation_effects::canonical_publication_tests::canonical_federation_effects_disabled_is_forbidden)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=notification_dispatch::kinds::canonical_publication_tests::canonical_checked_task_reads_migration_marker)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=notification_dispatch::notices::canonical_publication_tests::canonical_account_notice_updates_workspace_projection)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=peer_projects::canonical_publication_tests::canonical_peer_project_scan_retires_only_matching_server)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=project_deletion::canonical_publication_tests::canonical_project_admission_keeps_missing_and_live_version)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=project_locations::canonical_publication_tests::canonical_location_admission_requires_live_project_and_source_record)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=projects::operations::canonical_publication_tests::canonical_peer_team_write_retires_orphan_projection)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_payload_sequence_and_version_keep_null_deleted_and_raw_bytes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_limits_stream_preserves_null_bytes_and_source_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_account_identity_keeps_first_duplicate_null_and_invalid_json)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_peer_scans_and_team_membership_keep_selectors)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_hot_limits_plan_and_vm_ignore_retained_history)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::metadata_tests::projection_canonical_federation_and_marker_preserve_missing_and_integer_bool)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::hot_query_tests::projection_canonical_hot_peer_and_point_queries_ignore_retained_history)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_cost_worker_failure_settles_saved_value_and_preserves_missing)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_replace_empty_collection_has_no_source_table_dependency)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_seed_empty_sessions_has_no_source_table_dependency)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_empty_catalog_cleanup_has_no_source_table_dependency)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_canonical_raw_rows_preserve_selectors_null_and_source_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_canonical_identity_preserves_missing_null_and_first_duplicate)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_hot_reads_use_owned_indexes_and_flat_vm)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_session_seed_left_join_preserves_nullable_saved_payloads)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_workspace_seed_is_idempotent)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_seed_completeness_checks_queue_and_event_sequence)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_entity_context::room_preparation_tests::f1_n_canonical_account_destinations_missing_live_and_deleted)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_retirement_and_collection_marker)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_entity_context::room_preparation_tests::f1_n_canonical_account_destinations_null_is_error)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_event_marker_fast_path)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_workspace_refresh_preserves_envelope)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_catalog_has_no_source_table)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=sync_policy_queries::tests::f1_n_publication_queue_completeness_uses_exact_live_flag)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=sync_policy_queries::tests::f1_n_publication_reads_plan_and_vm_ignore_unrelated_history)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=sync_policy_queries::tests::f1_n_publication_selectors_preserve_null_raw_integer_and_source_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::canonical_expiration_floor_reads_and_gc_are_atomic_without_legacy_settings)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_publication::tests::f1_pending_deleted_sources_read_canonical_live_owners)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::projects::tests::f1_project_hide_reads_canonical_peer_team_scope_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::account_state::tests::f1_limits_snapshots_canonical_deleted_null_malformed_and_receipt)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::account_state::tests::f1_limits_snapshots_canonical_account_isolation_and_source_order)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_direct_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_task_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_agent_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_tail_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_agent_sequence_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_window_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_direct_sequence_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_work_and_history_fanout_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_work_history_and_fanout_keep_service_envelopes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_direct_candidates_preserve_deleted_selectors_bounds_and_source_ties)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_agent_grouping_scopes_tombstones_and_range_boundaries)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_window_uses_membership_and_exact_source_deleted_zero)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_work_keeps_exact_deleted_one_scope_escape)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_history_preserves_raw_tokens_nullable_join_and_tombstones)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_task_owner_union_and_run_fanout_keep_raw_projection_policy)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_hot_queries_use_owned_indexes_and_ignore_unrelated_history)) |
     (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
     (package(=studio-runtime-services) & kind(lib) & test(malformed_monitor_)) |
@@ -104,6 +186,17 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(scope_shaped_unknown_fields)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(agent_tables::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(clock_schema::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(durable_seq::tests::canonical_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(event_publication_triggers::tests::event_publication_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scopes::tests::canonical::canonical_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=commit_notification_tests::canonical_metadata_settings_notifications_ignore_clock_writes_and_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::projects::tests::canonical_project_caller_preserves_missing_deleted_and_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(feature_schema::tests::canonical_summary_delete)) |
+    (package(=studio-runtime-store) & kind(lib) & test(sync_policy_queries::tests::sync_policy_target)) |
+    (package(=studio-runtime-store) & kind(lib) & test(settings_schema::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::transcript::tests::transcript_revision_reads_only_its_changes_partition_and_rolls_back)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=transcript::tests::cached_page_ignores_unrelated_agent_decode_errors)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(work_history::tests::)) |
@@ -119,11 +212,15 @@ default-filter = '''
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
+    (package(=studio-runtime-store) & kind(lib) & (test(=repositories::command_watermarks::tests::send_cutover_preserves_sqlite_presence_types_and_first_duplicate) | test(=repositories::federation::tests::settings_missing_disabled_and_enabled_updates_preserve_room_fence) | test(=repositories::federation::tests::invalid_settings_are_refused_and_room_fence_keeps_sqlite_selection) | test(=repositories::orchestration_settings::tests::policy_selectors_preserve_first_member_null_and_independent_fields) | test(=repositories::orchestration_settings::tests::setters_work_inside_existing_transactions_and_rollback) | test(=repositories::projects::tests::sidebar_metadata_preserves_default_legacy_json_and_workspace_presence))) |
+    (package(=studio-runtime-store) & kind(lib) & (test(migration_progress::tests::) | test(migrations::m2026_11_11_consolidate_f1::tests::))) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & (test(receipt_tables::tests::) | test(=migrations::m2026_11_06_idle_unload::tests::receipt_transfer_upgrade_defers_lookup_until_target_column_exists))) |
     (package(=studio-runtime-schema) & kind(lib) & test(usage_resume_record::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(supervisor_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::sync_documents::f1_cutover_tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & (test(=repositories::sync_documents::tests::resume_entities_seq_cursor_reads_only_changed_collection_rows) | test(=repositories::sync_documents::tests::scoped_page_reads_only_its_collection_and_id) | test(=repositories::sync_documents::tests::pull_page_stops_at_limit))) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_position)) |
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(item_monitor_terminal::tests::)) |
@@ -296,7 +393,7 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(unrelated_content_reads_do_not_wait_for_a_projection) | test(older_projection_cannot_overwrite_a_newer_revision) | test(entity_candidates_bypass_content_reads_for_seq_cursor_delivery))) |
     (package(=studio-runtime-http) & kind(lib) & test(/^bounded_entities::tests::desktop_source_projects_legacy_native_rotation_without_mutating_status$/)) |
     (package(=studio-runtime-store) & kind(lib) & test(=schema::tests::analytics_marker_admission_preserves_legacy_json_and_error_order)) |
-    (package(=studio-runtime-store) & kind(test) & binary(=integration) & (test(/^local_server_id::/) | test(=schema_compat::analytics_marker_projection_is_checked_during_store_open))) |
+    (package(=studio-runtime-store) & kind(test) & binary(=integration) & (test(/^local_server_id::/) | (test(=schema_compat::analytics_marker_projection_is_checked_during_store_open) | test(=schema_compat::noncanonical_tombstone_triggers_are_replaced)))) |
     (package(=studio-runtime-server) & kind(lib) & test(/^provider_ports::tests::(title_thread_reply_projection_matches_legacy_admission|title_invalid_thread_reply_retains_home_and_unknown_receipt|title_projection_matches_legacy_partial_provider_observations|title_cancelled_turn_uses_exact_id_and_last_final_answer|title_uses_the_retained_thread_turn_and_read_receipts|title_with_written_thread_and_unsent_turn_remains_unknown|unknown_title_start_is_never_followed_by_another_write)$/)) |
     (package(=studio-runtime-services) & kind(lib) & (test(=browser_host::tests::launcher_request_encoding_preserves_existing_wire_shape) | test(callback_request_refusal_order_handles_partial_stored_records) | test(host_source_preserves_partial_and_duplicate_params) | test(pending_links_become_cards_once_and_unknown_chats_are_refused) | test(non_string_url_or_host_never_creates_a_browser_card) | test(browser_answer_uses_guest_receipt_and_replays_without_second_call) | test(=browser_host::local_open_tests::launcher_request_admission_keeps_order_and_json_number_rules) | test(=browser_host::local_open_tests::without_the_mac_fast_path_the_launcher_only_queues_the_card))) |
     (package(=studio-runtime-server) & kind(lib) & test(/^provider_ports::tests::supervisor_health_(accepts_current_protocol_and_preserves_exact_handles|rejects_incompatible_or_degraded_status)$/)) |
@@ -496,7 +593,7 @@ default-filter = '''
     | (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(/^queue_recovery::/))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/^wave7_p01_registry::callback_only_saved_reply_starts_its_account_without_any_pending_input$/))
     | ((package(=studio-runtime-schema) | package(=studio-runtime-services) | package(=studio-runtime-store) | package(=studio-runtime-http)) & kind(lib) & test(platform_neutral))
-    | (package(=studio-runtime-services) & kind(lib) & test(/^system_reads::tests::account_projection_preserves_provider_order_and_empty_labels$/))
+    | (package(=studio-runtime-services) & kind(lib) & (test(/^system_reads::tests::account_projection_preserves_provider_order_and_empty_labels$/) | test(=system_reads::tests::canonical_summary_is_ready_and_shows_chats)))
     | (package(=studio-runtime-process) & kind(lib) & (test(prepared_diagnostic_requests_preserve_valid_and_malformed_ids) | test(failed_stdin_write_does_not_sample_or_emit_timing)))
     | (package(=studio-runtime-process) & kind(lib) & test(/^provider_stdio::tests::shutdown_delivers_frames_written_on_stdin_eof_before_the_kill$/))
     | (package(=studio-runtime-services) & kind(test) & binary(=integration) & (test(/^provider_session_task::shutdown_keeps_the_stdout_tail_beyond_full_lanes_in_order$/) | test(/^provider_session_task::shutdown_tail_reply_resolves_its_request_instead_of_unknown$/)))
@@ -612,6 +709,88 @@ default-filter = '''
     (package(=studio-runtime-providers) & kind(lib) & test(boundary_metadata_tests::)) |
     (package(=studio-runtime-process) & kind(test) & binary(=integration) & test(real_supervisor_keeps_claude_string_ids_and_writes_a_reply_once)) |
     (package(=studio-runtime-services) & kind(lib) & (test(analytics_capture::boundary_timing_tests::) | test(account_worker::boundary::tests::) | test(boundary_clocks::) | test(analytics_index_and_byte_counters_track_aggregation_and_flush))) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_reopen_keeps_schema_version_and_catalog_bytes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_sidebar_write_updates_workspace_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_sidebar_write_does_not_create_an_absent_workspace)) |
+    (package(=studio-runtime-server) & kind(lib) & test(canonical_limits_reset_callback_reads_only_live_rate_limits)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_windows_hash_only_isolation_and_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_retention_advances_floor_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_search_phase_preserves_legacy_text_and_missing_id)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_delta_uses_original_rowid_for_sequence_ties)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_window_and_retention_plans_have_flat_unrelated_history_cost)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_revision_cache_keeps_hash_sequence_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(canonical_transcript_recent_chat_plan_and_flat_unrelated_changes_cost)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_transcript_recent_chats_reads_changes_and_excludes_requested_ids)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_commands_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_diagnostics_store_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_maintenance_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_process_controls_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_provider_versions_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-services) & kind(lib) & test(f1_studio_errors_canonical_caller_without_source_tables)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_projection_preserves_missing_null_deleted_and_raw_text)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_error_scans_keep_integer_selectors_source_order_and_json_scalar_policy)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_monitor_liveness_and_source_visibility_use_canonical_rows)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_task_visit_streams_source_order_and_restores_visitor_error)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_command_rows_bound_bytes_preserve_full_length_sequence_and_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_metadata_keeps_historical_phase_integer_boolean_and_nullable_progress)) |
+    (package(=studio-runtime-store) & kind(lib) & test(f1_diagnostic_hot_read_plans_and_vm_cost_ignore_retained_tombstones)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=account_session_runtime::limits::canonical_publication_tests::canonical_limits_views_read_publication_and_seed_agents)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=coordination_reads::canonical_publication_tests::canonical_delete_room_retires_empty_projection)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=federation::canonical_publication_tests::canonical_federation_disabled_is_business_error)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=federation_effects::canonical_publication_tests::canonical_federation_effects_disabled_is_forbidden)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=notification_dispatch::kinds::canonical_publication_tests::canonical_checked_task_reads_migration_marker)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=notification_dispatch::notices::canonical_publication_tests::canonical_account_notice_updates_workspace_projection)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=peer_projects::canonical_publication_tests::canonical_peer_project_scan_retires_only_matching_server)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=project_deletion::canonical_publication_tests::canonical_project_admission_keeps_missing_and_live_version)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=project_locations::canonical_publication_tests::canonical_location_admission_requires_live_project_and_source_record)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=projects::operations::canonical_publication_tests::canonical_peer_team_write_retires_orphan_projection)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_payload_sequence_and_version_keep_null_deleted_and_raw_bytes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_limits_stream_preserves_null_bytes_and_source_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_account_identity_keeps_first_duplicate_null_and_invalid_json)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_peer_scans_and_team_membership_keep_selectors)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::tests::projection_canonical_hot_limits_plan_and_vm_ignore_retained_history)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::metadata_tests::projection_canonical_federation_and_marker_preserve_missing_and_integer_bool)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=projection_publication_queries::hot_query_tests::projection_canonical_hot_peer_and_point_queries_ignore_retained_history)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_cost_worker_failure_settles_saved_value_and_preserves_missing)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_replace_empty_collection_has_no_source_table_dependency)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_seed_empty_sessions_has_no_source_table_dependency)) |
+    (package(=studio-runtime-http) & kind(lib) & test(canonical_empty_catalog_cleanup_has_no_source_table_dependency)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_canonical_raw_rows_preserve_selectors_null_and_source_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_canonical_identity_preserves_missing_null_and_first_duplicate)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_hot_reads_use_owned_indexes_and_flat_vm)) |
+    (package(=studio-runtime-store) & kind(lib) & test(http_publication_session_seed_left_join_preserves_nullable_saved_payloads)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_workspace_seed_is_idempotent)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_seed_completeness_checks_queue_and_event_sequence)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_entity_context::room_preparation_tests::f1_n_canonical_account_destinations_missing_live_and_deleted)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_retirement_and_collection_marker)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_entity_context::room_preparation_tests::f1_n_canonical_account_destinations_null_is_error)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_event_marker_fast_path)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_workspace_refresh_preserves_envelope)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::f1_n_canonical_catalog_has_no_source_table)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=sync_policy_queries::tests::f1_n_publication_queue_completeness_uses_exact_live_flag)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=sync_policy_queries::tests::f1_n_publication_reads_plan_and_vm_ignore_unrelated_history)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=sync_policy_queries::tests::f1_n_publication_selectors_preserve_null_raw_integer_and_source_order)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::canonical_expiration_floor_reads_and_gc_are_atomic_without_legacy_settings)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_publication::tests::f1_pending_deleted_sources_read_canonical_live_owners)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::projects::tests::f1_project_hide_reads_canonical_peer_team_scope_and_rolls_back)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::account_state::tests::f1_limits_snapshots_canonical_deleted_null_malformed_and_receipt)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::account_state::tests::f1_limits_snapshots_canonical_account_isolation_and_source_order)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_direct_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_task_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_agent_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_tail_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_agent_sequence_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_window_candidates_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_direct_sequence_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_work_and_history_fanout_need_no_legacy_table)) |
+    (package(=studio-runtime-services) & kind(lib) & test(canonical_scope_work_history_and_fanout_keep_service_envelopes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_direct_candidates_preserve_deleted_selectors_bounds_and_source_ties)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_agent_grouping_scopes_tombstones_and_range_boundaries)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_window_uses_membership_and_exact_source_deleted_zero)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_work_keeps_exact_deleted_one_scope_escape)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_history_preserves_raw_tokens_nullable_join_and_tombstones)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_task_owner_union_and_run_fanout_keep_raw_projection_policy)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_hot_queries_use_owned_indexes_and_ignore_unrelated_history)) |
     (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
     (package(=studio-runtime-services) & kind(lib) & test(malformed_monitor_)) |
@@ -624,6 +803,17 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(scope_shaped_unknown_fields)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(agent_tables::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(clock_schema::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(durable_seq::tests::canonical_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(event_publication_triggers::tests::event_publication_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scopes::tests::canonical::canonical_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=commit_notification_tests::canonical_metadata_settings_notifications_ignore_clock_writes_and_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::projects::tests::canonical_project_caller_preserves_missing_deleted_and_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(feature_schema::tests::canonical_summary_delete)) |
+    (package(=studio-runtime-store) & kind(lib) & test(sync_policy_queries::tests::sync_policy_target)) |
+    (package(=studio-runtime-store) & kind(lib) & test(settings_schema::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::transcript::tests::transcript_revision_reads_only_its_changes_partition_and_rolls_back)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=transcript::tests::cached_page_ignores_unrelated_agent_decode_errors)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(work_history::tests::)) |
@@ -639,11 +829,15 @@ default-filter = '''
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
+    (package(=studio-runtime-store) & kind(lib) & (test(=repositories::command_watermarks::tests::send_cutover_preserves_sqlite_presence_types_and_first_duplicate) | test(=repositories::federation::tests::settings_missing_disabled_and_enabled_updates_preserve_room_fence) | test(=repositories::federation::tests::invalid_settings_are_refused_and_room_fence_keeps_sqlite_selection) | test(=repositories::orchestration_settings::tests::policy_selectors_preserve_first_member_null_and_independent_fields) | test(=repositories::orchestration_settings::tests::setters_work_inside_existing_transactions_and_rollback) | test(=repositories::projects::tests::sidebar_metadata_preserves_default_legacy_json_and_workspace_presence))) |
+    (package(=studio-runtime-store) & kind(lib) & (test(migration_progress::tests::) | test(migrations::m2026_11_11_consolidate_f1::tests::))) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & (test(receipt_tables::tests::) | test(=migrations::m2026_11_06_idle_unload::tests::receipt_transfer_upgrade_defers_lookup_until_target_column_exists))) |
     (package(=studio-runtime-schema) & kind(lib) & test(usage_resume_record::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(supervisor_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::sync_documents::f1_cutover_tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & (test(=repositories::sync_documents::tests::resume_entities_seq_cursor_reads_only_changed_collection_rows) | test(=repositories::sync_documents::tests::scoped_page_reads_only_its_collection_and_id) | test(=repositories::sync_documents::tests::pull_page_stops_at_limit))) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_position)) |
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(item_monitor_terminal::tests::)) |
@@ -816,7 +1010,7 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(unrelated_content_reads_do_not_wait_for_a_projection) | test(older_projection_cannot_overwrite_a_newer_revision) | test(entity_candidates_bypass_content_reads_for_seq_cursor_delivery))) |
     (package(=studio-runtime-http) & kind(lib) & test(/^bounded_entities::tests::desktop_source_projects_legacy_native_rotation_without_mutating_status$/)) |
     (package(=studio-runtime-store) & kind(lib) & test(=schema::tests::analytics_marker_admission_preserves_legacy_json_and_error_order)) |
-    (package(=studio-runtime-store) & kind(test) & binary(=integration) & (test(/^local_server_id::/) | test(=schema_compat::analytics_marker_projection_is_checked_during_store_open))) |
+    (package(=studio-runtime-store) & kind(test) & binary(=integration) & (test(/^local_server_id::/) | (test(=schema_compat::analytics_marker_projection_is_checked_during_store_open) | test(=schema_compat::noncanonical_tombstone_triggers_are_replaced)))) |
     (package(=studio-runtime-server) & kind(lib) & test(/^provider_ports::tests::(title_thread_reply_projection_matches_legacy_admission|title_invalid_thread_reply_retains_home_and_unknown_receipt|title_projection_matches_legacy_partial_provider_observations|title_cancelled_turn_uses_exact_id_and_last_final_answer|title_uses_the_retained_thread_turn_and_read_receipts|title_with_written_thread_and_unsent_turn_remains_unknown|unknown_title_start_is_never_followed_by_another_write)$/)) |
     (package(=studio-runtime-services) & kind(lib) & (test(=browser_host::tests::launcher_request_encoding_preserves_existing_wire_shape) | test(callback_request_refusal_order_handles_partial_stored_records) | test(host_source_preserves_partial_and_duplicate_params) | test(pending_links_become_cards_once_and_unknown_chats_are_refused) | test(non_string_url_or_host_never_creates_a_browser_card) | test(browser_answer_uses_guest_receipt_and_replays_without_second_call) | test(=browser_host::local_open_tests::launcher_request_admission_keeps_order_and_json_number_rules) | test(=browser_host::local_open_tests::without_the_mac_fast_path_the_launcher_only_queues_the_card))) |
     (package(=studio-runtime-server) & kind(lib) & test(/^provider_ports::tests::supervisor_health_(accepts_current_protocol_and_preserves_exact_handles|rejects_incompatible_or_degraded_status)$/)) |
@@ -1016,7 +1210,7 @@ default-filter = '''
     | (package(=studio-runtime-http) & kind(test) & binary(=integration) & test(/^queue_recovery::/))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/^wave7_p01_registry::callback_only_saved_reply_starts_its_account_without_any_pending_input$/))
     | ((package(=studio-runtime-schema) | package(=studio-runtime-services) | package(=studio-runtime-store) | package(=studio-runtime-http)) & kind(lib) & test(platform_neutral))
-    | (package(=studio-runtime-services) & kind(lib) & test(/^system_reads::tests::account_projection_preserves_provider_order_and_empty_labels$/))
+    | (package(=studio-runtime-services) & kind(lib) & (test(/^system_reads::tests::account_projection_preserves_provider_order_and_empty_labels$/) | test(=system_reads::tests::canonical_summary_is_ready_and_shows_chats)))
     | (package(=studio-runtime-process) & kind(lib) & (test(prepared_diagnostic_requests_preserve_valid_and_malformed_ids) | test(failed_stdin_write_does_not_sample_or_emit_timing)))
     | (package(=studio-runtime-process) & kind(lib) & test(/^provider_stdio::tests::shutdown_delivers_frames_written_on_stdin_eof_before_the_kill$/))
     | (package(=studio-runtime-services) & kind(test) & binary(=integration) & (test(/^provider_session_task::shutdown_keeps_the_stdout_tail_beyond_full_lanes_in_order$/) | test(/^provider_session_task::shutdown_tail_reply_resolves_its_request_instead_of_unknown$/)))

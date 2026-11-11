@@ -169,7 +169,7 @@ pub(crate) fn prepare_schema(tx: &Transaction<'_>) -> StoreResult<()> {
         descriptor.install_if_absent(tx)?;
     }
     tx.execute_batch(CASCADE)?;
-    crate::durable_seq::install(tx)
+    crate::bootstrap::install_current_producers(tx)
 }
 
 /// Replace the child rows of one work record with its arrays. Unchanged entries keep
@@ -437,11 +437,11 @@ mod tests {
         )
         .unwrap();
         tx.commit().unwrap();
-        let before: i64 = db.query_row("SELECT max(seq) FROM durable_rows WHERE tbl IN ('runtime_work_results','runtime_work_decisions','runtime_work_releases')", [], |row| row.get(0)).unwrap();
+        let before = crate::durable_seq::high(&db).unwrap();
         let tx = db.unchecked_transaction().unwrap();
         reconcile(&tx, "w", &original).unwrap();
         assert_eq!(stored_result(&tx), raw);
-        let after: i64 = tx.query_row("SELECT max(seq) FROM durable_rows WHERE tbl IN ('runtime_work_results','runtime_work_decisions','runtime_work_releases')", [], |row| row.get(0)).unwrap();
+        let after = crate::durable_seq::high(&tx).unwrap();
         assert_eq!(
             before, after,
             "unchanged entries allocate no durable sequence"
@@ -477,12 +477,19 @@ mod tests {
     }
 
     fn tombstones(db: &Connection, table: &str) -> Vec<String> {
-        db.prepare("SELECT id FROM durable_rows WHERE tbl=?1 AND deleted=1 ORDER BY id")
-            .unwrap()
-            .query_map([table], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap()
+        use crate::change_schema::DurableRows;
+        let source = crate::change_schema::DurableSource::from_stored(table.to_owned());
+        studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(db),
+            DurableRows,
+            scalars(DurableRows::DURABLE_ID),
+            order_by(DurableRows::DURABLE_ID.asc),
+            filter(
+                DurableRows::SOURCE_LABEL.eq(&source),
+                DurableRows::DELETED.eq(&crate::metadata_values::StoredBoolean::from_stored(1))
+            )
+        )
+        .unwrap()
     }
 
     #[test]

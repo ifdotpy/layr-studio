@@ -129,22 +129,41 @@ mod tests {
         let total = ENTITY_TOMBSTONE_LIMIT + excess;
         store
             .transaction(move |transaction| {
-                let mut statement = transaction.prepare(
-                    "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) \
-                     VALUES('agent',?1,?2,'h',NULL,1)",
-                )?;
+                let first_rowid =
+                    studio_runtime_store::test_fixtures::canvas::entities(transaction)?
+                        .into_iter()
+                        .map(|row| row.source_rowid)
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
                 for index in 0..total {
-                    statement.execute(params![format!("gone-{index:05}"), 1_000 + index])?;
+                    studio_runtime_store::test_fixtures::canvas::seed_entity(
+                        transaction,
+                        &studio_runtime_store::clock_schema::SyncEntities {
+                            collection: "agent".into(),
+                            id: format!("gone-{index:05}"),
+                            seq: 1_000 + index,
+                            hash: "h".into(),
+                            payload: None,
+                            deleted: 1,
+                        },
+                        first_rowid + index,
+                    )?;
                 }
-                // Transcript tombstones are older than every entity tombstone
-                // but belong to transcript sync; pruning never counts or
-                // removes them.
-                let mut transcript = transaction.prepare(
-                    "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) \
-                     VALUES('transcript:agent',?1,?2,'h',NULL,1)",
-                )?;
+                // Older transcript tombstones remain outside entity retention.
                 for index in 0..TRANSCRIPT_TOMBSTONES {
-                    transcript.execute(params![format!("item-{index:03}"), 1 + index])?;
+                    studio_runtime_store::test_fixtures::canvas::seed_entity(
+                        transaction,
+                        &studio_runtime_store::clock_schema::SyncEntities {
+                            collection: "transcript:agent".into(),
+                            id: format!("item:item-{index:03}"),
+                            seq: 1 + index,
+                            hash: studio_runtime_store::sha256_hex(b""),
+                            payload: None,
+                            deleted: 1,
+                        },
+                        first_rowid + total + index,
+                    )?;
                 }
                 Ok(())
             })
@@ -160,23 +179,20 @@ mod tests {
 
         let (count, floor, remaining) = store
             .read_async("runtime-services/storage_retention", |connection| {
-                let count: String = connection.query_row(
-                    "SELECT value FROM sync_entity_meta WHERE key='entity_tombstone_count'",
-                    [],
-                    |row| row.get(0),
-                )?;
-                let remaining: i64 = connection.query_row(
-                    "SELECT COUNT(*) FROM sync_entities \
-                 WHERE deleted=1 AND collection NOT LIKE 'transcript:%'",
-                    [],
-                    |row| row.get(0),
-                )?;
-                let transcript: i64 = connection.query_row(
-                    "SELECT COUNT(*) FROM sync_entities \
-                 WHERE deleted=1 AND collection LIKE 'transcript:%'",
-                    [],
-                    |row| row.get(0),
-                )?;
+                let count = studio_runtime_store::clock_schema::SyncEntityMeta::value(
+                    connection,
+                    "entity_tombstone_count",
+                )?
+                .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+                let entities = studio_runtime_store::test_fixtures::canvas::entities(connection)?;
+                let remaining = entities
+                    .iter()
+                    .filter(|row| row.deleted == 1 && !row.collection.starts_with("transcript:"))
+                    .count() as i64;
+                let transcript = entities
+                    .iter()
+                    .filter(|row| row.deleted == 1 && row.collection.starts_with("transcript:"))
+                    .count() as i64;
                 assert_eq!(transcript, TRANSCRIPT_TOMBSTONES);
                 Ok::<_, studio_runtime_store::StoreError>((
                     count,

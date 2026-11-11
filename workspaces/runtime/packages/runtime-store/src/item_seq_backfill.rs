@@ -55,19 +55,60 @@ impl OnlineMigration for ItemSeqBackfill {
         tx: &mut studio_db_api::Tx<'_, crate::peer_update_settings::Canvas>,
         key: &i64,
         _: (),
-    ) -> StoreResult<()> {
-        use crate::clock_schema::queries::{High, NumberItem};
-        let high = tx.read().named(&High::QUERY, &High)?;
-        tx.named(&NumberItem::QUERY, &NumberItem { rowid: *key, high })?;
-        Ok(())
+    ) -> StoreResult<i64> {
+        use crate::clock_schema::queries::{ChangeRowidHigh, High, ItemIdByRowid, NumberItem};
+        use studio_db_api::Table;
+        let Some(id) = tx
+            .read()
+            .named(&ItemIdByRowid::QUERY, &ItemIdByRowid { rowid: *key })?
+        else {
+            return Ok(0);
+        };
+        let table = crate::item_monitor_terminal::ItemsRow::NAME;
+        let identity = studio_db_api::migration::encode_key(&(table.to_owned(), id));
+        if tx
+            .read()
+            .get::<crate::change_schema::DurableRows>(&(identity.clone(),))?
+            .is_some()
+        {
+            return Ok(0);
+        }
+        let high = tx.read().named(
+            &High::QUERY,
+            &High {
+                generation_kind: crate::consolidation_kinds::CanvasMetadataKind::SyncGeneration,
+            },
+        )?;
+        high.checked_add(1)
+            .ok_or(crate::StoreError::RecordContract("item sequence exhausted"))?;
+        let kind = crate::consolidation_kinds::CanvasChangesKind::DurableRows;
+        let source_rowid = tx
+            .read()
+            .named(&ChangeRowidHigh::QUERY, &ChangeRowidHigh { kind })?
+            .checked_add(1)
+            .ok_or(crate::StoreError::RecordContract(
+                "durable source rowid exhausted",
+            ))?;
+        tx.named(
+            &NumberItem::QUERY,
+            &NumberItem {
+                rowid: *key,
+                high,
+                kind,
+                identity: &identity,
+                source_rowid,
+                table,
+            },
+        )?;
+        Ok(0)
     }
 
     fn remove(
         &self,
         _: &mut studio_db_api::Tx<'_, crate::peer_update_settings::Canvas>,
         _: &i64,
-    ) -> StoreResult<()> {
-        Ok(())
+    ) -> StoreResult<i64> {
+        Ok(0)
     }
 }
 
@@ -113,6 +154,43 @@ mod tests {
         assert_eq!(
             ItemSeqBackfill.read_after(&db, None, 1).unwrap(),
             vec![(-1, ())]
+        );
+        // Existing rows can be numbered after the F1 source tables retire.
+        use studio_db_api::Table;
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::change_schema::Changes::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let transaction = db.unchecked_transaction().unwrap();
+        let mut tx = crate::peer_update_settings::canvas_tx(&transaction);
+        tx.partition::<crate::metadata_schema::SyncGeneration>()
+            .put(&crate::metadata_schema::SyncGeneration {
+                identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                source_rowid: 1,
+                integer_key: 1,
+                sync_generation: 0,
+            })
+            .unwrap();
+        ItemSeqBackfill.write(&mut tx, &-1, ()).unwrap();
+        ItemSeqBackfill.write(&mut tx, &20, ()).unwrap();
+        assert_eq!(crate::durable_seq::high(&transaction).unwrap(), 2);
+        ItemSeqBackfill.write(&mut tx, &-1, ()).unwrap();
+        assert_eq!(
+            crate::durable_seq::high(&transaction).unwrap(),
+            2,
+            "numbered rows keep their original number"
+        );
+        assert_eq!(
+            tx.partition::<crate::change_schema::DurableRows>()
+                .list()
+                .unwrap()
+                .len(),
+            2
         );
     }
 
@@ -174,14 +252,14 @@ mod tests {
         let before = crate::online_migration::progress(&tx).expect("before resume");
         let dirty_before = studio_db_api::db_query!(
             crate::peer_update_settings::canvas_read(&tx),
-            crate::settings_schema::OnlineMigrationDirty
+            crate::metadata_schema::OnlineMigrationDirty
         )
         .expect("dirty before resume");
         begin(&tx, &ItemSeqBackfill).expect("resume incomplete migration");
         assert_eq!(crate::online_migration::progress(&tx).unwrap(), before);
         let dirty_after = studio_db_api::db_query!(
             crate::peer_update_settings::canvas_read(&tx),
-            crate::settings_schema::OnlineMigrationDirty
+            crate::metadata_schema::OnlineMigrationDirty
         )
         .expect("dirty after resume");
         assert_eq!(dirty_before.len(), dirty_after.len());
@@ -189,7 +267,8 @@ mod tests {
             assert!(
                 dirty_after
                     .iter()
-                    .any(|after| after.migration == row.migration && after.key == row.key)
+                    .any(|after| after.dirty_migration == row.dirty_migration
+                        && after.dirty_key == row.dirty_key)
             );
         }
         let updated = studio_json::json!({"id":"agent:item","role":"assistant","text":"after"});
@@ -237,12 +316,18 @@ mod tests {
         )
         .expect("old rows");
         let seqs = |db: &Connection| -> Vec<i64> {
-            db.prepare("SELECT seq FROM durable_rows WHERE tbl='runtime_items' ORDER BY seq")
-                .expect("query")
-                .query_map([], |row| row.get(0))
-                .expect("rows")
-                .collect::<Result<_, _>>()
-                .expect("seqs")
+            use crate::change_schema::{DurableRows, DurableSource};
+            studio_db_api::db_query!(
+                crate::peer_update_settings::canvas_read(db),
+                DurableRows,
+                scalars(DurableRows::SEQUENCE),
+                order_by(DurableRows::SEQUENCE.asc),
+                filter(
+                    DurableRows::SOURCE_LABEL
+                        .eq(&DurableSource::from_stored("runtime_items".into()))
+                )
+            )
+            .expect("seqs")
         };
         assert!(seqs(&db).is_empty());
         let tx = db.transaction().expect("transaction");

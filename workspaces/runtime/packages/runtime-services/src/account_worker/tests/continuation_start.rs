@@ -564,17 +564,14 @@ async fn limit_failure_refresh_publishes_account_entity_after_recording_failure_
             record_of(&state, &state.agent).await["usageResume"]["status"],
             "scheduled"
         );
-        let raw: String = state
-            .bridge
-            .store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &state.bridge.store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         #[derive(serde::Deserialize)]
         struct Entity {
             value: View,

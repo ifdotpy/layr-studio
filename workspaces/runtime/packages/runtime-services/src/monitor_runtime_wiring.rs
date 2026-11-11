@@ -2481,7 +2481,7 @@ mod tests {
         let (_root, store, _) = fixture().await;
         insert_active_owner(&store).await;
         store.transaction_with(|tx| {
-            tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
+            studio_runtime_store::test_fixtures::canvas::set_meta(tx, studio_runtime_store::WORK_DETAILS_SEED_MARKER, None)?;
             for status in ["running", "completed", "failed"] {
                 let record = crate::monitor_policy::complete_test_monitor(studio_json::json!({
                     "id":status,"agent":"owner","epoch":0,"status":status,"created":1

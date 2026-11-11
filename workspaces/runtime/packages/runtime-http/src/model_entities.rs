@@ -5,7 +5,9 @@ use studio_json::{Value, json};
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::model_catalog::ModelCatalog;
 use studio_runtime_services::model_catalog::ChangeCallback;
-use studio_runtime_store::{RuntimeStore, StoreError, SyncDocumentsRepository, Transaction};
+use studio_runtime_store::{
+    HttpPublicationQueries, RuntimeStore, StoreError, SyncDocumentsRepository, Transaction,
+};
 use tokio::sync::mpsc;
 #[cfg(test)]
 use tokio::sync::oneshot;
@@ -129,14 +131,7 @@ fn publish_catalog(
         }
     }
 
-    let mut statement = transaction
-        .prepare_cached("SELECT id,payload FROM sync_entities WHERE collection=?1 AND deleted=0")?;
-    let existing = statement
-        .query_map([MODEL_COLLECTION], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
+    let existing = HttpPublicationQueries::live_rows(transaction, MODEL_COLLECTION)?;
     for id in existing.into_iter().filter_map(|(id, payload)| {
         let belongs_to_account = studio_json::from_str::<
             studio_runtime_schema::json_object::JsonObject<StoredModelEnvelope>,
@@ -160,6 +155,18 @@ fn publish_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn canonical_empty_catalog_cleanup_has_no_source_table_dependency() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        assert!(
+            !store
+                .transaction_with(|tx| publish_catalog(tx, "missing", ProviderKind::Codex, None))
+                .await
+                .unwrap()
+        );
+    }
+
     fn typed(value: Value) -> ModelCatalog {
         ModelCatalog::parse(value).expect("valid catalog")
     }
@@ -191,15 +198,25 @@ mod tests {
                 r#"{"value":{"accountKey":"two","accountKey":"one"}}"#,
             ),
         ];
-        store.transaction_with(move |tx| {
-            studio_runtime_store::seed_legacy_reparented_rows(tx, || {
-            for (id, payload) in rows {
-                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('model',?1,1,'fixture',?2,0)", rusqlite::params![id,payload])?;
-            }
-                Ok(())
-            })?;
-            Ok::<_, StoreError>(())
-        }).await.expect("seed");
+        store
+            .transaction_with(move |tx| {
+                studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+                    for (index, (id, payload)) in rows.into_iter().enumerate() {
+                        HttpPublicationQueries::test_seed_entity(
+                            tx,
+                            "model",
+                            id,
+                            index as i64 + 1_000_000,
+                            0,
+                            Some(payload),
+                        )?;
+                    }
+                    Ok(())
+                })?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .expect("seed");
         store
             .transaction_with(|tx| {
                 publish_catalog(
@@ -265,19 +282,7 @@ mod tests {
 
         let rows = store
             .test_read_transaction(|tx| {
-                let mut statement = tx.prepare(
-                    "SELECT id,deleted,payload FROM sync_entities WHERE collection='model' ORDER BY id",
-                )?;
-                let rows = statement
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, bool>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok(rows)
+                Ok(HttpPublicationQueries::test_collection_rows(tx, "model")?)
             })
             .expect("model entities read");
         assert_eq!(rows.len(), 3);
@@ -362,19 +367,7 @@ mod tests {
     fn read_model_rows(store: &RuntimeStore) -> Vec<(String, bool, String)> {
         store
             .test_read_transaction(|tx| {
-                let mut statement = tx.prepare(
-                    "SELECT id,deleted,payload FROM sync_entities WHERE collection='model' ORDER BY id",
-                )?;
-                let rows = statement
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, bool>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok(rows)
+                Ok(HttpPublicationQueries::test_collection_rows(tx, "model")?)
             })
             .expect("model entities read")
     }

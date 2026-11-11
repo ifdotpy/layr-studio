@@ -9,16 +9,34 @@ use studio_runtime_schema::project_record::{ProjectLive, ProjectRecord, ProjectR
 
 use crate::request_results::AdmittedRequest;
 
+use crate::peer_update_settings::{Canvas, canvas_read};
+use crate::publication_schema::Publications;
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult, SyncDocumentsRepository};
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,native,result=String,
+    tables(rows=Publications),indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_DELETED),
+    predicates(entities=rows),columns(id=Publications::ENTITY_ID,collection=Publications::COLLECTION_ORDER,deleted=Publications::DELETED,payload=Publications::ENTITY_PAYLOAD,rowid=Publications::SOURCE_ROWID),
+    sql="SELECT {id} FROM {rows} WHERE {entities} AND {collection}='peerTeam' AND {deleted}=0 AND json_extract({payload},'$.value.projectPath')=?1 ORDER BY {rowid}")]
+struct VisiblePeerTeams<'a> {
+    #[db(column=Publications::ENTITY_PAYLOAD)]
+    project_path: Option<&'a str>,
+}
 
 const PROJECT_TABLE: &[TableRequirement] = &[TableRequirement {
     name: "runtime_projects",
     columns: &["id", "record"],
 }];
 const SIDEBAR_TABLE: &[TableRequirement] = &[TableRequirement {
-    name: "runtime_sidebar_order",
-    columns: &["id", "record"],
+    name: <crate::metadata_schema::Metadata as studio_db_api::Table>::NAME,
+    columns: &[
+        crate::metadata_schema::Metadata::__DB_COLUMN_KIND,
+        crate::metadata_schema::Metadata::__DB_COLUMN_IDENTITY,
+        crate::metadata_schema::Metadata::__DB_COLUMN_SOURCE_ROWID,
+        crate::metadata_schema::Metadata::__DB_COLUMN_TEXT_KEY,
+        crate::metadata_schema::Metadata::__DB_COLUMN_SIDEBAR_RECORD,
+    ],
 }];
 const AGENT_TABLE: &[TableRequirement] = &[TableRequirement {
     name: "runtime_agents",
@@ -61,11 +79,8 @@ impl ProjectsRepository {
         request_id: &str,
         deleted_at: i64,
     ) -> StoreResult<()> {
-        let seq: i64 = tx.query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=1",
-            [id],
-            |row| row.get(0),
-        )?;
+        let seq = super::sync_documents::publication_sequence(tx, "project", id, true)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
         let removal = ProjectRemoval {
             reason: ProjectRemovalReason::Delete,
             sequence: seq,
@@ -408,14 +423,12 @@ impl ProjectsRepository {
         )? > 0;
         if removed {
             SyncDocumentsRepository::put_entity(transaction, "project", id, json!({}), true)?;
-            let mut statement = transaction.prepare_cached(
-                "SELECT id FROM sync_entities WHERE collection='peerTeam' AND deleted=0 \
-                 AND json_extract(payload,'$.value.projectPath')=?1",
+            let ids = canvas_read(transaction).collect(
+                &VisiblePeerTeams::QUERY,
+                &VisiblePeerTeams {
+                    project_path: Some(id),
+                },
             )?;
-            let ids = statement
-                .query_map([id], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
             for team_id in ids {
                 SyncDocumentsRepository::put_entity(
                     transaction,
@@ -538,9 +551,28 @@ impl ProjectsRepository {
         .transpose()
     }
 
+    /// Preserve the stored row's presence separately from the default sidebar order.
+    pub fn sidebar_order_record(connection: &Connection) -> StoreResult<Option<String>> {
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::metadata_schema::SidebarOrder>(&(
+                crate::consolidation_codec::nullable_text_identity(&Some("current".into()), 0),
+            ))
+            .map_err(|error| {
+                if matches!(&error, rusqlite::Error::FromSqlConversionFailure(..)) {
+                    StoreError::InvalidStoredRecord {
+                        object: "runtime_sidebar_order",
+                        id: "current".into(),
+                    }
+                } else {
+                    StoreError::from(error)
+                }
+            })?
+            .map(|row| row.sidebar_record)
+            .map(|raw| raw.raw().to_owned()))
+    }
+
     pub fn sidebar_order(connection: &Connection) -> StoreResult<Value> {
-        crate::settings_schema::SidebarOrder::get(connection)?
-            .map(|row| row.record)
+        Self::sidebar_order_record(connection)?
             .map(|raw| {
                 studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: "runtime_sidebar_order",
@@ -552,19 +584,22 @@ impl ProjectsRepository {
     }
 
     pub fn put_sidebar_order(transaction: &Transaction<'_>, value: &Value) -> StoreResult<()> {
-        crate::peer_update_settings::canvas_tx(transaction).upsert(
-            &crate::settings_schema::SidebarOrder {
-                id: "current".to_owned(),
-                record: studio_json::to_string(value)?,
-            },
-        )?;
-        let workspace_exists = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities \
-             WHERE collection='workspace' AND id='current' AND deleted=0)",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?;
-        if workspace_exists {
+        crate::peer_update_settings::canvas_tx(transaction)
+            .partition::<crate::metadata_schema::SidebarOrder>()
+            .put(&crate::metadata_schema::SidebarOrder {
+                identity: crate::consolidation_codec::nullable_text_identity(
+                    &Some("current".into()),
+                    0,
+                ),
+                source_rowid: 0,
+                text_key: Some("current".into()),
+                sidebar_record: crate::metadata_values::SidebarOrderRecord::from_stored(
+                    studio_json::to_string(value)?,
+                )?,
+            })?;
+        if super::sync_documents::publication_sequence(transaction, "workspace", "current", false)?
+            .is_some()
+        {
             SyncDocumentsRepository::patch_entity(
                 transaction,
                 "workspace",
@@ -585,15 +620,333 @@ inventory::submit! {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn canonical_sidebar_write_does_not_create_an_absent_workspace() {
+        use studio_db_api::Table;
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let transaction = db.transaction().unwrap();
+        ProjectsRepository::put_sidebar_order(&transaction, &json!({"revision":1,"groups":null}))
+            .unwrap();
+        assert_eq!(
+            crate::repositories::sync_documents::publication_sequence(
+                &transaction,
+                "workspace",
+                "current",
+                false
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn canonical_sidebar_write_updates_workspace_and_rolls_back() {
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+        let value = studio_json::json!({"revision":7,"groups":null});
+        let expected = value.clone();
+        store
+            .transaction(move |tx| {
+                ProjectsRepository::put_sidebar_order(tx, &value)?;
+                let raw = crate::repositories::sync_documents::publication_payload(
+                    tx,
+                    "workspace",
+                    "current",
+                    true,
+                )?
+                .unwrap();
+                let workspace: Value = studio_json::from_str(&raw)?;
+                assert_eq!(workspace["value"]["sidebarOrder"], value);
+                Ok(())
+            })
+            .await
+            .expect("actual canonical sidebar caller");
+        let reader = store.test_reader().unwrap();
+        assert_eq!(
+            ProjectsRepository::sidebar_order(&reader).unwrap(),
+            expected
+        );
+        let result: crate::StoreResult<()> = store
+            .transaction(|tx| {
+                ProjectsRepository::put_sidebar_order(
+                    tx,
+                    &studio_json::json!({"revision":8,"groups":[]}),
+                )?;
+                Err(crate::StoreError::SchemaMismatch("test rollback".into()))
+            })
+            .await;
+        assert!(matches!(result, Err(crate::StoreError::SchemaMismatch(_))));
+        assert_eq!(
+            ProjectsRepository::sidebar_order(&reader).unwrap(),
+            expected
+        );
+    }
+    #[test]
+    fn f1_project_hide_reads_canonical_peer_team_scope_and_rolls_back() {
+        use studio_db_api::Table;
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        for descriptor in [
+            crate::publication_schema::Publications::descriptor(),
+            crate::metadata_schema::Metadata::descriptor(),
+            crate::change_schema::Changes::descriptor(),
+            crate::planning_work::ProjectRow::descriptor(),
+        ] {
+            descriptor.install_if_absent(&db).unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        crate::peer_update_settings::canvas_tx(&tx)
+            .upsert(&crate::planning_work::ProjectRow {
+                id: "p".into(),
+                record: crate::json_record_codec::ExactJson::from_stored(
+                    r#"{"recordKind":"live","id":"p","path":"p"}"#.into(),
+                )
+                .unwrap(),
+                removal_reason: None,
+            })
+            .unwrap();
+        tx.commit().unwrap();
+        let tx = db.transaction().unwrap();
+        for (collection, id, value, deleted) in [
+            (
+                "peerTeam",
+                "matching",
+                studio_json::json!({"projectPath":"p"}),
+                false,
+            ),
+            (
+                "peerTeam",
+                "first",
+                studio_json::json!({"projectPath":"p"}),
+                false,
+            ),
+            (
+                "peerTeam",
+                "other",
+                studio_json::json!({"projectPath":"q"}),
+                false,
+            ),
+            ("peerTeam", "missing", studio_json::json!({}), false),
+            (
+                "peerTeam",
+                "null",
+                studio_json::json!({"projectPath":null}),
+                false,
+            ),
+            (
+                "peerTeam",
+                "deleted",
+                studio_json::json!({"projectPath":"p"}),
+                true,
+            ),
+            (
+                "other",
+                "matching",
+                studio_json::json!({"projectPath":"p"}),
+                false,
+            ),
+        ] {
+            crate::SyncDocumentsRepository::put_entity(&tx, collection, id, value, deleted)
+                .unwrap();
+        }
+        let identity =
+            studio_db_api::migration::encode_key(&("peerTeam".to_owned(), "first".to_owned()));
+        let mut first = super::canvas_read(&tx)
+            .get::<crate::publication_schema::SyncEntities>(&(identity,))
+            .unwrap()
+            .unwrap();
+        first.source_rowid = -10;
+        crate::peer_update_settings::canvas_tx(&tx)
+            .partition::<crate::publication_schema::SyncEntities>()
+            .put(&first)
+            .unwrap();
+        let params = super::VisiblePeerTeams {
+            project_path: Some("p"),
+        };
+        let plan = crate::query_plan_test_support::explain(
+            &tx,
+            super::VisiblePeerTeams::QUERY.sql(),
+            &params,
+        )
+        .unwrap();
+        assert!(
+            plan.iter().any(|line| line.contains("SEARCH")
+                && line.contains("publications_entity_collection_deleted")),
+            "{plan:?}"
+        );
+        let mut counts = Vec::new();
+        for history in [0, 2000] {
+            for n in 0..history {
+                crate::SyncDocumentsRepository::put_entity(
+                    &tx,
+                    "history",
+                    &n.to_string(),
+                    (),
+                    false,
+                )
+                .unwrap();
+                crate::SyncDocumentsRepository::put_entity(
+                    &tx,
+                    "peerTeam",
+                    &format!("old-{n}"),
+                    (),
+                    true,
+                )
+                .unwrap();
+            }
+            use std::sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            };
+            let steps = Arc::new(AtomicUsize::new(0));
+            let counter = steps.clone();
+            tx.progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            let ids = super::canvas_read(&tx)
+                .collect(&super::VisiblePeerTeams::QUERY, &params)
+                .unwrap();
+            tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+            counts.push(steps.load(Ordering::Relaxed));
+            assert_eq!(ids, ["first", "matching"]);
+        }
+        eprintln!("peer-team visibility VM steps: {counts:?}");
+        assert!(counts[1] <= counts[0] + 20 && counts[1] < 200, "{counts:?}");
+        assert!(super::ProjectsRepository::remove(&tx, "p").unwrap());
+        assert!(
+            super::super::sync_documents::publication_sequence(&tx, "peerTeam", "matching", true)
+                .unwrap()
+                .is_some()
+        );
+        for id in ["other", "missing", "null"] {
+            assert!(
+                super::super::sync_documents::publication_sequence(&tx, "peerTeam", id, false)
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        assert!(
+            super::super::sync_documents::publication_sequence(&tx, "other", "matching", false)
+                .unwrap()
+                .is_some()
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            super::ProjectsRepository::get(&db, "p")
+                .unwrap()
+                .unwrap()
+                .1
+                .get("sidebarHidden"),
+            None
+        );
+        let tx = db.transaction().unwrap();
+        crate::SyncDocumentsRepository::put_entity_payload(
+            &tx,
+            "peerTeam",
+            "malformed",
+            "not JSON",
+            false,
+        )
+        .unwrap();
+        assert!(super::ProjectsRepository::remove(&tx, "p").is_err());
+        tx.rollback().unwrap();
+        assert_eq!(
+            super::ProjectsRepository::get(&db, "p")
+                .unwrap()
+                .unwrap()
+                .1
+                .get("sidebarHidden"),
+            None
+        );
+    }
     use super::*;
 
     #[test]
-    fn typed_project_write_keeps_omitted_fields_and_explicit_null() {
+    fn sidebar_metadata_preserves_default_legacy_json_and_workspace_presence() {
         let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
-            CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        crate::test_fixtures::canvas::install_canonical(&db).unwrap();
+        assert_eq!(
+            ProjectsRepository::sidebar_order(&db).unwrap(),
+            json!({"revision":0,"groups":null})
+        );
+        let tx = db.transaction().unwrap();
+        for value in [
+            json!(null),
+            json!(42),
+            json!([1, "old"]),
+            json!({"groups":false}),
+        ] {
+            ProjectsRepository::put_sidebar_order(&tx, &value).unwrap();
+            assert_eq!(ProjectsRepository::sidebar_order(&tx).unwrap(), value);
+        }
+        for deleted in [1, -7, 2, 0] {
+            crate::test_fixtures::canvas::seed_entity(
+                &tx,
+                &crate::clock_schema::SyncEntities {
+                    collection: "workspace".into(),
+                    id: "current".into(),
+                    seq: 1,
+                    hash: "hash-only".into(),
+                    payload: None,
+                    deleted,
+                },
+                1,
+            )
+            .unwrap();
+            let result = ProjectsRepository::put_sidebar_order(&tx, &json!({"revision":7}));
+            if deleted == 0 {
+                assert!(matches!(
+                    result,
+                    Err(StoreError::Sqlite(rusqlite::Error::InvalidColumnType(..)))
+                ));
+            } else {
+                result.unwrap();
+            }
+        }
+        SyncDocumentsRepository::put_entity(
+            &tx,
+            "workspace",
+            "current",
+            json!({"unrelated":7}),
+            false,
+        )
+        .unwrap();
+        let order = json!({"revision":9,"groups":null});
+        ProjectsRepository::put_sidebar_order(&tx, &order).unwrap();
+        let published = crate::test_fixtures::canvas::entities(&tx)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.collection == "workspace" && row.id == "current")
+            .unwrap();
+        let envelope: Value = studio_json::from_str(published.payload.as_ref().unwrap()).unwrap();
+        assert_eq!(envelope["value"]["sidebarOrder"], order);
+        assert_eq!(envelope["value"]["unrelated"], 7);
+        ProjectsRepository::put_sidebar_order(&tx, &order).unwrap();
+        assert_eq!(
+            crate::test_fixtures::canvas::entities(&tx)
+                .unwrap()
+                .into_iter()
+                .find(|row| row.collection == "workspace" && row.id == "current")
+                .unwrap()
+                .seq,
+            published.seq
+        );
+    }
+
+    #[test]
+    fn typed_project_write_keeps_omitted_fields_and_explicit_null() {
+        let mut db = crate::fresh_state::test_canvas();
         let tx = db.transaction().unwrap();
         let original: ProjectLive =
             studio_json::from_str(r#"{"id":"p","path":"/p","name":"Old","sidebarHidden":true}"#)
@@ -616,11 +969,7 @@ mod tests {
 
     #[test]
     fn typed_project_write_preserves_missing_null_and_empty() {
-        let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-            CREATE TABLE sync_documents(seq INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
-            CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        let mut db = crate::fresh_state::test_canvas();
         let tx = db.transaction().unwrap();
         let project: ProjectLive = studio_json::from_str(
             r#"{"id":"p","path":"/p","name":null,"peerTeams":[],"locations":null}"#,
@@ -655,12 +1004,7 @@ mod tests {
     fn sidebar_hide_retains_pending_location_owner() {
         use crate::request_results::{Admission, RequestResults};
         use studio_runtime_schema::persistence::RequestIdentity;
-        let mut db = Connection::open_in_memory().expect("database");
-        db.execute_batch("CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-            CREATE TABLE sync_documents(seq INTEGER);
-            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-            CREATE TABLE runtime_orchestration_settings(id TEXT,record TEXT);").expect("schema");
+        let mut db = crate::fresh_state::test_canvas();
         crate::receipt_schema::create(&db).expect("request schema");
         let tx = db.transaction().expect("transaction");
         ProjectsRepository::put_project(&tx, &json!({"id":"p","locations":[]})).expect("project");
@@ -691,15 +1035,95 @@ mod tests {
         assert!(!ProjectsRepository::remove(&tx, "p").expect("second hide"));
     }
 
+    fn canonical_project_entity(db: &Connection, deleted: crate::metadata_values::StoredBoolean) {
+        use crate::peer_update_settings::canvas_tx;
+        use crate::publication_collection::CollectionName;
+        use crate::publication_schema::{EntityValue, SyncEntities};
+        use studio_db_api::migration::encode_key;
+        let collection = CollectionName::from_stored("project".into());
+        let tx = db.unchecked_transaction().unwrap();
+        canvas_tx(&tx)
+            .partition::<SyncEntities>()
+            .put(&SyncEntities {
+                identity: encode_key(&("project".to_owned(), "p".to_owned())),
+                source_rowid: 7,
+                publication_seq: 17,
+                deleted,
+                collection_kind: collection.kind(),
+                collection_agent: collection.agent().cloned(),
+                non_transcript: collection.non_transcript(),
+                collection_order: collection,
+                entity_id: "p".into(),
+                entity_hash: "hash".into(),
+                entity_payload: EntityValue::from_stored("project", "p", deleted, None).unwrap(),
+            })
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn canonical_project_caller_preserves_missing_deleted_and_rollback() {
+        use crate::metadata_values::StoredBoolean;
+        use crate::peer_update_settings::canvas_read;
+        use crate::planning_work::ProjectRow;
+        use studio_db_api::Table;
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        ProjectRow::descriptor().install_if_absent(&db).unwrap();
+        for deleted in [
+            None,
+            Some(StoredBoolean::Valid(false)),
+            Some(StoredBoolean::LegacyInteger(2)),
+        ] {
+            if let Some(deleted) = deleted {
+                canonical_project_entity(&db, deleted);
+            }
+            let tx = db.transaction().unwrap();
+            assert!(matches!(
+                ProjectsRepository::record_destructive_removal(&tx, "p", "request", 1000),
+                Err(StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+            ));
+            tx.rollback().unwrap();
+            assert!(
+                canvas_read(&db)
+                    .get::<ProjectRow>(&("p".to_owned(),))
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        canonical_project_entity(&db, StoredBoolean::Valid(true));
+        let tx = db.transaction().unwrap();
+        ProjectsRepository::record_destructive_removal(&tx, "p", "request", 1000).unwrap();
+        let row = canvas_read(&tx)
+            .get::<ProjectRow>(&("p".to_owned(),))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.record.raw(),
+            r#"{"id":"p","peerTeams":[],"recordKind":"removal","removal":{"deletedAt":1000,"reason":"delete","requestId":"request","sequence":17}}"#
+        );
+        tx.rollback().unwrap();
+        assert!(
+            canvas_read(&db)
+                .get::<ProjectRow>(&("p".to_owned(),))
+                .unwrap()
+                .is_none()
+        );
+    }
+
     #[test]
     fn destructive_fence_survives_sidebar_removal_on_project_owner() {
         let mut db = Connection::open_in_memory().expect("database");
-        db.execute_batch(
-            "CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,deleted INTEGER);
-            INSERT INTO sync_entities VALUES('project','p',17,1);",
-        )
-        .expect("schema");
+        use studio_db_api::Table;
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::planning_work::ProjectRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        canonical_project_entity(&db, crate::metadata_values::StoredBoolean::Valid(true));
         let tx = db.transaction().expect("transaction");
         ProjectsRepository::record_destructive_removal(&tx, "p", "request", 1000).expect("fence");
         assert!(ProjectsRepository::is_destructive_removal(&tx, "p", 17).expect("fence read"));

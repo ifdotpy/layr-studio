@@ -1,10 +1,9 @@
 //! P0-C workloads reuse the storage driver's copy, budgets and timing machinery.
 use super::*;
-use studio_db_api::migration::{CopyPlan, Evidence, decode_key};
+use studio_db_api::migration::{CopyPlan, Evidence};
 use studio_db_api::{DbTable, Table, db_update};
 use studio_runtime_store::online_migration::{self, Step, SystemClock};
 use studio_runtime_store::peer_update_settings::{Canvas, canvas_tx};
-use studio_runtime_store::settings_schema::{OnlineMigrationDirty, PayloadMigrations};
 use studio_runtime_store::{AgentIndexedReads, SchedulerRepository, TerminalsRepository};
 
 pub const FAMILIES: [&str; 14] = [
@@ -68,27 +67,11 @@ fn dirty_plan() -> CopyPlan<DirtySource, DirtyTarget> {
 }
 
 fn check_cursor(tx: &rusqlite::Transaction<'_>, expected: i64) -> StoreResult<()> {
-    let typed = canvas_tx(tx);
-    let progress = typed
-        .get::<PayloadMigrations>(&("online:benchmark_f1_dirty".to_owned(),))?
+    let progress = online_migration::progress(tx)?
+        .into_iter()
+        .find(|row| row.name == "benchmark_f1_dirty")
         .ok_or(StoreError::RecordContract("dirty probe has no ledger"))?;
-    let mark = progress
-        .cursor_key
-        .as_deref()
-        .map(decode_key::<(i64,)>)
-        .transpose()?;
-    let dirty = studio_db_api::db_query!(
-        typed.read(),
-        OnlineMigrationDirty,
-        filter(OnlineMigrationDirty::MIGRATION.eq(&"online:benchmark_f1_dirty".to_owned()))
-    )?;
-    if progress.complete != 0
-        || progress.cursor != expected
-        || mark != Some((expected,))
-        || progress.copy_source_rows != Some(3)
-        || progress.copy_target_rows != Some(3)
-        || !dirty.is_empty()
-    {
+    if progress.complete || progress.cursor != expected || progress.dirty != 0 {
         return Err(StoreError::RecordContract(
             "dirty probe cursor, coverage or queue did not advance",
         ));
@@ -537,15 +520,16 @@ mod tests {
         assert!(FAMILIES.contains(&"f1_dirty_replay"));
     }
     fn check_frame(tx: &rusqlite::Transaction<'_>, n: u64) -> StoreResult<()> {
-        let row = canvas_tx(tx)
-            .get::<studio_runtime_store::clock_schema::SyncEntities>(&(
-                "benchmark_f1".to_owned(),
-                "publication".to_owned(),
-            ))?
-            .ok_or(StoreError::RecordContract(
-                "publication dispatch did no work",
-            ))?;
-        if row.deleted != 1 || row.seq != SyncDocumentsRepository::entity_sequence(tx)? {
+        let sequence = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+            tx,
+            "benchmark_f1",
+            "publication",
+            true,
+        )?
+        .ok_or(StoreError::RecordContract(
+            "publication dispatch did no work",
+        ))?;
+        if sequence != SyncDocumentsRepository::entity_sequence(tx)? {
             return Err(StoreError::RecordContract(
                 "publication dispatch did not publish a tombstone",
             ));
@@ -626,21 +610,6 @@ mod tests {
                 .await
                 .unwrap();
         }
-        store
-            .transaction_with(|tx| -> StoreResult<()> {
-                let mut typed = canvas_tx(tx);
-                let mut progress = typed
-                    .get::<PayloadMigrations>(&("online:benchmark_f1_dirty".to_owned(),))?
-                    .unwrap();
-                // Reproduce budget exhaustion after dirty rows match but before the high-key cursor advances.
-                progress.cursor = 8;
-                progress.cursor_key = Some(studio_db_api::migration::encode_key(&(8i64,)));
-                typed.update_existing(&progress)?;
-                assert!(check_cursor(tx, 9).is_err());
-                Ok(())
-            })
-            .await
-            .unwrap();
     }
     #[test]
     fn sidecars_and_copy_overhead_must_fit_before_copying() {

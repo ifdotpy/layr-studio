@@ -71,7 +71,6 @@ pub async fn install(store: &RuntimeStore) -> StoreResult<()> {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use rusqlite::OptionalExtension;
     use studio_json::Value;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore, StoreError};
 
@@ -123,13 +122,17 @@ pub(crate) mod test_support {
                 {
                     return built_entity(tx, &collection, &id);
                 }
-                Ok(tx
-                    .query_row(
-                        "SELECT deleted,payload FROM sync_entities WHERE collection=?1 AND id=?2",
-                        [collection, id],
-                        |row| Ok((row.get::<_, bool>(0)?, row.get::<_, String>(1)?)),
-                    )
-                    .optional()?)
+                use studio_runtime_store::ProjectionPublicationQueries;
+                Ok(
+                    match ProjectionPublicationQueries::entity_version(tx, &collection, &id)? {
+                        Some((_, deleted)) => Some((
+                            deleted,
+                            ProjectionPublicationQueries::raw_payload(tx, &collection, &id, false)?
+                                .ok_or(rusqlite::Error::QueryReturnedNoRows)?,
+                        )),
+                        None => None,
+                    },
+                )
             })
             .expect("the client entity reads")
             .map(|(deleted, payload)| {

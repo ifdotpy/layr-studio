@@ -16,7 +16,7 @@ pub async fn run(store: Arc<RuntimeStore>, shutdown: tokio::sync::watch::Receive
     let stop = shutdown.clone();
     match online_migration::run(&store, Arc::new(ItemSeqBackfill), move || *stop.borrow()).await {
         Ok(Step::Complete) => {}
-        Ok(Step::Progress) => return,
+        Ok(Step::Progress | Step::Ready) => return,
         Err(error) => {
             eprintln!("transcript sequence backfill failed: {error}");
             return;

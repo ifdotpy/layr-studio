@@ -862,10 +862,13 @@ fn role(record: &Value) -> Result<thread::Role, WorkerError> {
 }
 
 fn federation_enabled(tx: &Transaction<'_>) -> Result<bool, WorkerError> {
-    Ok(record_by_id(tx, "runtime_federation_settings", "global")?
-        .map(|raw| studio_json::from_str::<Value>(&raw).map_err(|_| invalid("federation settings")))
-        .transpose()?
-        .is_some_and(|v| v["enabled"] == true))
+    use studio_runtime_store::federation_messaging::{
+        FederationMessagingRepository, FederationTable,
+    };
+    Ok(
+        FederationMessagingRepository::record(tx, FederationTable::Settings, "global", "")?
+            .is_some_and(|value| value["enabled"] == true),
+    )
 }
 
 /// The tool definitions of one agent, as Python's
@@ -2333,6 +2336,7 @@ mod resource_tests {
         store
             .transaction_with(move |tx| {
                 let failed = |error: WorkerError| StoreError::SchemaMismatch(error.to_string());
+                studio_runtime_store::test_fixtures::canvas::seed_federation_settings(tx, r#"{"enabled":true}"#)?;
                 for mode in ["native"] {
                     for (thread_id, source) in [
                         (Some("thread-old"), None),
@@ -2362,6 +2366,7 @@ mod resource_tests {
                         )
                         .map_err(failed)?;
                         let case = format!("{mode} {thread_id:?} {source:?}");
+                        assert!(snapshot.root.federation_enabled, "{case}: canonical federation settings reach the snapshot");
                         let expected_source = if thread_id.is_some() {
                             thread::CatalogSource::Legacy
                         } else {
@@ -2369,6 +2374,7 @@ mod resource_tests {
                         };
                         assert_eq!(snapshot.catalog.source, expected_source, "{case}");
                         let tools = thread::tool_definitions(&snapshot).expect("tools");
+                        assert!(tools.iter().any(|tool| tool.name == "orchestration_peers" && tool.description.contains("Includes user-approved remote peers")), "{case}: remote peer guidance reaches provider tools");
                         assert!(
                             tools.iter().any(|tool| tool.name == crate::sign_in::TOOL),
                             "{case}: Claude must receive the sign-in tool"

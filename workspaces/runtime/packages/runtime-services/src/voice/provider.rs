@@ -2609,7 +2609,7 @@ mod tests {
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.epoch',3,'$.deletedAt',1) WHERE id='agent'", [])?;
             stage_delete_sessions(tx, "agent")?;
             tx.execute("DELETE FROM voice_sessions WHERE agent='agent'", [])?;
-            tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',?1) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.expired_before_ms',?2)",rusqlite::params![json!({"expired_before_ms":i64::MAX}).to_string(),i64::MAX])?;
+            studio_runtime_store::receipt_migration_contract::seed_expired_before_ms(tx, i64::MAX).expect("expiry floor seed");
             Ok(())
         }).await.expect("delete and expire");
         let captured = ProviderCallIntent {

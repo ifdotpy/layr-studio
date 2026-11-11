@@ -67,11 +67,15 @@ pub mod clock_schema;
 mod consolidation_codec;
 pub mod consolidation_kinds;
 pub mod context_settings;
+mod event_publication_triggers;
 pub mod json_record_codec;
 mod metadata_schema;
 pub mod metadata_values;
+mod migration_progress;
 pub mod peer_update_settings;
 pub mod planning_work;
+#[cfg(test)]
+mod query_plan_test_support;
 pub mod queue_payloads;
 pub mod queue_schema;
 mod schema;
@@ -82,9 +86,19 @@ pub mod sqlite_durability;
 mod storage_catalog;
 pub mod voice_storage;
 pub use sqlite_durability::WAL_FLUSH_INTERVAL;
+mod entity_scope_queries;
 pub mod state_owner;
 pub mod stored_text;
 pub mod stored_text_compaction;
+pub use entity_scope_queries::EntityScopeQueries;
+mod diagnostic_publication_queries;
+pub use diagnostic_publication_queries::DiagnosticPublicationQueries;
+mod projection_publication_queries;
+pub use projection_publication_queries::ProjectionPublicationQueries;
+mod http_publication_queries;
+pub use http_publication_queries::HttpPublicationQueries;
+mod sync_policy_queries;
+pub use sync_policy_queries::SyncPolicyQueries;
 pub mod stored_text_dictionary;
 pub mod supervisor_journal;
 pub mod supervisor_schema;
@@ -335,11 +349,9 @@ pub enum ResourceChange {
 }
 
 // Entity projection tables whose rows are delivered by entity-backed sync refs.
-const ENTITY_RESOURCE_TABLES: [&str; 4] = [
-    "sync_entities",
-    "sync_entity_meta",
-    "durable_rows",
-    "durable_floor",
+const ENTITY_RESOURCE_TABLES: [&str; 2] = [
+    <publication_schema::Publications as studio_db_api::Table>::NAME,
+    <change_schema::Changes as studio_db_api::Table>::NAME,
 ];
 
 type ResourceChangeObserver = Arc<dyn Fn(ResourceChange) + Send + Sync>;
@@ -349,12 +361,22 @@ type TableChangeObserverRegistry = Mutex<HashMap<ObservedTable, Vec<TableChangeO
 /// Rowids written by the current writer transaction, grouped by observed table bit.
 #[derive(Default)]
 struct ChangedRowHints {
+    /// Rows changed by typed entity clock and marker statements, in rows.
+    entity_metadata_updates: u64,
     /// Tables whose rowids are recorded for the whole transaction.
     complete: u32,
+    explicit_table_changes: u32,
     rows: [Vec<i64>; u32::BITS as usize],
     outbox_kinds: Vec<studio_runtime_schema::persistence::OutboxKind>,
     agent_components: Vec<agent_columns::typed::AgentComponentChange>,
     agent_components_recorded: bool,
+}
+
+/// Count only successful statements owned by entity bookkeeping writers.
+pub(crate) fn record_entity_metadata_updates(rows: u64) {
+    CHANGED_ROWS.with_borrow_mut(|changes| {
+        changes.entity_metadata_updates = changes.entity_metadata_updates.saturating_add(rows);
+    });
 }
 
 thread_local! {
@@ -376,6 +398,24 @@ impl ChangedRowHints {
             rows.clear();
         }
     }
+}
+
+/// Settings adapters record logical changes after successful writes. Physical Metadata
+/// clock/marker writes do not identify either settings observer.
+pub(crate) fn record_settings_change(kind: consolidation_kinds::CanvasMetadataKind) {
+    use consolidation_kinds::CanvasMetadataKind;
+    let observed = if kind == CanvasMetadataKind::FederationSettings {
+        ObservedTable::FederationSettings
+    } else if kind == CanvasMetadataKind::OrchestrationSettings {
+        ObservedTable::OrchestrationSettings
+    } else {
+        return;
+    };
+    CHANGED_ROWS.with_borrow_mut(|rows| {
+        let bit = observed.change_bit();
+        rows.explicit_table_changes |= bit;
+        rows.complete &= !bit;
+    });
 }
 
 /// Record OLD/NEW owners captured by the typed agent writer in this transaction.
@@ -466,6 +506,14 @@ impl ObservedTable {
             Self::AnalyticsProjection => "runtime_analytics_projection",
             Self::AccountState => "runtime_account_state",
             Self::Projects => "runtime_projects",
+        }
+    }
+
+    const fn physical_name(self) -> &'static str {
+        if matches!(self, Self::FederationSettings | Self::OrchestrationSettings) {
+            <metadata_schema::Metadata as studio_db_api::Table>::NAME
+        } else {
+            self.name()
         }
     }
 
@@ -751,7 +799,11 @@ fn transaction_resource_change(
     total_changes: Option<u64>,
     receipt_updates: u64,
     entity_updates: u64,
+    entity_metadata_updates: u64,
 ) -> Option<ResourceChange> {
+    let Some(entity_updates) = entity_updates.checked_add(entity_metadata_updates) else {
+        return Some(ResourceChange::All);
+    };
     let Some(total_changes) = total_changes else {
         return Some(ResourceChange::All);
     };
@@ -772,14 +824,14 @@ mod resource_change_classifier_tests {
 
     #[test]
     fn only_exact_receipt_and_entity_counts_narrow_the_refresh() {
-        assert_eq!(transaction_resource_change(Some(0), 0, 0), None);
-        assert_eq!(transaction_resource_change(Some(3), 3, 0), None);
+        assert_eq!(transaction_resource_change(Some(0), 0, 0, 0), None);
+        assert_eq!(transaction_resource_change(Some(3), 3, 0, 0), None);
         assert_eq!(
-            transaction_resource_change(Some(3), 0, 3),
+            transaction_resource_change(Some(3), 0, 3, 0),
             Some(ResourceChange::Entities)
         );
         assert_eq!(
-            transaction_resource_change(Some(3), 1, 2),
+            transaction_resource_change(Some(3), 1, 2, 0),
             Some(ResourceChange::Entities)
         );
         for (total, receipts, entities) in [
@@ -791,10 +843,30 @@ mod resource_change_classifier_tests {
             (Some(u64::MAX), u64::MAX, 1),
         ] {
             assert_eq!(
-                transaction_resource_change(total, receipts, entities),
+                transaction_resource_change(total, receipts, entities, 0),
                 Some(ResourceChange::All)
             );
         }
+    }
+
+    #[test]
+    fn typed_entity_metadata_counts_preserve_mixed_and_unknown_writes() {
+        assert_eq!(
+            transaction_resource_change(Some(4), 0, 2, 2),
+            Some(ResourceChange::Entities)
+        );
+        assert_eq!(
+            transaction_resource_change(Some(5), 0, 2, 2),
+            Some(ResourceChange::All)
+        );
+        assert_eq!(
+            transaction_resource_change(None, 0, 2, 2),
+            Some(ResourceChange::All)
+        );
+        assert_eq!(
+            transaction_resource_change(Some(u64::MAX), 0, u64::MAX, 1),
+            Some(ResourceChange::All)
+        );
     }
 }
 
@@ -855,10 +927,29 @@ fn install_table_change_hooks(
 }
 
 fn verify_observed_tables_are_rowid(connection: &Connection) -> StoreResult<()> {
+    use studio_db_api::Table;
+    let legacy = peer_update_settings::canvas_read(connection)
+        .table_exists::<settings_schema::PayloadMigrations>()?;
+    let resources: &[&str] = if legacy {
+        &[
+            clock_schema::SyncEntities::NAME,
+            clock_schema::SyncEntityMeta::NAME,
+            clock_schema::DurableRows::NAME,
+            clock_schema::DurableFloor::NAME,
+        ]
+    } else {
+        &ENTITY_RESOURCE_TABLES
+    };
     for table in OBSERVED_TABLES
         .iter()
-        .map(|table| table.name())
-        .chain(ENTITY_RESOURCE_TABLES)
+        .map(|table| {
+            if legacy {
+                table.name()
+            } else {
+                table.physical_name()
+            }
+        })
+        .chain(resources.iter().copied())
     {
         let without_rowid = connection.query_row(
             "SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?1",
@@ -2236,12 +2327,15 @@ impl RuntimeStore {
                         let changed = final_changes != initial_changes;
                         let total_changes = final_changes.checked_sub(initial_changes);
                         let receipt_updates = resource_receipt_update_count.load(Ordering::Acquire);
+                        let transaction_rows = CHANGED_ROWS.with_borrow_mut(std::mem::take);
                         let resource_change = transaction_resource_change(
                             total_changes,
                             receipt_updates,
                             resource_entity_update_count.load(Ordering::Acquire),
+                            transaction_rows.entity_metadata_updates,
                         );
-                        let transaction_rows = CHANGED_ROWS.with_borrow_mut(std::mem::take);
+                        table_change_flags
+                            .fetch_or(transaction_rows.explicit_table_changes, Ordering::Release);
                         if transaction_rows.agent_components_recorded {
                             table_change_flags
                                 .fetch_or(ObservedTable::Agents.change_bit(), Ordering::Release);
@@ -3858,6 +3952,75 @@ mod commit_notification_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[tokio::test]
+    async fn canonical_metadata_settings_notifications_ignore_clock_writes_and_rollback() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        let federation = Arc::new(AtomicUsize::new(0));
+        let orchestration = Arc::new(AtomicUsize::new(0));
+        for (table, count) in [
+            (ObservedTable::FederationSettings, federation.clone()),
+            (ObservedTable::OrchestrationSettings, orchestration.clone()),
+        ] {
+            store.add_table_change_observer(table, move || {
+                count.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        store
+            .transaction(|tx| {
+                let before = durable_seq::high(tx)?;
+                durable_seq::mark(tx, "runtime_agents", "notification-fixture")?;
+                assert_eq!(durable_seq::high(tx)?, before + 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                federation.load(Ordering::SeqCst),
+                orchestration.load(Ordering::SeqCst)
+            ),
+            (0, 0)
+        );
+        store
+            .transaction(|tx| FederationRepository::set_enabled(tx, true))
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                federation.load(Ordering::SeqCst),
+                orchestration.load(Ordering::SeqCst)
+            ),
+            (1, 0)
+        );
+        store
+            .transaction(|tx| OrchestrationSettingsRepository::set_child_result_coalesce(tx, 1))
+            .await
+            .unwrap();
+        assert_eq!(
+            (
+                federation.load(Ordering::SeqCst),
+                orchestration.load(Ordering::SeqCst)
+            ),
+            (1, 1)
+        );
+        let rollback = store
+            .transaction(|tx| {
+                FederationRepository::set_enabled(tx, false)?;
+                OrchestrationSettingsRepository::set_child_result_coalesce(tx, 2)?;
+                Err::<(), StoreError>(StoreError::RecordContract("notification rollback witness"))
+            })
+            .await;
+        assert!(rollback.is_err());
+        assert_eq!(
+            (
+                federation.load(Ordering::SeqCst),
+                orchestration.load(Ordering::SeqCst)
+            ),
+            (1, 1)
+        );
+    }
+
+    #[tokio::test]
     async fn transaction_entry_futures_do_not_store_operation_capture() {
         const SMALL_CAPTURE_BYTES: usize = 8;
         const LARGE_CAPTURE_BYTES: usize = 65_536;
@@ -3926,8 +4089,9 @@ mod commit_notification_tests {
         let database = Connection::open_in_memory().expect("in-memory database");
         for table in OBSERVED_TABLES
             .iter()
-            .map(|table| table.name())
+            .map(|table| table.physical_name())
             .chain(ENTITY_RESOURCE_TABLES)
+            .collect::<std::collections::BTreeSet<_>>()
         {
             database
                 .execute_batch(&format!("CREATE TABLE {}(id TEXT PRIMARY KEY);", table))
@@ -3936,11 +4100,11 @@ mod commit_notification_tests {
         verify_observed_tables_are_rowid(&database).expect("all observed tables use rowid storage");
 
         for table in [
-            ObservedTable::AccessClients.name(),
-            ObservedTable::EventMeta.name(),
-            ObservedTable::RequestResults.name(),
-            ObservedTable::RuntimeOutbox.name(),
-            ObservedTable::ErrorIncidents.name(),
+            ObservedTable::AccessClients.physical_name(),
+            ObservedTable::EventMeta.physical_name(),
+            ObservedTable::RequestResults.physical_name(),
+            ObservedTable::RuntimeOutbox.physical_name(),
+            ObservedTable::ErrorIncidents.physical_name(),
             ENTITY_RESOURCE_TABLES[0],
             ENTITY_RESOURCE_TABLES[1],
         ] {
@@ -4200,7 +4364,7 @@ mod commit_notification_tests {
             .expect("tombstone and metadata update");
         store
             .transaction(|tx| {
-                tx.execute("DELETE FROM sync_entities", [])?;
+                ProjectionPublicationQueries::delete_entity(tx, "agent", "agent")?;
                 Ok(())
             })
             .await
@@ -4607,6 +4771,21 @@ mod commit_notification_tests {
         drop(store);
         let db = rusqlite::Connection::open(directory.path().join("canvas.sqlite3")).unwrap();
         for (table, columns) in expected {
+            if table == "runtime_payload_migrations" {
+                use studio_db_api::Table;
+                assert!(
+                    !crate::peer_update_settings::canvas_read(&db)
+                        .table_exists::<crate::settings_schema::PayloadMigrations>()
+                        .unwrap()
+                );
+                assert_eq!(
+                    crate::metadata_schema::Metadata::state_check(&db)
+                        .unwrap()
+                        .rejected_count,
+                    0
+                );
+                continue;
+            }
             let mut stmt = db
                 .prepare("SELECT name,type,[notnull],pk,hidden FROM pragma_table_xinfo(?1)")
                 .unwrap();
@@ -4679,7 +4858,22 @@ mod commit_notification_tests {
         let directory = tempfile::tempdir().unwrap();
         drop(RuntimeStore::open(Some(directory.path())).await.unwrap());
         let db = rusqlite::Connection::open(directory.path().join("canvas.sqlite3")).unwrap();
-        db.execute_batch("DROP TABLE runtime_payload_migrations; INSERT INTO messages(id,room,author,text,at,deliveries) VALUES('old','room','author','kept',1,'{}')").unwrap();
+        {
+            let tx = db.unchecked_transaction().unwrap();
+            let rows = studio_db_api::db_query!(
+                crate::peer_update_settings::canvas_read(&tx),
+                crate::metadata_schema::PayloadMigrations
+            )
+            .unwrap();
+            for row in rows {
+                crate::peer_update_settings::canvas_tx(&tx)
+                    .partition::<crate::metadata_schema::PayloadMigrations>()
+                    .delete(&(row.identity,))
+                    .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        db.execute_batch("INSERT INTO messages(id,room,author,text,at,deliveries) VALUES('old','room','author','kept',1,'{}')").unwrap();
         drop(db);
         assert!(matches!(
             RuntimeStore::open(Some(directory.path())).await,
@@ -4701,12 +4895,29 @@ mod commit_notification_tests {
         drop(store);
         let path = directory.path().join("canvas.sqlite3");
         let db = rusqlite::Connection::open(&path).unwrap();
-        let name: String = db.query_row("SELECT name FROM runtime_payload_migrations WHERE name LIKE '%receipts-tools-finish:%'", [], |r| r.get(0)).unwrap();
-        db.execute(
-            "UPDATE runtime_payload_migrations SET status='pending', complete=0 WHERE name=?1",
-            [&name],
+        let mut marker = studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(&db),
+            crate::metadata_schema::PayloadMigrations
         )
+        .unwrap()
+        .into_iter()
+        .find(|row| {
+            row.text_key
+                .as_deref()
+                .is_some_and(|name| name.contains("receipts-tools-finish:"))
+        })
         .unwrap();
+        let name = marker.text_key.clone().unwrap();
+        marker.migration_complete = crate::metadata_values::StoredBoolean::from_stored(0);
+        marker.migration_status = studio_json::from_str("\"pending\"").unwrap();
+        {
+            let tx = db.unchecked_transaction().unwrap();
+            crate::peer_update_settings::canvas_tx(&tx)
+                .partition::<crate::metadata_schema::PayloadMigrations>()
+                .put(&marker)
+                .unwrap();
+            tx.commit().unwrap();
+        }
         db.execute("INSERT INTO messages(id,room,author,text,at,deliveries) VALUES('witness','room','author','kept',1,'{}')", []).unwrap();
         drop(db);
         let analytics_path = directory.path().join("analytics.sqlite3");
@@ -4725,13 +4936,11 @@ mod commit_notification_tests {
         assert!(matches!(error, StoreError::SchemaMismatch(_)));
         assert!(error.to_string().contains("state too old:"));
         let db = rusqlite::Connection::open(&path).unwrap();
-        let status: String = db
-            .query_row(
-                "SELECT status FROM runtime_payload_migrations WHERE name=?1",
-                [&name],
-                |r| r.get(0),
-            )
-            .unwrap();
+        let status =
+            crate::migration_progress::load(&crate::peer_update_settings::canvas_read(&db), &name)
+                .unwrap()
+                .unwrap()
+                .status;
         let value: String = db
             .query_row("SELECT text FROM messages WHERE id='witness'", [], |r| {
                 r.get(0)

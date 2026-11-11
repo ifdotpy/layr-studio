@@ -4641,7 +4641,7 @@ mod tests {
                 "compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"reconnect-over-limit",
                 "rootId":"reconnect-over-limit","epoch":0,"status":"idle","threadId":"thread","accountKey":"default"
             }))?)?;
-            tx.execute("DELETE FROM sync_entity_meta WHERE key='transcript_copies'", [])?;
+            studio_runtime_store::test_fixtures::canvas::set_meta(tx, "transcript_copies", None)?;
             let revision = studio_runtime_store::TranscriptRepository::revision(tx, "reconnect-over-limit")?;
             let page = |prefix: &str, count: usize| json!({"items":(0..count).map(|index| json!({
                 "id":format!("{prefix}:{index}"),"role":"assistant","text":"message"
@@ -4650,7 +4650,7 @@ mod tests {
                 "transcript:reconnect-over-limit", 0, &page("removed", 500), false, Some(revision)).expect("initial retained page");
             let replacement = studio_runtime_store::TranscriptRepository::pull_payload(tx,
                 "transcript:reconnect-over-limit", 0, &page("current", 120), false, Some(revision)).expect("replacement retained page");
-            tx.execute("UPDATE sync_entities SET payload=?1 WHERE collection='transcript:reconnect-over-limit' AND id='@revision'", [page("current",120).to_string()])?;
+            studio_runtime_store::TranscriptRepository::cache_revision_payload(tx, "transcript:reconnect-over-limit", &page("current",120).to_string()).expect("cache current retained page");
             Ok((baseline["checkpoint"]["seq"].as_i64().expect("baseline"), replacement["checkpoint"]["seq"].as_i64().expect("replacement")))
         }).await.expect("retained removals and changed items");
         let delta = studio_runtime_services::transcript::pull_scope(
@@ -5607,7 +5607,7 @@ mod tests {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
-            tx.execute("INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('transcript_copies','retired')", [])?;
+            studio_runtime_store::test_fixtures::canvas::set_meta(tx, "transcript_copies", Some("retired"))?;
             studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"open","rootId":"open","epoch":0,"status":"idle"}))?)?;
             tx.execute("INSERT INTO runtime_items(id,agent,record,created) VALUES('answer','open',?1,1)",
                 [json!({"id":"answer","role":"assistant","text":"before"}).to_string()])?;
@@ -5661,12 +5661,12 @@ mod tests {
         let copies = store
             .read_async(
                 "transcript-copy-count",
-                |tx| -> Result<i64, studio_runtime_store::StoreError> {
-                    Ok(tx.query_row(
-                        "SELECT COUNT(*) FROM sync_entities WHERE collection LIKE 'transcript:%'",
-                        [],
-                        |row| row.get(0),
-                    )?)
+                |tx| -> Result<usize, studio_runtime_store::StoreError> {
+                    Ok(
+                        studio_runtime_store::TranscriptRepository::test_publication_snapshot(tx)
+                            .expect("transcript publication snapshot")
+                            .len(),
+                    )
                 },
             )
             .await
@@ -6293,14 +6293,15 @@ mod tests {
                     SyncDocumentsRepository::put_entity(tx, "project", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
                 }
                 if scenario == "pruned" {
-                    tx.execute("INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('entity_tombstone_floor','1')", [])?;
+                    studio_runtime_store::test_fixtures::canvas::set_meta(tx, "entity_tombstone_floor", Some("1"))?;
                 }
                 if scenario == "payload" || scenario == "envelope" {
                     // Model corrupt imported evidence; reinstall guards before the reader runs.
-                    tx.execute("UPDATE sync_generation SET value=value+1 WHERE id=1", [])?;
                     let payload=if scenario=="payload" {"broken"} else {"{}"};
                     studio_runtime_store::seed_legacy_reparented_rows(tx, || {
-                    tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) SELECT 'workspace','corrupt-import',value,'corrupt-fixture',?1,0 FROM sync_generation WHERE id=1", [payload])?;
+                        SyncDocumentsRepository::put_entity(tx, "workspace", "corrupt-import", json!({}), false)?;
+                        let seq = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(tx, "workspace", "corrupt-import", false)?.expect("corrupt fixture sequence");
+                        studio_runtime_store::HttpPublicationQueries::test_seed_entity(tx, "workspace", "corrupt-import", seq, 0, Some(payload))?;
                         Ok(())
                     })?;
                 }
@@ -7125,10 +7126,13 @@ mod tests {
         let snapshot = &event["resourceVersions"][0]["discoverySnapshot"];
         assert_eq!(snapshot["protocol"], 1);
         assert!(snapshot["identity"]["serverId"].as_str().is_some());
-        store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_access_settings(id,auto_pair) VALUES(1,0) ON CONFLICT(id) DO UPDATE SET auto_pair=0", [])?;
-            Ok(())
-        }).await.expect("settings change");
+        store
+            .transaction(|tx| {
+                studio_runtime_store::test_fixtures::canvas::seed_access_settings(tx, 0)?;
+                Ok(())
+            })
+            .await
+            .expect("settings change");
         http.resource_notifications.publish_once(&studio_json::from_str(r#"{"requestId":"discovery-settings-change","resources":[{"kind":"multi-server"}]}"#).expect("notification fixture")).expect("committed discovery hint");
         let (frame, _) = next_frame(state).await.expect("discovery update");
         let event = event_document(frame).await;

@@ -1,15 +1,175 @@
 //! Persisted transcript rows, full text, and the current search projection.
 
 use crate::CachedSql;
+use crate::consolidation_kinds::CanvasPublicationsKind;
+use crate::peer_update_settings::{Canvas, canvas_read, canvas_tx};
+use crate::publication_schema::{Publications, SyncEntities};
 use crate::records::{RecordOrder, RecordPredicate, Table, TranscriptItemId, TranscriptItemRecord};
 use crate::repositories::sync_documents::SyncDocumentsRepository;
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
 use crate::stored_text::{StoredText, StoredTextValue};
 use crate::text_blobs;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use studio_db_api::{DbProjection, DbQuery};
 use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::TRANSCRIPT_MAX_TOMBSTONES;
 use thiserror::Error;
+
+// Hash-only transcript rows deliberately avoid the optional payload decoder.
+#[derive(DbProjection)]
+#[db(of=Publications)]
+struct TranscriptHashRow {
+    entity_id: Option<String>,
+    publication_seq: i64,
+    entity_hash: Option<String>,
+    deleted: i64,
+}
+
+#[derive(DbProjection)]
+#[db(of=Publications)]
+struct TranscriptChangeRow {
+    entity_id: Option<String>,
+    publication_seq: i64,
+    deleted: i64,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=TranscriptHashRow,projection=TranscriptHashRow,
+    tables(rows=Publications),indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_SEQUENCE),
+    columns(id=Publications::ENTITY_ID,seq=Publications::PUBLICATION_SEQ,hash=Publications::ENTITY_HASH,
+        deleted=Publications::DELETED,kind=Publications::KIND,label=Publications::COLLECTION_ORDER,rowid=Publications::SOURCE_ROWID),
+    sql="SELECT {id},{seq},{hash},{deleted} FROM {rows} WHERE {kind}=?1 AND {label}=?2 ORDER BY {rowid}")]
+struct TranscriptCurrent<'a> {
+    #[db(column=Publications::KIND)]
+    kind: CanvasPublicationsKind,
+    #[db(column=Publications::COLLECTION_ORDER)]
+    scope: Option<&'a str>,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=TranscriptChangeRow,projection=TranscriptChangeRow,
+    tables(rows=Publications),indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_DELETED),
+    predicates(entities=rows),
+    columns(id=Publications::ENTITY_ID,seq=Publications::PUBLICATION_SEQ,deleted=Publications::DELETED,
+        label=Publications::COLLECTION_ORDER,rowid=Publications::SOURCE_ROWID),
+    sql="SELECT {id},{seq},{deleted} FROM {rows} WHERE {entities} AND {label}=?1 AND {deleted}=1
+        AND {id} LIKE 'item:%' ORDER BY {seq} DESC,{rowid} LIMIT -1 OFFSET ?2")]
+struct TranscriptPruned<'a> {
+    #[db(column=Publications::COLLECTION_ORDER)]
+    scope: Option<&'a str>,
+    #[db(column=Publications::PUBLICATION_SEQ)]
+    retained: i64,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,result=i64,decode=Publications::PUBLICATION_SEQ,
+    tables(rows=Publications),indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_SEQUENCE),columns(seq=Publications::PUBLICATION_SEQ,kind=Publications::KIND,label=Publications::COLLECTION_ORDER),
+    sql="SELECT COALESCE(MAX({seq}),0) AS {seq} FROM {rows} WHERE {kind}=?1 AND {label}=?2")]
+struct TranscriptHigh<'a> {
+    #[db(column=Publications::KIND)]
+    kind: CanvasPublicationsKind,
+    #[db(column=Publications::COLLECTION_ORDER)]
+    scope: Option<&'a str>,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=TranscriptChangeRow,projection=TranscriptChangeRow,
+    tables(rows=Publications),
+    columns(id=Publications::ENTITY_ID,seq=Publications::PUBLICATION_SEQ,deleted=Publications::DELETED,
+        kind=Publications::KIND,label=Publications::COLLECTION_ORDER,rowid=Publications::SOURCE_ROWID),
+    sql="SELECT {id},{seq},{deleted} FROM {rows} WHERE {kind}=?1 AND {label}=?2 AND {seq}>?3 AND {id}!='@floor' ORDER BY {seq},{rowid}")]
+struct TranscriptDelta<'a> {
+    #[db(column=Publications::KIND)]
+    kind: CanvasPublicationsKind,
+    #[db(column=Publications::COLLECTION_ORDER)]
+    scope: Option<&'a str>,
+    #[db(column=Publications::PUBLICATION_SEQ)]
+    after: i64,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(rows=Publications),
+    columns(kind=Publications::KIND,label=Publications::COLLECTION_ORDER,id=Publications::ENTITY_ID,payload=Publications::ENTITY_PAYLOAD),
+    sql="UPDATE {rows} SET {payload}=?3 WHERE {kind}=?1 AND {label}=?2 AND {id}='@revision'")]
+struct CacheRevisionPayload<'a> {
+    #[db(column=Publications::KIND)]
+    kind: CanvasPublicationsKind,
+    #[db(column=Publications::COLLECTION_ORDER)]
+    scope: Option<&'a str>,
+    #[db(column=Publications::ENTITY_PAYLOAD)]
+    payload: Option<&'a str>,
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=String,decode=crate::agent_tables::AgentsStorageRow::ID,
+    tables(changes=crate::change_schema::Changes,agents=crate::agent_tables::AgentsStorageRow,items=crate::item_monitor_terminal::ItemsRow),
+    indexes(changes=crate::change_schema::Changes::INDEX_CHANGES_DURABLE_IDENTITY),predicates(durable=changes),
+    columns(agent_id=crate::agent_tables::AgentsStorageRow::ID,deleted=crate::agent_tables::AgentsStorageRow::DELETED_AT,
+        item_agent=crate::item_monitor_terminal::ItemsRow::AGENT,
+        label=crate::change_schema::Changes::SOURCE_LABEL,id=crate::change_schema::Changes::DURABLE_ID,
+        seq=crate::change_schema::Changes::SEQUENCE,rowid=crate::change_schema::Changes::SOURCE_ROWID),
+    sql="SELECT a.{agent_id} FROM (SELECT {id},{seq},{rowid} FROM {changes} WHERE {durable} AND {label}=?1) d
+        JOIN {agents} a ON d.{id}=a.{agent_id} WHERE a.{deleted} IS NULL
+        AND EXISTS(SELECT 1 FROM {items} i WHERE i.{item_agent}=a.{agent_id})
+        ORDER BY d.{seq} DESC,d.{rowid} DESC LIMIT ?2")]
+struct RecentChatIds<'a> {
+    #[db(column=crate::change_schema::Changes::SOURCE_LABEL)]
+    label: Option<&'a str>,
+    #[db(column=crate::change_schema::Changes::SOURCE_ROWID)]
+    limit: i64,
+}
+
+fn transcript_current(
+    connection: &Connection,
+    scope: &str,
+) -> rusqlite::Result<std::collections::BTreeMap<String, (i64, String, bool)>> {
+    canvas_read(connection)
+        .collect(
+            &TranscriptCurrent::QUERY,
+            &TranscriptCurrent {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some(scope),
+            },
+        )?
+        .into_iter()
+        .map(|row| {
+            Ok((
+                row.entity_id.ok_or(rusqlite::Error::InvalidQuery)?,
+                (
+                    row.publication_seq,
+                    row.entity_hash.ok_or(rusqlite::Error::InvalidQuery)?,
+                    row.deleted != 0,
+                ),
+            ))
+        })
+        .collect()
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[derive(DbProjection)]
+#[db(of=Publications)]
+struct TranscriptTestRow {
+    collection_order: Option<String>,
+    entity_id: Option<String>,
+    publication_seq: i64,
+    entity_hash: Option<String>,
+    entity_payload: Option<String>,
+    deleted: i64,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,
+    result=TranscriptTestRow,projection=TranscriptTestRow,tables(rows=Publications),
+    columns(label=Publications::COLLECTION_ORDER,id=Publications::ENTITY_ID,
+        seq=Publications::PUBLICATION_SEQ,hash=Publications::ENTITY_HASH,
+        payload=Publications::ENTITY_PAYLOAD,deleted=Publications::DELETED,kind=Publications::KIND),
+    sql="SELECT {label},{id},{seq},{hash},{payload},{deleted} FROM {rows}
+        WHERE {kind}=?1 AND {label} LIKE 'transcript:%' ORDER BY {label},{id}")]
+struct TranscriptTestSnapshot {
+    #[db(column=Publications::KIND)]
+    kind: CanvasPublicationsKind,
+}
 
 const BOOTSTRAP_TABLES: &[TableRequirement] = &[
     TableRequirement {
@@ -26,8 +186,14 @@ const SEARCH_NEXT_META_TABLES: &[TableRequirement] = &[TableRequirement {
     columns: &["id", "agent", "kind", "search_rowid"],
 }];
 const SEARCH_ROLLOUT_TABLES: &[TableRequirement] = &[TableRequirement {
-    name: "runtime_search_rollout",
-    columns: &["id", "phase", "cursor", "updated"],
+    name: <crate::metadata_schema::Metadata as studio_db_api::Table>::NAME,
+    columns: &[
+        crate::metadata_schema::Metadata::__DB_COLUMN_KIND,
+        crate::metadata_schema::Metadata::__DB_COLUMN_IDENTITY,
+        crate::metadata_schema::Metadata::__DB_COLUMN_SEARCH_PHASE,
+        crate::metadata_schema::Metadata::__DB_COLUMN_SEARCH_CURSOR,
+        crate::metadata_schema::Metadata::__DB_COLUMN_SEARCH_UPDATED,
+    ],
 }];
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
@@ -51,7 +217,7 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
             tables: SEARCH_NEXT_META_TABLES,
         },
         ConditionalTableRequirement {
-            table_exists: "runtime_search_rollout",
+            table_exists: <crate::metadata_schema::Metadata as studio_db_api::Table>::NAME,
             tables: SEARCH_ROLLOUT_TABLES,
         },
     ],
@@ -127,10 +293,125 @@ impl TranscriptRepository {
             .map_err(map_store_error)
     }
 
+    /// Exact transcript ledger evidence for cross-crate replay and copy-retirement witnesses.
+    #[cfg(any(test, feature = "test-support"))]
+    #[expect(
+        clippy::type_complexity,
+        reason = "test evidence preserves the six native stored columns"
+    )]
+    pub fn test_publication_snapshot(
+        connection: &Connection,
+    ) -> TranscriptStoreResult<Vec<(String, String, i64, String, Option<String>, i64)>> {
+        canvas_read(connection)
+            .collect(
+                &TranscriptTestSnapshot::QUERY,
+                &TranscriptTestSnapshot {
+                    kind: CanvasPublicationsKind::SyncEntities,
+                },
+            )?
+            .into_iter()
+            .map(|row| {
+                Ok((
+                    row.collection_order.ok_or(rusqlite::Error::InvalidQuery)?,
+                    row.entity_id.ok_or(rusqlite::Error::InvalidQuery)?,
+                    row.publication_seq,
+                    row.entity_hash.ok_or(rusqlite::Error::InvalidQuery)?,
+                    row.entity_payload,
+                    row.deleted,
+                ))
+            })
+            .collect()
+    }
+
+    /// Current sequence of this transcript's publication partition.
+    pub fn publication_high(connection: &Connection, scope: &str) -> TranscriptStoreResult<i64> {
+        Ok(canvas_read(connection).named(
+            &TranscriptHigh::QUERY,
+            &TranscriptHigh {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some(scope),
+            },
+        )?)
+    }
+
+    /// Read hash-only revision evidence without admitting the optional cache payload.
+    pub fn cached_revision_hash(
+        connection: &Connection,
+        scope: &str,
+    ) -> TranscriptStoreResult<Option<String>> {
+        let identity =
+            studio_db_api::migration::encode_key(&(scope.to_owned(), "@revision".to_owned()));
+        Ok(studio_db_api::db_query!(
+            canvas_read(connection),
+            SyncEntities,
+            scalar(SyncEntities::ENTITY_HASH),
+            filter(
+                SyncEntities::IDENTITY.eq_ref(&identity),
+                SyncEntities::DELETED.eq(&crate::metadata_values::StoredBoolean::Valid(false))
+            )
+        )?)
+    }
+
+    /// The service validates this raw page with its existing error labels.
+    pub fn cached_revision_payload(
+        connection: &Connection,
+        scope: &str,
+        hash: &str,
+    ) -> TranscriptStoreResult<Option<String>> {
+        let identity =
+            studio_db_api::migration::encode_key(&(scope.to_owned(), "@revision".to_owned()));
+        Ok(studio_db_api::db_query!(
+            canvas_read(connection),
+            Publications,
+            scalar(Publications::ENTITY_PAYLOAD),
+            filter(
+                Publications::KIND.eq(&CanvasPublicationsKind::SyncEntities),
+                Publications::IDENTITY.eq(&identity),
+                Publications::ENTITY_HASH.eq(&Some(hash.to_owned())),
+                Publications::DELETED.eq(&0)
+            )
+        )?
+        .flatten())
+    }
+
+    /// Keep the bounded page on the existing revision without advancing its sequence.
+    pub fn cache_revision_payload(
+        transaction: &Transaction<'_>,
+        scope: &str,
+        payload: &str,
+    ) -> TranscriptStoreResult<()> {
+        canvas_tx(transaction).named(
+            &CacheRevisionPayload::QUERY,
+            &CacheRevisionPayload {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some(scope),
+                payload: Some(payload),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Recent live conversations with items, in durable change order.
+    pub fn recent_chat_ids(
+        connection: &Connection,
+        limit: i64,
+    ) -> TranscriptStoreResult<Vec<String>> {
+        use studio_db_api::Table;
+        Ok(canvas_read(connection).collect(
+            &RecentChatIds::QUERY,
+            &RecentChatIds {
+                label: Some(crate::agent_tables::AgentsStorageRow::NAME),
+                limit,
+            },
+        )?)
+    }
+
     /// Durable conversation content revision, independent of other agents.
     pub fn revision(connection: &Connection, agent: &str) -> crate::StoreResult<i64> {
         Ok(crate::peer_update_settings::canvas_read(connection)
-            .get::<crate::context_settings::TranscriptRevisionsStorageRow>(&(agent.to_owned(),))?
+            .get::<crate::change_schema::TranscriptRevisions>(&(
+                crate::consolidation_codec::nullable_text_identity(&Some(agent.to_owned()), 0),
+            ))?
             .map_or(0, |row| row.revision))
     }
 
@@ -734,21 +1015,7 @@ fn transcript_pull_write(
         .filter(|(key, _)| key.as_str() != "items")
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<studio_json::Map<_, _>>();
-    let mut current = transaction
-        .prepare_cached(
-            "SELECT id,seq,hash,deleted FROM sync_entities WHERE collection=?1 ORDER BY rowid",
-        )?
-        .query_map([scope], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                (
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)? != 0,
-                ),
-            ))
-        })?
-        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let mut current = transcript_current(transaction, scope)?;
     let prior_meta = current.get("@meta");
     let base_missing = prior_meta.is_none();
     let was_deleted = prior_meta.is_some_and(|row| row.2);
@@ -809,31 +1076,38 @@ fn transcript_pull_write(
         }
     }
 
-    let pruned = transaction
-        .prepare_cached(
-            "SELECT id,seq FROM sync_entities WHERE collection=?1 AND deleted=1 \
-             AND id LIKE 'item:%' ORDER BY seq DESC LIMIT -1 OFFSET ?2",
-        )?
-        .query_map(params![scope, TRANSCRIPT_MAX_TOMBSTONES as i64], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let pruned = canvas_read(transaction).collect(
+        &TranscriptPruned::QUERY,
+        &TranscriptPruned {
+            scope: Some(scope),
+            retained: TRANSCRIPT_MAX_TOMBSTONES as i64,
+        },
+    )?;
     if !pruned.is_empty() {
-        for (id, _) in &pruned {
-            transaction.execute_cached(
-                "DELETE FROM sync_entities WHERE collection=?1 AND id=?2",
-                params![scope, id],
-            )?;
+        for row in &pruned {
+            canvas_tx(transaction)
+                .partition::<SyncEntities>()
+                .delete(&(studio_db_api::migration::encode_key(&(
+                    scope.to_owned(),
+                    row.entity_id.clone().ok_or(rusqlite::Error::InvalidQuery)?,
+                )),))?;
         }
-        let previous_floor = transaction
-            .query_row_cached(
-                "SELECT seq FROM sync_entities WHERE collection=?1 AND id='@floor'",
-                [scope],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .unwrap_or(0);
-        let floor_sequence = previous_floor.max(pruned.iter().map(|row| row.1).max().unwrap_or(0));
+        let identity =
+            studio_db_api::migration::encode_key(&(scope.to_owned(), "@floor".to_owned()));
+        let previous_floor = studio_db_api::db_query!(
+            canvas_read(transaction),
+            SyncEntities,
+            scalar(SyncEntities::PUBLICATION_SEQ),
+            filter(SyncEntities::IDENTITY.eq_ref(&identity))
+        )?
+        .unwrap_or(0);
+        let floor_sequence = previous_floor.max(
+            pruned
+                .iter()
+                .map(|row| row.publication_seq)
+                .max()
+                .unwrap_or(0),
+        );
         SyncDocumentsRepository::put_entity_hash_at_sequence(
             transaction,
             scope,
@@ -844,21 +1118,7 @@ fn transcript_pull_write(
         )?;
     }
 
-    current = transaction
-        .prepare_cached(
-            "SELECT id,seq,hash,deleted FROM sync_entities WHERE collection=?1 ORDER BY rowid",
-        )?
-        .query_map([scope], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                (
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)? != 0,
-                ),
-            ))
-        })?
-        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    current = transcript_current(transaction, scope)?;
     let high = current.values().map(|row| row.0).max().unwrap_or(0);
     let floor = current.get("@floor").map_or(0, |row| row.0);
     if !deleted && base_missing {
@@ -871,10 +1131,12 @@ fn transcript_pull_write(
             high,
         )?;
     }
-    let high = transaction.query_row_cached(
-        "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection=?1",
-        [scope],
-        |row| row.get::<_, i64>(0),
+    let high = canvas_read(transaction).named(
+        &TranscriptHigh::QUERY,
+        &TranscriptHigh {
+            kind: CanvasPublicationsKind::SyncEntities,
+            scope: Some(scope),
+        },
     )?;
     let current_revision_hash = current.get("@revision").map(|row| row.1.as_str());
     let revision_hash = revision.map(|revision| canonical_hash(&json!(revision)));
@@ -892,16 +1154,20 @@ fn transcript_pull_write(
     } else if after < high && deleted {
         vec![json!({"id":scope,"payload":"{}","seq":high,"_deleted":true})]
     } else if after < high {
-        let changed = transaction
-            .prepare_cached("SELECT id,deleted FROM sync_entities WHERE collection=?1 AND seq>?2 AND id!='@floor' ORDER BY seq")?
-            .query_map(params![scope, after], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
+        let changed = canvas_read(transaction).collect(
+            &TranscriptDelta::QUERY,
+            &TranscriptDelta {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some(scope),
+                after,
+            },
+        )?;
         let mut changed_items = std::collections::BTreeSet::new();
         let mut removed = Vec::new();
         let mut order_changed = false;
-        for (id, is_deleted) in changed {
+        for row in changed {
+            let id = row.entity_id.ok_or(rusqlite::Error::InvalidQuery)?;
+            let is_deleted = row.deleted != 0;
             if id == "@order" {
                 order_changed = true;
             } else if id.starts_with("item:") {
@@ -987,19 +1253,649 @@ pub(crate) fn transcript_index_storage_error(
 }
 
 fn search_phase(connection: &Connection) -> TranscriptStoreResult<String> {
-    use crate::settings_schema::SearchRollout;
+    use crate::metadata_schema::SearchRollout;
     let read = crate::peer_update_settings::canvas_read(connection);
     Ok(studio_db_api::db_query!(
         read,
         SearchRollout,
-        scalar(SearchRollout::PHASE),
-        filter(SearchRollout::ID.eq(&1))
+        scalar(SearchRollout::SEARCH_PHASE),
+        filter(SearchRollout::INTEGER_KEY.eq(&1))
     )?
+    .map(|phase| phase.as_stored().to_owned())
     .unwrap_or_default())
 }
 
 #[cfg(test)]
 mod tests {
+    fn canonical_transcript_fixture() -> Connection {
+        use studio_db_api::Table;
+        let db = Connection::open_in_memory().unwrap();
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::change_schema::Changes::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let text_key = Some("workspace".to_owned());
+        let tx = db.unchecked_transaction().unwrap();
+        crate::peer_update_settings::canvas_tx(&tx)
+            .partition::<crate::metadata_schema::SyncIdentity>()
+            .put(&crate::metadata_schema::SyncIdentity {
+                identity: crate::consolidation_codec::nullable_text_identity(&text_key, 1),
+                source_rowid: 1,
+                text_key,
+            })
+            .unwrap();
+        tx.commit().unwrap();
+        db
+    }
+
+    #[test]
+    fn canonical_transcript_windows_hash_only_isolation_and_rollback() {
+        let mut db = canonical_transcript_fixture();
+        let first = json!({"items":[{"id":"a","text":"old"},{"id":"b","text":"keep"}],"title":"t"});
+        {
+            let tx = db.transaction().unwrap();
+            let full =
+                TranscriptRepository::pull_payload(&tx, "transcript:a", 0, &first, false, Some(1))
+                    .unwrap();
+            assert_eq!(full["documents"][0]["payload"], first.to_string());
+            let after = full["checkpoint"]["seq"].as_i64().unwrap();
+            let unchanged = TranscriptRepository::pull_payload(
+                &tx,
+                "transcript:a",
+                after,
+                &first,
+                false,
+                Some(1),
+            )
+            .unwrap();
+            assert_eq!(unchanged["documents"], json!([]));
+            let second = json!({"items":[{"id":"b","text":"new"}],"title":"t"});
+            let delta = TranscriptRepository::pull_payload(
+                &tx,
+                "transcript:a",
+                after,
+                &second,
+                false,
+                Some(2),
+            )
+            .unwrap();
+            let payload: Value =
+                studio_json::from_str(delta["documents"][0]["payload"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                payload,
+                json!({"delta":true,"items":[{"id":"b","text":"new"}],"removed":["a"],"order":["b"],"title":"t"})
+            );
+            let other =
+                TranscriptRepository::pull_payload(&tx, "transcript:other", 0, &first, false, None)
+                    .unwrap();
+            assert_eq!(other["documents"][0]["payload"], first.to_string());
+            let after = delta["checkpoint"]["seq"].as_i64().unwrap();
+            let deleted =
+                TranscriptRepository::pull_payload(&tx, "transcript:a", after, &second, true, None)
+                    .unwrap();
+            assert_eq!(deleted["documents"][0]["_deleted"], true);
+        }
+        let tx = db.transaction().unwrap();
+        let full = TranscriptRepository::pull_payload(&tx, "transcript:a", 7, &first, false, None)
+            .unwrap();
+        assert_eq!(full["documents"][0]["payload"], first.to_string());
+    }
+
+    #[test]
+    fn canonical_transcript_retention_advances_floor_and_rolls_back() {
+        use crate::repositories::sync_documents::SyncDocumentsRepository as Sync;
+        let mut db = canonical_transcript_fixture();
+        let tx = db.transaction().unwrap();
+        let empty = json!({"items":[]});
+        TranscriptRepository::pull_payload(&tx, "transcript:a", 0, &empty, false, None).unwrap();
+        let hash = "0".repeat(64);
+        for n in 0..super::TRANSCRIPT_MAX_TOMBSTONES + 3 {
+            Sync::put_entity_hash_at_sequence(
+                &tx,
+                "transcript:a",
+                &format!("item:{n}"),
+                &hash,
+                true,
+                100 + n as i64,
+            )
+            .unwrap();
+        }
+        Sync::put_entity_hash_at_sequence(&tx, "transcript:other", "item:keep", &hash, true, 9_000)
+            .unwrap();
+        let full = TranscriptRepository::pull_payload(&tx, "transcript:a", 50, &empty, false, None)
+            .unwrap();
+        assert_eq!(full["documents"][0]["payload"], empty.to_string());
+        for n in 0..3 {
+            assert!(
+                crate::repositories::sync_documents::publication_sequence(
+                    &tx,
+                    "transcript:a",
+                    &format!("item:{n}"),
+                    true
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+        assert_eq!(
+            crate::repositories::sync_documents::publication_sequence(
+                &tx,
+                "transcript:a",
+                "@floor",
+                false
+            )
+            .unwrap(),
+            Some(102)
+        );
+        assert!(
+            crate::repositories::sync_documents::publication_sequence(
+                &tx,
+                "transcript:other",
+                "item:keep",
+                true
+            )
+            .unwrap()
+            .is_some()
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            crate::repositories::sync_documents::publication_sequence(
+                &db,
+                "transcript:a",
+                "@floor",
+                false
+            )
+            .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn canonical_transcript_search_phase_preserves_legacy_text_and_missing_id() {
+        use crate::metadata_schema::SearchRollout;
+        let db = canonical_transcript_fixture();
+        assert_eq!(super::search_phase(&db).unwrap(), "");
+        for phase in ["active", "waiting_for_space", "", "complete"] {
+            let tx = db.unchecked_transaction().unwrap();
+            crate::peer_update_settings::canvas_tx(&tx)
+                .partition::<SearchRollout>()
+                .put(&SearchRollout {
+                    identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                    source_rowid: 1,
+                    integer_key: 1,
+                    search_phase: crate::metadata_values::SearchPhase::from_stored(phase.into()),
+                    search_cursor: 0,
+                    search_updated: 0.0,
+                })
+                .unwrap();
+            assert_eq!(super::search_phase(&db).unwrap(), phase);
+            tx.commit().unwrap();
+        }
+    }
+
+    #[test]
+    fn canonical_transcript_delta_uses_original_rowid_for_sequence_ties() {
+        use crate::metadata_values::StoredBoolean;
+        use crate::publication_collection::CollectionName;
+        use crate::publication_schema::{EntityValue, SyncEntities};
+        let mut db = canonical_transcript_fixture();
+        let tx = db.transaction().unwrap();
+        let empty = json!({"items":[]});
+        let full = TranscriptRepository::pull_payload(&tx, "transcript:a", 0, &empty, false, None)
+            .unwrap();
+        let after = full["checkpoint"]["seq"].as_i64().unwrap();
+        // Physical insertion order deliberately disagrees with the original rowid.
+        for (id, source_rowid) in [("item:z", 90), ("item:a", 80)] {
+            let label = CollectionName::from_stored("transcript:a".into());
+            let deleted = StoredBoolean::Valid(true);
+            crate::peer_update_settings::canvas_tx(&tx)
+                .partition::<SyncEntities>()
+                .put(&SyncEntities {
+                    identity: studio_db_api::migration::encode_key(&(
+                        "transcript:a".to_owned(),
+                        id.to_owned(),
+                    )),
+                    source_rowid,
+                    publication_seq: after + 1,
+                    deleted,
+                    collection_kind: label.kind(),
+                    collection_agent: label.agent().cloned(),
+                    non_transcript: label.non_transcript(),
+                    collection_order: label,
+                    entity_id: id.into(),
+                    entity_hash: "0".repeat(64),
+                    entity_payload: EntityValue::from_stored("transcript:a", id, deleted, None)
+                        .unwrap(),
+                })
+                .unwrap();
+        }
+        let delta =
+            TranscriptRepository::pull_payload(&tx, "transcript:a", after, &empty, false, None)
+                .unwrap();
+        let payload: Value =
+            studio_json::from_str(delta["documents"][0]["payload"].as_str().unwrap()).unwrap();
+        assert_eq!(payload["removed"], json!(["a", "z"]));
+        for n in 0..super::TRANSCRIPT_MAX_TOMBSTONES - 1 {
+            super::SyncDocumentsRepository::put_entity_hash_at_sequence(
+                &tx,
+                "transcript:a",
+                &format!("item:new:{n}"),
+                &"0".repeat(64),
+                true,
+                after + 2 + n as i64,
+            )
+            .unwrap();
+        }
+        TranscriptRepository::pull_payload(&tx, "transcript:a", 0, &empty, false, None).unwrap();
+        assert!(
+            crate::repositories::sync_documents::publication_sequence(
+                &tx,
+                "transcript:a",
+                "item:z",
+                true
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            crate::repositories::sync_documents::publication_sequence(
+                &tx,
+                "transcript:a",
+                "item:a",
+                true
+            )
+            .unwrap()
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn canonical_transcript_window_and_retention_plans_have_flat_unrelated_history_cost() {
+        use super::{
+            Canvas, CanvasPublicationsKind, Publications, TranscriptCurrent, TranscriptDelta,
+            TranscriptHigh, TranscriptPruned,
+        };
+        use crate::peer_update_settings::canvas_read;
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let mut measurements = Vec::new();
+        for history in [100, 2_000] {
+            let mut db = canonical_transcript_fixture();
+            let tx = db.transaction().unwrap();
+            for (scope, count) in [
+                ("transcript:a", super::TRANSCRIPT_MAX_TOMBSTONES + 3),
+                ("transcript:other", history),
+            ] {
+                for n in 0..count {
+                    super::SyncDocumentsRepository::put_entity_hash_at_sequence(
+                        &tx,
+                        scope,
+                        &format!("item:{n}"),
+                        &"0".repeat(64),
+                        true,
+                        n as i64 + 1,
+                    )
+                    .unwrap();
+                }
+            }
+            let current = TranscriptCurrent {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some("transcript:a"),
+            };
+            let delta = TranscriptDelta {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some("transcript:a"),
+                after: 500,
+            };
+            let high = TranscriptHigh {
+                kind: CanvasPublicationsKind::SyncEntities,
+                scope: Some("transcript:a"),
+            };
+            let pruned = TranscriptPruned {
+                scope: Some("transcript:a"),
+                retained: super::TRANSCRIPT_MAX_TOMBSTONES as i64,
+            };
+            let sequence_index = studio_db_api::query_index::<Canvas, Publications>(
+                &Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_SEQUENCE,
+            )
+            .trim_matches('"');
+            let retention_index = studio_db_api::query_index::<Canvas, Publications>(
+                &Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_DELETED,
+            )
+            .trim_matches('"');
+            for (plan, index) in [
+                (
+                    crate::query_plan_test_support::explain(
+                        &tx,
+                        TranscriptCurrent::QUERY.sql(),
+                        &current,
+                    )
+                    .unwrap(),
+                    sequence_index,
+                ),
+                (
+                    crate::query_plan_test_support::explain(
+                        &tx,
+                        TranscriptDelta::QUERY.sql(),
+                        &delta,
+                    )
+                    .unwrap(),
+                    sequence_index,
+                ),
+                (
+                    crate::query_plan_test_support::explain(
+                        &tx,
+                        TranscriptHigh::QUERY.sql(),
+                        &high,
+                    )
+                    .unwrap(),
+                    sequence_index,
+                ),
+                (
+                    crate::query_plan_test_support::explain(
+                        &tx,
+                        TranscriptPruned::QUERY.sql(),
+                        &pruned,
+                    )
+                    .unwrap(),
+                    retention_index,
+                ),
+            ] {
+                assert!(
+                    plan.iter()
+                        .any(|line| line.contains("SEARCH") && line.contains(index)),
+                    "{plan:?}"
+                );
+                eprintln!("transcript history={history} plan={plan:?}");
+            }
+            let steps = Arc::new(AtomicUsize::new(0));
+            let counter = Arc::clone(&steps);
+            tx.progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                canvas_read(&tx)
+                    .collect(&TranscriptCurrent::QUERY, &current)
+                    .unwrap()
+                    .len(),
+                super::TRANSCRIPT_MAX_TOMBSTONES + 3
+            );
+            let current_steps = steps.swap(0, Ordering::Relaxed);
+            assert_eq!(
+                canvas_read(&tx)
+                    .collect(&TranscriptDelta::QUERY, &delta)
+                    .unwrap()
+                    .len(),
+                15
+            );
+            let delta_steps = steps.swap(0, Ordering::Relaxed);
+            assert_eq!(
+                canvas_read(&tx)
+                    .named(&TranscriptHigh::QUERY, &high)
+                    .unwrap(),
+                515
+            );
+            let high_steps = steps.swap(0, Ordering::Relaxed);
+            assert_eq!(
+                canvas_read(&tx)
+                    .collect(&TranscriptPruned::QUERY, &pruned)
+                    .unwrap()
+                    .len(),
+                3
+            );
+            let retention_steps = steps.load(Ordering::Relaxed);
+            tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+            let measured = [current_steps, delta_steps, high_steps, retention_steps];
+            eprintln!(
+                "transcript history={history} VM steps [current,delta,high,retention]={measured:?}"
+            );
+            assert!(measured.iter().all(|steps| *steps < 50_000), "{measured:?}");
+            measurements.push(measured);
+        }
+        for (small, large) in measurements[0].iter().zip(measurements[1].iter()) {
+            assert!(*large <= small + 100, "{measurements:?}");
+        }
+    }
+
+    #[test]
+    fn canonical_transcript_revision_cache_keeps_hash_sequence_and_rolls_back() {
+        let mut db = canonical_transcript_fixture();
+        let tx = db.transaction().unwrap();
+        let hash = "0".repeat(64);
+        super::SyncDocumentsRepository::put_entity_hash(
+            &tx,
+            "transcript:a",
+            "@revision",
+            &hash,
+            false,
+        )
+        .unwrap();
+        super::SyncDocumentsRepository::put_entity_hash(
+            &tx,
+            "transcript:other",
+            "@revision",
+            &hash,
+            false,
+        )
+        .unwrap();
+        let high = TranscriptRepository::publication_high(&tx, "transcript:a").unwrap();
+        assert_eq!(
+            TranscriptRepository::cached_revision_hash(&tx, "transcript:a").unwrap(),
+            Some(hash.clone())
+        );
+        assert!(
+            TranscriptRepository::cached_revision_payload(&tx, "transcript:a", &hash)
+                .unwrap()
+                .is_none()
+        );
+        TranscriptRepository::cache_revision_payload(&tx, "transcript:a", " {}").unwrap();
+        assert_eq!(
+            TranscriptRepository::cached_revision_payload(&tx, "transcript:a", &hash)
+                .unwrap()
+                .as_deref(),
+            Some(" {}")
+        );
+        assert!(
+            TranscriptRepository::cached_revision_payload(&tx, "transcript:other", &hash)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            TranscriptRepository::cached_revision_payload(&tx, "transcript:a", &"f".repeat(64))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            TranscriptRepository::publication_high(&tx, "transcript:a").unwrap(),
+            high
+        );
+        assert_eq!(
+            TranscriptRepository::cached_revision_hash(&tx, "transcript:a").unwrap(),
+            Some(hash)
+        );
+        tx.rollback().unwrap();
+        assert!(
+            TranscriptRepository::cached_revision_hash(&db, "transcript:a")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn canonical_transcript_recent_chat_plan_and_flat_unrelated_changes_cost() {
+        use crate::agent_tables::AgentsStorageRow;
+        use crate::change_schema::{Changes, DurableRows, DurableSource};
+        use crate::item_monitor_terminal::ItemsRow;
+        use crate::json_record_codec::RawJsonRecord;
+        use crate::metadata_values::StoredBoolean;
+        use crate::peer_update_settings::{Canvas, canvas_tx};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        use studio_db_api::Table;
+        let mut measurements = Vec::new();
+        for history in [100, 2_000] {
+            let mut db = canonical_transcript_fixture();
+            AgentsStorageRow::descriptor()
+                .install_if_absent(&db)
+                .unwrap();
+            crate::agent_tables::AgentVolatileStorageRow::descriptor()
+                .install_if_absent(&db)
+                .unwrap();
+            ItemsRow::descriptor().install_if_absent(&db).unwrap();
+            let tx = db.transaction().unwrap();
+            for (n, id) in ["a", "b", "deleted", "empty"].iter().enumerate() {
+                let mut record = json!({"id":id,"rootId":id,"epoch":0,"provider":"codex","accountKey":"default","status":"idle","compactions":0});
+                if *id == "deleted" {
+                    record["deletedAt"] = json!(1.0);
+                }
+                canvas_tx(&tx)
+                    .insert(&AgentsStorageRow {
+                        id: (*id).into(),
+                        root_id: None,
+                        deleted_at: None,
+                        record: RawJsonRecord::from_stored(&tx, id, record.to_string()).unwrap(),
+                    })
+                    .unwrap();
+                if *id != "empty" {
+                    canvas_tx(&tx)
+                        .insert(&ItemsRow {
+                            id: (*id).into(),
+                            agent: (*id).into(),
+                            created: 1.0,
+                            record: RawJsonRecord::from_stored(
+                                &tx,
+                                id,
+                                json!({"id":id,"role":"assistant","text":"body"}).to_string(),
+                            )
+                            .unwrap(),
+                        })
+                        .unwrap();
+                }
+                canvas_tx(&tx)
+                    .partition::<DurableRows>()
+                    .put(&DurableRows {
+                        identity: studio_db_api::migration::encode_key(&(
+                            AgentsStorageRow::NAME.to_owned(),
+                            (*id).to_owned(),
+                        )),
+                        source_rowid: n as i64 + 1,
+                        source_label: DurableSource::from_stored(AgentsStorageRow::NAME.into()),
+                        durable_id: (*id).into(),
+                        sequence: 10,
+                        deleted: StoredBoolean::Valid(false),
+                        deleted_at: 0,
+                        scope: None,
+                    })
+                    .unwrap();
+            }
+            for n in 0..history {
+                let id = format!("other:{n}");
+                canvas_tx(&tx)
+                    .partition::<DurableRows>()
+                    .put(&DurableRows {
+                        identity: studio_db_api::migration::encode_key(&(
+                            "unrelated".to_owned(),
+                            id.clone(),
+                        )),
+                        source_rowid: 100 + n as i64,
+                        source_label: DurableSource::from_stored("unrelated".into()),
+                        durable_id: id,
+                        sequence: 100 + n as i64,
+                        deleted: StoredBoolean::Valid(false),
+                        deleted_at: 0,
+                        scope: None,
+                    })
+                    .unwrap();
+            }
+            let params = super::RecentChatIds {
+                label: Some(AgentsStorageRow::NAME),
+                limit: 2,
+            };
+            let plan = crate::query_plan_test_support::explain(
+                &tx,
+                super::RecentChatIds::QUERY.sql(),
+                &params,
+            )
+            .unwrap();
+            let index = studio_db_api::query_index::<Canvas, Changes>(
+                &Changes::INDEX_CHANGES_DURABLE_IDENTITY,
+            )
+            .trim_matches('"');
+            assert!(
+                plan.iter()
+                    .any(|line| line.contains("SEARCH") && line.contains(index)),
+                "{plan:?}"
+            );
+            let steps = Arc::new(AtomicUsize::new(0));
+            let counter = Arc::clone(&steps);
+            tx.progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            assert_eq!(
+                TranscriptRepository::recent_chat_ids(&tx, 2).unwrap(),
+                ["b", "a"]
+            );
+            let measured = steps.load(Ordering::Relaxed);
+            tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+            assert!(measured < 10_000, "{measured}");
+            eprintln!("recent chat history={history} VM steps={measured} plan={plan:?}");
+            measurements.push(measured);
+        }
+        assert!(measurements[1] <= measurements[0] + 100, "{measurements:?}");
+    }
+
+    #[test]
+    fn transcript_revision_reads_only_its_changes_partition_and_rolls_back() {
+        use crate::change_schema::{Changes, TranscriptRevisions};
+        use studio_db_api::Table;
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        Changes::descriptor().install_if_absent(&db).unwrap();
+        assert_eq!(TranscriptRepository::revision(&db, "worker").unwrap(), 0);
+        {
+            let transaction = db.transaction().unwrap();
+            crate::peer_update_settings::canvas_tx(&transaction)
+                .partition::<TranscriptRevisions>()
+                .put(&TranscriptRevisions {
+                    identity: crate::consolidation_codec::nullable_text_identity(
+                        &Some("worker".into()),
+                        0,
+                    ),
+                    source_rowid: 17,
+                    original_key: Some("worker".into()),
+                    revision: 42,
+                })
+                .unwrap();
+            assert_eq!(
+                TranscriptRepository::revision(&transaction, "worker").unwrap(),
+                42
+            );
+            assert_eq!(
+                TranscriptRepository::revision(&transaction, "other").unwrap(),
+                0
+            );
+        }
+        assert_eq!(TranscriptRepository::revision(&db, "worker").unwrap(), 0);
+    }
+
     use crate::text_blobs;
     use rusqlite::Connection;
     use studio_json::Value;
@@ -1162,6 +2058,7 @@ mod tests {
 
     #[test]
     fn retired_sqlite_search_keeps_current_rollout_phases() {
+        use crate::metadata_schema::SearchRollout;
         let mut db = crate::fresh_state::test_canvas();
         for phase in [
             "building",
@@ -1171,7 +2068,17 @@ mod tests {
             "waiting_for_space",
         ] {
             let tx = db.transaction().expect("transaction");
-            tx.execute("INSERT INTO runtime_search_rollout(id,phase,cursor,updated) VALUES(1,?1,0,0) ON CONFLICT(id) DO UPDATE SET phase=excluded.phase", [phase]).expect("phase");
+            crate::peer_update_settings::canvas_tx(&tx)
+                .partition::<SearchRollout>()
+                .put(&SearchRollout {
+                    identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                    source_rowid: 1,
+                    integer_key: 1,
+                    search_phase: crate::metadata_values::SearchPhase::from_stored(phase.into()),
+                    search_cursor: 0,
+                    search_updated: 0.0,
+                })
+                .expect("phase");
             let record = json!({"id":"item", "role":"assistant", "text":"searchable sentinel"});
             TranscriptRepository::put_item(
                 &tx,
@@ -1201,8 +2108,12 @@ mod tests {
             }
             tx.commit().expect("commit");
         }
-        db.execute("DELETE FROM runtime_search_rollout", [])
+        let tx = db.transaction().unwrap();
+        crate::peer_update_settings::canvas_tx(&tx)
+            .partition::<SearchRollout>()
+            .delete(&(studio_db_api::migration::encode_key(&(1_i64,)),))
             .expect("absent phase");
+        tx.commit().unwrap();
         assert!(
             TranscriptRepository::search_hits(&db, "sentinel")
                 .expect("search")
@@ -1533,6 +2444,7 @@ mod tests {
 
     /// A file database with the transcript tables and the blob table.
     fn blob_fixture(directory: &std::path::Path) -> Connection {
+        use studio_db_api::Table;
         let connection = Connection::open(directory.join("canvas.sqlite3")).expect("database");
         connection
             .execute_batch(
@@ -1543,6 +2455,9 @@ mod tests {
                  CREATE TABLE runtime_search_rollout(id INTEGER PRIMARY KEY, phase TEXT NOT NULL);",
             )
             .expect("transcript tables create");
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&connection)
+            .unwrap();
         connection
     }
 

@@ -2,7 +2,7 @@
 
 use crate::event_write::truthy;
 use crate::submit_gates::Deletion;
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Transaction};
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_store::{
@@ -219,16 +219,7 @@ pub async fn recent_chats(
     store
         .read_async("runtime-services/transcript_recent", move |transaction| {
             let wanted = (limit + exclude.len()) as i64;
-            let ids = transaction
-                .prepare_cached(
-                    "SELECT a.id FROM runtime_agents a
-                     JOIN durable_rows d ON d.tbl='runtime_agents' AND d.id=a.id
-                     WHERE json_extract(a.record,'$.deletedAt') IS NULL
-                       AND EXISTS(SELECT 1 FROM runtime_items i WHERE i.agent=a.id)
-                     ORDER BY d.seq DESC LIMIT ?1",
-                )?
-                .query_map([wanted], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
+            let ids = TranscriptRepository::recent_chat_ids(transaction, wanted)?;
             Ok::<_, TranscriptError>(
                 ids.into_iter()
                     .filter(|id| !exclude.contains(id))
@@ -429,18 +420,8 @@ fn pull_scope_cached_in(
     after: i64,
 ) -> Result<Option<Value>, TranscriptError> {
     let revision = TranscriptRepository::revision(transaction, agent)?;
-    let high = transaction.query_row(
-        "SELECT coalesce(max(seq),0) FROM sync_entities WHERE collection=?1",
-        [scope],
-        |r| r.get::<_, i64>(0),
-    )?;
-    let hash = transaction
-        .query_row(
-            "SELECT hash FROM sync_entities WHERE collection=?1 AND id='@revision' AND deleted=0",
-            [scope],
-            |r| r.get::<_, String>(0),
-        )
-        .optional()?;
+    let high = TranscriptRepository::publication_high(transaction, scope)?;
+    let hash = TranscriptRepository::cached_revision_hash(transaction, scope)?;
     if after > 0
         && after >= high
         && hash.as_deref()
@@ -453,14 +434,11 @@ fn pull_scope_cached_in(
         })));
     }
     let deleted = TranscriptRepository::agent_deleted(transaction, agent)?.unwrap_or(true);
-    let cache = transaction
-        .query_row(
-            "SELECT payload FROM sync_entities WHERE collection=?1 AND id='@revision' AND hash=?2 AND deleted=0",
-            params![scope, studio_runtime_store::sha256_hex(revision.to_string().as_bytes())],
-            |r| r.get::<_, Option<String>>(0),
-        )
-        .optional()?
-        .flatten();
+    let cache = TranscriptRepository::cached_revision_payload(
+        transaction,
+        scope,
+        &studio_runtime_store::sha256_hex(revision.to_string().as_bytes()),
+    )?;
     let Some(raw) = cache else {
         return Ok(None);
     };
@@ -514,10 +492,7 @@ fn pull_scope_in(
     // Keep the bounded result on the existing revision entity. A lost
     // response can replay any original cursor without observing time again.
     let encoded = studio_json::to_string(&payload).map_err(|_| TranscriptError::Store)?;
-    transaction.execute(
-        "UPDATE sync_entities SET payload=?1 WHERE collection=?2 AND id='@revision'",
-        params![encoded, scope],
-    )?;
+    TranscriptRepository::cache_revision_payload(transaction, scope, &encoded)?;
     Ok(response)
 }
 
@@ -1191,7 +1166,21 @@ mod tests {
     use studio_json::{Value, json};
     use studio_runtime_store::{
         AgentRecord, AgentRepository, RuntimeStore, TranscriptItem, TranscriptItemRecord,
+        TranscriptRepository,
     };
+
+    #[tokio::test]
+    async fn canonical_transcript_recent_chats_reads_changes_and_excludes_requested_ids() {
+        let (_root, store) = chat(false, 2).await;
+        let recent = super::recent_chats(&store, 5, Vec::new()).await.unwrap();
+        assert_eq!(recent, ["agent"]);
+        assert!(
+            super::recent_chats(&store, 5, vec!["agent".into()])
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn global_excerpt_uses_thirty_words_and_shared_lowercase_limit() {
@@ -1358,22 +1347,14 @@ mod tests {
 
         let sync_state = || {
             let connection = store.test_reader().expect("reader");
-            let mut statement = connection
-                .prepare("SELECT id,seq,hash,payload,deleted FROM sync_entities WHERE collection='transcript:agent' ORDER BY id")
-                .expect("sync ledger snapshot query");
-            statement
-                .query_map([], |row| {
-                    Ok(json!([
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, i64>(4)?
-                    ]))
-                })
-                .expect("sync ledger rows")
-                .collect::<Result<Vec<_>, _>>()
+            TranscriptRepository::test_publication_snapshot(&connection)
                 .expect("sync ledger snapshot")
+                .into_iter()
+                .filter(|(scope, ..)| scope == "transcript:agent")
+                .map(|(_, id, seq, hash, payload, deleted)| {
+                    json!([id, seq, hash, payload, deleted])
+                })
+                .collect::<Vec<_>>()
         };
         let committed_sync_state = sync_state();
 
@@ -1405,10 +1386,7 @@ mod tests {
         store
             .transaction(move |transaction| {
                 if retired {
-                    transaction.execute(
-                        "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('transcript_copies','retired')",
-                        [],
-                    )?;
+                    studio_runtime_store::durable_seq::retire_transcript_copies(transaction)?;
                 }
                 AgentRepository::put(
                     transaction,
@@ -1439,36 +1417,77 @@ mod tests {
     }
 
     fn transcript_rows(store: &RuntimeStore) -> i64 {
-        store
-            .test_reader()
-            .expect("reader")
-            .query_row(
-                "SELECT COUNT(*) FROM sync_entities WHERE collection LIKE 'transcript:%'",
-                [],
-                |row| row.get(0),
-            )
+        let connection = store.test_reader().expect("reader");
+        TranscriptRepository::test_publication_snapshot(&connection)
             .expect("count")
+            .len() as i64
     }
 
     #[test]
     fn unchanged_cached_cursor_does_not_decode_the_agent() {
-        let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT);\
-            CREATE TABLE runtime_transcript_revisions(agent TEXT,revision INTEGER);\
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,hash TEXT,deleted INTEGER,seq INTEGER,payload TEXT);\
-            CREATE TABLE sync_identity(id TEXT);\
-            INSERT INTO sync_identity VALUES('workspace');\
-            INSERT INTO runtime_agents VALUES('agent','{}');\
-            INSERT INTO runtime_transcript_revisions VALUES('agent',10);").unwrap();
-        db.execute(
-            "INSERT INTO sync_entities VALUES('transcript:agent','@revision',?1,0,10,NULL)",
-            [studio_runtime_store::sha256_hex(b"10")],
+        use studio_runtime_store::SyncDocumentsRepository as Sync;
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        let revision = studio_runtime_store::TranscriptRepository::revision(&tx, "agent").unwrap();
+        Sync::put_entity_hash(
+            &tx,
+            "transcript:agent",
+            "@revision",
+            &studio_runtime_store::sha256_hex(revision.to_string().as_bytes()),
+            false,
         )
         .unwrap();
-        let tx = db.transaction().unwrap();
-        let unchanged = super::pull_scope_cached_in(&tx, "transcript:agent", "agent", 10);
-        assert_eq!(unchanged.unwrap().unwrap()["documents"], json!([]));
-        assert!(super::pull_scope_cached_in(&tx, "transcript:agent", "agent", 9).is_err());
+        let high = Sync::entity_sequence(&tx).unwrap();
+        Sync::put_entity_hash(&tx, "transcript:other", "@revision", &"0".repeat(64), false)
+            .unwrap();
+        tx.authorizer(Some(|context: rusqlite::hooks::AuthContext<'_>| {
+            if matches!(
+                context.action,
+                rusqlite::hooks::AuthAction::Read {
+                    table_name: "runtime_agents",
+                    ..
+                }
+            ) {
+                rusqlite::hooks::Authorization::Deny
+            } else {
+                rusqlite::hooks::Authorization::Allow
+            }
+        }))
+        .unwrap();
+        let unchanged = super::pull_scope_cached_in(&tx, "transcript:agent", "agent", high)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged["documents"], json!([]));
+        assert_eq!(unchanged["checkpoint"]["seq"], high);
+        assert!(super::pull_scope_cached_in(&tx, "transcript:agent", "agent", 0).is_err());
+    }
+
+    #[tokio::test]
+    async fn cached_page_ignores_unrelated_agent_decode_errors() {
+        let (_root, store) = chat(false, 1).await;
+        let before = super::pull_scope(Arc::clone(&store), "transcript:agent", "agent", 0)
+            .await
+            .expect("populate the valid cached page");
+        store.transaction(move |tx| {
+            let saved = TranscriptRepository::cached_revision_payload(
+                tx, "transcript:agent",
+                &studio_runtime_store::sha256_hex(TranscriptRepository::revision(tx, "agent")?.to_string().as_bytes()),
+            ).expect("cache query").expect("existing cached page");
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','unknown-status') WHERE id='agent'", [])?;
+            assert!(AgentRepository::get(tx, &studio_runtime_store::AgentId::from("agent")).is_err());
+            assert_eq!(TranscriptRepository::agent_deleted(tx, "agent").expect("deletion lookup"), Some(false));
+            let revision = TranscriptRepository::revision(tx, "agent")?;
+            studio_runtime_store::SyncDocumentsRepository::put_entity_hash(
+                tx, "transcript:agent", "@revision",
+                &studio_runtime_store::sha256_hex(revision.to_string().as_bytes()), false,
+            )?;
+            TranscriptRepository::cache_revision_payload(tx, "transcript:agent", &saved).expect("restore cached page");
+            let replay = super::pull_scope_cached_in(tx, "transcript:agent", "agent", 0)
+                .expect("cached page does not decode unrelated agent fields")
+                .expect("cached page remains available");
+            assert_eq!(payload(&replay)["items"], payload(&before)["items"]);
+            Ok(())
+        }).await.expect("cached transcript caller");
     }
 
     #[tokio::test]
@@ -1535,7 +1554,7 @@ mod tests {
         let entities = report
             .tables
             .iter()
-            .find(|table| table.table == "sync_entities")
+            .find(|table| table.table == "publications")
             .expect("publication report");
         assert!(entities.row_count > 0);
         assert_eq!(
@@ -1616,9 +1635,12 @@ mod tests {
         let (_root, store) = chat(false, 2).await;
         store
             .transaction(|transaction| {
-                transaction.execute(
-                    "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES ('transcript:agent','item:gone',1,'h',NULL,0)",
-                    [],
+                studio_runtime_store::SyncDocumentsRepository::put_entity_hash(
+                    transaction,
+                    "transcript:agent",
+                    "item:gone",
+                    &"0".repeat(64),
+                    false,
                 )?;
                 Ok(())
             })

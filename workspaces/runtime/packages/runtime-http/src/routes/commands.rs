@@ -601,7 +601,15 @@ mod tests {
     async fn pre_upgrade_send_skips_admission_and_file_conversion() {
         let (app, store, _directory) = app_with_queue().await;
         let id = RequestIdentity::issue_root();
-        store.transaction(|tx| { tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [now_ms() + 60_000])?; Ok(()) }).await.expect("cutover");
+        store
+            .transaction(|tx| {
+                studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(
+                    tx,
+                    &json!({"sendAdmissionCutoverMs":now_ms() + 60_000}).to_string(),
+                )
+            })
+            .await
+            .expect("cutover");
         let (status, response) = post(&app, None, json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello","asTextFile":true}})).await;
         assert_eq!(status, 200, "{response}");
         let state = store
@@ -631,7 +639,16 @@ mod tests {
         let id = RequestIdentity::issue_root();
         let request = json!({"id":id,"client":"web-1","number":1,"kind":"send","target":"workspace","body":{"text":"hello","delivery":"current_turn"}});
         assert_eq!(post(&app, None, request.clone()).await.0, 200);
-        store.transaction(|tx| { tx.execute("DELETE FROM command_send_admissions", [])?; tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [now_ms() + 60_000])?; Ok(()) }).await.expect("cutover");
+        store
+            .transaction(|tx| {
+                tx.execute("DELETE FROM command_send_admissions", [])?;
+                studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(
+                    tx,
+                    &json!({"sendAdmissionCutoverMs":now_ms() + 60_000}).to_string(),
+                )
+            })
+            .await
+            .expect("cutover");
         let mut omitted = request.clone();
         omitted["body"]
             .as_object_mut()
@@ -650,7 +667,10 @@ mod tests {
         store
             .transaction(|tx| {
                 tx.execute("DELETE FROM command_send_admissions", [])?;
-                tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.sendAdmissionCutoverMs',?1)", [now_ms() + 60_000])?;
+                studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(
+                    tx,
+                    &json!({"sendAdmissionCutoverMs":now_ms() + 60_000}).to_string(),
+                )?;
                 Ok(())
             })
             .await
@@ -739,10 +759,10 @@ mod tests {
         store
             .transaction(|tx| {
                 tx.execute_batch(
-                    "CREATE TRIGGER fail_send_record_insert BEFORE INSERT ON client_command_watermarks
+                    &format!("CREATE TRIGGER fail_send_record_insert BEFORE INSERT ON metadata WHEN NEW.kind={kind}
                      BEGIN SELECT RAISE(ABORT,'injected record failure'); END;
-                     CREATE TRIGGER fail_send_record_update BEFORE UPDATE ON client_command_watermarks
-                     BEGIN SELECT RAISE(ABORT,'injected record failure'); END;",
+                     CREATE TRIGGER fail_send_record_update BEFORE UPDATE ON metadata WHEN NEW.kind={kind}
+                     BEGIN SELECT RAISE(ABORT,'injected record failure'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasMetadataKind::ClientCommandWatermarks as i64),
                 )?;
                 Ok(())
             })
@@ -1381,11 +1401,12 @@ mod tests {
         assert_eq!(status_of(&store, "a").await, "cancelled");
         let draft: String = store
             .transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
-                    [],
-                    |row| row.get(0),
-                )?)
+                Ok(studio_runtime_store::SyncDocumentsRepository::draft(
+                    tx,
+                    "server:withdraw:workspace",
+                )?
+                .expect("server draft exists")
+                .payload)
             })
             .await
             .expect("server draft");
@@ -1404,17 +1425,16 @@ mod tests {
             Err(CommandError::Invalid("forced rollback"))
         ));
         assert_eq!(status_of(&store, "a").await, "reserved");
-        let drafts: i64 = store
+        let drafts = store
             .transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT count(*) FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
-                    [],
-                    |row| row.get(0),
-                )?)
+                studio_runtime_store::SyncDocumentsRepository::draft(
+                    tx,
+                    "server:withdraw:workspace",
+                )
             })
             .await
             .expect("draft count");
-        assert_eq!(drafts, 0);
+        assert!(drafts.is_none());
     }
 
     #[tokio::test]
@@ -1425,11 +1445,12 @@ mod tests {
         assert_eq!(status, 200, "{body}");
         let draft: String = store
             .transaction(|tx| {
-                Ok(tx.query_row(
-                    "SELECT payload FROM sync_documents WHERE scope='drafts' AND id='server:withdraw:workspace'",
-                    [],
-                    |row| row.get(0),
-                )?)
+                Ok(studio_runtime_store::SyncDocumentsRepository::draft(
+                    tx,
+                    "server:withdraw:workspace",
+                )?
+                .expect("server draft exists")
+                .payload)
             })
             .await
             .expect("server draft");

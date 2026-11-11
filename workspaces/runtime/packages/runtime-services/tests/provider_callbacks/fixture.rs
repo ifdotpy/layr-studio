@@ -199,11 +199,20 @@ fn seed_tools(tx: &Transaction<'_>, tools: Vec<SeedTool>) -> Result<(), StoreErr
 
 pub(crate) async fn state() -> (tempfile::TempDir, RuntimeStore, Value) {
     let root = tempfile::tempdir().expect("isolated callback state");
-    let store = RuntimeStore::open(Some(root.path()))
-        .await
-        .expect("callback store");
     let mut seed: Seed =
         studio_json::from_str(include_str!("seed.json")).expect("current callback seed");
+    studio_runtime_store::test_fixtures::canvas::write_supported_fixture(root.path())
+        .expect("supported callback source schema");
+    let tx = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(root.path())
+        .expect("callback source database");
+    studio_runtime_store::test_fixtures::canvas::install_legacy_source_schema(&tx)
+        .expect("callback source owners");
+    tx.execute_batch(&seed.metadata.join("\n"))
+        .expect("frozen callback metadata");
+    drop(tx);
+    let store = studio_runtime_store::test_fixtures::canvas::migrate_legacy(root.path())
+        .await
+        .expect("migrate callback store");
     let mut oracle: Value =
         studio_json::from_str(include_str!("expected.json")).expect("callback expectations");
     let mut ids = BTreeMap::new();
@@ -315,8 +324,6 @@ pub(crate) async fn state() -> (tempfile::TempDir, RuntimeStore, Value) {
         }
         seed_tools(tx,seed.tool_requests)?;
         for entity in seed.sync_entities.into_iter().filter(|entity| entity.collection != "request") { SyncDocumentsRepository::put_entity(tx,&entity.collection,&entity.id,entity.value,entity.deleted)?; }
-        // Metadata counters and read-only analytics have no typed write owner.
-        tx.execute_batch(&seed.metadata.join("\n"))?;
         Ok(())
     }).await.expect("seed callback owners");
     store

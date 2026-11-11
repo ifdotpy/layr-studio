@@ -64,28 +64,7 @@ fn rust_snapshot(store: &RuntimeStore) -> Value {
             .collect::<Vec<_>>()
     };
     let sync_entities = {
-        let mut statement = db
-            .prepare(
-                "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor') ORDER BY collection,id",
-            )
-            .expect("prepare projection snapshot");
-        let mut rows = statement
-            .query_map([], |row| {
-                Ok(json!({
-                    "collection": row.get::<_, String>(0)?, "id": row.get::<_, String>(1)?,
-                    "payload": row.get::<_, String>(2)?, "deleted": row.get::<_, i64>(3)?,
-                }))
-            })
-            .expect("query projections")
-            .map(|row| {
-                let mut projection = row.expect("projection row");
-                projection["payload"] = studio_json::from_str(
-                    projection["payload"].as_str().expect("projection payload"),
-                )
-                .expect("projection JSON");
-                projection
-            })
-            .collect::<Vec<_>>();
+        let mut rows = studio_runtime_store::test_fixtures::canvas::entities(&db).expect("projection snapshot").into_iter().filter(|row| !["agent","agentSummary","agentDetail","retainedWorktree","task","monitor"].contains(&row.collection.as_str())).map(|studio_runtime_store::test_fixtures::canvas::EntitySnapshot {collection,id,payload,deleted,..}| json!({"collection":collection,"id":id,"payload":studio_json::from_str::<Value>(payload.as_deref().expect("projection payload")).expect("projection JSON"),"deleted":deleted})).collect::<Vec<_>>();
         // The agent views and the windows are built at read time; compare them as the
         // old copies.
         rows.extend(

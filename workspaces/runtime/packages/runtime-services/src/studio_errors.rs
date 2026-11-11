@@ -937,13 +937,7 @@ pub fn publish(tx: &Transaction<'_>) -> Result<(), StoreError> {
         )?;
         current.insert(id.clone());
     }
-    let mut statement = tx.prepare_cached(
-        "SELECT id FROM sync_entities WHERE collection='studioError' AND deleted=0",
-    )?;
-    let existing = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
+    let existing = studio_runtime_store::DiagnosticPublicationQueries::error_ids(tx)?;
     for id in existing {
         if !current.contains(&id) {
             studio_runtime_store::SyncDocumentsRepository::put_entity(
@@ -1020,9 +1014,9 @@ fn may_change(tx: &Transaction<'_>, sources: &StudioErrorSources) -> Result<bool
         return Ok(true);
     }
     for id in &sources.monitors {
-        if monitor_groups && tx.prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities e WHERE e.collection='studioError' AND e.deleted=0 AND (             json_extract(e.payload,'$.value.monitorId')=?1 OR              json_extract(e.payload,'$.value.ruleId')=(SELECT json_extract(m.record,'$.ruleId') FROM runtime_monitors m                  WHERE m.id=?1 AND json_extract(m.record,'$.status')='completed')))"
-        )?.query_row([id], |row| row.get::<_, bool>(0))? {
+        if monitor_groups
+            && studio_runtime_store::DiagnosticPublicationQueries::monitor_published(tx, id)?
+        {
             return Ok(true);
         }
         if is_published(tx, &format!("monitor:{id}"))? {
@@ -1115,16 +1109,11 @@ fn malformed_monitor_may_be_candidate(raw: &str, since: f64) -> bool {
 /// visibility of rows it hid at the last full build.
 fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> {
     let own_prefix = format!("agent:{id}:");
-    let mut statement = tx.prepare_cached(
-        "SELECT payload FROM sync_entities WHERE collection='studioError' AND deleted=0 AND id>=?1 AND id<?2",
+    let own_published = studio_runtime_store::DiagnosticPublicationQueries::error_range(
+        tx,
+        &own_prefix,
+        &format!("agent:{id};"),
     )?;
-    let own_published = statement
-        .query_map(
-            rusqlite::params![own_prefix, format!("agent:{id};")],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
     if is_published(tx, &format!("stored:runtime_agents:{id}"))? {
         return Ok(true);
     }
@@ -1148,9 +1137,7 @@ fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> 
     // An unchanged own error can still accompany a changed liveness finding.
     // Keep conservative rebuilds for these dependencies instead of caching their inputs.
     if candidate.is_some()
-        && (tx
-            .prepare_cached(AGENT_LIVENESS_DEPENDENCIES_SQL)?
-            .query_row([id], |row| row.get::<_, bool>(0))?
+        && (studio_runtime_store::DiagnosticPublicationQueries::liveness_dependencies(tx, id)?
             || tx
                 .prepare_cached(&crate::liveness::stalled_turn_candidate_sql())?
                 .query_row([id], |row| row.get::<_, bool>(0))?)
@@ -1162,13 +1149,7 @@ fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> 
         SourceOwner::Live(record) => Some(owner_name(&record)),
         SourceOwner::Missing | SourceOwner::Deleted => None,
     };
-    let mut statement = tx.prepare_cached(
-        "SELECT json_extract(payload,'$.value.agentName') FROM sync_entities WHERE collection='studioError' AND deleted=0 AND json_extract(payload,'$.value.agentId')=?1",
-    )?;
-    let names = statement
-        .query_map([id], |row| row.get::<_, Option<String>>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
+    let names = studio_runtime_store::DiagnosticPublicationQueries::error_owner_names(tx, id)?;
     if names.iter().any(|name| name.as_deref() != owner.as_deref()) {
         return Ok(true);
     }
@@ -1181,33 +1162,14 @@ fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> 
         }))
 }
 
-const AGENT_LIVENESS_DEPENDENCIES_SQL: &str = "SELECT \
-    EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status='pending') OR \
-    EXISTS(SELECT 1 FROM runtime_agents WHERE id=?1 AND (json_extract(record,'$.usageResume.id') IS NOT NULL OR json_extract(record,'$.capacityRetry.id') IS NOT NULL)) OR \
-    EXISTS(SELECT 1 FROM sync_entities WHERE collection='studioError' AND id>='liveness:' AND id<'liveness;' AND deleted=0 AND json_extract(payload,'$.value.agentId')=?1) OR \
-    EXISTS(SELECT 1 FROM runtime_account_transfers WHERE json_extract(record,'$.status')='pending')";
-
 /// Whether row `id` of the list is published.
 fn is_published(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> {
-    Ok(tx
-        .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='studioError' AND id=?1 AND deleted=0)",
-        )?
-        .query_row([id], |row| row.get(0))?)
+    Ok(studio_runtime_store::DiagnosticPublicationQueries::is_published(tx, id)?)
 }
 
 /// Whether a published row lost its monitor, event or owner row.
 fn published_source_missing(tx: &Transaction<'_>) -> Result<bool, StoreError> {
-    Ok(tx
-        .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities e WHERE e.collection='studioError' AND e.deleted=0 AND (\
-             (e.id LIKE 'monitor:%' AND NOT EXISTS(SELECT 1 FROM runtime_monitors m WHERE m.id=substr(e.id,9))) OR \
-             (e.id LIKE 'event:%' AND NOT EXISTS(SELECT 1 FROM runtime_events v WHERE v.id=substr(e.id,7))) OR \
-             (e.id LIKE 'stored:runtime_agents:%' AND NOT EXISTS(SELECT 1 FROM runtime_agents a WHERE a.id=json_extract(e.payload,'$.value.diagnostics.context.id'))) OR \
-             ((e.id LIKE 'http:%' OR e.id LIKE 'recovery:%') AND NOT EXISTS(SELECT 1 FROM runtime_error_incidents r WHERE r.id=e.id AND r.payload!='null')) OR \
-             (json_extract(e.payload,'$.value.action')!='details' AND NOT EXISTS(SELECT 1 FROM runtime_agents a WHERE a.id=json_extract(e.payload,'$.value.agentId')))))",
-        )?
-        .query_row([], |row| row.get(0))?)
+    Ok(studio_runtime_store::DiagnosticPublicationQueries::source_missing(tx)?)
 }
 
 /// One failed or lost run of a rule or command, with its row.
@@ -1362,10 +1324,8 @@ mod tests {
         let (_dir, store) = crate::entity_publication::test_support::store().await;
         store
             .transaction(|tx| {
-                for (sql, searches) in [
-                    (super::AGENT_LIVENESS_DEPENDENCIES_SQL.to_owned(), 4),
-                    (crate::liveness::stalled_turn_candidate_sql(), 3),
-                ] {
+                {
+                    let (sql, searches) = (crate::liveness::stalled_turn_candidate_sql(), 3);
                     let mut statement = tx.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
                     let plan = statement
                         .query_map(["owner"], |row| row.get::<_, String>(3))?
@@ -1478,17 +1438,23 @@ mod tests {
             Ok::<_, StoreError>(())
         }).await.expect("valid group publication fixture");
         store.transaction(move |tx| {
-            let count: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='studioError' AND deleted=0", [], |r| r.get(0))?;
+            let count = studio_runtime_store::DiagnosticPublicationQueries::error_ids(tx)?.len();
             assert_eq!(count, 1, "the failure is published");
             let raw = format!(r#"{{"id":"success","agent":"owner","ruleId":"rule","epoch":0,"status":"completed","requestId":"fixture","created":{now},"finished":{now},"activityAt":0,"activityGeneration":0,"bytes":0,"command":"check","cwd":"/fixture","interactive":false,"livenessCommand":"","log":"/fixture/watch.log","stallTimeoutSeconds":1800,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","exitCode":0}}"#);
             Table::new(tx).put(&studio_json::from_str::<MonitorRecord>(&raw)?)?;
             Ok::<_, StoreError>(())
         }).await.expect("valid group publication fixture");
-        store.test_read_transaction(|tx| {
-            let count: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='studioError' AND deleted=0", [], |r| r.get(0))?;
-            assert_eq!(count, 0, "the success retires the group before the periodic refresh");
-            Ok::<_, StoreError>(())
-        }).expect("valid group publication fixture");
+        store
+            .test_read_transaction(|tx| {
+                let count =
+                    studio_runtime_store::DiagnosticPublicationQueries::error_ids(tx)?.len();
+                assert_eq!(
+                    count, 0,
+                    "the success retires the group before the periodic refresh"
+                );
+                Ok::<_, StoreError>(())
+            })
+            .expect("valid group publication fixture");
     }
 
     #[test]
@@ -1766,5 +1732,34 @@ mod tests {
             })
             .await
             .expect("fixture transaction");
+    }
+}
+
+#[cfg(test)]
+mod f1_canonical_tests {
+    use super::*;
+    #[tokio::test]
+    async fn f1_studio_errors_canonical_caller_without_source_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(
+                    !studio_runtime_store::peer_update_settings::canvas_read(tx)
+                        .table_exists::<studio_runtime_store::clock_schema::SyncEntities>()?
+                );
+
+                let published = is_published(tx, "missing");
+                let source_missing = published_source_missing(tx);
+                let agent_changed = agent_may_change(tx, "missing");
+                assert!(!published.unwrap());
+                assert!(!source_missing.unwrap());
+                assert!(!agent_changed.unwrap());
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

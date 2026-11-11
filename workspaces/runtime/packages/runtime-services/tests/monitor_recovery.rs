@@ -538,7 +538,7 @@ async fn result_write_boundaries_roll_back_then_recover_the_first_receipt() {
             store.transaction(move |tx| {
                 // An upsert fires AFTER UPDATE when its row already exists.
                 for operation in ["INSERT", "UPDATE"] {
-                    tx.execute_batch(&format!("CREATE TRIGGER injected_{operation} {boundary} {operation} ON {table} BEGIN SELECT RAISE(ABORT,'injected'); END"))?;
+                    if table == "sync_entities" && boundary == "BEFORE" { let operation = if operation == "INSERT" {studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert} else {studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update}; studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), operation, true)?; } else { tx.execute_batch(&format!("CREATE TRIGGER injected_{operation} {boundary} {operation} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'injected'); END", table=if table=="sync_entities" {"publications"} else {&table}, partition_predicate=if table=="sync_entities" {format!(" WHEN NEW.kind={}",studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64)} else {String::new()}))?; }
                 }
                 Ok(())
             }).await.expect("install boundary");
@@ -555,7 +555,7 @@ async fn result_write_boundaries_roll_back_then_recover_the_first_receipt() {
             assert_eq!(fixtures::events(&store), json!([]));
             store
                 .transaction(move |tx| {
-                    tx.execute_batch("DROP TRIGGER injected_INSERT; DROP TRIGGER injected_UPDATE")?;
+                    if table == "sync_entities" && boundary == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Insert, false)?;studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Publications(studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch("DROP TRIGGER injected_INSERT; DROP TRIGGER injected_UPDATE")?; }
                     Ok(())
                 })
                 .await

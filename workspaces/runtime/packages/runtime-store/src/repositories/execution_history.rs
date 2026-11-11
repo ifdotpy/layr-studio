@@ -1317,13 +1317,19 @@ mod tests {
 
     #[test]
     fn attempt_replay_lives_in_request_results_and_keeps_exact_outcome() {
-        let mut db = rusqlite::Connection::open_in_memory().expect("database");
-        crate::receipt_schema::create(&db).expect("receipt schema");
-        db.execute_batch("CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT);
-            CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT,record TEXT);
-            INSERT INTO runtime_execution_attempts VALUES('attempt','run','{\"id\":\"attempt\",\"runId\":\"run\",\"epoch\":1,\"events\":[]}');")
-            .expect("execution owner");
+        let mut db = crate::fresh_state::test_canvas();
         let tx = db.transaction().expect("transaction");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .insert(&ExecutionAttemptsRow {
+                id: "attempt".into(),
+                run: "run".into(),
+                record: "{\"id\":\"attempt\",\"runId\":\"run\",\"epoch\":1,\"events\":[]}"
+                    .to_owned()
+                    .into(),
+                submission: None,
+                turn_status: None,
+            })
+            .expect("execution owner");
         let root = RequestIdentity::issue_root();
         let identity = RequestIdentity::new("execution-attempt", &["agent"], &root, &["attempt"])
             .expect("identity");

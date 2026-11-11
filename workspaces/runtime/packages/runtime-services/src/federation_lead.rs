@@ -351,7 +351,10 @@ mod tests {
         store
             .transaction(move |tx| {
                 studio_runtime_store::receipt_schema::create(tx)?;
-                tx.execute("UPDATE runtime_orchestration_settings SET record=json_set(record,'$.expired_before_ms',0) WHERE id='global'",[])?;
+                studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(
+                    tx,
+                    r#"{"expired_before_ms":0}"#,
+                )?;
                 tx.execute(
                     "INSERT INTO runtime_federation_identity VALUES('local',?1)",
                     [local.to_string()],

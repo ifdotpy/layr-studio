@@ -58,19 +58,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
          UPDATE runtime_agents SET record=json_remove(record,'$.convertedFromLead')
            WHERE json_valid(record) AND json_type(record,'$.convertedFromLead') IS NOT NULL;"
     ))?;
-    for table in crate::durable_seq::DURABLE_TABLES {
-        for operation in ["insert", "update", "delete"] {
-            tx.execute_batch(&format!(
-                "DROP TRIGGER IF EXISTS durable_{}_{operation}",
-                table.name
-            ))?;
-        }
-    }
     for name in ["summary_task_delete", "summary_messageReceipt_delete"] {
         tx.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}"))?;
     }
-    crate::feature_schema::install_summary_delete_triggers(tx)?;
-    crate::durable_seq::install(tx)?;
+    // Durable producers switch once, in the dated F1 authority transaction.
     crate::entity_scopes::install(tx)
 }
 
@@ -91,8 +82,18 @@ mod tests {
 
     #[test]
     fn upgraded_and_fresh_entity_scopes_have_identical_schema_and_rerun_is_idempotent() {
-        let fresh = crate::fresh_state::test_canvas();
+        let mut fresh = crate::fresh_state::test_canvas();
         let mut upgraded = crate::fresh_state::test_canvas();
+        for db in [&fresh, &upgraded] {
+            for descriptor in super::super::m2026_11_11_consolidate_f1::legacy_source_descriptors()
+            {
+                descriptor.install_if_absent(db).unwrap();
+            }
+        }
+        let fresh_tx = fresh.transaction().unwrap();
+        apply(&fresh_tx).unwrap();
+        crate::bootstrap::install_current_producers(&fresh_tx).unwrap();
+        fresh_tx.commit().unwrap();
         let tx = upgraded.transaction().unwrap();
         for (name, _) in owned_schema(&tx).into_iter().filter(|(name, _)| {
             name.starts_with("immutable_scope_") || name.starts_with("durable_")
@@ -109,10 +110,13 @@ mod tests {
             INSERT INTO sync_entity_meta VALUES('entity_scope_tombstone:[\"task\",\"old\"]','[]');
             INSERT INTO runtime_agents(id,record) VALUES('old','{\"id\":\"old\",\"rootId\":\"lead\",\"parentId\":\"lead\",\"provider\":\"codex\",\"accountKey\":\"default\",\"epoch\":1,\"compactions\":0,\"status\":\"idle\",\"convertedFromLead\":{}}');").unwrap();
         apply(&tx).unwrap();
+        crate::clock_schema::prepare_durable_scope(&tx).unwrap();
+        crate::bootstrap::install_current_producers(&tx).unwrap();
         assert_eq!(owned_schema(&tx), owned_schema(&fresh));
         let once = owned_schema(&tx);
         let high = crate::durable_seq::high(&tx).unwrap();
         apply(&tx).unwrap();
+        crate::bootstrap::install_current_producers(&tx).unwrap();
         assert_eq!(owned_schema(&tx), once);
         assert_eq!(crate::durable_seq::high(&tx).unwrap(), high);
         let legacy: i64 = tx

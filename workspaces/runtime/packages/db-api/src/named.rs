@@ -1,4 +1,29 @@
 //! Fixed descriptor-owned statements. Only generated declarations construct tokens.
+//!
+//! Native fixed expression results use only SQLite primitives, optional primitives,
+//! or tuples of them. They are decoded by ordinal, without a persisted column codec.
+//! Custom result decoders and write-mode native queries are refused.
+//! ```compile_fail
+//! use studio_db_api::{Database, DbTable, DbQuery};
+//! struct Canvas; impl Database for Canvas {}
+//! #[derive(DbTable)] #[db(table="rows",database=Canvas)]
+//! struct Row { #[db(key)] id:i64 }
+//! struct Custom;
+//! #[derive(DbQuery)]
+//! #[db_query(database=Canvas,mode=read,cardinality=one,native,result=Custom,
+//! tables(rows=Row),columns(id=Row::ID),sql="SELECT {id} FROM {rows}")]
+//! struct Query;
+//! ```
+//! ```compile_fail
+//! use studio_db_api::{Database, DbTable, DbQuery};
+//! struct Canvas; impl Database for Canvas {}
+//! #[derive(DbTable)] #[db(table="rows",database=Canvas)]
+//! struct Row { #[db(key)] id:i64 }
+//! #[derive(DbQuery)]
+//! #[db_query(database=Canvas,mode=write,cardinality=one,native,result=i64,
+//! tables(rows=Row),columns(id=Row::ID),sql="DELETE FROM {rows} RETURNING {id}")]
+//! struct Query;
+//! ```
 use crate::*;
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 use rusqlite::{Connection, Statement as SqlStatement, types::ToSql};
@@ -190,7 +215,7 @@ impl<D: Database, P: QueryParams, R, M, C: Cardinality> NamedQuery<D, P, R, M, C
         }
     }
     /// Fixed SQL for schema diagnostics and query-plan inspection.
-    pub fn sql(&self) -> &'static str {
+    pub const fn sql(&self) -> &'static str {
         self.statement.sql
     }
 
@@ -281,7 +306,9 @@ impl<D: Database, P: QueryParams, R, M, C: Cardinality> NamedQuery<D, P, R, M, C
             return Err(rusqlite::Error::InvalidQuery.into());
         }
         for (i, column) in self.columns.iter().enumerate() {
-            if statement.column_name(i)? != column.name {
+            // Native fixed expressions are decoded by ordinal; persisted projections
+            // retain their descriptor-owned output names.
+            if !column.name.is_empty() && statement.column_name(i)? != column.name {
                 return Err(rusqlite::Error::InvalidQuery.into());
             }
         }
@@ -366,6 +393,67 @@ pub const fn query_column_descriptor<C: Column>(_: C) -> ColumnDescriptor {
         nullable: C::Stored::NULLABLE,
         private: false,
         codes: C::Stored::CODE_NAMES,
+    }
+}
+
+/// A fixed index name emitted by its owning table descriptor.
+/// An index hint cannot be attached to a different table.
+/// ```compile_fail
+/// use studio_db_api::{Database,DbTable,DbQuery};
+/// struct Db; impl Database for Db {}
+/// #[derive(DbTable)] #[db(table="a",database=Db)]
+/// struct A { #[db(key)] id:i64 }
+/// #[derive(DbTable)] #[db(table="b",database=Db,index(name="b_value",columns(value)))]
+/// struct B { #[db(key)] id:i64,value:i64 }
+/// #[derive(DbQuery)]
+/// #[db_query(database=Db,mode=read,cardinality=many,result=i64,decode=A::ID,
+///     tables(rows=A),indexes(rows=B::INDEX_B_VALUE),columns(id=A::ID),
+///     sql="SELECT {id} FROM {rows}")]
+/// struct WrongIndex;
+/// ```
+pub struct TableIndex<T: Table> {
+    position: usize,
+    owner: PhantomData<fn() -> T>,
+}
+impl<T: Table> TableIndex<T> {
+    #[doc(hidden)]
+    pub const fn from_descriptor(position: usize) -> Self {
+        Self {
+            position,
+            owner: PhantomData,
+        }
+    }
+}
+#[doc(hidden)]
+pub const fn query_index<D: Database, T: Table<Database = D>>(
+    index: &TableIndex<T>,
+) -> &'static str {
+    let _ = query_table::<D, T>();
+    T::INDEXES[index.position].name
+}
+
+/// A query may reuse only its hinted index's typed partial predicate. A
+/// nonpartial index cannot provide a predicate.
+/// ```compile_fail
+/// use studio_db_api::{Database,DbTable,DbQuery};
+/// struct Db; impl Database for Db {}
+/// #[derive(DbTable)] #[db(table="a",database=Db,index(name="a_id",columns(id)))]
+/// struct A { #[db(key)] id:i64 }
+/// #[derive(DbQuery)]
+/// #[db_query(database=Db,mode=read,cardinality=many,result=i64,decode=A::ID,
+///     tables(rows=A),indexes(rows=A::INDEX_A_ID),predicates(live=rows),columns(id=A::ID),
+///     sql="SELECT {id} FROM {rows} WHERE {live}")]
+/// struct MissingPredicate;
+/// const _: &str = MissingPredicate::QUERY.sql();
+/// ```
+#[doc(hidden)]
+pub const fn query_index_predicate<D: Database, T: Table<Database = D>>(
+    index: &TableIndex<T>,
+) -> &'static str {
+    let _ = query_table::<D, T>();
+    match T::INDEXES[index.position].predicate {
+        Some(predicate) if !predicate.is_empty() => predicate,
+        _ => panic!("index has no typed partial predicate"),
     }
 }
 

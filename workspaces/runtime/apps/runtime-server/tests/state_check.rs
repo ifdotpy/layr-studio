@@ -1,20 +1,50 @@
 use std::fs;
 use std::process::Command;
 
-#[test]
+#[tokio::test]
 #[allow(clippy::disallowed_methods)]
-fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
+async fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
     let directory = tempfile::tempdir().expect("owned test directory");
     let root = directory.path().to_path_buf();
     fs::create_dir_all(&root).expect("temporary state directory is created");
     let database = root.join("canvas.sqlite3");
-    let db = rusqlite::Connection::open(&database).expect("fixture database opens");
-    db.execute_batch(include_str!("fixtures/state-check.sql"))
-        .expect("fixture rows insert");
-    drop(db);
+    let store = studio_runtime_store::RuntimeStore::open(Some(&root))
+        .await
+        .expect("current-schema fixture opens");
+    store.transaction(|tx| {
+        let agent: studio_runtime_store::AgentRecord = studio_json::from_str(
+            r#"{"id":"valid-secret-id","rootId":"root-secret","accountKey":"default","epoch":0,"status":"idle","provider":"codex","compactions":0,"sandbox":null}"#,
+        )?;
+        studio_runtime_store::AgentRepository::put(tx, &agent)?;
+        // Deliberately bypass DTO admission so the operator checker sees the
+        // same malformed historical evidence as the frozen pre-cutover corpus.
+        tx.execute(
+            "INSERT INTO runtime_agents(id,record) VALUES('invalid-secret-id',?1)",
+            [r#"{"id":"invalid-secret-id","rootId":"root-secret","accountKey":"default","epoch":"broken","status":"idle","provider":"codex","compactions":0,"private":"private-record-content"}"#],
+        )?;
+        for (id, raw) in [
+            ("attempt-good", r#"{"id":"attempt-good","epoch":2}"#),
+            ("attempt-bad", r#"{"id":"attempt-bad","epoch":"wrong"}"#),
+        ] {
+            tx.execute("INSERT INTO runtime_execution_attempts(id,run,record) VALUES(?1,'fixture',?2)", [id, raw])?;
+        }
+        let task: studio_runtime_store::TaskRecord = studio_json::from_str(
+            r#"{"id":"task-secret-id","agent":"valid-secret-id","itemId":"item","turnId":"turn","type":"commandExecution","name":"command","kind":"command","status":"running","created":1,"reattachRecovery":{"state":"pending"},"outputPreviewOnly":true}"#,
+        )?;
+        studio_runtime_store::TaskRepository::put(tx, &task)?;
+        studio_runtime_store::peer_update_settings::PeerUpdateSettings { id: 1, auto_update: 0 }.upsert(tx)?;
+        assert_eq!(studio_runtime_store::peer_update_settings::PeerUpdateSettings::get(tx)?.into_iter().count(), 1);
+        Ok(())
+    }).await.expect("fixture rows insert");
+    store
+        .checkpoint_wal_passive()
+        .await
+        .expect("checkpoint fixture");
+    drop(store);
     let before = fs::read(&database).expect("fixture database is readable");
 
     let supervisor_path = root.join("supervisor.sqlite3");
+    fs::remove_file(&supervisor_path).expect("replace owned supervisor fixture");
     let supervisor = rusqlite::Connection::open(&supervisor_path).expect("supervisor fixture");
     supervisor.execute_batch("CREATE TABLE events(handle TEXT, payload TEXT); INSERT INTO events VALUES('private-handle','invalid JSON')").expect("previously unvalidated history");
     drop(supervisor);
@@ -66,8 +96,8 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         supervisor_before,
         fs::read(supervisor_path).expect("unchanged supervisor")
     );
-    // Frozen reports on main c26e8fc0 before wave 2; new reports may be added freely.
-    const PRE_WAVE_TWO_REPORTS: &[&str] = &[
+    // Keep the pre-wave-two coverage mapped to the current physical owners.
+    const CURRENT_REPORTS: &[&str] = &[
         "runtime_access_clients",
         "runtime_access_discovered",
         "runtime_access_invites",
@@ -89,10 +119,9 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         "runtime_federation_outbox",
         "runtime_federation_peers",
         "runtime_federation_rooms",
-        "runtime_federation_settings",
+        "metadata",
         "runtime_items",
         "runtime_monitors",
-        "runtime_peer_update_settings",
         "runtime_plans",
         "runtime_profiles",
         "runtime_projects",
@@ -105,12 +134,12 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         "runtime_usage_resumes",
         "runtime_work",
         "runtime_workspace_operations",
-        "sync_entities",
+        "publications",
         "user_terminals",
     ];
     assert!(
-        PRE_WAVE_TWO_REPORTS.iter().all(|name| names.contains(name)),
-        "pre-wave-two reports must remain present"
+        CURRENT_REPORTS.iter().all(|name| names.contains(name)),
+        "current owners retain the pre-wave-two report coverage"
     );
     // Registry and system checker owners define current coverage for the CLI.
     let expected: std::collections::BTreeSet<_> = studio_runtime_store::check_state_readonly(&root)
@@ -120,10 +149,16 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         .map(|table| table.table)
         .collect();
     assert_eq!(names, expected, "registry and system report coverage");
-    for retired in ["runtime_budget", "runtime_budget_usage"] {
+    for retired in [
+        "runtime_budget",
+        "runtime_budget_usage",
+        "sync_entities",
+        "runtime_peer_update_settings",
+        "runtime_federation_settings",
+    ] {
         assert!(
             !names.contains(retired),
-            "retired token-budget tables have no reports"
+            "retired tables have no reports: {retired}"
         );
     }
     assert!(
@@ -141,9 +176,20 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
     }
     let peer_settings = tables
         .iter()
-        .find(|table| table["table"] == "runtime_peer_update_settings")
+        .find(|table| table["table"] == "metadata")
         .expect("registered pilot is checked");
-    assert_eq!(peer_settings["row_count"], 1);
+    let metadata_rows = studio_runtime_store::check_state_readonly(&root)
+        .expect("current metadata report")
+        .tables
+        .into_iter()
+        .find(|table| table.table == "metadata")
+        .unwrap()
+        .row_count;
+    assert_eq!(peer_settings["row_count"], metadata_rows);
+    assert!(
+        metadata_rows >= 1,
+        "the peer settings partition retains its singleton"
+    );
     assert_eq!(peer_settings["rejected_count"], 0);
     let agents = tables
         .iter()

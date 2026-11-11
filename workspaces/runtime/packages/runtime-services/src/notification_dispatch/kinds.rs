@@ -426,13 +426,9 @@ pub(super) fn put_checked_task(
     tx: &Transaction<'_>,
     task_record: &TaskRecord,
 ) -> Result<(), NotificationDispatchError> {
-    let migrated: bool = tx
-        .query_row_cached(
-            "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key='task_window_migrated')",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(StoreError::from)?;
+    let migrated =
+        studio_runtime_store::ProjectionPublicationQueries::meta_exists(tx, "task_window_migrated")
+            .map_err(StoreError::from)?;
     let previous = if migrated {
         let task_id = task_record.id().as_ref();
         let previous_raw: Option<String> = tx
@@ -718,4 +714,29 @@ fn idle_episode_id(agent: &AgentRecord) -> Option<&str> {
         return None;
     };
     Some(id)
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_checked_task_reads_migration_marker() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction_with(|tx| {
+                let task = studio_runtime_schema::task_record::TaskRecord::new(
+                    "agent".into(),
+                    "item".into(),
+                    "turn".into(),
+                    studio_json::from_str("1").unwrap(),
+                    studio_runtime_schema::task_record::TaskType::CommandExecution,
+                    "Canonical".into(),
+                );
+                super::put_checked_task(tx, &task)
+            })
+            .await
+            .unwrap();
+    }
 }

@@ -353,11 +353,25 @@ async fn completion_failpoints_roll_back_all_rows_and_restart_is_replay_safe() {
                 .query_row("SELECT count(*) FROM turns", [], |r| r.get(0))
                 .expect("count");
             let sql = format!(
-                "CREATE TRIGGER p07_fail {timing} {op} ON {table} BEGIN SELECT RAISE(ABORT,'p07 injected crash'); END;"
+                "CREATE TRIGGER p07_fail {timing} {op} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'p07 injected crash'); END;",
+                table = if table == "durable_rows" {
+                    "changes"
+                } else {
+                    &table
+                },
+                partition_predicate = if table == "durable_rows" {
+                    format!(
+                        " WHEN NEW.kind={}",
+                        studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows
+                            as i64
+                    )
+                } else {
+                    String::new()
+                }
             );
             store
                 .transaction(move |tx| {
-                    tx.execute_batch(&sql)?;
+                    if table == "durable_rows" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, true)?; } else { tx.execute_batch(&sql)?; }
                     Ok(())
                 })
                 .await
@@ -385,8 +399,8 @@ async fn completion_failpoints_roll_back_all_rows_and_restart_is_replay_safe() {
                 turns_before
             );
             store
-                .transaction(|tx| {
-                    tx.execute_batch("DROP TRIGGER p07_fail")?;
+                .transaction(move |tx| {
+                    if table == "durable_rows" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch("DROP TRIGGER p07_fail")?; }
                     Ok(())
                 })
                 .await
@@ -593,7 +607,7 @@ async fn unknown_start_accepts_exact_client_receipt_without_resending_input() {
     let before = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent","rootId":"agent","epoch":0,"status":"running","accountKey":"default","threadId":"thread","turnEpoch":0,"turnId":null,"inFlight":true,"autoWake":true,"error":"turn/start response timed out; outcome unknown","startAttempt":{"id":"attempt","epoch":0,"accountKey":"default","threadId":"thread","connectionId":"connection","connectionGeneration":1,"requestTicket":"request","events":["event"],"created":1.0,"submitted":true,"executionOutcome":"unknown"}});
     seed(&store, &before).await;
     let before = agent(&store);
-    store.transaction(|tx|{tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','one original input','uncertain',1,0,NULL,NULL)",[])?;Ok(())}).await.expect("unknown input");
+    store.transaction(|tx|{studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','one original input','uncertain',1,0,NULL,NULL)",[])?; Ok(())})?;Ok(())}).await.expect("unknown input");
     let turn = json!({"id":"turn","status":"inProgress","items":[{"id":"input","type":"userMessage","clientId":"event"}]});
     let result = apply(
         &store,
@@ -1012,11 +1026,25 @@ async fn accepted_start_failpoints_never_deliver_input_without_its_attempt_recei
             let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
             seed(&store, &before).await;
             let sql = format!(
-                "CREATE TRIGGER p07_accept_fail {timing} {operation} ON {table} BEGIN SELECT RAISE(ABORT,'p07 crash'); END;"
+                "CREATE TRIGGER p07_accept_fail {timing} {operation} ON {table}{partition_predicate} BEGIN SELECT RAISE(ABORT,'p07 crash'); END;",
+                table = if table == "durable_rows" {
+                    "changes"
+                } else {
+                    &table
+                },
+                partition_predicate = if table == "durable_rows" {
+                    format!(
+                        " WHEN NEW.kind={}",
+                        studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows
+                            as i64
+                    )
+                } else {
+                    String::new()
+                }
             );
             store.transaction(move |tx|{
-                tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','original input','uncertain',1,0,NULL,NULL)",[])?;
-                tx.execute_batch(&sql)?;
+                studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','original input','uncertain',1,0,NULL,NULL)",[])?; Ok(())})?;
+                if table == "durable_rows" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, true)?; } else { tx.execute_batch(&sql)?; }
                 Ok(())
             }).await.expect("fault");
             assert!(
@@ -1052,8 +1080,8 @@ async fn accepted_start_failpoints_never_deliver_input_without_its_attempt_recei
                 "uncertain"
             );
             store
-                .transaction(|tx| {
-                    tx.execute_batch("DROP TRIGGER p07_accept_fail")?;
+                .transaction(move |tx| {
+                    if table == "durable_rows" && timing == "BEFORE" { studio_runtime_store::test_fixtures::canvas::set_failpoint(tx, studio_runtime_store::test_fixtures::canvas::FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows), studio_runtime_store::test_fixtures::canvas::FailpointOperation::Update, false)?; } else { tx.execute_batch("DROP TRIGGER p07_accept_fail")?; }
                     Ok(())
                 })
                 .await
@@ -1357,7 +1385,7 @@ async fn accepted_start_matches_real_python_agent_event_and_transcript_rows() {
     let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
     seed(&store, &case["before"]).await;
     store.transaction(|tx| {
-        tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','original input','uncertain',1,0,NULL,NULL)",[])?;
+        studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','original input','uncertain',1,0,NULL,NULL)",[])?; Ok(())})?;
         Ok(())
     }).await.expect("input");
     apply(
@@ -1409,10 +1437,8 @@ async fn accepted_terminal_start_calls_canonical_messages_and_finishes_atomicall
             "request_results",
             "runtime_outbox",
             "turns",
-            "sync_entities",
-            "sync_documents",
-            "sync_generation",
-            "sync_entity_meta",
+            "publications",
+            "metadata",
         ]
         .into_iter()
         .map(|table| {
@@ -1436,7 +1462,7 @@ async fn accepted_terminal_start_calls_canonical_messages_and_finishes_atomicall
             let before = &corpus()["accepted_start"]["before"];
             seed(&store, before).await;
             store.transaction(|tx| {
-            tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','original input','uncertain',1,0,NULL,NULL)",[])?;
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch,turn_id,error) VALUES('event','agent','user','original input','uncertain',1,0,NULL,NULL)",[])?; Ok(())})?;
             Ok(())
         }).await.expect("input");
             let original_rows = durable_rows(&store);

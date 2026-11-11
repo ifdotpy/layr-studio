@@ -153,13 +153,11 @@ async fn delete_with_ports(
     ports: Arc<dyn studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts>,
 ) -> Value {
     let reader = store.test_reader().expect("reader");
-    let seq = reader
-        .query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1",
-            [&id],
-            |r| r.get(0),
-        )
-        .expect("seq");
+    let seq = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+        &reader, "project", &id, false,
+    )
+    .expect("seq")
+    .expect("published project");
     let workspace = SyncDocumentsRepository::workspace_id(&reader).expect("workspace");
     drop(reader);
     let reply = project_deletion::execute(
@@ -299,13 +297,11 @@ async fn project_deletion_receipt_survives_store_restart() {
     let (root, store, project) = setup().await;
     let id = project["id"].as_str().expect("id").to_owned();
     let reader = store.test_reader().expect("reader");
-    let seq = reader
-        .query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1",
-            [&id],
-            |r| r.get(0),
-        )
-        .expect("seq");
+    let seq = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+        &reader, "project", &id, false,
+    )
+    .expect("seq")
+    .expect("published project");
     let workspace = SyncDocumentsRepository::workspace_id(&reader).expect("workspace");
     drop(reader);
     let first = delete(store.clone(), id.clone()).await;

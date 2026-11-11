@@ -54,17 +54,17 @@ impl OnlineMigration for Copy {
         tx: &mut studio_db_api::Tx<'_, studio_runtime_store::peer_update_settings::Canvas>,
         key: &i64,
         out: i64,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<i64> {
         tx.upsert(&Target { id: *key, v: out })?;
-        Ok(())
+        Ok(0)
     }
     fn remove(
         &self,
         tx: &mut studio_db_api::Tx<'_, studio_runtime_store::peer_update_settings::Canvas>,
         key: &i64,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<i64> {
         tx.delete::<Target>(&(*key,))?;
-        Ok(())
+        Ok(0)
     }
 }
 

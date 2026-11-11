@@ -4,16 +4,7 @@ use rusqlite::Transaction;
 use crate::StoreResult;
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
-    // Deletion evidence must use the same last-member selector as the guards.
-    for table in crate::durable_seq::DURABLE_TABLES {
-        if crate::entity_scopes::deleted_scope_sql(table.name, "OLD").is_some() {
-            tx.execute_batch(&format!(
-                "DROP TRIGGER IF EXISTS durable_{}_delete",
-                table.name
-            ))?;
-        }
-    }
-    crate::durable_seq::install(tx)?;
+    // F1 refreshes deletion producers together with all other writers at authority.
     crate::entity_scopes::install(tx)
 }
 
@@ -37,15 +28,17 @@ mod tests {
                 tx.execute("INSERT INTO runtime_plans(id,record) VALUES('legacy-plan','{\"id\":\"legacy-plan\",\"rootId\":1,\"rootId\":\"alpha\"}')", [])?;
                 Ok(())
             })?;
+            // The captured guard reads the historical durable source before its replacement.
+            <crate::clock_schema::DurableRows as studio_db_api::Table>::descriptor().install_if_absent(tx)?;
             // Exact UPDATE and INSERT guards captured from origin/main 81ffe643.
             tx.execute_batch("DROP TRIGGER immutable_scope_runtime_agents; DROP TRIGGER immutable_scope_runtime_agents_insert; DROP TRIGGER durable_runtime_plans_delete;")?;
             tx.execute_batch(include_str!("fixtures/w3_r_agent_scope.sql"))?;
             let error = AgentRepository::put(tx, &repaired()).unwrap_err();
-            assert!(error.to_string().contains(crate::entity_scopes::IMMUTABLE_SCOPE_ERROR));
-            // Model the catalog marker of a store that already applied W3-R.
-            let position = super::super::CATALOG.iter().position(|step| step.definition().id == "2026-11-09-repair-invalid-entity-scopes").unwrap();
-            let parent = super::super::catalog_fingerprint(&super::super::CATALOG[..position], super::super::MigrationTarget::Canvas);
-            tx.execute("UPDATE sync_entity_meta SET value=?1 WHERE key='migration_catalog'", [super::super::catalog_marker(tx, &parent)?])?;
+            assert!(error.to_string().contains(crate::entity_scopes::IMMUTABLE_SCOPE_ERROR), "{error}");
+            super::apply(tx)?;
+            crate::bootstrap::install_current_producers(tx)?;
+            studio_db_api::migration::retire_source::<crate::clock_schema::DurableRows>(
+                &mut crate::peer_update_settings::canvas_tx(tx))?;
             Ok(())
         }).await.unwrap();
         drop(store);

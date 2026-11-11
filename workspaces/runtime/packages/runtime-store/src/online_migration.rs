@@ -18,9 +18,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::peer_update_settings::Canvas;
 use rusqlite::types::Value as SqlValue;
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction};
 use studio_db_api::migration::{
-    CopyPlan, DirtyKey, MigrationKey, decode_key, encode_key, identifier, key_sql,
+    CopyPlan, MigrationKey, decode_key, encode_key, identifier, key_sql,
 };
 use studio_db_api::{MutableTable, Table, Tx};
 use studio_runtime_schema::persistence::MigrationStatus;
@@ -80,12 +80,20 @@ pub trait OnlineMigration: Send + Sync + 'static {
     type Out;
     /// Unique name made of `[a-z0-9_]`. It names the progress row and triggers.
     const NAME: &'static str;
+    /// Family streams stay tracked after exhaustion; their owner performs the
+    /// single final authority switch after all streams are ready.
+    const DEFER_FINISH: bool = false;
     /// Source table. Writes to it are tracked by triggers until completion.
     const SOURCE_TABLE: &'static str;
     /// Complete ordered source key, with a tie key for nullable identities.
     const SOURCE_KEYS: &'static [&'static str];
     fn source_keys(&self) -> &[&str] {
         Self::SOURCE_KEYS
+    }
+    /// Fixed first-key TEXT values omitted by a family's read-only source view.
+    /// Empty preserves the existing tracking SQL exactly.
+    fn excluded_first_keys(&self) -> &'static [&'static str] {
+        &[]
     }
     fn prepare(&self, _tx: &Transaction<'_>) -> StoreResult<()> {
         Ok(())
@@ -105,9 +113,10 @@ pub trait OnlineMigration: Send + Sync + 'static {
     /// Migration-only target write in the existing batch transaction.
     /// Write the target row of `key`. Must be idempotent (upsert): a batch can
     /// run again after a crash or when a dirty key is copied twice.
-    fn write(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key, out: Self::Out) -> StoreResult<()>;
+    /// Return the signed change in target coverage, in rows; the batch records it atomically.
+    fn write(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key, out: Self::Out) -> StoreResult<i64>;
     /// Delete the target row of `key` after its source row was deleted.
-    fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key) -> StoreResult<()>;
+    fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key) -> StoreResult<i64>;
     /// Verify and switch durable writer authority before this transaction commits.
     fn finish(&self, _tx: &Transaction<'_>) -> StoreResult<()> {
         Ok(())
@@ -136,12 +145,10 @@ where
     fn prepare(&self, tx: &Transaction<'_>) -> StoreResult<()> {
         T::descriptor().install_if_absent(tx)?;
         let name = progress_name(self);
-        let started: bool = tx.query_row(
-            "SELECT copy_source_rows IS NOT NULL FROM runtime_payload_migrations WHERE name=?1",
-            [&name],
-            |row| row.get(0),
-        )?;
-        if !started {
+        let mut typed = crate::peer_update_settings::canvas_tx(tx);
+        let mut progress = crate::migration_progress::load(&typed.read(), &name)?
+            .ok_or(StoreError::RecordContract("online migration was not begun"))?;
+        if progress.copy_source_rows.is_none() {
             self.require_empty(tx)?;
             // One snapshot, atomically with empty-target admission and triggers.
             let source_rows: i64 = tx.query_row(
@@ -149,7 +156,9 @@ where
                 [],
                 |row| row.get(0),
             )?;
-            tx.execute("UPDATE runtime_payload_migrations SET copy_source_rows=?2,copy_target_rows=0 WHERE name=?1",params![name,source_rows])?;
+            progress.copy_source_rows = Some(source_rows);
+            progress.copy_target_rows = Some(0);
+            crate::migration_progress::save(&mut typed, progress)?;
         }
         Ok(())
     }
@@ -173,7 +182,7 @@ where
         tx: &mut Tx<'_, Canvas>,
         key: &Self::Key,
         (out, evidence): Self::Out,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<i64> {
         let inserted = tx.insert_new(&out)?;
         if !inserted {
             tx.upsert(&out)?;
@@ -184,18 +193,20 @@ where
         if (self.target_evidence)(&actual)?.digest() != evidence.digest() {
             return Err(rusqlite::Error::InvalidQuery.into());
         }
-        adjust_copy_target_rows(tx, self, i64::from(inserted))?;
-        Ok(())
+        Ok(i64::from(inserted))
     }
-    fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key) -> StoreResult<()> {
+    fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key) -> StoreResult<i64> {
         let removed = tx.delete::<T>(&(self.target_key)(key))?;
-        adjust_copy_target_rows(tx, self, -i64::from(removed != 0))
+        Ok(-i64::from(removed != 0))
     }
     fn finish(&self, tx: &Transaction<'_>) -> StoreResult<()> {
         let mut typed = crate::peer_update_settings::canvas_tx(tx);
         // Empty start + injective mapping + verified writes make equal counters
         // a bijection. No table aggregates run under the final writer lock.
-        let covered:bool=tx.query_row("SELECT (copy_source_rows=copy_target_rows) IS 1 FROM runtime_payload_migrations WHERE name=?1",[progress_name(self)],|row|row.get(0))?;
+        let progress = crate::migration_progress::load(&typed.read(), &progress_name(self))?
+            .ok_or(StoreError::RecordContract("online migration was not begun"))?;
+        let covered = progress.copy_source_rows.is_some()
+            && progress.copy_source_rows == progress.copy_target_rows;
         if !covered {
             return Err(StoreError::RecordContract("online copy coverage mismatch"));
         }
@@ -209,15 +220,19 @@ fn adjust_copy_target_rows(
     migration: &impl OnlineMigration,
     delta: i64,
 ) -> StoreResult<()> {
-    use crate::clock_schema::queries::AdjustCopyTargetRows;
-    tx.named(
-        &AdjustCopyTargetRows::QUERY,
-        &AdjustCopyTargetRows {
-            name: &progress_name(migration),
-            delta: Some(delta),
-        },
-    )?;
-    Ok(())
+    let name = progress_name(migration);
+    let Some(mut row) = crate::migration_progress::load(&tx.read(), &name)? else {
+        return Ok(());
+    };
+    row.copy_target_rows = row
+        .copy_target_rows
+        .map(|count| {
+            count.checked_add(delta).ok_or(StoreError::RecordContract(
+                "online copy target count overflow",
+            ))
+        })
+        .transpose()?;
+    crate::migration_progress::save(tx, row)
 }
 
 /// Result of one batch.
@@ -225,12 +240,16 @@ fn adjust_copy_target_rows(
 pub enum Step {
     /// More work remains.
     Progress,
+    /// Caught up in this transaction; tracking and progress stay active.
+    Ready,
     /// The migration is complete and its triggers are gone.
     Complete,
 }
 
+pub(crate) const PROGRESS_PREFIX: &str = "online:";
+
 fn progress_name<M: OnlineMigration>(migration: &M) -> String {
-    format!("online:{}", migration.name())
+    format!("{PROGRESS_PREFIX}{}", migration.name())
 }
 
 fn now_seconds() -> f64 {
@@ -254,34 +273,48 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>, migration: &M) -> StoreRe
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
         "online migration name must match [a-z0-9_]+"
     );
-    crate::migrations::m2026_11_09_online_keys::apply(tx)?;
+    let mut typed = crate::peer_update_settings::canvas_tx(tx);
+    let legacy = typed
+        .read()
+        .table_exists::<crate::settings_schema::PayloadMigrations>()?;
+    if legacy {
+        crate::migrations::m2026_11_09_online_keys::apply(tx)?;
+    }
     let name = progress_name(migration);
-    tx.execute(
-        "INSERT OR IGNORE INTO runtime_payload_migrations(name,cursor,complete,status,updated,cursor_key) \
-         VALUES(?1,0,0,?2,?3,x'')",
-        params![name, MigrationStatus::Running.as_str(), now_seconds()],
-    )?;
-    // Raw SQL: progress schema is upgraded in stages and cannot require final descriptor columns here.
-    let complete: bool = tx.query_row(
-        "SELECT complete FROM runtime_payload_migrations WHERE name=?1",
-        [&name],
-        |row| row.get(0),
-    )?;
-    if complete {
+    let progress = crate::migration_progress::load(&typed.read(), &name)?;
+    if progress.as_ref().is_some_and(|row| row.complete != 0) {
         return Ok(());
+    }
+    if progress.is_none() {
+        crate::migration_progress::save(
+            &mut typed,
+            crate::migration_progress::State {
+                name: name.clone(),
+                cursor: 0,
+                complete: 0,
+                status: MigrationStatus::Running.as_str().to_owned(),
+                updated: Some(now_seconds()),
+                error: None,
+                cursor_key: Some(vec![]),
+                copy_source_rows: None,
+                copy_target_rows: None,
+            },
+        )?;
     }
     assert!(
         !migration.source_keys().is_empty(),
         "online migration requires a source key"
     );
     migration.prepare(tx)?;
-    crate::settings_schema::OnlineMigrationDirty::descriptor().install_if_absent(tx)?;
+    if legacy {
+        crate::settings_schema::OnlineMigrationDirty::descriptor().install_if_absent(tx)?;
+    }
     let [ins, upd, del] = trigger_names(migration);
     let table = identifier(M::SOURCE_TABLE);
     // Record all changes. Replaying a key above the cursor is idempotent and
     // avoids imposing an encoding comparison order on composite keys.
-    let record = |row: &str| {
-        let key = if M::Key::INTEGER {
+    let source_key = |row: &str| {
+        if M::Key::INTEGER {
             format!(
                 "{}.{}",
                 identifier(row),
@@ -289,7 +322,68 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>, migration: &M) -> StoreRe
             )
         } else {
             key_sql(migration.source_keys(), row)
+        }
+    };
+    if !legacy {
+        use crate::consolidation_kinds::CanvasMetadataKind as Kind;
+        use crate::metadata_schema::Metadata;
+        use crate::settings_schema::OnlineMigrationDirty as Dirty;
+        let metadata = identifier(Metadata::NAME);
+        let kind = studio_db_api::query_column::<Canvas, _>(Metadata::KIND);
+        let identity = studio_db_api::query_column::<Canvas, _>(Metadata::IDENTITY);
+        let dirty_migration = studio_db_api::query_column::<Canvas, _>(Metadata::DIRTY_MIGRATION);
+        let dirty_key = studio_db_api::query_column::<Canvas, _>(Metadata::DIRTY_KEY);
+        let text_key = studio_db_api::query_column::<Canvas, _>(Metadata::TEXT_KEY);
+        let count = studio_db_api::query_column::<Canvas, _>(Metadata::MIGRATION_SOURCE_ROWS);
+        let source_migration = studio_db_api::query_column::<Canvas, _>(Dirty::MIGRATION);
+        let source_dirty_key = studio_db_api::query_column::<Canvas, _>(Dirty::KEY);
+        let encoded = key_sql(
+            &[Dirty::__DB_COLUMN_MIGRATION, Dirty::__DB_COLUMN_KEY],
+            "dirty",
+        );
+        let eligible = |row: &str| {
+            let excluded = migration.excluded_first_keys();
+            if excluded.is_empty() {
+                return "1".to_owned();
+            }
+            let column = identifier(migration.source_keys()[0]);
+            let values = excluded
+                .iter()
+                .map(|value| format!("'{}'", value.replace('\'', "''")))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("({row}.{column} IS NULL OR {row}.{column} NOT IN ({values}))")
         };
+        let record = |row: &str| {
+            let key = source_key(row);
+            let predicate = eligible(row);
+            let code = Kind::DB_CODE_ONLINEMIGRATIONDIRTY;
+            format!(
+                "INSERT INTO {metadata}({kind},{identity},{dirty_migration},{dirty_key}) SELECT {code},{encoded},dirty.{source_migration},dirty.{source_dirty_key} FROM (SELECT '{name}' AS {source_migration},{key} AS {source_dirty_key}) AS dirty WHERE {predicate} ON CONFLICT({kind},{identity}) DO NOTHING;"
+            )
+        };
+        let delta = |value: &str, predicate: &str| {
+            let code = Kind::DB_CODE_PAYLOADMIGRATIONS;
+            format!(
+                "UPDATE {metadata} SET {count}={count}+({value}) WHERE {kind}={code} AND {text_key}='{name}' AND {count} IS NOT NULL AND ({predicate});"
+            )
+        };
+        let old = eligible("OLD");
+        let new = eligible("NEW");
+        let change =
+            format!("(CASE WHEN {new} THEN 1 ELSE 0 END)-(CASE WHEN {old} THEN 1 ELSE 0 END)");
+        tx.execute_batch(&format!(
+            "DROP TRIGGER IF EXISTS {ins}; DROP TRIGGER IF EXISTS {upd}; DROP TRIGGER IF EXISTS {del};\
+             CREATE TRIGGER {ins} AFTER INSERT ON {table} BEGIN {} {} END;\
+             CREATE TRIGGER {upd} AFTER UPDATE ON {table} BEGIN {} {} {} END;\
+             CREATE TRIGGER {del} AFTER DELETE ON {table} BEGIN {} {} END;",
+            record("NEW"), delta("1", &new), record("OLD"), record("NEW"),
+            delta(&change, &format!("({old})<>({new})")), record("OLD"), delta("-1", &old),
+        ))?;
+        return Ok(());
+    }
+    let record = |row: &str| {
+        let key = source_key(row);
         format!(
             "INSERT INTO {DIRTY_TABLE}(migration,key) VALUES('{name}',{key}) ON CONFLICT(migration,key) DO NOTHING;"
         )
@@ -299,6 +393,45 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>, migration: &M) -> StoreRe
             "UPDATE runtime_payload_migrations SET copy_source_rows=copy_source_rows+({delta}) WHERE name='{name}' AND copy_source_rows IS NOT NULL;"
         )
     };
+    let excluded = migration.excluded_first_keys();
+    if !excluded.is_empty() {
+        let column = identifier(migration.source_keys()[0]);
+        let values = excluded
+            .iter()
+            .map(|value| format!("'{}'", value.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(",");
+        let eligible = |row: &str| {
+            let row = identifier(row);
+            format!("({row}.{column} IS NULL OR {row}.{column} NOT IN ({values}))")
+        };
+        let filtered_record = |row: &str| {
+            let key = source_key(row);
+            let predicate = eligible(row);
+            format!(
+                "INSERT INTO {DIRTY_TABLE}(migration,key) SELECT '{name}',{key} WHERE {predicate} ON CONFLICT(migration,key) DO NOTHING;"
+            )
+        };
+        let filtered_delta = |delta: &str, predicate: &str| {
+            format!(
+                "UPDATE runtime_payload_migrations SET copy_source_rows=copy_source_rows+({delta}) WHERE name='{name}' AND copy_source_rows IS NOT NULL AND ({predicate});"
+            )
+        };
+        let old = eligible("OLD");
+        let new = eligible("NEW");
+        let delta =
+            format!("(CASE WHEN {new} THEN 1 ELSE 0 END)-(CASE WHEN {old} THEN 1 ELSE 0 END)");
+        tx.execute_batch(&format!(
+            "DROP TRIGGER IF EXISTS {ins}; DROP TRIGGER IF EXISTS {upd}; DROP TRIGGER IF EXISTS {del};\
+             CREATE TRIGGER {ins} AFTER INSERT ON {table} BEGIN {} {} END;\
+             CREATE TRIGGER {upd} AFTER UPDATE ON {table} BEGIN {} {} {} END;\
+             CREATE TRIGGER {del} AFTER DELETE ON {table} BEGIN {} {} END;",
+            filtered_record("NEW"), filtered_delta("1", &new),
+            filtered_record("OLD"), filtered_record("NEW"), filtered_delta(&delta, &format!("({old})<>({new})")),
+            filtered_record("OLD"), filtered_delta("-1", &old),
+        ))?;
+        return Ok(());
+    }
     tx.execute_batch(&format!(
         "DROP TRIGGER IF EXISTS {ins}; DROP TRIGGER IF EXISTS {upd}; DROP TRIGGER IF EXISTS {del};\
          CREATE TRIGGER {ins} AFTER INSERT ON {table} BEGIN {} {} END;\
@@ -345,13 +478,10 @@ pub fn step<M: OnlineMigration>(
     clock: &dyn Clock,
 ) -> StoreResult<Step> {
     let name = progress_name(migration);
-    // Raw SQL: progress schema is upgraded in stages and cannot require final descriptor columns here.
-    let complete: bool = tx.query_row(
-        "SELECT complete FROM runtime_payload_migrations WHERE name=?1",
-        [&name],
-        |row| row.get(0),
-    )?;
-    if complete {
+    let progress =
+        crate::migration_progress::load(&crate::peer_update_settings::canvas_read(tx), &name)?
+            .ok_or(StoreError::RecordContract("online migration was not begun"))?;
+    if progress.complete != 0 {
         return Ok(Step::Complete);
     }
     let mut budget = Budget {
@@ -361,15 +491,14 @@ pub fn step<M: OnlineMigration>(
         rows: 0,
     };
 
+    let mut target_row_delta = 0_i64;
+
     // 1. Re-copy changed keys; a dirty key invalidates its prior row evidence.
-    let dirty = tx
-        .prepare_cached(&format!(
-            "SELECT key FROM {DIRTY_TABLE} WHERE migration=?1 ORDER BY key LIMIT ?2"
-        ))?
-        .query_map(params![name, BATCH_MAX_ROWS as i64], |row| {
-            row.get::<_, DirtyKey>(0)
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let dirty = crate::migration_progress::dirty(
+        &crate::peer_update_settings::canvas_read(tx),
+        &name,
+        BATCH_MAX_ROWS as i64,
+    )?;
     let mut dirty_left = dirty.len() == BATCH_MAX_ROWS;
     for stored_key in &dirty {
         let key = stored_key.decode::<M::Key>()?;
@@ -377,7 +506,7 @@ pub fn step<M: OnlineMigration>(
             dirty_left = true;
             break;
         }
-        budget.timed(|| match migration.read_one(tx, &key)? {
+        let delta = budget.timed(|| match migration.read_one(tx, &key)? {
             Some(row) => migration.write(
                 &mut crate::peer_update_settings::canvas_tx(tx),
                 &key,
@@ -385,21 +514,22 @@ pub fn step<M: OnlineMigration>(
             ),
             None => migration.remove(&mut crate::peer_update_settings::canvas_tx(tx), &key),
         })?;
-        tx.execute(
-            &format!("DELETE FROM {DIRTY_TABLE} WHERE migration=?1 AND key=?2"),
-            params![name, stored_key],
+        target_row_delta =
+            target_row_delta
+                .checked_add(delta)
+                .ok_or(StoreError::RecordContract(
+                    "online copy target delta overflow",
+                ))?;
+        crate::migration_progress::clear_dirty(
+            &mut crate::peer_update_settings::canvas_tx(tx),
+            &name,
+            stored_key,
         )?;
     }
 
     // 2. Copy rows above the mark, unless dirty keys still wait.
-    let (mark, cursor_key): (i64, Option<Vec<u8>>) = tx
-        .query_row(
-            "SELECT cursor,cursor_key FROM runtime_payload_migrations WHERE name=?1",
-            [&name],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?
-        .ok_or(StoreError::RecordContract("online migration was not begun"))?;
+    let mark = progress.cursor;
+    let cursor_key = progress.cursor_key;
     let after = match cursor_key.as_deref() {
         Some([]) => None,
         Some(bytes) => Some(decode_key::<M::Key>(bytes)?),
@@ -416,13 +546,19 @@ pub fn step<M: OnlineMigration>(
             if !budget.allows_next() {
                 break;
             }
-            budget.timed(|| {
+            let delta = budget.timed(|| {
                 migration.write(
                     &mut crate::peer_update_settings::canvas_tx(tx),
                     &key,
                     migration.transform(row)?,
                 )
             })?;
+            target_row_delta =
+                target_row_delta
+                    .checked_add(delta)
+                    .ok_or(StoreError::RecordContract(
+                        "online copy target delta overflow",
+                    ))?;
             new_cursor = Some(encode_key(&key));
             new_mark = if M::Key::INTEGER {
                 match key.values()[0] {
@@ -438,7 +574,17 @@ pub fn step<M: OnlineMigration>(
     }
 
     // 3. Record the mark, or completion when nothing was left to do.
-    let done = exhausted && !dirty_left;
+    let ready = exhausted && !dirty_left;
+    let done = ready && !M::DEFER_FINISH;
+    // Target rows and coverage share this transaction; no per-row ledger round-trip.
+    // Flush before finish so its bijection check observes this batch's exact coverage.
+    if target_row_delta != 0 {
+        adjust_copy_target_rows(
+            &mut crate::peer_update_settings::canvas_tx(tx),
+            migration,
+            target_row_delta,
+        )?;
+    }
     if done {
         migration.finish(tx)?;
         for trigger in trigger_names(migration) {
@@ -450,12 +596,26 @@ pub fn step<M: OnlineMigration>(
     } else {
         MigrationStatus::Running
     };
-    tx.execute(
-        "UPDATE runtime_payload_migrations SET cursor=?2,complete=?3,status=?4,updated=?5,error=NULL,cursor_key=?6 \
-         WHERE name=?1",
-        params![name, new_mark, i64::from(done), status.as_str(), now_seconds(),new_cursor],
+    // finish may have retired the old ledger. Resolve again in this transaction,
+    // retaining counts changed by this batch rather than the pre-batch snapshot.
+    let mut typed = crate::peer_update_settings::canvas_tx(tx);
+    let mut progress = crate::migration_progress::load(&typed.read(), &name)?.ok_or(
+        StoreError::RecordContract("online migration progress disappeared"),
     )?;
-    Ok(if done { Step::Complete } else { Step::Progress })
+    progress.cursor = new_mark;
+    progress.complete = i64::from(done);
+    progress.status = status.as_str().to_owned();
+    progress.updated = Some(now_seconds());
+    progress.error = None;
+    progress.cursor_key = new_cursor;
+    crate::migration_progress::save(&mut typed, progress)?;
+    Ok(if done {
+        Step::Complete
+    } else if ready {
+        Step::Ready
+    } else {
+        Step::Progress
+    })
 }
 
 /// Drive a migration to completion, one batch per write transaction, with
@@ -477,7 +637,7 @@ pub async fn run<M: OnlineMigration>(
             .transaction(move |tx| step(tx, step_migration.as_ref(), &SystemClock::new()))
             .await;
         match outcome {
-            Ok(Step::Complete) => return Ok(Step::Complete),
+            Ok(step @ (Step::Complete | Step::Ready)) => return Ok(step),
             Ok(Step::Progress) => {
                 tokio::time::sleep(Duration::from_millis(BATCH_PAUSE_MS)).await;
             }
@@ -485,17 +645,20 @@ pub async fn run<M: OnlineMigration>(
                 let message = error.to_string();
                 let name = progress_name(migration.as_ref());
                 // The original error is the one to return; a failed status write is only logged.
-                if let Err(status_error) =
-                    store
-                        .transaction(move |tx| {
-                            tx.execute(
-                            "UPDATE runtime_payload_migrations SET status=?2,error=?3,updated=?4 \
-                             WHERE name=?1",
-                            params![name, MigrationStatus::Error.as_str(), message, now_seconds()],
-                        )?;
-                            Ok::<(), StoreError>(())
-                        })
-                        .await
+                if let Err(status_error) = store
+                    .transaction(move |tx| {
+                        let mut typed = crate::peer_update_settings::canvas_tx(tx);
+                        if let Some(mut row) =
+                            crate::migration_progress::load(&typed.read(), &name)?
+                        {
+                            row.status = MigrationStatus::Error.as_str().to_owned();
+                            row.error = Some(message);
+                            row.updated = Some(now_seconds());
+                            crate::migration_progress::save(&mut typed, row)?;
+                        }
+                        Ok::<(), StoreError>(())
+                    })
+                    .await
                 {
                     eprintln!("The migration failure was not recorded: {status_error}");
                 }
@@ -522,6 +685,11 @@ pub struct Progress {
 
 /// Read the progress of every online migration.
 pub fn progress(db: &Connection) -> rusqlite::Result<Vec<Progress>> {
+    if !crate::peer_update_settings::canvas_read(db)
+        .table_exists::<crate::settings_schema::PayloadMigrations>()?
+    {
+        return crate::migration_progress::progress(db);
+    }
     let dirty_table: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
         [DIRTY_TABLE],
@@ -554,6 +722,7 @@ pub fn progress(db: &Connection) -> rusqlite::Result<Vec<Progress>> {
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::{OptionalExtension, params};
     use std::cell::Cell;
 
     use super::*;
@@ -687,6 +856,162 @@ mod tests {
         }
         db
     }
+    #[test]
+    fn copy_batch_prepares_and_updates_coverage_once_and_rolls_back_together() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let mut db = copy_database();
+        let plan = copy_plan();
+        {
+            let transaction = db.transaction().unwrap();
+            begin(&transaction, &plan).unwrap();
+            crate::metadata_schema::Metadata::descriptor()
+                .install_if_absent(&transaction)
+                .unwrap();
+            let mut typed = crate::peer_update_settings::canvas_tx(&transaction);
+            let state = crate::migration_progress::load(&typed.read(), &progress_name(&plan))
+                .unwrap()
+                .unwrap();
+            studio_db_api::migration::retire_source::<crate::settings_schema::PayloadMigrations>(
+                &mut typed,
+            )
+            .unwrap();
+            studio_db_api::migration::retire_source::<crate::settings_schema::OnlineMigrationDirty>(&mut typed).unwrap();
+            crate::migration_progress::save(&mut typed, state).unwrap();
+            begin(&transaction, &plan).unwrap();
+            transaction.commit().unwrap();
+        }
+        let prepares = Arc::new(AtomicUsize::new(0));
+        let prepared = prepares.clone();
+        db.authorizer(Some(move |context: AuthContext<'_>| {
+            if matches!(context.action, AuthAction::Select) {
+                prepared.fetch_add(1, Ordering::Relaxed);
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+        let ledger_writes = Arc::new(AtomicUsize::new(0));
+        let written = ledger_writes.clone();
+        db.update_hook(Some(
+            move |_: rusqlite::hooks::Action, _: &str, table: &str, _: i64| {
+                if table == "metadata" {
+                    written.fetch_add(1, Ordering::Relaxed);
+                }
+            },
+        ))
+        .unwrap();
+        {
+            let transaction = db.transaction().unwrap();
+            assert_eq!(
+                step(&transaction, &plan, &ThreadClock).unwrap(),
+                Step::Progress
+            );
+            eprintln!(
+                "COPY_BATCH prepares={} ledger_writes={}",
+                prepares.load(Ordering::Relaxed),
+                ledger_writes.load(Ordering::Relaxed)
+            );
+            assert!(
+                prepares.load(Ordering::Relaxed) < 20,
+                "one bounded page must not prepare ledger SELECTs per row: {}",
+                prepares.load(Ordering::Relaxed)
+            );
+            assert!(
+                ledger_writes.load(Ordering::Relaxed) <= 2,
+                "coverage and cursor writes must be bounded per transaction: {}",
+                ledger_writes.load(Ordering::Relaxed)
+            );
+            let progress = crate::migration_progress::load(
+                &crate::peer_update_settings::canvas_read(&transaction),
+                &progress_name(&plan),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(progress.copy_target_rows, Some(500));
+            transaction.rollback().unwrap();
+        }
+        db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        db.update_hook(None::<fn(rusqlite::hooks::Action, &str, &str, i64)>)
+            .unwrap();
+        let read = crate::peer_update_settings::canvas_read(&db);
+        let progress = crate::migration_progress::load(&read, &progress_name(&plan))
+            .unwrap()
+            .unwrap();
+        assert_eq!(progress.copy_target_rows, Some(0));
+        assert_eq!(progress.cursor, 0);
+        assert!(studio_db_api::db_query!(read, Target).unwrap().is_empty());
+    }
+
+    #[test]
+    fn active_copy_resumes_after_ledger_and_dirty_authority_retirement() {
+        use crate::settings_schema::{OnlineMigrationDirty, PayloadMigrations};
+        let mut db = copy_database();
+        let plan = copy_plan();
+        let transaction = db.transaction().unwrap();
+        begin(&transaction, &plan).unwrap();
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&transaction)
+            .unwrap();
+        let mut typed = crate::peer_update_settings::canvas_tx(&transaction);
+        let state = crate::migration_progress::load(&typed.read(), &progress_name(&plan))
+            .unwrap()
+            .unwrap();
+        studio_db_api::migration::retire_source::<PayloadMigrations>(&mut typed).unwrap();
+        studio_db_api::migration::retire_source::<OnlineMigrationDirty>(&mut typed).unwrap();
+        crate::migration_progress::save(&mut typed, state).unwrap();
+        begin(&transaction, &plan).unwrap();
+        assert!(!typed.read().table_exists::<OnlineMigrationDirty>().unwrap());
+        let mut row = typed.get::<Source>(&("a".into(), 0)).unwrap().unwrap();
+        row.value = 99;
+        typed.upsert(&row).unwrap();
+        assert_eq!(
+            step(&transaction, &plan, &ThreadClock).unwrap(),
+            Step::Progress
+        );
+        let copied = crate::migration_progress::load(&typed.read(), &progress_name(&plan))
+            .unwrap()
+            .unwrap();
+        assert_eq!(copied.copy_source_rows, Some(1200));
+        assert_eq!(copied.copy_target_rows, Some(500));
+        assert_eq!(
+            decode_key::<(String, i64)>(copied.cursor_key.as_ref().unwrap()).unwrap(),
+            ("a".into(), -102)
+        );
+        let mut corrupt = crate::migration_progress::load(&typed.read(), &progress_name(&plan))
+            .unwrap()
+            .unwrap();
+        corrupt.cursor_key = Some(vec![255]);
+        crate::migration_progress::save(&mut typed, corrupt).unwrap();
+        assert!(
+            step(&transaction, &plan, &ThreadClock).is_err(),
+            "canonical corrupt cursor must refuse before authority"
+        );
+        assert!(typed.get::<Authority>(&(1,)).unwrap().is_none());
+        crate::migration_progress::save(&mut typed, copied).unwrap();
+        while step(&transaction, &plan, &ThreadClock).unwrap() == Step::Progress {}
+        assert_eq!(
+            typed
+                .get::<Target>(&("a".into(), 0))
+                .unwrap()
+                .unwrap()
+                .value,
+            198
+        );
+        assert_eq!(
+            crate::migration_progress::load(&typed.read(), &progress_name(&plan))
+                .unwrap()
+                .unwrap()
+                .complete,
+            1
+        );
+        assert!(!typed.read().table_exists::<PayloadMigrations>().unwrap());
+        transaction.commit().unwrap();
+    }
+
     fn copy_batch(db: &mut Connection, plan: &CopyPlan<Source, Target>) -> StoreResult<Step> {
         let tx = db.transaction()?;
         let outcome = step(&tx, plan, &ThreadClock)?;
@@ -1011,16 +1336,16 @@ mod tests {
             TEST_CLOCK.with(|c| c.set(c.get() + Duration::from_millis(cost)));
             Ok(row * 2)
         }
-        fn write(&self, tx: &mut Tx<'_, Canvas>, key: &i64, out: i64) -> StoreResult<()> {
+        fn write(&self, tx: &mut Tx<'_, Canvas>, key: &i64, out: i64) -> StoreResult<i64> {
             if CRASH_AT.with(Cell::get) == Some(*key) {
                 return Err(StoreError::RecordContract("simulated crash"));
             }
             tx.upsert(&PlainTarget { id: *key, v2: out })?;
-            Ok(())
+            Ok(0)
         }
-        fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &i64) -> StoreResult<()> {
+        fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &i64) -> StoreResult<i64> {
             tx.delete::<PlainTarget>(&(*key,))?;
-            Ok(())
+            Ok(0)
         }
     }
 

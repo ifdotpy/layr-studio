@@ -65,13 +65,45 @@ pub(crate) fn admitted_owner_token(id: &str, signature: &str, cutover_ms: i64) -
 }
 
 pub fn seed_expired_before_ms(tx: &Transaction<'_>, cutover_ms: i64) -> Result<()> {
-    tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('expired_before_ms',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.expired_before_ms',?1) WHERE coalesce(json_extract(record,'$.expired_before_ms'),0)<?1",[cutover_ms])?;
+    let floor = crate::repositories::orchestration_settings::request_expiration_floor(tx)?;
+    let missing = crate::peer_update_settings::canvas_read(tx)
+        .get::<crate::metadata_schema::OrchestrationSettings>(&(
+            crate::consolidation_codec::nullable_text_identity(&Some("global".into()), 0),
+        ))?
+        .is_none();
+    if missing || cutover_ms > floor {
+        crate::repositories::orchestration_settings::set_request_expiration_floor(tx, cutover_ms)?;
+    }
     Ok(())
 }
 
 pub fn prepare_schema(tx: &Transaction<'_>) -> Result<()> {
     crate::receipt_schema::create(tx)?;
-    crate::settings_schema::OrchestrationSettings::descriptor().install_if_absent(tx)?;
-    crate::settings_schema::PayloadMigrations::descriptor().install_if_absent(tx)?;
+    crate::metadata_schema::Metadata::descriptor().install_if_absent(tx)?;
     Ok(())
+}
+#[cfg(test)]
+mod canonical_tests {
+    #[test]
+    fn receipt_preparation_and_expiry_use_canonical_metadata() {
+        let mut db = crate::test_canvas();
+        let transaction = db.transaction().unwrap();
+        super::prepare_schema(&transaction).unwrap();
+        assert!(
+            !crate::schema::table_exists(&transaction, "runtime_orchestration_settings").unwrap()
+        );
+        assert!(!crate::schema::table_exists(&transaction, "runtime_payload_migrations").unwrap());
+        super::seed_expired_before_ms(&transaction, 25).unwrap();
+        super::seed_expired_before_ms(&transaction, 10).unwrap();
+        assert_eq!(
+            crate::repositories::orchestration_settings::request_expiration_floor(&transaction)
+                .unwrap(),
+            25
+        );
+        transaction.rollback().unwrap();
+        assert_eq!(
+            crate::repositories::orchestration_settings::request_expiration_floor(&db).unwrap(),
+            0
+        );
+    }
 }

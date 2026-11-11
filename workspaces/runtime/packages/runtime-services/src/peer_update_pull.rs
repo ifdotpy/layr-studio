@@ -1541,7 +1541,11 @@ exit 0"#;
         let f = fixture().await;
         f.mac
             .transaction(|tx| {
-                tx.execute("INSERT INTO runtime_peer_update_settings VALUES(1,0)", [])?;
+                studio_runtime_store::peer_update_settings::PeerUpdateSettings {
+                    id: 1,
+                    auto_update: 0,
+                }
+                .upsert(tx)?;
                 Ok::<(), studio_runtime_store::StoreError>(())
             })
             .await

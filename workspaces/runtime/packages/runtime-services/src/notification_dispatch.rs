@@ -2722,6 +2722,8 @@ mod tests {
 
     pub(super) fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("memory database opens");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
+            .expect("canonical storage");
         connection
             .execute_batch(
                 &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
@@ -2731,20 +2733,37 @@ mod tests {
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL, monitor_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN COALESCE(record->>'$.status','lost') ELSE 'lost' END) STORED);
                  CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL);
                  CREATE TABLE runtime_item_blobs(id TEXT PRIMARY KEY,hash TEXT NOT NULL,size INTEGER NOT NULL);
-                 CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                 
                  CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT NOT NULL,record TEXT NOT NULL);
-                 CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
+                 
+                 
+                   
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
-                 CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT);
+                 
                  CREATE VIRTUAL TABLE runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');
                  CREATE TABLE runtime_search_next_meta(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,search_rowid INTEGER NOT NULL UNIQUE);
-                 CREATE TABLE runtime_search_rollout(id INTEGER PRIMARY KEY,phase TEXT,cursor INTEGER,updated REAL);
-                 INSERT INTO runtime_search_rollout VALUES(1,'complete',0,0);
-                 INSERT INTO sync_entities VALUES('agent','agent',1,'old','{\"collection\":\"agent\",\"id\":\"agent\",\"value\":{\"id\":\"agent\",\"status\":\"running\",\"threadId\":\"thread\",\"accountKey\":\"default\",\"turnId\":\"turn\",\"inFlight\":true,\"events\":0}}',0);"),
+                 
+                 
+                 "),
             )
             .expect("notification dispatch tables create");
+        let tx = connection
+            .unchecked_transaction()
+            .expect("fixture seed transaction");
+        studio_runtime_store::test_fixtures::canvas::seed_entity(&tx, &studio_runtime_store::clock_schema::SyncEntities {
+            collection:"agent".into(), id:"agent".into(), seq:1, hash:"old".into(), payload:Some(r#"{"collection":"agent","id":"agent","value":{"id":"agent","status":"running","threadId":"thread","accountKey":"default","turnId":"turn","inFlight":true,"events":0}}"#.into()), deleted:0
+        }, 1).expect("prior entity seed");
+        studio_runtime_store::test_fixtures::canvas::seed_search_rollout(
+            &tx,
+            &studio_runtime_store::settings_schema::SearchRollout {
+                id: 1,
+                phase: "complete".into(),
+                cursor: 0,
+                updated: 0.0,
+            },
+        )
+        .expect("search rollout seed");
+        tx.commit().expect("fixture seed commit");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt owner tables");
         fixture_attempt(&connection, "attempt");
         let agent_record = json!({"id":"agent","provider":studio_runtime_schema::ProviderKind::Codex,
@@ -3837,13 +3856,7 @@ mod tests {
             let mut connection = database();
             let tx = connection.transaction().expect("transaction");
             let rows = |tx: &rusqlite::Transaction<'_>| {
-                [
-                    "runtime_agents",
-                    "runtime_items",
-                    "sync_entities",
-                    "runtime_outbox",
-                ]
-                .map(|table| {
+                let sources = ["runtime_agents", "runtime_items", "runtime_outbox"].map(|table| {
                     let mut statement = tx
                         .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
                         .expect("rows");
@@ -3857,7 +3870,11 @@ mod tests {
                         .expect("query")
                         .collect::<Result<Vec<_>, _>>()
                         .expect("records")
-                })
+                });
+                (
+                    sources,
+                    studio_runtime_store::test_fixtures::canvas::entities(tx).expect("entities"),
+                )
             };
             let before = rows(&tx);
             let streams = NotificationStreamBuffer::default();

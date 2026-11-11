@@ -4,7 +4,7 @@ use studio_runtime_store::RuntimeStore;
 #[tokio::test]
 async fn migration_baseline_missing_catalog_refuses_before_any_database_write() {
     let root = tempfile::tempdir().unwrap();
-    drop(RuntimeStore::open(Some(root.path())).await.unwrap());
+    write_supported_fixture(root.path());
     let path = root.path().join("canvas.sqlite3");
     let db = Connection::open(&path).unwrap();
     db.execute(
@@ -61,8 +61,10 @@ async fn migration_baseline_supported_release_upgrades_and_reopens_with_current_
         store.transaction(|tx| {
             let budget: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='runtime_budget')", [], |r| r.get(0))?;
             assert!(!budget);
-            let cursors: i64 = tx.query_row("SELECT count(*) FROM pragma_table_info('runtime_payload_migrations') WHERE name IN ('cursor_key','copy_source_rows','copy_target_rows')", [], |r| r.get(0))?;
+            let cursors: i64 = tx.query_row("SELECT count(*) FROM pragma_table_info('metadata') WHERE name IN ('migration_cursor_key','migration_source_rows','migration_target_rows')", [], |r| r.get(0))?;
             assert_eq!(cursors, 3);
+            assert!(!studio_runtime_store::peer_update_settings::canvas_read(tx)
+                .table_exists::<studio_runtime_store::settings_schema::PayloadMigrations>()?);
             let agent = studio_runtime_store::AgentRecord::from_value(studio_json::json!({"id":"baseline-current","rootId":"baseline-current","provider":"codex","accountKey":"default","epoch":0,"compactions":0,"status":"idle"}))?;
             studio_runtime_store::AgentRepository::put(tx, &agent)?;
             assert!(studio_runtime_store::AgentRepository::get(tx, &studio_runtime_store::AgentId::from("baseline-current"))?.is_some());
@@ -92,20 +94,20 @@ async fn migration_baseline_populated_preledger_release_upgrade_preserves_missin
         ],
     );
     let checkpoint = "2026-11-07-explicit-review-model";
+    let db = Connection::open(root.path().join("canvas.sqlite3")).expect("fixture database");
+    let present: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM runtime_payload_migrations WHERE name=?1)",
+            [checkpoint],
+            |row| row.get(0),
+        )
+        .expect("historical checkpoint");
+    assert!(
+        !present,
+        "the historical upgrade never wrote this checkpoint"
+    );
+    drop(db);
     for _ in 0..2 {
-        let db = Connection::open(root.path().join("canvas.sqlite3")).expect("fixture database");
-        let present: bool = db
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM runtime_payload_migrations WHERE name=?1)",
-                [checkpoint],
-                |row| row.get(0),
-            )
-            .expect("historical checkpoint");
-        assert!(
-            !present,
-            "the historical upgrade never wrote this checkpoint"
-        );
-        drop(db);
         let store = RuntimeStore::open(Some(root.path()))
             .await
             .expect("valid populated release upgrade opens");
@@ -129,6 +131,13 @@ async fn migration_baseline_populated_preledger_release_upgrade_preserves_missin
                     )?
                     .expect("preserved work");
                     assert_eq!(work.value()["title"], "Preserved upgrade task");
+                    assert!(
+                        !RuntimeStore::payload_migration_checkpoint_exists(
+                            db,
+                            "2026-11-07-explicit-review-model"
+                        )?,
+                        "missing historical checkpoint remains absent after migration and reopen"
+                    );
                     Ok(())
                 },
             )

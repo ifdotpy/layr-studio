@@ -459,12 +459,7 @@ mod tests {
         use studio_runtime_schema::persistence::{
             OutboxKind, REQUEST_RESULT_TTL_MS, RequestIdentity,
         };
-        let mut db = Connection::open_in_memory().expect("database");
-        crate::receipt_schema::create(&db).expect("schema");
-        db.execute_batch(
-            "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-        )
-        .expect("policy");
+        let mut db = crate::fresh_state::test_canvas();
         let root = RequestIdentity::issue_root();
         let now = super::now_ms().expect("clock");
         let tx = db.transaction().expect("transaction");

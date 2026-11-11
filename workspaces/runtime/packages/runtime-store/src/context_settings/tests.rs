@@ -14,6 +14,26 @@ fn descriptors() -> [studio_db_api::Descriptor; 7] {
     ]
 }
 
+fn registration(descriptor: studio_db_api::Descriptor) -> studio_db_api::Registration {
+    if descriptor.name == TranscriptRevisionsStorageRow::NAME {
+        // F1 retains this descriptor only to read its frozen migration source.
+        assert!(
+            !crate::canvas_schema::registry()
+                .iter()
+                .any(|entry| entry.descriptor.name == descriptor.name)
+        );
+        studio_db_api::Registration {
+            descriptor,
+            check: TranscriptRevisionsStorageRow::state_check,
+        }
+    } else {
+        crate::canvas_schema::registry()
+            .into_iter()
+            .find(|entry| entry.descriptor.name == descriptor.name)
+            .unwrap()
+    }
+}
+
 #[derive(Deserialize)]
 struct Catalog {
     #[serde(rename = "canvas.sqlite3")]
@@ -37,6 +57,18 @@ fn context_settings_descriptors_match_catalog_and_keep_existing_rows_exact() {
     let catalog: Catalog = studio_json::from_str(crate::fresh_state::SNAPSHOT).unwrap();
     let mut db = rusqlite::Connection::open_in_memory().unwrap();
     for descriptor in descriptors() {
+        if descriptor.name == TranscriptRevisionsStorageRow::NAME {
+            assert!(
+                !catalog
+                    .canvas
+                    .sqlite_master
+                    .iter()
+                    .any(|entry| entry.name == descriptor.name)
+            );
+            registration(descriptor);
+            descriptor.install_if_absent(&db).unwrap();
+            continue;
+        }
         let entry = catalog
             .canvas
             .sqlite_master
@@ -120,10 +152,7 @@ fn context_settings_descriptors_match_catalog_and_keep_existing_rows_exact() {
         status
     );
     for descriptor in descriptors() {
-        let report = crate::canvas_schema::registry()
-            .into_iter()
-            .find(|registration| registration.descriptor.name == descriptor.name)
-            .unwrap();
+        let report = registration(descriptor);
         let check = (report.check)(&db).unwrap();
         assert_eq!(check.rejected_count, 0, "{} state check", descriptor.name);
     }
@@ -233,10 +262,7 @@ fn context_settings_new_reports_only_count_legacy_rows() {
         .into_iter()
         .filter(|entry| !matches!(entry.name, "runtime_assets" | "runtime_profiles"))
     {
-        let registration = crate::canvas_schema::registry()
-            .into_iter()
-            .find(|entry| entry.descriptor.name == descriptor.name)
-            .unwrap();
+        let registration = registration(descriptor);
         let report = (registration.check)(&db).unwrap();
         assert_eq!(report.row_count, 1, "{} rows", registration.descriptor.name);
         assert_eq!(

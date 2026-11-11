@@ -1408,11 +1408,11 @@ mod tests {
                     studio_json::json!({"id":"agent"}),
                     false,
                 )?;
-                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                studio_runtime_store::SyncDocumentsRepository::put_entity_hash(
                     tx,
                     "transcript:agent",
-                    "item",
-                    studio_json::json!({"text":"hello"}),
+                    "item:item",
+                    &studio_runtime_store::sha256_hex(b"hello"),
                     false,
                 )?;
                 Ok(())

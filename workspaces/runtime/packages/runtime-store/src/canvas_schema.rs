@@ -1,7 +1,5 @@
 //! Canvas table registry; each descriptor has one family owner.
-use crate::clock_schema::*;
-use crate::peer_update_settings::{Canvas, PeerUpdateSettings};
-use crate::settings_schema::*;
+use crate::peer_update_settings::Canvas;
 use crate::work_history::{WorkDecisionsStorageRow, WorkReleasesStorageRow, WorkResultsStorageRow};
 use studio_db_api::db_schema;
 
@@ -16,9 +14,12 @@ pub(crate) fn install(
     Ok(())
 }
 
-pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
+pub(crate) fn registry() -> [studio_db_api::Registration; 95] {
     db_schema![Canvas;
         crate::queue_schema::ToolRequestAliasIndex,
+        crate::metadata_schema::Metadata,
+        crate::change_schema::Changes,
+        crate::publication_schema::Publications,
         crate::agent_tables::AgentsStorageRow,
         crate::agent_tables::AgentVolatileStorageRow,
         crate::agent_tables::AgentMovesStorageRow,
@@ -33,11 +34,9 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
         crate::access_tables::AccessClientsRow,
         crate::access_tables::AccessDiscoveredRow,
         crate::access_tables::AccessInvitesRow,
-        AccessLocalAlias,
         crate::access_tables::AccessNameRequestsRow,
         crate::access_tables::AccessNameTargetsRow,
         crate::access_tables::AccessNoncesRow,
-        AccessSettings,
         crate::access_tables::AccessUnrevokesRow,
         crate::item_monitor_terminal::ItemsRow,
         crate::item_monitor_terminal::ItemBlobsRow,
@@ -47,28 +46,18 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
         crate::item_monitor_terminal::TerminalOutputRow,
         crate::item_monitor_terminal::TerminalDecoderRow,
         crate::item_monitor_terminal::TerminalCursorRow,
-        AgentPublicationState,
-        AgentRecordGeneration,
         crate::interaction_tables::ApprovalsRow,
         crate::interaction_tables::ChatMessagesRow,
-        ClientCommandWatermarks,
         crate::interaction_tables::ComplaintRow,
-        DurableFloor,
-        DurableRows,
         crate::access_tables::FederationIdentityRow,
         crate::access_tables::FederationInboxRow,
         crate::access_tables::FederationInvitesRow,
         crate::access_tables::FederationPeersRow,
         crate::access_tables::FederationRoomsRow,
-        FederationSettings,
         crate::project_grants::GrantRow,
         crate::interaction_tables::GraphEdgesRow,
         crate::interaction_tables::GroupsRow,
         crate::interaction_tables::MessagesRow,
-        OnlineMigrationDirty,
-        OrchestrationSettings,
-        PayloadMigrations,
-        PeerUpdateSettings,
         crate::receipt_tables::RequestResultsRow,
         crate::receipt_tables::OutboxStorageRow,
         crate::receipt_tables::AccountStateRow,
@@ -82,9 +71,6 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
         crate::receipt_tables::ErrorIncidentRow,
         crate::interaction_tables::RequestRow,
         crate::interaction_tables::RoomRow,
-        SchedulerAgentChanges,
-        SchedulerAgentChangeState,
-        SearchRollout,
         crate::access_tables::ServerExecAuditRow,
         crate::access_tables::ServerExecInputRow,
         crate::access_tables::ServerExecRow,
@@ -98,15 +84,6 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
         crate::context_settings::ContextRemindersStorageRow,
         crate::context_settings::ModelStatusStorageRow,
         crate::context_settings::ProfilesStorageRow,
-        crate::context_settings::TranscriptRevisionsStorageRow,
-        SidebarOrder,
-        StoredTextBatches,
-        SyncDocuments,
-        SyncEntities,
-        SyncEntityMeta,
-        SyncGeneration,
-        SyncIdentity,
-        TaskWindowState,
         crate::voice_storage::VoiceApprovalRow,
         crate::voice_storage::VoiceDeliveryRow,
         crate::voice_storage::VoiceRecordRow,
@@ -140,6 +117,8 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 116] {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::clock_schema::*;
+    use crate::settings_schema::*;
     use studio_db_api::Table;
 
     #[derive(serde::Deserialize)]
@@ -212,6 +191,7 @@ pub(crate) mod tests {
         .unwrap();
         let tx = db.transaction().unwrap();
         crate::feature_schema::prepare(&tx).unwrap();
+        crate::bootstrap::install_current_producers(&tx).unwrap();
         for name in ["summary_messageReceipt_delete", "summary_task_delete"] {
             let actual: String = tx
                 .query_row(
@@ -247,8 +227,6 @@ pub(crate) mod tests {
     #[test]
     fn clocks_settings_descriptors_preserve_existing_state() {
         let db = crate::fresh_state::test_canvas();
-        crate::clock_schema::prepare_features(&db).expect("clock features");
-        crate::settings_schema::prepare_features(&db).expect("settings features");
         for registration in registry() {
             let descriptor = registration.descriptor;
             let (rows, rejected) = (registration.check)(&db).expect(descriptor.name).counts();
@@ -258,32 +236,41 @@ pub(crate) mod tests {
                 descriptor.name
             );
         }
-        // Lazy table owners are installed by the real feature preparation path.
-        for name in [TaskWindowState::NAME, AgentPublicationState::NAME] {
-            let wanted = registry()
-                .into_iter()
-                .find(|entry| entry.descriptor.name == name)
-                .expect("registered")
-                .descriptor;
-            let sql: String = db
-                .query_row(
-                    "SELECT sql FROM sqlite_master WHERE name=?1",
-                    [name],
-                    |row| row.get(0),
-                )
-                .expect("installed feature");
-            assert_eq!(sql, wanted.ddl, "{name} lazy DDL");
+        let current = studio_db_api::catalog::export(&db).unwrap();
+        for descriptor in [
+            crate::metadata_schema::Metadata::descriptor(),
+            crate::change_schema::Changes::descriptor(),
+            crate::publication_schema::Publications::descriptor(),
+        ] {
+            let installed = current
+                .iter()
+                .find(|entry| entry.name == descriptor.name)
+                .unwrap();
+            assert_eq!(installed.sql, descriptor.ddl);
         }
         let scratch = rusqlite::Connection::open_in_memory().expect("scratch");
-        install(&scratch, &[OnlineMigrationDirty::descriptor()]).expect("dirty owner");
-        let sql: String = scratch
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE name=?1",
-                [OnlineMigrationDirty::NAME],
-                |row| row.get(0),
-            )
-            .expect("installed dirty");
-        assert_eq!(sql, OnlineMigrationDirty::DDL);
+        for descriptor in [
+            TaskWindowState::descriptor(),
+            AgentPublicationState::descriptor(),
+            OnlineMigrationDirty::descriptor(),
+        ] {
+            assert!(
+                !registry()
+                    .iter()
+                    .any(|row| row.descriptor.name == descriptor.name),
+                "retired owner is source-only"
+            );
+            descriptor.install_if_absent(&scratch).unwrap();
+            let objects = studio_db_api::catalog::export(&scratch).unwrap();
+            assert_eq!(
+                objects
+                    .iter()
+                    .find(|entry| entry.name == descriptor.name)
+                    .unwrap()
+                    .sql,
+                descriptor.ddl
+            );
+        }
     }
 
     #[test]
@@ -307,12 +294,14 @@ pub(crate) mod tests {
         let tx = db.transaction().expect("settings transaction");
         crate::FederationRepository::set_enabled(&tx, true).expect("write settings");
         let row = crate::peer_update_settings::canvas_tx(&tx)
-            .get::<FederationSettings>(&("global".to_owned(),))
+            .get::<crate::metadata_schema::FederationSettings>(&(
+                crate::consolidation_codec::nullable_text_identity(&Some("global".into()), 0),
+            ))
             .expect("read settings")
             .expect("row");
-        let updated = row.record.value().extensions["updated"].as_str();
+        let updated = row.federation_record.value().extensions["updated"].as_str();
         assert_eq!(
-            row.record.raw(),
+            row.federation_record.raw(),
             format!(r#"{{"enabled":true,"updated":{updated}}}"#)
         );
         tx.rollback().expect("caller owns rollback");
@@ -322,8 +311,18 @@ pub(crate) mod tests {
     fn metadata_marker_query_keeps_sql_comparison_semantics() {
         let db = rusqlite::Connection::open_in_memory().expect("db");
         db.execute_batch(SyncEntityMeta::DDL).expect("legacy table");
-        db.execute_batch("INSERT INTO sync_entity_meta VALUES('text','1'),('blob',x'31'),('other','0'),(NULL,'1')").expect("history");
-        for key in ["text", "blob", "other", "missing"] {
+        db.execute_batch(
+            "INSERT INTO sync_entity_meta VALUES('text','1'),('other','0'),(NULL,'1')",
+        )
+        .expect("history");
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let transaction = db.unchecked_transaction().unwrap();
+        SyncEntityMeta::put(&transaction, "text", "1").unwrap();
+        SyncEntityMeta::put(&transaction, "other", "0").unwrap();
+        transaction.commit().unwrap();
+        for key in ["text", "other", "missing"] {
             let previous: bool = db
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
@@ -344,54 +343,46 @@ pub(crate) mod tests {
         let mut db = crate::fresh_state::test_canvas();
         let before = crate::durable_seq::high(&db).expect("counter");
         let tx = db.transaction().expect("publication transaction");
-        let raw = r#"{ "unknown": [1,2], "id": "row" }"#;
+        let raw = r#"{ "collection":"fixture", "id":"row", "value": { "unknown": [1,2] } }"#;
         assert!(
-            crate::SyncDocumentsRepository::put_entity_hash(
-                &tx,
-                "transcript:fixture",
-                "row",
-                "one",
-                false
-            )
-            .expect("first publication")
+            crate::SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "one", false)
+                .expect("first publication")
         );
         let first = crate::durable_seq::high(&tx).expect("first counter");
         assert!(first > before);
         assert!(
-            !crate::SyncDocumentsRepository::put_entity_hash(
-                &tx,
-                "transcript:fixture",
-                "row",
-                "one",
-                false
-            )
-            .expect("no-op")
+            !crate::SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "one", false)
+                .expect("no-op")
         );
         assert_eq!(crate::durable_seq::high(&tx).expect("no-op counter"), first);
-        crate::peer_update_settings::canvas_tx(&tx)
-            .upsert(&SyncEntities {
-                collection: "transcript:fixture".into(),
+        let source_rowid = crate::test_fixtures::canvas::entities(&tx)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.collection == "fixture" && row.id == "row")
+            .unwrap()
+            .source_rowid;
+        crate::test_fixtures::canvas::seed_entity(
+            &tx,
+            &SyncEntities {
+                collection: "fixture".into(),
                 id: "row".into(),
                 seq: first,
                 hash: "one".into(),
                 payload: Some(raw.into()),
                 deleted: 0,
-            })
-            .expect("exact raw evidence");
-        let stored = crate::peer_update_settings::canvas_tx(&tx)
-            .get::<SyncEntities>(&("transcript:fixture".into(), "row".into()))
-            .expect("read")
-            .expect("row");
+            },
+            source_rowid,
+        )
+        .expect("exact raw evidence");
+        let stored = crate::test_fixtures::canvas::entities(&tx)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.collection == "fixture" && row.id == "row")
+            .unwrap();
         assert_eq!(stored.payload.as_deref(), Some(raw));
         assert!(
-            crate::SyncDocumentsRepository::put_entity_hash(
-                &tx,
-                "transcript:fixture",
-                "row",
-                "two",
-                true
-            )
-            .expect("tombstone")
+            crate::SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "two", true)
+                .expect("tombstone")
         );
         assert!(crate::durable_seq::high(&tx).expect("tombstone counter") > first);
         tx.rollback().expect("outer rollback");
@@ -400,12 +391,11 @@ pub(crate) mod tests {
             before
         );
         assert_eq!(
-            db.query_row(
-                "SELECT count(*) FROM sync_entities WHERE collection='transcript:fixture'",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .expect("rollback"),
+            crate::test_fixtures::canvas::entities(&db)
+                .unwrap()
+                .iter()
+                .filter(|row| row.collection == "fixture")
+                .count(),
             0
         );
     }

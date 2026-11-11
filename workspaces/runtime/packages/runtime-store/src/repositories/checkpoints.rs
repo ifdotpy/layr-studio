@@ -1278,7 +1278,7 @@ mod tests {
                 agent["workspaceOperation"] = json!("checkpoint");
                 agent["workspaceReservationId"] = json!("checkpoint:lost");
                 crate::AgentRepository::put(tx, &crate::AgentRecord::from_value(agent)?)?;
-                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent','a',1,'fixture',?1,0)", [json!({"collection":"agent","id":"a","value":{"id":"a","workspaceOperation":"checkpoint","workspaceReservationId":"checkpoint:lost"}}).to_string()])?;
+                crate::SyncDocumentsRepository::put_entity(tx, "agent", "a", json!({"id":"a","workspaceOperation":"checkpoint","workspaceReservationId":"checkpoint:lost"}), false)?;
                 if terminal {
                     super::insert_object(tx, "runtime_workspace_operations", "checkpoint:lost", &saved)?;
                 }

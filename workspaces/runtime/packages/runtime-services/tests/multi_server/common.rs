@@ -43,35 +43,37 @@ pub fn typed_data<T: serde::de::DeserializeOwned>() -> T {
 }
 
 pub async fn store() -> (tempfile::TempDir, Arc<RuntimeStore>) {
+    use studio_runtime_store::test_fixtures::canvas;
+
     let root = test_directory();
+    canvas::write_supported_fixture(root.path()).expect("restore supported historical state");
+    {
+        let tx = canvas::open_supported_canvas(root.path()).expect("open historical canvas");
+        canvas::install_legacy_source_schema(&tx).expect("install historical source schema");
+        // The frozen dump predates the drop of the old outbox tables, so its
+        // statements on them are skipped.
+        // Receipt rows in the frozen snapshot predate the cutover. Tests
+        // create current receipt owners through their caller or migrate
+        // the individual legacy row they exercise.
+        let sql = fixture()
+            .canvas_sql
+            .lines()
+            .filter(|line| {
+                !line.contains("runtime_access_receipts")
+                    && !line.starts_with("INSERT INTO \"runtime_server_inbox\"")
+                    && !line.starts_with("INSERT INTO \"runtime_server_outbox\"")
+                    && !line.starts_with("DELETE FROM \"runtime_server_outbox\"")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        tx.execute_batch(&sql)
+            .expect("restore frozen multi-server rows");
+    }
     let store = Arc::new(
-        RuntimeStore::open(Some(root.path()))
+        canvas::migrate_legacy(root.path())
             .await
-            .expect("open fixture state"),
+            .expect("migrate frozen multi-server state"),
     );
-    store
-        .transaction_with(|tx| {
-            // The frozen dump predates the drop of the old outbox tables, so its
-            // statements on them are skipped.
-            // Receipt rows in the frozen snapshot predate the cutover. Tests
-            // create current receipt owners through their caller or migrate
-            // the individual legacy row they exercise.
-            let sql = fixture()
-                .canvas_sql
-                .lines()
-                .filter(|line| {
-                    !line.contains("runtime_access_receipts")
-                        && !line.starts_with("INSERT INTO \"runtime_server_inbox\"")
-                        && !line.starts_with("INSERT INTO \"runtime_server_outbox\"")
-                        && !line.starts_with("DELETE FROM \"runtime_server_outbox\"")
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            tx.execute_batch(&sql)?;
-            Ok::<_, studio_runtime_store::StoreError>(())
-        })
-        .await
-        .expect("restore frozen multi-server rows");
     (root, store)
 }
 

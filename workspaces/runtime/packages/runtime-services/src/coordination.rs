@@ -1169,6 +1169,8 @@ mod tests {
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory database opens");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
+            .expect("canonical storage");
         connection.execute_batch(
             &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE groups(id TEXT PRIMARY KEY,name TEXT NOT NULL,members TEXT NOT NULL);
              CREATE TABLE graph_edges(id TEXT PRIMARY KEY,source TEXT NOT NULL,target TEXT NOT NULL,kind TEXT NOT NULL,UNIQUE(source,target,kind));
@@ -1177,11 +1179,11 @@ mod tests {
              CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,created REAL,epoch INTEGER,turn_id TEXT,error TEXT);
              CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL, monitor_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN COALESCE(record->>'$.status','lost') ELSE 'lost' END) STORED);
              CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-             CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+             
              CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
-             CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));
-             CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,deleted INTEGER NOT NULL DEFAULT 0);
-             CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE IF NOT EXISTS agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT);  CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);")
+             
+             
+                 ")
         ).expect("coordination schema creates");
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
@@ -1201,6 +1203,24 @@ mod tests {
     }
 
     fn count(connection: &Connection, table: &str) -> i64 {
+        match table {
+            "durable_rows" => {
+                return studio_runtime_store::test_fixtures::canvas::changes(connection)
+                    .expect("changes")
+                    .len() as i64;
+            }
+            "sync_entities" => {
+                return studio_runtime_store::test_fixtures::canvas::entities(connection)
+                    .expect("entities")
+                    .len() as i64;
+            }
+            "sync_documents" => {
+                return studio_runtime_store::test_fixtures::canvas::documents(connection)
+                    .expect("documents")
+                    .len() as i64;
+            }
+            _ => {}
+        }
         connection
             .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
                 row.get(0)
@@ -1215,15 +1235,10 @@ mod tests {
     }
 
     #[test]
-    fn refused_chat_validation_does_not_advance_sqlite_sequence() {
+    fn refused_chat_validation_does_not_advance_publication_sequence() {
         let mut connection = database();
-        let before: i64 = connection
-            .query_row(
-                "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_documents'),0)",
-                [],
-                |row| row.get(0),
-            )
-            .expect("sequence reads");
+        let before = studio_runtime_store::durable_seq::high_and_floor(&connection)
+            .expect("publication clock reads");
         let transaction = connection.transaction().expect("transaction starts");
         let result = create_chat(&transaction, "chat", "Team", &["alias".into()]);
         assert!(matches!(
@@ -1231,13 +1246,8 @@ mod tests {
             Err(CoordinationError::RequiresDependency(_))
         ));
         drop(transaction);
-        let after: i64 = connection
-            .query_row(
-                "SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='sync_documents'),0)",
-                [],
-                |row| row.get(0),
-            )
-            .expect("sequence reads after refusal");
+        let after = studio_runtime_store::durable_seq::high_and_floor(&connection)
+            .expect("publication clock reads");
         assert_eq!(after, before);
     }
 
@@ -2150,10 +2160,7 @@ mod tests {
     #[test]
     fn late_chat_mark_failure_rolls_back_group_edges_and_marks() {
         let mut connection = database();
-        connection.execute_batch(
-            "CREATE TRIGGER fail_chat_mark BEFORE INSERT ON durable_rows
-             WHEN NEW.tbl='chat_views' BEGIN SELECT RAISE(ABORT,'injected chat mark failure'); END;",
-        ).expect("failure trigger creates");
+        connection.execute_batch(&format!("CREATE TRIGGER fail_chat_mark BEFORE INSERT ON changes WHEN NEW.kind={kind} AND NEW.source_label='chat_views' BEGIN SELECT RAISE(ABORT,'injected chat mark failure'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasChangesKind::DB_CODE_DURABLEROWS)).expect("failure trigger creates");
         let transaction = connection.transaction().expect("transaction starts");
         let result = create_chat(
             &transaction,

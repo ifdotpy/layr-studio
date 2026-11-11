@@ -260,23 +260,26 @@ mod tests {
 
     #[test]
     fn agent_sync_writes_mark_the_agent_views_at_a_new_sequence() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
-        connection
-            .execute_batch(
-                "CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id));
-                 CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,4);",
-            )
+        let mut connection = crate::fresh_state::test_canvas();
+        let tx = connection.transaction().expect("clock transaction");
+        crate::peer_update_settings::canvas_tx(&tx)
+            .partition::<crate::metadata_schema::SyncGeneration>()
+            .put(&crate::metadata_schema::SyncGeneration {
+                identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                source_rowid: 1,
+                integer_key: 1,
+                sync_generation: 4,
+            })
             .expect("counter fixture creates");
+        tx.commit().expect("clock commits");
         let mark = |connection: &Connection| {
-            connection
-                .query_row(
-                    "SELECT seq FROM durable_rows WHERE tbl='agent_views' AND id='a'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
+            crate::peer_update_settings::canvas_read(connection)
+                .get::<crate::change_schema::DurableRows>(&(studio_db_api::migration::encode_key(
+                    &("agent_views".to_owned(), "a".to_owned()),
+                ),))
+                .expect("agent views mark reads")
                 .expect("agent views mark exists")
+                .sequence
         };
         type Write = dyn Fn(&rusqlite::Transaction<'_>) -> Result<(), StoreError>;
         let writes: [&Write; 4] = [

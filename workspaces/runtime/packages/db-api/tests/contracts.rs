@@ -112,7 +112,17 @@ struct RetireWitness {
 #[test]
 fn retirement_removes_owned_objects_atomically_and_preserves_other_tables() {
     let mut db = Connection::open_in_memory().unwrap();
+    assert!(
+        !studio_db_api::Read::from_adapter(&db, &Canvas)
+            .table_exists::<RetireWitness>()
+            .unwrap()
+    );
     RetireWitness::descriptor().install_if_absent(&db).unwrap();
+    assert!(
+        studio_db_api::Read::from_adapter(&db, &Canvas)
+            .table_exists::<RetireWitness>()
+            .unwrap()
+    );
     TextKey::descriptor().install_if_absent(&db).unwrap();
     db.execute_batch(
         "CREATE TRIGGER retire_insert AFTER INSERT ON retire_witness BEGIN SELECT 1; END",
@@ -122,6 +132,7 @@ fn retirement_removes_owned_objects_atomically_and_preserves_other_tables() {
         let transaction = db.transaction().unwrap();
         let mut tx = Tx::from_adapter(&transaction, &Canvas);
         studio_db_api::migration::retire_source::<RetireWitness>(&mut tx).unwrap();
+        assert!(!tx.read().table_exists::<RetireWitness>().unwrap());
         assert!(
             !studio_db_api::catalog::export(&transaction)
                 .unwrap()
@@ -137,6 +148,11 @@ fn retirement_removes_owned_objects_atomically_and_preserves_other_tables() {
             .filter(|object| object.table == RetireWitness::NAME)
             .count(),
         3
+    );
+    assert!(
+        studio_db_api::Read::from_adapter(&db, &Canvas)
+            .table_exists::<RetireWitness>()
+            .unwrap()
     );
     let transaction = db.transaction().unwrap();
     studio_db_api::migration::retire_source::<RetireWitness>(&mut Tx::from_adapter(
@@ -1680,4 +1696,509 @@ mod f1_nullable_cursor {
         transaction.execute("INSERT INTO f1_nullable_source(rowid,id,payload) VALUES(99,CAST(X'FF' AS TEXT),'bad UTF8')",[]).unwrap();
         assert!(plan.read_after(&transaction, None, 100).is_err());
     }
+}
+
+#[derive(DbTable)]
+#[db(table="owned_index_rows",database=Canvas,index(name="owned_category",columns(category,id)))]
+struct OwnedIndexRow {
+    #[db(key)]
+    id: i64,
+    category: i64,
+}
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=i64,decode=OwnedIndexRow::ID,
+    tables(rows=OwnedIndexRow),indexes(rows=OwnedIndexRow::INDEX_OWNED_CATEGORY),
+    columns(id=OwnedIndexRow::ID,category=OwnedIndexRow::CATEGORY),
+    sql="SELECT {id} FROM {rows} WHERE {category}=?1")]
+struct OwnedIndexQuery {
+    #[db(column=OwnedIndexRow::CATEGORY)]
+    category: i64,
+}
+#[test]
+fn named_query_index_hint_is_owned_and_used() {
+    let mut db = Connection::open_in_memory().unwrap();
+    OwnedIndexRow::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&OwnedIndexRow { id: 2, category: 7 }).unwrap();
+    assert_eq!(
+        tx.read()
+            .collect(&OwnedIndexQuery::QUERY, &OwnedIndexQuery { category: 7 })
+            .unwrap(),
+        [2]
+    );
+    assert!(OwnedIndexQuery::QUERY.sql().contains("INDEXED BY"));
+    assert!(
+        OwnedIndexQuery::QUERY
+            .sql()
+            .contains(OwnedIndexRow::INDEXES[0].name)
+    );
+}
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=write,cardinality=none,result=(),
+    tables(rows=RetireWitness), columns(id=RetireWitness::ID,value=RetireWitness::VALUE),
+    sql="UPDATE {rows} SET {value}=?2 WHERE {id}=?1")]
+struct ConnectionWriteWitness {
+    #[db(column=RetireWitness::ID)]
+    id: i64,
+    #[db(column=RetireWitness::VALUE)]
+    value: i64,
+}
+
+#[test]
+fn connection_write_requires_an_active_transaction_and_preserves_rollback() {
+    use studio_db_api::ConnectionWrite;
+    let db = Connection::open_in_memory().unwrap();
+    RetireWitness::descriptor().install_if_absent(&db).unwrap();
+    assert!(ConnectionWrite::from_adapter(&db, &Canvas).is_err());
+    let query = ConnectionWriteWitness { id: 1, value: 9 };
+    {
+        let transaction = db.unchecked_transaction().unwrap();
+        Tx::from_adapter(&transaction, &Canvas)
+            .insert(&RetireWitness { id: 1, value: 2 })
+            .unwrap();
+        ConnectionWrite::from_adapter(&db, &Canvas)
+            .unwrap()
+            .named(&ConnectionWriteWitness::QUERY, &query)
+            .unwrap();
+        assert_eq!(
+            Tx::from_adapter(&transaction, &Canvas)
+                .get::<RetireWitness>(&(1,))
+                .unwrap()
+                .unwrap()
+                .value,
+            9
+        );
+        // Dropping the caller's transaction rolls back the typed named write too.
+    }
+    assert!(
+        studio_db_api::Read::from_adapter(&db, &Canvas)
+            .get::<RetireWitness>(&(1,))
+            .unwrap()
+            .is_none()
+    );
+    let transaction = db.unchecked_transaction().unwrap();
+    let mut stale = ConnectionWrite::from_adapter(&db, &Canvas).unwrap();
+    transaction.commit().unwrap();
+    assert!(stale.named(&ConnectionWriteWitness::QUERY, &query).is_err());
+    assert!(db.is_autocommit());
+}
+
+#[derive(DbTable)]
+#[db(table="nonnull_copy_cursor",database=Canvas)]
+struct NonNullCopyCursor {
+    #[db(key)]
+    scope: String,
+    #[db(key)]
+    ordinal: i64,
+    value: i64,
+}
+#[test]
+fn nonnullable_copy_cursor_seeks_past_unrelated_prefix_rows() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    use studio_db_api::migration::{CopyPlan, Evidence};
+    let mut db = Connection::open_in_memory().unwrap();
+    NonNullCopyCursor::descriptor()
+        .install_if_absent(&db)
+        .unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    for ordinal in 0..2000 {
+        tx.insert(&NonNullCopyCursor {
+            scope: "scope".into(),
+            ordinal,
+            value: ordinal,
+        })
+        .unwrap();
+    }
+    transaction.commit().unwrap();
+    let plan = CopyPlan {
+        name: "nonnull_cursor_seek",
+        source_keys: &["scope", "ordinal"],
+        source_key: |row: &NonNullCopyCursor| (row.scope.clone(), row.ordinal),
+        target_key: Clone::clone,
+        transform: Ok,
+        source_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_select: NonNullCopyCursor::SELECT_QUERY,
+        finish: |_| Ok(()),
+    };
+    let steps = Arc::new(AtomicUsize::new(0));
+    let observed = steps.clone();
+    db.progress_handler(
+        1,
+        Some(move || {
+            observed.fetch_add(1, Ordering::Relaxed);
+            false
+        }),
+    )
+    .unwrap();
+    let rows = plan
+        .read_after(&db, Some(&("scope".into(), 1998)), 1)
+        .unwrap();
+    db.progress_handler(0, None::<fn() -> bool>).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1.ordinal, 1999);
+    assert!(
+        steps.load(Ordering::Relaxed) < 1000,
+        "cursor prefix scan: {} VM steps",
+        steps.load(Ordering::Relaxed)
+    );
+}
+
+#[derive(DbTable)]
+#[db(table="mixed_null_copy_cursor", database=Canvas,
+ legacy_ddl="CREATE TABLE mixed_null_copy_cursor(scope TEXT,position INTEGER,tie INTEGER PRIMARY KEY)")]
+struct MixedNullCopyCursor {
+    scope: Option<String>,
+    position: Option<i64>,
+    #[db(key)]
+    tie: i64,
+}
+// A read-only legacy cursor can order nullable components without declaring a nullable primary key.
+struct MixedCursor(MixedNullCopyCursor);
+impl Table for MixedCursor {
+    type Database = Canvas;
+    type Key = (Option<String>, Option<i64>, i64);
+    const NAME: &'static str = MixedNullCopyCursor::NAME;
+    const DDL: &'static str = MixedNullCopyCursor::DDL;
+    const INDEXES: &'static [studio_db_api::IndexDescriptor] = MixedNullCopyCursor::INDEXES;
+    const SELECT: &'static str = MixedNullCopyCursor::SELECT;
+    const STATE_CHECK: &'static str = MixedNullCopyCursor::STATE_CHECK;
+    const VALID_ROWS: &'static str = MixedNullCopyCursor::VALID_ROWS;
+    const GET: &'static str = "SELECT scope,position,tie FROM mixed_null_copy_cursor WHERE scope IS ?1 AND position IS ?2 AND tie=?3";
+    const INSERT: &'static str = MixedNullCopyCursor::INSERT;
+    const DELETE: &'static str =
+        "DELETE FROM mixed_null_copy_cursor WHERE scope IS ?1 AND position IS ?2 AND tie=?3";
+    const COLUMNS: &'static [studio_db_api::ColumnDescriptor] = MixedNullCopyCursor::COLUMNS;
+    fn read(
+        db: &Connection,
+        row: &studio_db_api::rusqlite::Row<'_>,
+    ) -> studio_db_api::rusqlite::Result<Self> {
+        MixedNullCopyCursor::read(db, row).map(Self)
+    }
+    fn bind<R>(
+        &self,
+        db: &Connection,
+        f: impl FnOnce(
+            &[&dyn studio_db_api::rusqlite::types::ToSql],
+        ) -> studio_db_api::rusqlite::Result<R>,
+    ) -> studio_db_api::rusqlite::Result<R> {
+        self.0.bind(db, f)
+    }
+    fn bind_key<R>(
+        key: &Self::Key,
+        f: impl FnOnce(
+            &[&dyn studio_db_api::rusqlite::types::ToSql],
+        ) -> studio_db_api::rusqlite::Result<R>,
+    ) -> studio_db_api::rusqlite::Result<R> {
+        f(&[&key.0, &key.1, &key.2])
+    }
+}
+#[test]
+fn copy_cursor_tuple_seek_keeps_null_suffixes_in_later_prefixes() {
+    use studio_db_api::migration::{CopyPlan, Evidence};
+    let mut db = Connection::open_in_memory().unwrap();
+    MixedNullCopyCursor::descriptor()
+        .install_if_absent(&db)
+        .unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    for (scope, position, tie) in [
+        (None, None, 1),
+        (Some("a"), None, 2),
+        (Some("a"), Some(1), 3),
+        (Some("b"), None, 4),
+        (Some("b"), Some(2), 5),
+    ] {
+        tx.insert(&MixedNullCopyCursor {
+            scope: scope.map(str::to_owned),
+            position,
+            tie,
+        })
+        .unwrap();
+    }
+    transaction.commit().unwrap();
+    let plan = CopyPlan {
+        name: "mixed_null_cursor",
+        source_keys: &["scope", "position", "tie"],
+        source_key: |row: &MixedCursor| (row.0.scope.clone(), row.0.position, row.0.tie),
+        target_key: |key| (key.2,),
+        transform: |row| Ok(row.0),
+        source_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_select: MixedNullCopyCursor::SELECT_QUERY,
+        finish: |_| Ok(()),
+    };
+    for (after, expected) in [
+        ((Some("a".to_owned()), Some(1), 3), vec![4, 5]),
+        ((Some("a".to_owned()), None, 2), vec![3, 4, 5]),
+        ((None, None, 1), vec![2, 3, 4, 5]),
+    ] {
+        let rows = plan.read_after(&db, Some(&after), 10).unwrap();
+        assert_eq!(
+            rows.into_iter()
+                .map(|(_, row)| row.0.tie)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+}
+
+#[derive(DbTable)]
+#[db(table="copy_byte_page",database=Canvas)]
+struct CopyBytePage {
+    #[db(key)]
+    id: i64,
+    payload: String,
+}
+#[test]
+fn copy_pages_bound_bytes_and_admit_one_oversized_historical_row() {
+    use studio_db_api::migration::{COPY_PAGE_MAX_BYTES, CopyPlan, Evidence};
+    let mut db = Connection::open_in_memory().unwrap();
+    CopyBytePage::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    for (id, size) in [
+        (1, COPY_PAGE_MAX_BYTES / 2),
+        (2, COPY_PAGE_MAX_BYTES / 2),
+        (3, COPY_PAGE_MAX_BYTES * 2 + 17),
+        (4, 4),
+    ] {
+        tx.insert(&CopyBytePage {
+            id,
+            payload: "x".repeat(size),
+        })
+        .unwrap();
+    }
+    transaction.commit().unwrap();
+    let plan = CopyPlan {
+        name: "byte_page",
+        source_keys: &["id"],
+        source_key: |row: &CopyBytePage| (row.id,),
+        target_key: Clone::clone,
+        transform: Ok,
+        source_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_select: CopyBytePage::SELECT_QUERY,
+        finish: |_| Ok(()),
+    };
+    let mut cursor = None;
+    for id in 1..=4 {
+        let rows = plan.read_after(&db, cursor.as_ref(), 500).unwrap();
+        assert_eq!(rows.len(), 1, "page before row {id}");
+        assert_eq!(rows[0].1.id, id);
+        if id == 3 {
+            assert!(rows[0].1.payload.len() > COPY_PAGE_MAX_BYTES);
+        }
+        cursor = Some(rows[0].0);
+    }
+    assert!(
+        plan.read_after(&db, cursor.as_ref(), 500)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn copy_target_keys_page_without_decoding_unused_payloads() {
+    use studio_db_api::migration::{CopyPlan, Evidence};
+    let mut db = Connection::open_in_memory().unwrap();
+    CopyBytePage::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    for id in 1..=3 {
+        tx.insert(&CopyBytePage {
+            id,
+            payload: "owned".into(),
+        })
+        .unwrap();
+    }
+    transaction.commit().unwrap();
+    // An extra corrupted row must count even though its unused payload cannot decode.
+    db.execute("INSERT INTO copy_byte_page(id,payload) VALUES(4,x'00')", [])
+        .unwrap();
+    let plan = CopyPlan {
+        name: "target_keys",
+        source_keys: &["id"],
+        source_key: |row: &CopyBytePage| (row.id,),
+        target_key: Clone::clone,
+        transform: Ok,
+        source_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_evidence: |_| {
+            Ok(Evidence {
+                identity: vec![],
+                ordering: vec![],
+                values: vec![],
+            })
+        },
+        target_select: CopyBytePage::SELECT_QUERY,
+        finish: |_| Ok(()),
+    };
+    let first = plan.target_keys_after(&db, None, 2).unwrap();
+    assert_eq!(first, vec![(1,), (2,)]);
+    let second = plan.target_keys_after(&db, first.last(), 2).unwrap();
+    assert_eq!(second, vec![(3,), (4,)]);
+    assert!(
+        plan.target_keys_after(&db, second.last(), 2)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[derive(DbTable)]
+#[db(table="partial_owned_rows",database=Canvas,index(name="partial_owned_live",columns(id),predicate=category.eq(7)))]
+struct PartialOwnedRow {
+    #[db(key)]
+    id: i64,
+    category: i64,
+}
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=i64,decode=PartialOwnedRow::ID,
+    tables(rows=PartialOwnedRow),indexes(rows=PartialOwnedRow::INDEX_PARTIAL_OWNED_LIVE),predicates(live=rows),
+    columns(id=PartialOwnedRow::ID),sql="SELECT {id} FROM {rows} WHERE {live} AND {id}>?1")]
+struct PartialOwnedQuery {
+    #[db(column=PartialOwnedRow::ID)]
+    after: i64,
+}
+#[test]
+fn named_query_reuses_its_owned_partial_index_predicate() {
+    let mut db = Connection::open_in_memory().unwrap();
+    PartialOwnedRow::descriptor()
+        .install_if_absent(&db)
+        .unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    for (id, category) in [(1, 7), (2, 9), (3, 7)] {
+        tx.insert(&PartialOwnedRow { id, category }).unwrap();
+    }
+    assert_eq!(
+        tx.read()
+            .collect(&PartialOwnedQuery::QUERY, &PartialOwnedQuery { after: 0 })
+            .unwrap(),
+        [1, 3]
+    );
+    assert_eq!(
+        tx.read()
+            .collect(&PartialOwnedQuery::QUERY, &PartialOwnedQuery { after: 1 })
+            .unwrap(),
+        [3]
+    );
+    let predicate = PartialOwnedRow::INDEXES[0].predicate.unwrap();
+    assert!(PartialOwnedQuery::QUERY.sql().contains(predicate));
+    assert!(
+        !studio_json::to_string(&PartialOwnedRow::INDEXES[0])
+            .unwrap()
+            .contains("predicate")
+    );
+}
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,native,
+ result=(i64,f64,bool,String,Vec<u8>,Option<i64>,Option<f64>,Option<bool>,Option<String>,Option<Vec<u8>>),
+ tables(rows=ConstChecked),columns(id=ConstChecked::ID,value=ConstChecked::PAYLOAD),
+ sql="SELECT {id},CAST({value} AS REAL),{value}>0,CAST({value} AS TEXT),CAST({value} AS BLOB),NULL,NULL,NULL,NULL,NULL FROM {rows}")]
+struct NativeExpressions;
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,native,result=i64,
+ tables(rows=ConstChecked),columns(value=ConstChecked::PAYLOAD),
+ sql="SELECT CAST({value} AS TEXT) AS mismatch FROM {rows}")]
+struct NativeMismatch;
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,native,result=i64,
+ tables(rows=ConstChecked),columns(id=ConstChecked::ID,owner=ConstChecked::OWNER),
+ sql="UPDATE {rows} SET {owner}=CAST({id} AS TEXT) RETURNING {id}")]
+struct NativeWrite;
+
+#[test]
+fn named_native_expressions_keep_primitives_nulls_type_errors_and_read_only() {
+    let mut db = Connection::open_in_memory().unwrap();
+    ConstChecked::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&ConstChecked {
+        id: 7,
+        owner: "original".into(),
+        state: Status::Ready,
+        payload: 42,
+    })
+    .unwrap();
+    NativeExpressions::validate_query(&transaction).unwrap();
+    let values = tx
+        .read()
+        .named(&NativeExpressions::QUERY, &NativeExpressions)
+        .unwrap();
+    assert_eq!(
+        values,
+        (
+            7,
+            42.0,
+            true,
+            "42".into(),
+            b"42".to_vec(),
+            None,
+            None,
+            None,
+            None,
+            None
+        )
+    );
+    assert!(
+        matches!(tx.read().named(&NativeMismatch::QUERY, &NativeMismatch),
+        Err(studio_db_api::rusqlite::Error::InvalidColumnType(0, name, studio_db_api::rusqlite::types::Type::Text)) if name=="mismatch")
+    );
+    assert!(NativeWrite::validate_query(&transaction).is_err());
+    assert!(tx.read().named(&NativeWrite::QUERY, &NativeWrite).is_err());
+    assert_eq!(
+        tx.read().get::<ConstChecked>(&(7,)).unwrap().unwrap().owner,
+        "original"
+    );
 }

@@ -84,13 +84,11 @@ impl Fixture {
             Ok(())
         }).await.expect("seed");
         let reader = store.test_reader().expect("reader");
-        let seq: i64 = reader
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='project' AND id='/p'",
-                [],
-                |r| r.get(0),
-            )
-            .expect("seq");
+        let seq = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+            &reader, "project", "/p", false,
+        )
+        .expect("seq")
+        .expect("project publication");
         let workspace = SyncDocumentsRepository::workspace_id(&reader).expect("workspace");
         let body = json!({"id":"/p","request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"expected_workspace_id":workspace,"expected_project_seq":seq});
         let ports = Arc::new(Ports {
@@ -262,13 +260,9 @@ async fn project_deletion_membership_and_retention() {
     );
     for id in ["shared", "broadcast"] {
         assert!(
-            reader
-                .query_row(
-                    "SELECT deleted FROM sync_entities WHERE collection='room' AND id=?1",
-                    [id],
-                    |r| r.get::<_, bool>(0)
-                )
-                .expect("tombstone")
+            studio_runtime_store::ProjectionPublicationQueries::entity_version(
+                &reader, "room", id,
+            ).expect("tombstone").expect("room publication").1
         );
     }
 }
@@ -298,10 +292,10 @@ async fn project_deletion_receipt_replay_changed_body_and_new_lifetime() {
 #[tokio::test]
 async fn project_deletion_rolls_back_every_write_boundary() {
     for trigger in [
-        "CREATE TRIGGER fail BEFORE UPDATE ON runtime_agents WHEN NEW.id='z' BEGIN SELECT RAISE(ABORT,'injected second agent'); END",
-        "CREATE TRIGGER fail BEFORE UPDATE ON runtime_rooms BEGIN SELECT RAISE(ABORT,'injected room'); END",
-        "CREATE TRIGGER fail BEFORE INSERT ON request_results BEGIN SELECT RAISE(ABORT,'injected receipt'); END",
-        "CREATE TRIGGER fail BEFORE UPDATE ON sync_entities WHEN NEW.collection='project' AND NEW.deleted=1 BEGIN SELECT RAISE(ABORT,'injected publication'); END",
+        "CREATE TRIGGER fail BEFORE UPDATE ON runtime_agents WHEN NEW.id='z' BEGIN SELECT RAISE(ABORT,'injected second agent'); END".to_owned(),
+        "CREATE TRIGGER fail BEFORE UPDATE ON runtime_rooms BEGIN SELECT RAISE(ABORT,'injected room'); END".to_owned(),
+        "CREATE TRIGGER fail BEFORE INSERT ON request_results BEGIN SELECT RAISE(ABORT,'injected receipt'); END".to_owned(),
+        format!("CREATE TRIGGER fail BEFORE UPDATE ON publications WHEN NEW.kind={} AND NEW.collection_order='project' AND NEW.deleted=1 BEGIN SELECT RAISE(ABORT,'injected publication'); END", studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64),
     ] {
         let f = Fixture::new(
             vec![agent("a", None, "/p"), agent("z", None, "/p")],
@@ -309,9 +303,10 @@ async fn project_deletion_rolls_back_every_write_boundary() {
             false,
         )
         .await;
+        let failure = trigger.clone();
         f.store
             .transaction(move |tx| {
-                tx.execute_batch(trigger)?;
+                tx.execute_batch(&failure)?;
                 Ok(())
             })
             .await
@@ -361,13 +356,11 @@ async fn project_deletion_remote_and_ambiguous_membership_fail_closed() {
             .await
             .expect("remote");
         let reader = f.store.test_reader().expect("reader");
-        let seq: i64 = reader
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='project' AND id='/p'",
-                [],
-                |r| r.get(0),
-            )
-            .expect("seq");
+        let seq = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+            &reader, "project", "/p", false,
+        )
+        .expect("seq")
+        .expect("project publication");
         let mut body = f.body.clone();
         body["expected_project_seq"] = json!(seq);
         let (status, r) = f.call(body).await;
@@ -530,13 +523,9 @@ async fn project_deletion_one_commit_and_room_rebuild_cannot_revive() {
             studio_json::from_str(&raw).expect("room");
         assert!(room.project_deleted_at.is_some());
         assert!(
-            reader
-                .query_row(
-                    "SELECT deleted FROM sync_entities WHERE collection='room' AND id=?1",
-                    [id],
-                    |r| r.get::<_, bool>(0)
-                )
-                .expect("tombstone")
+            studio_runtime_store::ProjectionPublicationQueries::entity_version(
+                &reader, "room", id,
+            ).expect("tombstone").expect("room publication").1
         );
     }
 }
@@ -700,15 +689,14 @@ async fn project_deletion_local_aliases_belong_to_one_scope() {
     }).await.expect("logical alias");
     let mut body = f.body.clone();
     body["expected_project_seq"] = json!(
-        f.store
-            .test_reader()
-            .expect("reader")
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='project' AND id='/p'",
-                [],
-                |r| r.get::<_, i64>(0)
-            )
-            .expect("seq")
+        studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+            &f.store.test_reader().expect("reader"),
+            "project",
+            "/p",
+            false,
+        )
+        .expect("seq")
+        .expect("project publication")
     );
     let (status, r) = f.call(body).await;
     assert_eq!(status, 200, "{r}");

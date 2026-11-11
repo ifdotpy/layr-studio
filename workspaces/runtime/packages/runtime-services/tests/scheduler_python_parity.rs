@@ -21,9 +21,12 @@ async fn seeded<T: serde::de::DeserializeOwned>(
     fixture: &str,
 ) -> (RuntimeStore, T) {
     let seed: Seed<T> = studio_json::from_str(fixture).expect("frozen scheduler seed");
-    let store = RuntimeStore::open(Some(&state.0))
-        .await
-        .expect("scheduler store");
+    studio_runtime_store::test_fixtures::canvas::write_supported_fixture(&state.0)
+        .expect("supported scheduler source schema");
+    let mut db = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(&state.0)
+        .expect("scheduler source database");
+    studio_runtime_store::test_fixtures::canvas::install_legacy_source_schema(&db)
+        .expect("scheduler source owners");
     let statements = seed
         .statements
         .join("\n")
@@ -32,14 +35,13 @@ async fn seeded<T: serde::de::DeserializeOwned>(
             "INSERT OR REPLACE INTO \"runtime_agents\"(id,record) VALUES(",
         )
         .replace("${ROOT}", &state.0.to_string_lossy().replace('\'', "''"));
-    store
-        .transaction(move |tx| {
-            tx.execute_batch(&statements)?;
-            studio_runtime_store::test_fixtures::normalize_agent(tx)?;
-            Ok(())
-        })
+    let tx = db.transaction().expect("scheduler seed transaction");
+    tx.execute_batch(&statements).expect("seed scheduler state");
+    tx.commit().expect("commit scheduler seed");
+    drop(db);
+    let store = studio_runtime_store::test_fixtures::canvas::migrate_legacy(&state.0)
         .await
-        .expect("seed scheduler state");
+        .expect("migrate scheduler store");
     (store, seed.expected)
 }
 #[derive(serde::Deserialize)]
@@ -260,7 +262,14 @@ async fn named_team_and_radio_refusals_match_python_preparation_and_preserve_who
     }
 }
 
-fn rust_policy_snapshot(store: &RuntimeStore, agent: &str) -> Value {
+fn rust_policy_snapshot(
+    store: &RuntimeStore,
+    agent: &str,
+) -> (
+    Value,
+    Vec<studio_runtime_store::test_fixtures::canvas::EntitySnapshot>,
+    Vec<studio_runtime_store::test_fixtures::canvas::DocumentSnapshot>,
+) {
     let reader = store.test_reader().expect("policy snapshot reads");
     let raw_agent = studio_runtime_store::agent_volatile::merged_record(&reader, agent)
         .expect("agent snapshot reads")
@@ -278,10 +287,11 @@ fn rust_policy_snapshot(store: &RuntimeStore, agent: &str) -> Value {
     let metadata = reader.prepare("SELECT id,record FROM runtime_event_meta WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id")
         .expect("metadata snapshot prepares").query_map([&ids_json], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))
         .expect("metadata snapshot queries").collect::<Result<Vec<_>,_>>().expect("metadata snapshot reads");
-    let sync = reader.prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities WHERE id=?1 OR id IN (SELECT value FROM json_each(?2)) ORDER BY collection,id")
-        .expect("sync snapshot prepares").query_map((agent,&ids_json), |row| Ok((
-            row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?,row.get::<_,String>(3)?,row.get::<_,String>(4)?,row.get::<_,i64>(5)?,
-        ))).expect("sync snapshot queries").collect::<Result<Vec<_>,_>>().expect("sync snapshot reads");
+    let sync = studio_runtime_store::test_fixtures::canvas::entities(&reader)
+        .expect("sync snapshot reads")
+        .into_iter()
+        .filter(|row| row.id == agent || ids.contains(&row.id))
+        .collect::<Vec<_>>();
     let completed = reader
         .prepare("SELECT chat||':'||provider_turn FROM turns WHERE state='completed' ORDER BY 1")
         .expect("completed-turn snapshot prepares")
@@ -289,15 +299,13 @@ fn rust_policy_snapshot(store: &RuntimeStore, agent: &str) -> Value {
         .expect("completed-turn snapshot queries")
         .collect::<Result<Vec<_>, _>>()
         .expect("completed-turn snapshot reads");
-    let sync_documents = reader
-        .prepare("SELECT seq FROM sync_documents ORDER BY seq")
-        .expect("sync-document snapshot prepares")
-        .query_map([], |row| row.get::<_, i64>(0))
-        .expect("sync-document snapshot queries")
-        .collect::<Result<Vec<_>, _>>()
+    let sync_documents = studio_runtime_store::test_fixtures::canvas::documents(&reader)
         .expect("sync-document snapshot reads");
-    json!({"agent":raw_agent,"events":events,"metadata":metadata,"sync":sync,
-        "completed":completed,"syncDocuments":sync_documents})
+    (
+        json!({"agent":raw_agent,"events":events,"metadata":metadata,"completed":completed}),
+        sync,
+        sync_documents,
+    )
 }
 
 #[tokio::test]

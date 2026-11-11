@@ -131,8 +131,12 @@ const TABLES: &[TableRequirement] = &[
         columns: &["id", "record"],
     },
     TableRequirement {
-        name: "runtime_access_settings",
-        columns: &["id", "auto_pair"],
+        name: <crate::metadata_schema::Metadata as studio_db_api::Table>::NAME,
+        columns: &[
+            crate::metadata_schema::Metadata::__DB_COLUMN_KIND,
+            crate::metadata_schema::Metadata::__DB_COLUMN_IDENTITY,
+            crate::metadata_schema::Metadata::__DB_COLUMN_AUTO_PAIR,
+        ],
     },
     TableRequirement {
         name: "runtime_server_inbox",

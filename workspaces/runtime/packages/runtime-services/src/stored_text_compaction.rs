@@ -503,15 +503,9 @@ mod tests {
     async fn status(store: &Arc<RuntimeStore>) -> Option<(i64, String)> {
         store
             .read_async(LABEL, |connection| {
-                use rusqlite::OptionalExtension;
-                Ok::<_, StoreError>(
-                    connection
-                        .query_row(
-                            "SELECT complete,status FROM runtime_payload_migrations WHERE name=?1",
-                            [FULLTEXT_BODY.progress],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .optional()?,
+                studio_runtime_store::test_fixtures::canvas::migration_progress(
+                    connection,
+                    FULLTEXT_BODY.progress,
                 )
             })
             .await
@@ -541,11 +535,21 @@ mod tests {
         assert_eq!(status(&store).await, Some((1, "complete".to_owned())));
         let batches = store
             .read_async(LABEL, |connection| {
-                Ok::<_, StoreError>(connection.query_row(
-                    "SELECT count(*),sum(rows) FROM runtime_stored_text_batches WHERE name=?1",
-                    [FULLTEXT_BODY.progress],
-                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-                )?)
+                let (count, rows) =
+                    studio_runtime_store::test_fixtures::canvas::stored_text_batch_totals(
+                        connection,
+                        FULLTEXT_BODY.progress,
+                    )?;
+                Ok::<_, StoreError>((
+                    count,
+                    rows.ok_or_else(|| {
+                        rusqlite::Error::InvalidColumnType(
+                            1,
+                            "sum(rows)".into(),
+                            rusqlite::types::Type::Null,
+                        )
+                    })?,
+                ))
             })
             .await
             .expect("batches");

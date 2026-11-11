@@ -214,6 +214,9 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
         .unwrap();
     let mut result = studio_json::Map::new();
     for name in tables {
+        if logical && matches!(name.as_str(), "metadata" | "changes" | "publications") {
+            continue;
+        }
         // The frozen oracle compares domain writes. Transport obligations and their
         // cached results have dedicated assertions; physical snapshots include all rows.
         // Merge volatile agent fields to match the Python domain record.
@@ -238,8 +241,6 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
         }
         let sql = if logical && name == "runtime_agents" {
             "SELECT id,record FROM runtime_agents".to_owned()
-        } else if logical && name == "sync_entities" {
-            "SELECT collection,id,payload,deleted FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree')".to_owned()
         } else {
             studio_runtime_store::agent_columns::select_declared_sql(&connection, &name).unwrap()
         };
@@ -274,6 +275,81 @@ fn snapshot_rows(store: &RuntimeStore, logical: bool) -> Value {
             }
         }
         result.insert(name, json!(rows));
+    }
+    if logical {
+        let generation =
+            studio_runtime_store::clock_schema::AgentRecordGeneration::get(&connection)
+                .unwrap()
+                .unwrap();
+        result.insert(
+            "runtime_agent_record_generation".into(),
+            json!([[generation.id, generation.value]]),
+        );
+        let clock = studio_runtime_store::test_fixtures::canvas::scheduler_state(&connection)
+            .unwrap()
+            .unwrap();
+        result.insert(
+            "runtime_scheduler_agent_change_state".into(),
+            json!([[
+                clock.id,
+                clock.floor,
+                clock.generation,
+                clock.entries,
+                clock.total
+            ]]),
+        );
+        result.insert(
+            "runtime_scheduler_agent_changes".into(),
+            json!(
+                studio_runtime_store::test_fixtures::canvas::scheduler_changes(&connection)
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| json!([row.id, row.generation]))
+                    .collect::<Vec<_>>()
+            ),
+        );
+        result.insert(
+            "runtime_transcript_revisions".into(),
+            json!(
+                studio_runtime_store::test_fixtures::canvas::transcript_revisions(&connection)
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| json!([row.agent, row.revision]))
+                    .collect::<Vec<_>>()
+            ),
+        );
+        let mut rows = studio_runtime_store::test_fixtures::canvas::entities(&connection)
+            .unwrap()
+            .into_iter()
+            .filter(|row| {
+                !["agent", "agentSummary", "agentDetail", "retainedWorktree"]
+                    .contains(&row.collection.as_str())
+            })
+            .map(|row| {
+                json!([
+                    row.collection,
+                    row.id,
+                    row.payload
+                        .map(|raw| studio_json::from_str::<Value>(&raw).unwrap()),
+                    row.deleted
+                ])
+            })
+            .collect::<Vec<_>>();
+        rows.extend(
+            studio_runtime_services::entity_scope::agent_snapshot(&connection)
+                .unwrap()
+                .into_iter()
+                .filter(|row| row.collection == "agent")
+                .map(|row| {
+                    json!([
+                        row.collection,
+                        row.id,
+                        studio_json::from_str::<Value>(row.payload.as_deref().unwrap()).unwrap(),
+                        0
+                    ])
+                }),
+        );
+        result.insert("sync_entities".into(), json!(rows));
     }
     Value::Object(result)
 }
@@ -511,9 +587,24 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
             }
             studio_runtime_store::test_fixtures::normalize_agent(tx)?;
             for (table, rows) in case["counters"].as_object().unwrap() {
-                tx.execute(&format!("DELETE FROM {table}"), [])?;
+                match table.as_str() {
+                    "runtime_scheduler_agent_changes" => studio_runtime_store::test_fixtures::canvas::clear_scheduler_changes(tx)?,
+                    "runtime_transcript_revisions" => studio_runtime_store::test_fixtures::canvas::clear_transcript_revisions(tx)?,
+                    _ => {},
+                }
                 for row in rows.as_array().unwrap() {
                     insert_row(tx, table, row)?;
+                }
+                let actual = match table.as_str() {
+                    "runtime_scheduler_agent_changes" => Some(studio_runtime_store::test_fixtures::canvas::scheduler_changes(tx)?.into_iter().map(|row|json!([row.id,row.generation])).collect::<Vec<_>>()),
+                    "runtime_transcript_revisions" => Some(studio_runtime_store::test_fixtures::canvas::transcript_revisions(tx)?.into_iter().map(|row|json!([row.agent,row.revision])).collect::<Vec<_>>()),
+                    _ => None,
+                };
+                if let Some(mut actual) = actual {
+                    let mut expected = rows.as_array().unwrap().clone();
+                    actual.sort_by_key(Value::to_string);
+                    expected.sort_by_key(Value::to_string);
+                    assert_eq!(actual, expected, "exact frozen counter reset: {table}");
                 }
             }
             Ok(())
@@ -548,6 +639,72 @@ fn insert_row(
     table: &str,
     row: &Value,
 ) -> Result<(), studio_runtime_store::StoreError> {
+    if table == "runtime_scheduler_agent_changes" {
+        let id = row[0].as_str().unwrap();
+        let previous = studio_runtime_store::test_fixtures::canvas::scheduler_changes(tx)?;
+        let rowid = previous
+            .iter()
+            .find(|row| row.id.as_deref() == Some(id))
+            .map(|row| row.source_rowid)
+            .unwrap_or_else(|| {
+                previous
+                    .iter()
+                    .map(|row| row.source_rowid)
+                    .max()
+                    .unwrap_or(0)
+                    + 1
+            });
+        return studio_runtime_store::test_fixtures::canvas::seed_scheduler_change(
+            tx,
+            &studio_runtime_store::clock_schema::SchedulerAgentChanges {
+                id: id.into(),
+                generation: row[1].as_i64().unwrap(),
+            },
+            rowid,
+        );
+    }
+    if table == "runtime_transcript_revisions" {
+        let agent = row[0].as_str().unwrap();
+        let previous = studio_runtime_store::test_fixtures::canvas::transcript_revisions(tx)?;
+        let rowid = previous
+            .iter()
+            .find(|row| row.agent.as_deref() == Some(agent))
+            .map(|row| row.source_rowid)
+            .unwrap_or_else(|| {
+                previous
+                    .iter()
+                    .map(|row| row.source_rowid)
+                    .max()
+                    .unwrap_or(0)
+                    + 1
+            });
+        return studio_runtime_store::test_fixtures::canvas::seed_transcript_revision(
+            tx,
+            &studio_runtime_store::context_settings::TranscriptRevisionsStorageRow {
+                agent: agent.into(),
+                revision: row[1].as_i64().unwrap(),
+            },
+            rowid,
+        );
+    }
+    if table == "runtime_agent_record_generation" {
+        return studio_runtime_store::test_fixtures::canvas::seed_agent_generation(
+            tx,
+            row[1].as_i64().unwrap(),
+        );
+    }
+    if table == "runtime_scheduler_agent_change_state" {
+        return studio_runtime_store::test_fixtures::canvas::seed_scheduler_state(
+            tx,
+            &studio_runtime_store::clock_schema::SchedulerAgentChangeState {
+                id: row[0].as_i64().unwrap(),
+                floor: row[1].as_i64().unwrap(),
+                generation: row[2].as_i64().unwrap(),
+                entries: row[3].as_i64().unwrap(),
+                total: row[4].as_i64().unwrap(),
+            },
+        );
+    }
     let values: Vec<rusqlite::types::Value> = row
         .as_array()
         .unwrap()

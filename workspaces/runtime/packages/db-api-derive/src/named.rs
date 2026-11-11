@@ -15,11 +15,14 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
     let mut mode = None::<Ident>;
     let mut cardinality = None::<Ident>;
     let mut result = None::<Type>;
+    let mut native = false;
     let mut scalar = None::<Path>;
     let mut projection = None::<Path>;
     let mut row_owner = None::<Path>;
     let mut sql = None::<LitStr>;
     let mut refs = Vec::<(Ident, Path, bool)>::new();
+    let mut indexes = Vec::<(Ident, Path)>::new();
+    let mut predicates = Vec::<(Ident, Ident)>::new();
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("db_query")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("database") {
@@ -30,6 +33,8 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
                 cardinality = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("result") {
                 result = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("native") {
+                native = true;
             } else if meta.path.is_ident("decode") {
                 scalar = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("projection") {
@@ -38,6 +43,32 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
                 row_owner = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("sql") {
                 sql = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("predicates") {
+                meta.parse_nested_meta(|predicate| {
+                    let alias = predicate
+                        .path
+                        .get_ident()
+                        .cloned()
+                        .ok_or_else(|| predicate.error("expected predicate alias"))?;
+                    if predicates.iter().any(|(old, _)| *old == alias) {
+                        return Err(predicate.error("duplicate predicate alias"));
+                    }
+                    predicates.push((alias, predicate.value()?.parse()?));
+                    Ok(())
+                })?;
+            } else if meta.path.is_ident("indexes") {
+                meta.parse_nested_meta(|index| {
+                    let alias = index
+                        .path
+                        .get_ident()
+                        .cloned()
+                        .ok_or_else(|| index.error("expected table alias"))?;
+                    if indexes.iter().any(|(old, _)| *old == alias) {
+                        return Err(index.error("duplicate index hint"));
+                    }
+                    indexes.push((alias, index.value()?.parse()?));
+                    Ok(())
+                })?;
             } else if meta.path.is_ident("tables") || meta.path.is_ident("columns") {
                 let table = meta.path.is_ident("tables");
                 meta.parse_nested_meta(|reference| {
@@ -81,12 +112,53 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             ));
         }
     };
+    if native
+        && (!read_only
+            || card == "none"
+            || scalar.is_some()
+            || projection.is_some()
+            || row_owner.is_some())
+    {
+        return Err(syn::Error::new_spanned(
+            input,
+            "native requires read mode, result cardinality, and no other decoder",
+        ));
+    }
+    if native && !refs.iter().any(|(_, _, table)| *table) {
+        return Err(syn::Error::new_spanned(
+            input,
+            "native requires a descriptor-owned table",
+        ));
+    }
     let sql = sql.ok_or_else(|| required("sql"))?;
+    for (alias, _) in &indexes {
+        if !refs.iter().any(|(name, _, table)| *table && name == alias) {
+            return Err(syn::Error::new_spanned(
+                alias,
+                "index hint requires a declared table alias",
+            ));
+        }
+    }
+    for (alias, table) in &predicates {
+        if refs.iter().any(|(name, _, _)| name == alias) {
+            return Err(syn::Error::new_spanned(
+                alias,
+                "predicate alias conflicts with descriptor reference",
+            ));
+        }
+        if !indexes.iter().any(|(name, _)| name == table) {
+            return Err(syn::Error::new_spanned(
+                table,
+                "predicate requires an owned index hint",
+            ));
+        }
+    }
     let text = sql.value();
     // SQLite owns statement, parameter and access validation.
     let mut fragments = Vec::new();
     let mut remaining = text.as_str();
     let mut used = vec![false; refs.len()];
+    let mut used_predicates = vec![false; predicates.len()];
     while let Some(start) = remaining.find('{') {
         let literal = &remaining[..start];
         fragments.push(quote!(#literal));
@@ -96,6 +168,25 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             + start
             + 1;
         let key = &remaining[start + 1..end];
+        if let Some((position, (_, table_alias))) = predicates
+            .iter()
+            .enumerate()
+            .find(|(_, (alias, _))| alias == key)
+        {
+            let (_, index) = indexes
+                .iter()
+                .find(|(name, _)| name == table_alias)
+                .expect("validated hint");
+            let (_, owner, _) = refs
+                .iter()
+                .find(|(name, _, table)| *table && name == table_alias)
+                .expect("validated table alias");
+            used_predicates[position] = true;
+            fragments
+                .push(quote!(::studio_db_api::query_index_predicate::<#database,#owner>(&#index)));
+            remaining = &remaining[end + 1..];
+            continue;
+        }
         let i = refs
             .iter()
             .position(|(name, _, _)| name == key)
@@ -104,14 +195,19 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             })?;
         used[i] = true;
         let (_, path, table) = &refs[i];
-        fragments.push(if *table {
-            quote!("\"", ::studio_db_api::query_table::<#database,#path>(), "\"")
+        if *table {
+            fragments.push(quote!("\"", ::studio_db_api::query_table::<#database,#path>(), "\""));
+            if let Some((_, index)) = indexes.iter().find(|(alias, _)| alias == &refs[i].0) {
+                fragments.push(
+                    quote!(" INDEXED BY \"",::studio_db_api::query_index::<#database,#path>(&#index),"\""),
+                );
+            }
         } else {
-            quote!(::studio_db_api::query_column::<#database,_>(#path))
-        });
+            fragments.push(quote!(::studio_db_api::query_column::<#database,_>(#path)));
+        }
         remaining = &remaining[end + 1..];
     }
-    if remaining.contains('}') || used.contains(&false) {
+    if remaining.contains('}') || used.contains(&false) || used_predicates.contains(&false) {
         return Err(syn::Error::new_spanned(
             &sql,
             "unused or malformed descriptor reference",
@@ -167,6 +263,7 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             quote!({ let _ = ::studio_db_api::query_table::<#database,#owner>(); <#owner as ::studio_db_api::Table>::read(connection,row) }),
             quote!(<#owner as ::studio_db_api::Table>::COLUMNS),
         ),
+        (None, None, None) if native => native_decoder(&result)?,
         (None, None, None) if card == "none" => (quote!(Ok(())), quote!(&[])),
         _ => return Err(required("exactly one decode, projection or row codec")),
     };
@@ -189,6 +286,84 @@ pub fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             pub fn validate_query(connection: &::studio_db_api::rusqlite::Connection) -> ::std::result::Result<(),::studio_db_api::QueryValidationError> { Self::QUERY.validate(connection,#read_only) }
         }
     })
+}
+
+// Expression results have native SQLite storage types, not a persisted column codec.
+fn native_type(ty: &Type, optional: bool) -> syn::Result<Tokens> {
+    let Type::Path(path) = ty else {
+        return Err(syn::Error::new_spanned(
+            ty,
+            "native requires a SQLite primitive",
+        ));
+    };
+    if path.qself.is_none() && path.path.segments.len() == 1 {
+        let part = &path.path.segments[0];
+        if matches!(part.arguments, syn::PathArguments::None) {
+            return match part.ident.to_string().as_str() {
+                "i64" => Ok(quote!(::core::primitive::i64)),
+                "f64" => Ok(quote!(::core::primitive::f64)),
+                "bool" => Ok(quote!(::core::primitive::bool)),
+                "String" => Ok(quote!(::std::string::String)),
+                _ => Err(syn::Error::new_spanned(
+                    ty,
+                    "unsupported native SQLite primitive",
+                )),
+            };
+        }
+        if let syn::PathArguments::AngleBracketed(args) = &part.arguments
+            && args.args.len() == 1
+            && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
+        {
+            if part.ident == "Option" && optional {
+                let inner = native_type(inner, false)?;
+                return Ok(quote!(::core::option::Option<#inner>));
+            }
+            if part.ident == "Vec"
+                && matches!(inner, Type::Path(path) if path.qself.is_none() && path.path.is_ident("u8"))
+            {
+                return Ok(quote!(::std::vec::Vec<::core::primitive::u8>));
+            }
+        }
+    }
+    Err(syn::Error::new_spanned(
+        ty,
+        "native supports i64, f64, bool, String, Vec<u8>, and Option of those types",
+    ))
+}
+fn native_decoder(result: &Type) -> syn::Result<(Tokens, Tokens)> {
+    let (types, tuple) = if let Type::Tuple(tuple) = result {
+        if tuple.elems.is_empty() {
+            return Err(syn::Error::new_spanned(
+                result,
+                "native requires a result value",
+            ));
+        }
+        (tuple.elems.iter().collect::<Vec<_>>(), true)
+    } else {
+        (vec![result], false)
+    };
+    let types = types
+        .into_iter()
+        .map(|ty| native_type(ty, true))
+        .collect::<syn::Result<Vec<_>>>()?;
+    let reads = types
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| quote!(row.get::<_,#ty>(#i)?))
+        .collect::<Vec<_>>();
+    let decode = if tuple {
+        quote!(Ok((#(#reads,)*)))
+    } else {
+        let ty = &types[0];
+        quote!(row.get::<_,#ty>(0))
+    };
+    let columns = types.iter().map(|ty| {
+        quote!(::studio_db_api::ColumnDescriptor {
+            name: "", storage: <#ty as ::studio_db_api::DbValue>::SQL_TYPE,
+            nullable: <#ty as ::studio_db_api::DbValue>::NULLABLE, private: false, codes: &[],
+        })
+    });
+    Ok((decode, quote!(&[#(#columns),*])))
 }
 
 #[cfg(test)]

@@ -295,12 +295,10 @@ async fn revoke_is_final_and_refuses_a_later_pairing_request() {
 async fn peer_team_payload(store: &Arc<RuntimeStore>) -> String {
     store
         .read_async("runtime-services/federation/tests", |tx| {
-            tx.query_row(
-                "SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team' AND deleted=0",
-                [],
-                |row| row.get::<_, String>(0),
+            studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                tx, "peerTeam", "team", true,
             )
-            .map_err(StoreError::from)
+            .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
         })
         .await
         .expect("peer team entity")

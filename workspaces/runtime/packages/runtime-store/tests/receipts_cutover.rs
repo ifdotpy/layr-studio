@@ -74,7 +74,11 @@ async fn receipt_cutover_enum_checks_match_owners_on_fresh_and_reopened_schema()
         let db = Connection::open(root.path().join("canvas.sqlite3")).expect("database");
         enum_column::<EventKind>(&db, "runtime_events", "kind");
         enum_column::<EventStatus>(&db, "runtime_events", "status");
-        enum_column::<MigrationStatus>(&db, "runtime_payload_migrations", "status");
+        assert!(
+            !studio_runtime_store::peer_update_settings::canvas_read(&db)
+                .table_exists::<studio_runtime_store::settings_schema::PayloadMigrations>()
+                .unwrap()
+        );
         enum_column::<HoldStatus>(&db, "runtime_agents", "hold_status");
         enum_column::<TitleStatus>(&db, "runtime_agents", "title_status");
         enum_column::<WorkEffectStatus>(&db, "runtime_agents", "vm_launch_status");
@@ -98,6 +102,18 @@ async fn receipt_cutover_enum_checks_match_owners_on_fresh_and_reopened_schema()
         enum_column::<IncidentKind>(&db, "runtime_error_incidents", "kind");
         enum_column::<OwnerKind>(&db, "runtime_error_incidents", "owner_kind");
         let ddl:Vec<(String,String)>=db.prepare("SELECT name,sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").expect("schema").query_map([],|row|Ok((row.get(0)?,row.get(1)?))).expect("rows").collect::<rusqlite::Result<_>>().expect("DDL");
+        let metadata = &ddl
+            .iter()
+            .find(|(name, _)| name == "metadata")
+            .expect("canonical metadata")
+            .1;
+        assert!(
+            metadata.contains(&format!(
+                "CHECK(migration_status IN ({}))",
+                <MigrationStatus as studio_db_api::DbValue>::CODES
+            )),
+            "canonical migration status consumes the integer enum owner"
+        );
         if let Some(previous) = &first {
             assert_eq!(previous, &ddl);
         } else {

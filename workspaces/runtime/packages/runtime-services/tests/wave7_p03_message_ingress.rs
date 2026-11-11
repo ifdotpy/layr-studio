@@ -69,35 +69,108 @@ impl Fixture {
             &self.sql(include_str!("wave7_p03_message_ingress/canvas.sqlite3.sql")),
             include_str!("wave7_p03_message_ingress/analytics.sqlite3.sql"),
         );
-        let db = rusqlite::Connection::open(root.join("canvas.sqlite3")).expect("seed reader");
-        let hashes: Vec<(String, String, String)> = db
-            .prepare("SELECT collection,id,payload FROM sync_entities WHERE payload IS NOT NULL")
-            .expect("seed hashes")
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-            .expect("seed payloads")
-            .collect::<Result<_, _>>()
-            .expect("seed rows");
-        for (collection, id, payload) in hashes {
-            db.execute(
-                "UPDATE sync_entities SET hash=?1 WHERE collection=?2 AND id=?3",
-                rusqlite::params![
-                    studio_runtime_store::sha256_hex(payload.as_bytes()),
-                    collection,
-                    id
-                ],
-            )
-            .expect("rebind seed hash");
+        let mut db = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(&root)
+            .expect("seed reader");
+        let rows =
+            studio_runtime_store::test_fixtures::canvas::entities(&db).expect("seed entities");
+        let tx = db.transaction().expect("seed hash transaction");
+        for row in rows {
+            if let Some(payload) = row.payload {
+                studio_runtime_store::test_fixtures::canvas::seed_entity(
+                    &tx,
+                    &studio_runtime_store::clock_schema::SyncEntities {
+                        collection: row.collection,
+                        id: row.id,
+                        seq: row.seq,
+                        hash: studio_runtime_store::sha256_hex(payload.as_bytes()),
+                        payload: Some(payload),
+                        deleted: row.deleted,
+                    },
+                    row.source_rowid,
+                )
+                .expect("rebind seed hash");
+            }
         }
+        tx.commit().expect("seed hashes committed");
         drop(db);
         Self::seed_identity(&root);
         root
     }
-    fn seed_copy(&self, name: &str, template: &crate::state_template::StateTemplate) -> PathBuf {
+    fn seed_configured(&self, name: &str, case: &str) -> PathBuf {
         let root = self.root.path().join(name);
-        std::fs::create_dir(&root).expect("fixture directory");
-        template.write(&root);
+        let source = tempfile::tempdir().expect("legacy configuration source");
+        crate::recovery_fixtures::database(
+            source.path(),
+            "canvas.sqlite3",
+            &self.sql(include_str!("wave7_p03_message_ingress/canvas.sqlite3.sql")),
+        );
+        let db = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(source.path())
+            .expect("legacy configuration source");
+        let sql = self
+            .sql(
+                &std::fs::read_to_string(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/wave7_p03_message_ingress")
+                        .join(format!("{case}.sql")),
+                )
+                .expect("frozen case configuration"),
+            )
+            .replace(
+                "INSERT INTO \"runtime_agents\" VALUES",
+                "INSERT INTO \"runtime_agents\"(id,record) VALUES",
+            );
+        db.execute_batch(&sql)
+            .expect("frozen live configuration source");
+        drop(db);
+        crate::recovery_fixtures::import(
+            &root,
+            "canvas.sqlite3",
+            &source.path().join("canvas.sqlite3"),
+        );
+        crate::recovery_fixtures::database(
+            &root,
+            "analytics.sqlite3",
+            include_str!("wave7_p03_message_ingress/analytics.sqlite3.sql"),
+        );
+        if Self::live_workspace_operation(case).is_some() {
+            let mut db = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(&root)
+                .expect("live marker source");
+            db.set_db_config(
+                rusqlite::config::DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER,
+                false,
+            )
+            .expect("preserve source clocks");
+            let tx = db.transaction().expect("live marker seed");
+            let mut agent = studio_runtime_store::AgentRepository::get(&tx, &"agent".into())
+                .expect("source agent")
+                .expect("frozen agent");
+            assert_eq!(
+                agent.workspace_operation,
+                studio_runtime_schema::queue_command::Field::Value(
+                    Self::live_workspace_operation(case).expect("marker")
+                )
+            );
+            // The oracle injects this malformed operation live, after startup.
+            agent.workspace_operation = studio_runtime_schema::queue_command::Field::Missing;
+            studio_runtime_store::AgentRepository::put(&tx, &agent)
+                .expect("defer live-only marker");
+            tx.commit().expect("live marker deferred");
+        }
         Self::seed_identity(&root);
         root
+    }
+    fn live_workspace_operation(case: &str) -> Option<String> {
+        let cases: Vec<Value> =
+            studio_json::from_str(include_str!("wave7_p03_message_ingress/cases.json"))
+                .expect("frozen ingress cases");
+        cases
+            .into_iter()
+            .find(|row| row["name"] == case)
+            .and_then(|row| {
+                row["agent"]["workspaceOperation"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
     }
     fn seed_identity(root: &Path) {
         let identity_root = root.join("multi-server");
@@ -156,27 +229,26 @@ impl Fixture {
         expected
     }
     async fn configure(&self, store: &RuntimeStore, case: &str) {
-        let source = std::fs::read_to_string(
-            Path::new(
-                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
-            )
-            .join("tests/wave7_p03_message_ingress")
-            .join(format!("{case}.sql")),
-        )
-        .expect("frozen live case configuration");
-        let sql = self.sql(&source).replace(
-            "INSERT INTO \"runtime_agents\" VALUES",
-            "INSERT INTO \"runtime_agents\"(id,record) VALUES",
-        );
+        let live_operation = Self::live_workspace_operation(case);
         store.transaction(move |tx| {
             studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
-            tx.execute_batch(&sql)?;
-            // These legacy rows are inserted after the template was migrated.
-            // Apply the permission migration to the records.
+            if let Some(operation) = live_operation {
+                let mut agent = studio_runtime_store::AgentRepository::get(tx, &"agent".into())?
+                    .expect("frozen live agent");
+                agent.workspace_operation = studio_runtime_schema::queue_command::Field::Value(operation);
+                studio_runtime_store::AgentRepository::put(tx, &agent)?;
+            }
+            // Keep the configured fixture's current records and payload hashes aligned.
             tx.execute("UPDATE runtime_agents SET record=json_remove(json_set(record,'$.permissionMode',CASE WHEN json_extract(record,'$.yoloMode') THEN 'bypassPermissions' ELSE 'default' END),'$.yoloMode') WHERE json_type(record,'$.yoloMode') IN ('true','false')", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.threadId') WHERE json_type(record,'$.threadId')='null'", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.turnId') WHERE json_type(record,'$.turnId')='null'", [])?;
-            tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
+            for row in studio_runtime_store::test_fixtures::canvas::entities(tx)? {
+                if let Some(payload) = row.payload {
+                    studio_runtime_store::test_fixtures::canvas::seed_entity(tx, &studio_runtime_store::clock_schema::SyncEntities {
+                        collection:row.collection,id:row.id,seq:row.seq,hash:studio_runtime_store::sha256_hex(payload.as_bytes()),payload:Some(payload),deleted:row.deleted,
+                    }, row.source_rowid)?;
+                }
+            }
             studio_runtime_store::test_fixtures::normalize_agent(tx)?;
             // Seed current roots with the explicit review choice assigned on creation.
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.reviewDefaults.model',?1) WHERE (json_extract(record,'$.isLead')=1 OR json_extract(record,'$.rootId')=id) AND json_extract(record,'$.reviewDefaults.model') IS NULL", [studio_runtime_schema::provider_kind::initial_review_model()])?;
@@ -264,8 +336,6 @@ fn post(
 #[tokio::test]
 async fn python_send_and_receipt_corpus() {
     let fixture = Fixture::new();
-    let seed = fixture.seed("migrated-template");
-    let template = crate::state_template::StateTemplate::migrate(&seed).await;
     let cases: Vec<Value> =
         studio_json::from_str(include_str!("wave7_p03_message_ingress/cases.json")).expect("cases");
     for mut case in cases {
@@ -285,7 +355,7 @@ async fn python_send_and_receipt_corpus() {
             }
         }
         let name = case["name"].as_str().expect("case name");
-        let root = fixture.seed_copy(name, &template);
+        let root = fixture.seed_configured(name, name);
         let expected = fixture.expected(name);
         let store = RuntimeStore::open(Some(&root))
             .await
@@ -480,17 +550,14 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
     for (id, record) in &mut agents {
         studio_runtime_store::agent_volatile::merge(&db, id, record).expect("merged agent");
     }
-    let mut hashes = db
-        .prepare("SELECT hash,payload FROM sync_entities WHERE payload IS NOT NULL")
-        .expect("hash query");
-    for row in hashes
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .expect("hash rows")
-    {
-        let (hash, payload) = row.expect("hash row");
-        assert_eq!(hash, studio_runtime_store::sha256_hex(payload.as_bytes()));
+    let entities = studio_runtime_store::test_fixtures::canvas::entities(&db).expect("entity rows");
+    for row in &entities {
+        if let Some(payload) = &row.payload {
+            assert_eq!(
+                row.hash,
+                studio_runtime_store::sha256_hex(payload.as_bytes())
+            );
+        }
     }
     let invalid_capacity_timestamps: i64 = db.query_row(
         "SELECT count(*) FROM runtime_capacity_retries WHERE json_extract(record,'$.status')='finished' AND COALESCE(json_extract(record,'$.updatedAt')>1,0)=0", [], |row| row.get(0)
@@ -503,14 +570,22 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
         "SELECT
             (SELECT count(*) FROM runtime_events WHERE typeof(created) NOT IN ('integer','real')) +
             (SELECT count(*) FROM runtime_event_meta WHERE COALESCE(json_type(record,'$.acceptedAt'),'null') NOT IN ('integer','real')) +
-            (SELECT count(*) FROM messages WHERE typeof(at) NOT IN ('integer','real')) +
-            (SELECT count(*) FROM sync_entities WHERE collection='event' AND payload IS NOT NULL AND COALESCE(json_type(payload,'$.value.created'),'null') NOT IN ('integer','real'))",
+            (SELECT count(*) FROM messages WHERE typeof(at) NOT IN ('integer','real'))",
         [], |row| row.get(0),
     ).expect("generated timestamp types");
     assert_eq!(
         invalid_generated_timestamps, 0,
         "normalized timestamps remain numeric"
     );
+    for row in entities.iter().filter(|row| row.collection == "event") {
+        if let Some(payload) = &row.payload {
+            let payload: Value = studio_json::from_str(payload).expect("event projection JSON");
+            assert!(
+                payload["value"]["created"].is_number(),
+                "normalized projection timestamps remain numeric"
+            );
+        }
+    }
     let mut state = BTreeMap::from([
         ("agents".into(), json!(agents)),
         (
@@ -530,20 +605,23 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
             "SELECT json_object('id',id,'room',room,'author',author,'text',text,'at','generated timestamp','deliveries',json(deliveries)) FROM messages ORDER BY rowid",
         ),
         (
-            "sync_entities",
-            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree') ORDER BY rowid",
-        ),
-        (
-            "sync_documents",
-            "SELECT json_object('seq',seq,'scope',scope,'id',id,'payload',json(payload),'deleted',deleted) FROM sync_documents ORDER BY rowid",
-        ),
-        (
             "runtime_capacity_retries",
             "SELECT json_object('id',id,'agent',agent,'record',json(CASE WHEN json_extract(record,'$.status')='finished' THEN json_set(record,'$.updatedAt','generated timestamp') ELSE record END)) FROM runtime_capacity_retries ORDER BY rowid",
         ),
     ] {
         state.insert(name.into(), json!(json_rows(sql)));
     }
+    let mut entities = entities;
+    entities.sort_by_key(|row| row.source_rowid);
+    state.insert("sync_entities".into(), json!(entities.into_iter().filter(|row| !["agent","agentSummary","agentDetail","retainedWorktree"].contains(&row.collection.as_str())).map(|studio_runtime_store::test_fixtures::canvas::EntitySnapshot {collection,id,seq,hash,payload,deleted,..}| {
+        let mut decoded = payload.as_deref().map(|raw| studio_json::from_str::<Value>(raw).expect("entity JSON"));
+        if collection == "event" && let Some(value) = &mut decoded { value["value"]["created"] = json!("generated timestamp"); }
+        json!({"collection":collection,"id":id,"seq":seq,"hash":if payload.is_some() {"verified payload hash".to_owned()} else {hash},"payload":decoded,"deleted":deleted})
+    }).collect::<Vec<_>>()));
+    let mut documents =
+        studio_runtime_store::test_fixtures::canvas::documents(&db).expect("document rows");
+    documents.sort_by_key(|row| row.source_rowid);
+    state.insert("sync_documents".into(),json!(documents.into_iter().map(|studio_runtime_store::test_fixtures::canvas::DocumentSnapshot {seq,scope,id,payload,deleted,..}| json!({"seq":seq,"scope":scope,"id":id,"payload":studio_json::from_str::<Value>(&payload).expect("document JSON"),"deleted":deleted})).collect::<Vec<_>>()));
     let views = studio_runtime_services::entity_scope::agent_snapshot(&db).expect("agent views");
     let sync = state
         .get_mut("sync_entities")
@@ -637,14 +715,14 @@ fn snapshot(store: &RuntimeStore) -> Vec<(String, Vec<String>)> {
         .expect("names")
         .map(|name| {
             let name = name.expect("name");
-            let mut sql =
-                studio_runtime_store::agent_columns::select_declared_sql(&connection, &name)
-                    .expect("columns");
-            if name == "sync_entity_meta" {
-                sql.push_str(" WHERE key != 'migration_catalog'");
-            }
+            let sql = studio_runtime_store::agent_columns::select_declared_sql(&connection, &name)
+                .expect("columns");
             let mut query = connection.prepare(&sql).expect("table");
             let count = query.column_count();
+            let catalog_columns = (name == "metadata").then(|| (
+                query.column_index("kind").expect("metadata kind"),
+                query.column_index("text_key").expect("metadata key"),
+            ));
             let mut rows: Vec<String> = query
                 .query_map([], |row| {
                     (0..count)
@@ -652,7 +730,18 @@ fn snapshot(store: &RuntimeStore) -> Vec<(String, Vec<String>)> {
                         .collect::<Result<Vec<_>, _>>()
                 })
                 .expect("rows")
-                .map(|row| format!("{:?}", row.expect("row")))
+                .filter_map(|row| {
+                    let row = row.expect("row");
+                    if catalog_columns.is_some_and(|(kind, key)| {
+                        row[kind] == rusqlite::types::Value::Integer(
+                            studio_runtime_store::consolidation_kinds::CanvasMetadataKind::SyncEntityMeta as i64,
+                        ) && row[key] == rusqlite::types::Value::Text("migration_catalog".into())
+                    }) {
+                        None
+                    } else {
+                        Some(format!("{row:?}"))
+                    }
+                })
                 .collect();
             rows.sort();
             (name, rows)
@@ -812,7 +901,8 @@ async fn each_write_occurrence_and_commit_wake_crash_recovers_exactly_once() {
             continue;
         }
         for point in ["BEFORE", "AFTER"] {
-            let root = fixture.seed(&format!("count-{table}-{operation}-{point}"));
+            let root =
+                fixture.seed_configured(&format!("count-{table}-{operation}-{point}"), "capacity");
             let store = RuntimeStore::open(Some(&root)).await.expect("count store");
             let request_id = request_id();
             fixture.configure(&store, "capacity").await;
@@ -934,11 +1024,14 @@ async fn event_projection_failure_returns_error_and_rolls_back_message_admission
     let request_id = request_id();
     store
         .transaction(move |tx| {
-            tx.execute_batch(
-                "CREATE TRIGGER fail_event_projection BEFORE INSERT ON sync_entities
-                 WHEN NEW.collection='event'
+            tx.execute_batch(&format!(
+                "CREATE TRIGGER fail_event_projection BEFORE INSERT ON publications
+                 WHEN NEW.kind={kind} AND NEW.collection_order='event'
                  BEGIN SELECT RAISE(ABORT,'injected event projection failure'); END;",
-            )?;
+                kind =
+                    studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities
+                        as i64
+            ))?;
             Ok(())
         })
         .await

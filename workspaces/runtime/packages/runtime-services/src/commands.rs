@@ -482,32 +482,21 @@ pub fn response(
     chat: &str,
     outcome: CommandOutcome,
 ) -> Result<CommandResponse, CommandError> {
-    let mut statement = conn.prepare_cached(
-        "SELECT collection,id,seq,payload FROM sync_entities WHERE id IN (?1,?2) AND deleted=0 ORDER BY collection,id",
+    let found = studio_runtime_store::DiagnosticPublicationQueries::command_rows(
+        conn,
+        &reference.id,
+        chat,
+        COMMAND_ROW_MAX_BYTES as i64,
     )?;
-    let found = statement
-        .query_map([reference.id.as_str(), chat], |row| {
-            let payload = match row.get_ref(3)? {
-                rusqlite::types::ValueRef::Text(bytes) | rusqlite::types::ValueRef::Blob(bytes) => {
-                    bytes.to_vec()
-                }
-                rusqlite::types::ValueRef::Null
-                | rusqlite::types::ValueRef::Integer(_)
-                | rusqlite::types::ValueRef::Real(_) => Vec::new(),
-            };
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                payload,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let seq = found.iter().map(|(_, _, seq, _)| *seq).max().unwrap_or(0);
+    let seq = found
+        .iter()
+        .map(|(_, _, seq, _, _)| *seq)
+        .max()
+        .unwrap_or(0);
     let rows = found
         .into_iter()
-        .filter(|(_, _, _, payload)| payload.len() <= COMMAND_ROW_MAX_BYTES)
-        .filter_map(|(collection, id, seq, payload)| {
+        .filter(|(_, _, _, _, bytes)| *bytes <= COMMAND_ROW_MAX_BYTES as i64)
+        .filter_map(|(collection, id, seq, payload, _)| {
             Some(CommandRow {
                 collection,
                 id,
@@ -912,5 +901,55 @@ mod withdraw_decision_tests {
     fn the_queue_check_comes_before_the_kind_check() {
         let error = decide_withdraw(&input(false, None), "m1").expect_err("not queued first");
         assert!(matches!(error, CommandError::Conflict(_)));
+    }
+}
+
+#[cfg(test)]
+mod f1_canonical_tests {
+    use super::*;
+    #[tokio::test]
+    async fn f1_commands_canonical_caller_without_source_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(
+                    !studio_runtime_store::peer_update_settings::canvas_read(tx)
+                        .table_exists::<studio_runtime_store::clock_schema::SyncEntities>()?
+                );
+
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "future",
+                    "reference",
+                    studio_json::json!({"text":"small"}),
+                    false,
+                )?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "future-large",
+                    "reference",
+                    studio_json::json!({"text":"x".repeat(COMMAND_ROW_MAX_BYTES)}),
+                    false,
+                )?;
+                let reference = RequestReference {
+                    kind: RequestReferenceKind::Message,
+                    id: "reference".into(),
+                    revision: 1,
+                };
+                let result = response(tx, &reference, "chat", CommandOutcome::Send).unwrap();
+                assert!(result.seq > 0);
+                assert_eq!(result.rows.len(), 1);
+                assert_eq!(result.rows[0].id, "reference");
+                assert!(
+                    result.seq > result.rows[0].seq,
+                    "oversized rows still raise the watermark"
+                );
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

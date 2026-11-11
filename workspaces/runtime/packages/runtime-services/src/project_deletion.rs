@@ -4,6 +4,7 @@ use crate::{
     agent_lifecycle_runtime::{self, LifecyclePorts},
     agent_management::{Action, ManagementError},
 };
+#[allow(unused_imports)]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -154,13 +155,12 @@ fn delete_in_transaction(
         };
     let (_, raw_project) = ProjectsRepository::get(tx, &request.id)?.ok_or(Error::NotFound)?;
     let project = decode_project(&request.id, &raw_project)?;
-    let seq: Option<i64> = tx
-        .query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-            [&request.id],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let seq = studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+        tx,
+        "project",
+        &request.id,
+        false,
+    )?;
     if seq != Some(request.expected_project_seq) {
         return Err(Error::Sequence);
     }
@@ -716,13 +716,8 @@ pub(crate) fn admission_version(
     db: &Connection,
     id: &str,
 ) -> Result<Option<(i64, bool)>, StoreError> {
-    let version: Option<(i64, bool)> = db
-        .query_row(
-            "SELECT seq,deleted FROM sync_entities WHERE collection='project' AND id=?1",
-            [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
+    let version =
+        studio_runtime_store::ProjectionPublicationQueries::entity_version(db, "project", id)?;
     version
         .map(|(seq, deleted)| {
             Ok((
@@ -785,5 +780,41 @@ mod membership_tests {
         assert!(
             matches!(error, Error::AgentProjectConflict { agent, project, other } if agent == "legacy" && project == "project-a" && other == "project-b")
         );
+    }
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_project_admission_keeps_missing_and_live_version() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "project",
+                    "canonical",
+                    (),
+                    false,
+                )?;
+                let seq = studio_runtime_store::SyncDocumentsRepository::entity_sequence(tx)?;
+                assert_eq!(
+                    super::admission_version(tx, "canonical")?,
+                    Some((seq, false))
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let result = store
+            .read_async("canonical-project-admission", |db| {
+                super::admission_version(db, "absent")
+            })
+            .await
+            .unwrap();
+        assert_eq!(result, None);
     }
 }

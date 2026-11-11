@@ -101,7 +101,13 @@ fn commit(
         account_state::LimitsStamp::read(account_state::limits_observation(tx, account)?)?;
     let old = account_state::typed_limits_snapshot(tx, account, &stamp)?;
     let mut stamp_changed = false;
-    let committed_view = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0", [account], |row| row.get::<_, String>(0)).optional()?.map(|payload| account_state::normalized_limits_view(account, payload.as_bytes(), now).0);
+    let committed_view = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+        tx,
+        "rateLimit",
+        account,
+        true,
+    )?
+    .map(|payload| account_state::normalized_limits_view(account, payload.as_bytes(), now).0);
     let mut checking = None;
     let force_projection = matches!(
         &write,
@@ -247,7 +253,8 @@ fn commit(
         crate::continuation_runtime::stage_limits_changed_for_account(tx, account, &value, now)
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     }
-    let current_identity: Option<String> = tx.query_row("SELECT json_extract(j.value,'$.accountId') FROM sync_entities e, json_each(CASE WHEN json_valid(e.payload) THEN e.payload ELSE '{}' END,'$.value.accounts') j WHERE e.collection='accounts' AND e.id='current' AND e.deleted=0 AND json_extract(j.value,'$.id')=?1", [account], |row| row.get(0)).optional()?.flatten();
+    let current_identity: Option<String> =
+        studio_runtime_store::ProjectionPublicationQueries::current_account_identity(tx, account)?;
     let observation_identity = value
         .data
         .as_ref()
@@ -345,22 +352,43 @@ pub(super) async fn recovery_deadline(
     account: String,
     attempted: f64,
 ) -> Option<f64> {
-    store.read_async("account-session/recovery-deadline", move |db| {
-        use studio_runtime_schema::usage_limits::RecoveryTiming;
-        let payload: Option<String> = db.query_row(
-            "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
-            [&account], |row| row.get(0),
-        ).optional()?;
-        let Some(payload) = payload else { return Ok::<_, StoreError>(None) };
-        let (value, _) = account_state::normalized_limits_view(&account, payload.as_bytes(), attempted);
-        let checked = value.observation.read_at.into_iter().chain(value.observation.checked_at).fold(0.0, f64::max);
-        Ok(value.projection.agents.values().filter_map(|agent| {
-            match &agent.recovery.as_ref()?.timing {
-                RecoveryTiming::Waiting { reset_at } | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
-                RecoveryTiming::Unknown | RecoveryTiming::Checking { .. } | RecoveryTiming::Confirmed { .. } => None,
-            }
-        }).filter(|reset| *reset > checked.max(attempted)).reduce(f64::min))
-    }).await.ok().flatten()
+    store
+        .read_async("account-session/recovery-deadline", move |db| {
+            use studio_runtime_schema::usage_limits::RecoveryTiming;
+            let payload = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                db,
+                "rateLimit",
+                &account,
+                true,
+            )?;
+            let Some(payload) = payload else {
+                return Ok::<_, StoreError>(None);
+            };
+            let (value, _) =
+                account_state::normalized_limits_view(&account, payload.as_bytes(), attempted);
+            let checked = value
+                .observation
+                .read_at
+                .into_iter()
+                .chain(value.observation.checked_at)
+                .fold(0.0, f64::max);
+            Ok(value
+                .projection
+                .agents
+                .values()
+                .filter_map(|agent| match &agent.recovery.as_ref()?.timing {
+                    RecoveryTiming::Waiting { reset_at }
+                    | RecoveryTiming::Unconfirmed { reset_at } => Some(*reset_at),
+                    RecoveryTiming::Unknown
+                    | RecoveryTiming::Checking { .. }
+                    | RecoveryTiming::Confirmed { .. } => None,
+                })
+                .filter(|reset| *reset > checked.max(attempted))
+                .reduce(f64::min))
+        })
+        .await
+        .ok()
+        .flatten()
 }
 
 fn mark_checking(view: &mut studio_runtime_schema::usage_limits::RateLimitView, reset_at: f64) {
@@ -382,25 +410,23 @@ fn decoded_account_views(
     tx: &studio_runtime_store::Transaction<'_>,
     now: f64,
 ) -> Result<Vec<AccountView>, StoreError> {
-    let mut query = tx.prepare(
-        "SELECT id,substr(CAST(payload AS BLOB),1,?1) FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
+    let mut views = Vec::new();
+    studio_runtime_store::ProjectionPublicationQueries::visit_limits(
+        tx,
+        account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1,
+        |(account, payload)| {
+            #[cfg(test)]
+            ACCOUNT_VIEW_DECODES.with(|count| count.set(count.get() + 1));
+            let (view, unreadable) = account_state::normalized_limits_view(
+                &account,
+                payload.as_deref().unwrap_or_default(),
+                now,
+            );
+            views.push((account, view, unreadable));
+            Ok(())
+        },
     )?;
-    let rows = query.query_map(
-        [account_state::MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
-    )?;
-    rows.map(|row| {
-        let (account, payload) = row?;
-        #[cfg(test)]
-        ACCOUNT_VIEW_DECODES.with(|count| count.set(count.get() + 1));
-        let (view, unreadable) = account_state::normalized_limits_view(
-            &account,
-            payload.as_deref().unwrap_or_default(),
-            now,
-        );
-        Ok((account, view, unreadable))
-    })
-    .collect()
+    Ok(views)
 }
 
 #[cfg(test)]
@@ -451,9 +477,10 @@ pub(crate) fn publish_agent_change_with_views(
         .transpose()?;
     for (account, value, unreadable) in views {
         if *unreadable {
-            tx.execute(
-                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
-                [&*account],
+            studio_runtime_store::ProjectionPublicationQueries::delete_entity(
+                tx,
+                "rateLimit",
+                account,
             )?;
             populate_agents(tx, value, now)?;
             SyncDocumentsRepository::put_entity(tx, "rateLimit", account, &*value, false)?;
@@ -494,9 +521,10 @@ pub(crate) fn seed_agents(tx: &studio_runtime_store::Transaction<'_>) -> Result<
     let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
     for (account, mut value, unreadable) in decoded_account_views(tx, now)? {
         if unreadable {
-            tx.execute(
-                "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
-                [&account],
+            studio_runtime_store::ProjectionPublicationQueries::delete_entity(
+                tx,
+                "rateLimit",
+                &account,
             )?;
         }
         if matches!(
@@ -657,7 +685,7 @@ mod tests {
                 commit(tx, account, LimitsWrite::Snapshot(LimitsSnapshot { response }), 1.0, None)?;
                 let decodes = AGENT_DECODES.get();
                 let steps = AGENT_SCAN_STEPS.get();
-                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1", [account], |row| row.get(0))?;
+                let payload = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "rateLimit", account, false)?.expect("published limits");
                 let (published, unreadable) = account_state::normalized_limits_view(account, payload.as_bytes(), 1.0);
                 assert!(!unreadable);
                 assert_eq!(studio_json::to_string(&published)?, studio_json::to_string(&expected)?);
@@ -668,5 +696,60 @@ mod tests {
             Ok(())
         }).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_limits_views_read_publication_and_seed_agents() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                let view = studio_runtime_schema::usage_limits::RateLimitView::from_observation(
+                    studio_runtime_schema::usage_limits::UsageLimitsResponse {
+                        account_key: "canonical".into(),
+                        ..Default::default()
+                    },
+                    1.0,
+                );
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "rateLimit",
+                    "canonical",
+                    &view,
+                    false,
+                )?;
+                let views = super::decoded_account_views(tx, 1.0)?;
+                assert_eq!(views.len(), 1);
+                assert_eq!(views[0].0, "canonical");
+                assert!(!views[0].2);
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "rateLimit",
+                    "broken",
+                    "legacy",
+                    false,
+                )?;
+                assert!(
+                    super::decoded_account_views(tx, 1.0)?
+                        .iter()
+                        .any(|(_, _, unreadable)| *unreadable)
+                );
+                super::publish_agent_change(tx, "missing", true)?;
+                assert!(
+                    super::decoded_account_views(tx, 1.0)?
+                        .iter()
+                        .all(|(_, _, unreadable)| !*unreadable)
+                );
+                super::seed_agents(tx)?;
+                assert_eq!(super::decoded_account_views(tx, 1.0)?.len(), 2);
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 }

@@ -910,20 +910,14 @@ pub fn listing(
         .iter()
         .filter_map(|owner| owner.id.as_deref())
         .collect();
-    let mut statement = connection
-        .prepare("SELECT payload FROM sync_entities WHERE collection='task' AND deleted=0")
-        .map_err(StoreError::from)?;
-    let entities = statement
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(StoreError::from)?;
     let mut tasks = Vec::new();
-    for entity in entities {
-        let entity: TaskEntity =
-            studio_json::from_str(&entity.map_err(StoreError::from)?).map_err(StoreError::from)?;
+    studio_runtime_store::DiagnosticPublicationQueries::visit_live_tasks(connection, |raw| {
+        let entity: TaskEntity = studio_json::from_str(&raw).map_err(StoreError::from)?;
         if owner_ids.contains(entity.value.agent.as_str()) && entity.value.display.active {
             tasks.push(entity.value);
         }
-    }
+        Ok(())
+    })?;
     let activities = background_activities(&processes, &tasks);
     Ok(ProcessListing {
         response_target: stop_target(&owners[0], connections),
@@ -1490,6 +1484,8 @@ mod claim_identity_tests {
         let old = "b16654521805af453f0fc6e0b9f42fb54887c3b20eb1fb103b50e05a645497f8";
         assert_ne!(signature, old);
         let mut db = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
         db.execute_batch(
             "CREATE TABLE runtime_process_actions(id TEXT PRIMARY KEY,signature TEXT,record TEXT);",
         )
@@ -1511,12 +1507,14 @@ mod claim_identity_tests {
     #[test]
     fn process_claim_reuses_its_admitted_token_after_expiry_without_another_effect() {
         let mut db = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
         db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT,parent_id TEXT,deleted_at REAL);
             CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
             CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(id);
             CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT);
             CREATE TABLE runtime_process_actions(id TEXT PRIMARY KEY,signature TEXT,record TEXT);
-            CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT);
+            
             CREATE TABLE effects(count INTEGER);
             INSERT INTO effects VALUES(0);")
             .expect("claim tables");
@@ -1601,4 +1599,30 @@ fn typed_task_keeps_numeric_process_identity_projection() {
     assert_eq!(after.process_id, typed.process_id().cloned());
     assert_eq!(after.item_id.as_deref(), Some("i"));
     assert_eq!(after.view.source, ProcessSourceKind::CodexTask);
+}
+
+#[cfg(test)]
+mod f1_canonical_tests {
+    use super::*;
+    #[tokio::test]
+    async fn f1_process_controls_canonical_caller_without_source_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(
+                    !studio_runtime_store::peer_update_settings::canvas_read(tx)
+                        .table_exists::<studio_runtime_store::clock_schema::SyncEntities>()?
+                );
+
+                let owner = ProcessOwner::default();
+                let result = listing(tx, &[owner], &[], &Connections::default()).unwrap();
+                assert!(result.activities.is_empty());
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
+    }
 }

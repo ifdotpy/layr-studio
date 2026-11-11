@@ -6,8 +6,24 @@ use studio_json::Value;
 use studio_runtime_schema::persistence::OutboxStatus;
 
 use super::remote_outbox::{RemoteEffect, RemoteOutbox};
+use crate::consolidation_kinds::CanvasMetadataKind;
+use crate::metadata_schema::{FederationSettings, Metadata};
+use crate::peer_update_settings::{Canvas, canvas_read, canvas_tx};
 
 const MAX_RECORD_BYTES: usize = 512 * 1024;
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=optional,native,result=Option<String>,
+    tables(rows=Metadata),columns(kind=Metadata::KIND,identity=Metadata::IDENTITY,record=Metadata::FEDERATION_RECORD),
+    sql="SELECT CASE WHEN length(CAST({record} AS BLOB))<=?3 THEN {record} ELSE NULL END FROM {rows} WHERE {kind}=?1 AND {identity}=?2")]
+struct SettingsRecord {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::IDENTITY)]
+    identity: Vec<u8>,
+    #[db(column=Metadata::SOURCE_ROWID)]
+    max_bytes: Option<i64>,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum FederationTable {
@@ -71,7 +87,32 @@ impl FederationMessagingRepository {
                     .to_owned()
             }
             FederationTable::Outbox => return Self::outbox_record(db, id, peer),
-            FederationTable::Settings | FederationTable::Peer | FederationTable::Room => {
+            FederationTable::Settings => {
+                return canvas_read(db)
+                    .named(
+                        &SettingsRecord::QUERY,
+                        &SettingsRecord {
+                            kind: CanvasMetadataKind::FederationSettings,
+                            identity: crate::consolidation_codec::nullable_text_identity(
+                                &Some(id.to_owned()),
+                                0,
+                            ),
+                            max_bytes: Some(MAX_RECORD_BYTES as i64),
+                        },
+                    )?
+                    .map(|raw| {
+                        Self::parse(
+                            table,
+                            id,
+                            &raw.ok_or_else(|| StoreError::InvalidStoredObject {
+                                table: table.name(),
+                                id: id.into(),
+                            })?,
+                        )
+                    })
+                    .transpose();
+            }
+            FederationTable::Peer | FederationTable::Room => {
                 format!("SELECT record FROM {} WHERE id=?1 AND ?2=?2", table.name())
             }
         };
@@ -181,8 +222,34 @@ impl FederationMessagingRepository {
                 )?;
             }
             FederationTable::Settings => {
-                // Raw SQL: the settings descriptor belongs to the separate settings family.
-                tx.execute(&format!("INSERT INTO {}(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",table.name()),params![id,raw])?;
+                let kind = CanvasMetadataKind::FederationSettings;
+                let text_key = Some(id.to_owned());
+                let identity = crate::consolidation_codec::nullable_text_identity(&text_key, 0);
+                let source_rowid = match studio_db_api::db_query!(
+                    canvas_read(tx),
+                    Metadata,
+                    scalar(Metadata::SOURCE_ROWID),
+                    filter(Metadata::KIND.eq(&kind), Metadata::IDENTITY.eq(&identity))
+                )? {
+                    Some(rowid) => rowid.ok_or(rusqlite::Error::InvalidColumnType(
+                        0,
+                        "source_rowid".into(),
+                        rusqlite::types::Type::Null,
+                    ))?,
+                    None => crate::clock_schema::next_metadata_rowid(tx, kind)?,
+                };
+                let before = tx.total_changes();
+                canvas_tx(tx)
+                    .partition::<FederationSettings>()
+                    .put(&FederationSettings {
+                        identity,
+                        source_rowid,
+                        text_key,
+                        federation_record: crate::json_record_codec::ExactJson::from_stored(raw)?,
+                    })?;
+                if tx.total_changes() != before {
+                    crate::record_settings_change(kind);
+                }
             }
         }
         Ok(())
@@ -282,11 +349,7 @@ mod tests {
 
     #[test]
     fn federation_record_write_uses_native_json() {
-        let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch(
-            "CREATE TABLE runtime_federation_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
-        )
-        .unwrap();
+        let mut db = crate::test_canvas();
         let record = studio_json::json!({"enabled":true,"number":1e-6});
         let tx = db.transaction().unwrap();
         FederationMessagingRepository::put(
@@ -297,11 +360,15 @@ mod tests {
             &record,
         )
         .unwrap();
-        let raw: String = tx
-            .query_row("SELECT record FROM runtime_federation_settings", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
+        let raw = crate::peer_update_settings::canvas_read(&tx)
+            .get::<crate::metadata_schema::FederationSettings>(&(
+                crate::consolidation_codec::nullable_text_identity(&Some("settings".to_owned()), 0),
+            ))
+            .unwrap()
+            .unwrap()
+            .federation_record
+            .raw()
+            .to_owned();
         assert_eq!(raw, record.to_string());
         assert_eq!(
             FederationMessagingRepository::record(

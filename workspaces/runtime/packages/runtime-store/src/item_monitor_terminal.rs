@@ -331,23 +331,68 @@ mod tests {
 
     #[test]
     fn family_indexes_and_triggers_keep_original_relative_order() {
-        let catalog: Catalog =
-            studio_json::from_str(&crate::storage_catalog::generate().unwrap()).unwrap();
+        let db = crate::fresh_state::test_canvas();
+        let catalog = Catalog {
+            canvas: Database {
+                sqlite_master: studio_db_api::catalog::export(&db)
+                    .expect("catalog exports")
+                    .into_iter()
+                    .map(|entry| Object {
+                        name: entry.name,
+                        sql: entry.sql,
+                        table: entry.table,
+                        kind: entry.r#type,
+                        create_order: entry
+                            .create_order
+                            .try_into()
+                            .expect("positive catalog rowid"),
+                    })
+                    .collect(),
+            },
+        };
+
+        assert!(
+            !crate::peer_update_settings::canvas_read(&db)
+                .table_exists::<crate::context_settings::TranscriptRevisionsStorageRow>()
+                .unwrap()
+        );
+        assert!(
+            !canvas_read(&db)
+                .table_exists::<crate::clock_schema::DurableRows>()
+                .unwrap()
+        );
+        for trigger in catalog.canvas.sqlite_master.iter().filter(|object| {
+            object.table == "runtime_items"
+                && (object.name.starts_with("sync_transcript_revision_")
+                    || object.name.starts_with("durable_"))
+        }) {
+            assert!(
+                trigger.sql.contains("\"changes\""),
+                "{} targets the canonical change owner",
+                trigger.name
+            );
+            assert!(!trigger.sql.contains("runtime_transcript_revisions"));
+            assert!(!trigger.sql.contains("durable_rows"));
+        }
         for (table, kind, expected) in [
-            ("runtime_items", "index", &["runtime_item_agent"][..]),
+            (
+                "runtime_items",
+                "index",
+                &["runtime_item_agent", "runtime_item_turn_scope"][..],
+            ),
             (
                 "runtime_items",
                 "trigger",
                 &[
                     "summary_receipt_item_delete",
+                    "immutable_scope_runtime_items",
+                    "immutable_scope_runtime_items_insert",
                     "sync_transcript_revision_runtime_items_insert",
                     "sync_transcript_revision_runtime_items_update",
                     "sync_transcript_revision_runtime_items_delete",
                     "durable_runtime_items_insert",
                     "durable_runtime_items_update",
                     "durable_runtime_items_delete",
-                    "immutable_scope_runtime_items",
-                    "immutable_scope_runtime_items_insert",
                 ][..],
             ),
             (
@@ -368,13 +413,13 @@ mod tests {
                 "runtime_monitors",
                 "trigger",
                 &[
-                    "durable_runtime_monitors_insert",
-                    "durable_runtime_monitors_update",
-                    "durable_runtime_monitors_delete",
                     "immutable_scope_runtime_monitors",
                     "immutable_scope_runtime_monitors_insert",
                     "immutable_scope_runtime_monitors_json_INSERT",
                     "immutable_scope_runtime_monitors_json_UPDATE",
+                    "durable_runtime_monitors_insert",
+                    "durable_runtime_monitors_update",
+                    "durable_runtime_monitors_delete",
                 ][..],
             ),
         ] {

@@ -1019,7 +1019,11 @@ mod tests {
     fn database() -> Connection {
         let db = Connection::open_in_memory().expect("database");
         studio_runtime_store::receipt_schema::create(&db).expect("receipt schema");
-        db.execute_batch("CREATE TABLE runtime_tool_requests(id TEXT PRIMARY KEY,record TEXT NOT NULL,kind TEXT GENERATED ALWAYS AS (json_extract(record,'$.kind')) VIRTUAL,origin_key TEXT GENERATED ALWAYS AS (json_extract(record,'$.originKey')) VIRTUAL,status TEXT GENERATED ALWAYS AS (coalesce(json_extract(record,'$.status'),json_extract(record,'$.stage'))) VIRTUAL,agent TEXT GENERATED ALWAYS AS (coalesce(json_extract(record,'$.agent'),json_extract(record,'$.payload.identity.context.agent'))) VIRTUAL); CREATE INDEX runtime_tool_request_current_status ON runtime_tool_requests(status,agent,id); CREATE UNIQUE INDEX callback_origin ON runtime_tool_requests(origin_key) WHERE origin_key IS NOT NULL; CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);") .expect("owner schema");
+        <studio_runtime_store::queue_schema::ToolRequestsRow as studio_db_api::Table>::descriptor()
+            .install_if_absent(&db)
+            .expect("callback owner schema");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("current Canvas schema");
         db
     }
     fn input() -> (ReplyIdentity, Input) {

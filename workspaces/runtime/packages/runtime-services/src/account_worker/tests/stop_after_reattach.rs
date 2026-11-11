@@ -1117,11 +1117,11 @@ async fn project_delete_stops_settled_background_commands_once() {
             let project = project.clone();
             move |conn| {
                 Ok::<_, studio_runtime_store::StoreError>((
-                    conn.query_row(
-                        "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1",
-                        [project],
-                        |row| row.get::<_, i64>(0),
-                    )?,
+                    studio_runtime_store::ProjectionPublicationQueries::entity_version(
+                        conn, "project", &project,
+                    )?
+                    .map(|(seq, _)| seq)
+                    .ok_or(rusqlite::Error::QueryReturnedNoRows)?,
                     studio_runtime_store::SyncDocumentsRepository::workspace_id(conn)?,
                 ))
             }

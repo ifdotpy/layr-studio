@@ -394,18 +394,7 @@ mod tests {
     use studio_json::json;
 
     fn nonce_db() -> Connection {
-        let db = Connection::open_in_memory().expect("in-memory SQLite opens");
-        db.execute_batch(
-            "CREATE TABLE runtime_access_nonces(client TEXT NOT NULL, nonce TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(client,nonce));
-             CREATE TABLE runtime_access_clients(id TEXT NOT NULL, record TEXT NOT NULL);
-             CREATE TABLE runtime_access_outbound(server TEXT NOT NULL, request_id TEXT NOT NULL, hash TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(server,request_id));",
-        ).expect("fixture tables create");
-        super::super::super::receipt_schema::create(&db).expect("target receipt schema");
-        db.execute_batch(
-            "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-        )
-        .expect("settings");
-        db
+        crate::fresh_state::test_canvas()
     }
 
     #[test]
@@ -729,10 +718,8 @@ mod tests {
         let mut sent = 0;
         {
             let mut db = Connection::open(&path).expect("journal database opens");
-            db.execute_batch("CREATE TABLE runtime_access_outbound(server TEXT,request_id TEXT,hash TEXT,record TEXT,PRIMARY KEY(server,request_id));")
-                .expect("journal schema creates");
             crate::receipt_schema::create(&db).expect("target receipt schema");
-            db.execute_batch("CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)").expect("settings");
+            crate::test_fixtures::canvas::install_canonical(&db).expect("current journal owners");
             let tx = db.transaction().expect("first reservation starts");
             let reservation = RemoteTransportRepository::reserve_multi_server_request(
                 &tx,

@@ -40,17 +40,11 @@ fn canvas(connection: &Connection) -> crate::StoreResult<()> {
     connection.execute_batch(&crate::domain::check_triggers_sql())?;
     connection.execute_batch(&crate::domain::owner_delete_trigger_sql())?;
     connection.execute_batch(include_str!("catalog-canvas-objects.sql"))?;
-    crate::feature_schema::install_summary_delete_triggers(connection)?;
-    connection.execute_batch(crate::bootstrap::SYNC_SCHEMA)?;
-    for table in crate::durable_seq::DURABLE_TABLES {
-        connection.execute_batch(&crate::durable_seq::trigger_sql(
-            table.name,
-            table.record_only,
-            table.team_fence,
-        ))?;
-    }
-    crate::entity_scopes::install(connection)?;
-    crate::migrations::install_writer_receipt_indexes(connection)?;
+    let transaction = connection.unchecked_transaction()?;
+    crate::entity_scopes::install(&transaction)?;
+    crate::bootstrap::install_current_producers(&transaction)?;
+    crate::migrations::install_writer_receipt_indexes(&transaction)?;
+    transaction.commit()?;
     Ok(())
 }
 

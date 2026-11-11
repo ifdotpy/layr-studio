@@ -17,9 +17,10 @@ const KEY_SCOPED_PUBLICATIONS: &[&str] = &["transcript:%", "rateLimit", "model"]
 const PUBLICATION_SCOPES: &[&str] = &["rootId", "agent"];
 
 fn team_scoped_publication_sql(row: &str) -> String {
+    let collection = crate::publication_schema::Publications::__DB_COLUMN_COLLECTION_ORDER;
     KEY_SCOPED_PUBLICATIONS
         .iter()
-        .map(|pattern| format!("{row}.collection NOT LIKE '{pattern}'"))
+        .map(|pattern| format!("{row}.{collection} NOT LIKE '{pattern}'"))
         .collect::<Vec<_>>()
         .join(" AND ")
 }
@@ -162,6 +163,7 @@ pub(crate) fn deleted_scope_sql(table: &str, row: &str) -> Option<String> {
     } else if ["runtime_items", "runtime_events", "approvals"].contains(&table) {
         Some(format!("json_object('agent',{row}.agent)"))
     } else if table == "sync_entities" {
+        let payload = crate::publication_schema::Publications::__DB_COLUMN_ENTITY_PAYLOAD;
         let team_scoped = team_scoped_publication_sql(row);
         let fields = PUBLICATION_SCOPES
             .iter()
@@ -169,7 +171,7 @@ pub(crate) fn deleted_scope_sql(table: &str, row: &str) -> Option<String> {
                 format!(
                     "'{field}',json({})",
                     scope_selector_sql(
-                        &format!("{row}.payload"),
+                        &format!("{row}.{payload}"),
                         &format!("$.value.{field}"),
                         "json_quote(value)"
                     )
@@ -178,11 +180,127 @@ pub(crate) fn deleted_scope_sql(table: &str, row: &str) -> Option<String> {
             .collect::<Vec<_>>()
             .join(",");
         Some(format!(
-            "CASE WHEN {team_scoped} AND json_valid({row}.payload) THEN json_object({fields}) END"
+            "CASE WHEN {team_scoped} AND json_valid({row}.{payload}) THEN json_object({fields}) END"
         ))
     } else {
         None
     }
+}
+
+/// Fixed publication guards; the authority installer executes this DDL atomically.
+pub(crate) fn publication_trigger_sql() -> String {
+    use crate::change_schema::Changes;
+    use crate::consolidation_kinds::{CanvasChangesKind, CanvasPublicationsKind};
+    use crate::peer_update_settings::Canvas;
+    use crate::publication_schema::Publications;
+    use studio_db_api::{Table, migration::key_sql, query_column as column};
+
+    let publications = Publications::NAME;
+    let changes = Changes::NAME;
+    let kind = column::<Canvas, _>(Publications::KIND);
+    let entity_kind = CanvasPublicationsKind::DB_CODE_SYNCENTITIES;
+    let identity = column::<Canvas, _>(Publications::IDENTITY);
+    let collection = column::<Canvas, _>(Publications::COLLECTION_ORDER);
+    let id = column::<Canvas, _>(Publications::ENTITY_ID);
+    let payload = column::<Canvas, _>(Publications::ENTITY_PAYLOAD);
+    let team_scoped = team_scoped_publication_sql("OLD");
+    let changed = PUBLICATION_SCOPES
+        .iter()
+        .map(|field| {
+            scope_changed_sql(
+                &format!("OLD.{payload}"),
+                &format!("NEW.{payload}"),
+                &format!("$.value.{field}"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let changed = format!(
+        "{team_scoped} AND json_valid(OLD.{payload}) AND (NEW.{payload} IS NULL OR (json_valid(NEW.{payload}) AND ({changed})))"
+    );
+    let mirrors = ["id", "collection"]
+        .iter()
+        .map(|field| {
+            selector_changed_sql(
+                &format!("OLD.{payload}"),
+                &format!("NEW.{payload}"),
+                &format!("$.{field}"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let mirrors = format!(
+        "{team_scoped} AND json_valid(OLD.{payload}) AND json_valid(NEW.{payload}) AND ({mirrors})"
+    );
+    let duplicated = duplicate_scopes_sql("sync_entities");
+    let inserted_change = format!("({changed}) OR ({mirrors})").replace("OLD.", "previous.");
+    let change_kind = column::<Canvas, _>(Changes::KIND);
+    let durable_kind = CanvasChangesKind::DB_CODE_DURABLEROWS;
+    let change_identity = column::<Canvas, _>(Changes::IDENTITY);
+    let source_rowid = column::<Canvas, _>(Changes::SOURCE_ROWID);
+    let source_label = column::<Canvas, _>(Changes::SOURCE_LABEL);
+    let durable_id = column::<Canvas, _>(Changes::DURABLE_ID);
+    let seq = column::<Canvas, _>(Changes::SEQUENCE);
+    let deleted = column::<Canvas, _>(Changes::DELETED);
+    let at = column::<Canvas, _>(Changes::DELETED_AT);
+    let scope_column = column::<Canvas, _>(Changes::SCOPE);
+    let scope = deleted_scope_sql("sync_entities", "NEW").expect("publication scope owner");
+    let scope_changed = PUBLICATION_SCOPES
+        .iter()
+        .map(|field| {
+            scope_changed_sql(
+                &format!("previous.{scope_column}"),
+                &format!("({scope})"),
+                &format!("$.{field}"),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let new_team_scoped = team_scoped_publication_sql("NEW");
+    let deleted_guard = format!(
+        "{new_team_scoped} AND EXISTS(SELECT 1 FROM {changes} previous WHERE previous.{change_kind}={durable_kind} AND previous.{source_label}='sync_entities:'||NEW.{collection} AND previous.{durable_id}=NEW.{id} AND previous.{deleted}=1 AND previous.{scope_column} IS NOT NULL AND ({scope_changed}))"
+    );
+    let old_scope = deleted_scope_sql("sync_entities", "OLD").expect("publication scope owner");
+    let key = key_sql(
+        &[
+            Changes::__DB_COLUMN_SOURCE_LABEL,
+            Changes::__DB_COLUMN_DURABLE_ID,
+        ],
+        "source_key",
+    );
+    let rowid_high = crate::clock_schema::queries::ChangeRowidHigh::QUERY
+        .sql()
+        .replace("?1", durable_kind);
+    let increment = format!("({rowid_high})+1");
+    // Zero remains deletion evidence, not an allocated publication sequence.
+    // Collision updates retain the stable source rowid and previously scoped evidence.
+    format!(
+        "DROP TRIGGER IF EXISTS immutable_scope_sync_entities;
+         DROP TRIGGER IF EXISTS immutable_scope_sync_entities_insert;
+         DROP TRIGGER IF EXISTS immutable_scope_sync_entities_delete;
+         DROP TRIGGER IF EXISTS immutable_scope_sync_entities_json_INSERT;
+         DROP TRIGGER IF EXISTS immutable_scope_sync_entities_json_UPDATE;
+         CREATE TRIGGER immutable_scope_sync_entities BEFORE UPDATE ON {publications}
+         WHEN OLD.{kind}={entity_kind} AND ((NEW.{kind} IS NOT OLD.{kind}) OR (NEW.{identity} IS NOT OLD.{identity}) OR (OLD.{id} IS NOT NEW.{id}) OR (OLD.{collection} IS NOT NEW.{collection}) OR (NEW.{payload} IS NOT OLD.{payload} AND ({duplicated})) OR ({mirrors}) OR ({changed}))
+         BEGIN SELECT RAISE(ABORT,'{IMMUTABLE_SCOPE_ERROR}'); END;
+         CREATE TRIGGER immutable_scope_sync_entities_insert BEFORE INSERT ON {publications}
+         WHEN NEW.{kind}={entity_kind} AND (({duplicated}) OR EXISTS(SELECT 1 FROM {publications} previous WHERE previous.{kind}={entity_kind} AND previous.{id}=NEW.{id} AND previous.{collection}=NEW.{collection} AND ({inserted_change})) OR ({deleted_guard}))
+         BEGIN SELECT RAISE(ABORT,'{IMMUTABLE_SCOPE_ERROR}'); END;
+         CREATE TRIGGER immutable_scope_sync_entities_delete AFTER DELETE ON {publications}
+         WHEN OLD.{kind}={entity_kind} AND {old_scope} IS NOT NULL BEGIN
+           INSERT INTO {changes}({change_kind},{change_identity},{source_rowid},{source_label},{durable_id},{seq},{deleted},{at},{scope_column})
+           SELECT {durable_kind},{key},COALESCE((SELECT {source_rowid} FROM {changes} WHERE {change_kind}={durable_kind} AND {change_identity}={key}),CASE WHEN typeof({increment})='integer' THEN {increment} ELSE RAISE(ABORT,'durable source rowid exhausted') END),
+             {source_label},{durable_id},0,1,CAST(strftime('%s','now') AS INTEGER),{old_scope}
+           FROM (SELECT 'sync_entities:'||OLD.{collection} AS {source_label},OLD.{id} AS {durable_id}) AS source_key WHERE 1
+           ON CONFLICT({change_kind},{change_identity}) DO UPDATE SET {at}=excluded.{at},{scope_column}=COALESCE({changes}.{scope_column},excluded.{scope_column});
+         END;
+         CREATE TRIGGER immutable_scope_sync_entities_json_INSERT BEFORE INSERT ON {publications}
+         WHEN NEW.{kind}={entity_kind} AND NEW.{payload} IS NOT NULL AND json_valid(NEW.{payload}) IS NOT 1
+         BEGIN SELECT RAISE(ABORT,'{INVALID_RECORD_JSON_ERROR}'); END;
+         CREATE TRIGGER immutable_scope_sync_entities_json_UPDATE BEFORE UPDATE OF {payload} ON {publications}
+         WHEN NEW.{kind}={entity_kind} AND NEW.{payload} IS NOT NULL AND json_valid(NEW.{payload}) IS NOT 1
+         BEGIN SELECT RAISE(ABORT,'{INVALID_RECORD_JSON_ERROR}'); END;"
+    )
 }
 
 pub(crate) fn install(tx: &Connection) -> StoreResult<()> {
@@ -202,20 +320,6 @@ pub(crate) fn install(tx: &Connection) -> StoreResult<()> {
     for table in ["runtime_items", "runtime_events", "approvals"] {
         install_guard(tx, table, "OLD.agent IS NOT NEW.agent")?;
     }
-    let team_scoped = team_scoped_publication_sql("OLD");
-    let publication_changed = PUBLICATION_SCOPES
-        .iter()
-        .map(|field| scope_changed_sql("OLD.payload", "NEW.payload", &format!("$.value.{field}")))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    install_guard(
-        tx,
-        "sync_entities",
-        &format!(
-            "{team_scoped} AND json_valid(OLD.payload) AND (NEW.payload IS NULL OR (json_valid(NEW.payload) AND ({publication_changed})))"
-        ),
-    )?;
-    install_json_guard(tx, "sync_entities", "payload", true)?;
     Ok(())
 }
 
@@ -255,7 +359,7 @@ fn scope_selector_sql(record: &str, path: &str, projection: &str) -> String {
 fn duplicate_scopes_sql(table: &str) -> String {
     let (column, fields, prefix, scoped) = if table == "sync_entities" {
         (
-            "payload",
+            crate::publication_schema::Publications::__DB_COLUMN_ENTITY_PAYLOAD,
             PUBLICATION_SCOPES,
             "$.value.",
             team_scoped_publication_sql("NEW"),
@@ -294,70 +398,49 @@ fn duplicate_scopes_sql(table: &str) -> String {
 }
 
 fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()> {
+    use crate::change_schema::Changes;
+    use crate::consolidation_kinds::CanvasChangesKind;
+    use studio_db_api::Table;
+
     if crate::schema::table_exists(tx, table)? {
         let duplicated = duplicate_scopes_sql(table);
-        let updated_duplicate = if table == "sync_entities" {
-            format!("NEW.payload IS NOT OLD.payload AND ({duplicated})")
-        } else if table == "runtime_items" || JSON_SCOPES.iter().any(|(name, _)| *name == table) {
-            format!("NEW.record IS NOT OLD.record AND ({duplicated})")
-        } else {
-            duplicated.clone()
-        };
-        let identity = if table == "sync_entities" {
-            "previous.id=NEW.id AND previous.collection=NEW.collection"
-        } else {
-            "previous.id=NEW.id"
-        };
-        let key_changed = if table == "sync_entities" {
-            "OLD.id IS NOT NEW.id OR OLD.collection IS NOT NEW.collection"
-        } else {
-            "OLD.id IS NOT NEW.id"
-        };
-        let mirror_changed = if table == "sync_entities" {
-            let team_scoped = team_scoped_publication_sql("OLD");
-            let mirrors = ["id", "collection"]
-                .iter()
-                .map(|field| {
-                    selector_changed_sql("OLD.payload", "NEW.payload", &format!("$.{field}"))
-                })
-                .collect::<Vec<_>>()
-                .join(" OR ");
-            format!(
-                "{team_scoped} AND json_valid(OLD.payload) AND json_valid(NEW.payload) AND ({mirrors})"
-            )
-        } else if table == "runtime_items" || JSON_SCOPES.iter().any(|(name, _)| *name == table) {
-            let mirror = selector_changed_sql("OLD.record", "NEW.record", "$.id");
-            format!("json_valid(OLD.record) AND json_valid(NEW.record) AND ({mirror})")
-        } else {
-            "0".to_owned()
-        };
+        let updated_duplicate =
+            if table == "runtime_items" || JSON_SCOPES.iter().any(|(name, _)| *name == table) {
+                format!("NEW.record IS NOT OLD.record AND ({duplicated})")
+            } else {
+                duplicated.clone()
+            };
+        let identity = "previous.id=NEW.id";
+        let key_changed = "OLD.id IS NOT NEW.id";
+        let mirror_changed =
+            if table == "runtime_items" || JSON_SCOPES.iter().any(|(name, _)| *name == table) {
+                let mirror = selector_changed_sql("OLD.record", "NEW.record", "$.id");
+                format!("json_valid(OLD.record) AND json_valid(NEW.record) AND ({mirror})")
+            } else {
+                "0".to_owned()
+            };
         let inserted_change =
             format!("({changed}) OR ({mirror_changed})").replace("OLD.", "previous.");
         let deleted_guard = if let Some(scope) = deleted_scope_sql(table, "NEW") {
-            let team_scoped = if table == "sync_entities" {
-                team_scoped_publication_sql("NEW")
-            } else {
-                "1".to_owned()
-            };
-            let evidence_table = if table == "sync_entities" {
-                "'sync_entities:'||NEW.collection".to_owned()
-            } else {
-                format!("'{table}'")
-            };
+            let changes = Changes::NAME;
+            let kind = Changes::__DB_COLUMN_KIND;
+            let durable_kind = CanvasChangesKind::DB_CODE_DURABLEROWS;
+            let label = Changes::__DB_COLUMN_SOURCE_LABEL;
+            let id = Changes::__DB_COLUMN_DURABLE_ID;
+            let deleted = Changes::__DB_COLUMN_DELETED;
+            let scope_column = Changes::__DB_COLUMN_SCOPE;
+            let team_scoped = "1".to_owned();
+            let evidence_table = format!("'{table}'");
             let fields = JSON_SCOPES
                 .iter()
                 .find(|(name, _)| *name == table)
                 .map(|(_, fields)| *fields)
-                .unwrap_or(if table == "sync_entities" {
-                    PUBLICATION_SCOPES
-                } else {
-                    &["agent"]
-                });
+                .unwrap_or(&["agent"]);
             let changed = fields
                 .iter()
                 .map(|field| {
                     scope_changed_sql(
-                        "previous.scope",
+                        &format!("previous.{scope_column}"),
                         &format!("({scope})"),
                         &format!("$.{field}"),
                     )
@@ -365,7 +448,7 @@ fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()>
                 .collect::<Vec<_>>()
                 .join(" OR ");
             format!(
-                " OR ({team_scoped} AND EXISTS(SELECT 1 FROM durable_rows previous WHERE previous.tbl={evidence_table} AND previous.id=NEW.id AND previous.deleted=1 AND previous.scope IS NOT NULL AND ({changed})))"
+                " OR ({team_scoped} AND EXISTS(SELECT 1 FROM {changes} previous WHERE previous.{kind}={durable_kind} AND previous.{label}={evidence_table} AND previous.{id}=NEW.id AND previous.{deleted}=1 AND previous.{scope_column} IS NOT NULL AND ({changed})))"
             )
         } else {
             String::new()
@@ -381,22 +464,6 @@ fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()>
              WHEN ({duplicated}) OR EXISTS(SELECT 1 FROM {table} previous WHERE {identity} AND ({inserted_change})){deleted_guard}
              BEGIN SELECT RAISE(ABORT,'{IMMUTABLE_SCOPE_ERROR}'); END;"
         ))?;
-        if table == "sync_entities" {
-            let scope = deleted_scope_sql(table, "OLD")
-                .expect("sync entity publications declare their deleted scope");
-            // Zero is evidence, not a publication sequence: allocators and floors
-            // stay unchanged. Existing durable tombstone retention prunes it.
-            tx.execute_batch(&format!(
-                "DROP TRIGGER IF EXISTS immutable_scope_sync_entities_delete;
-                 CREATE TRIGGER immutable_scope_sync_entities_delete
-                 AFTER DELETE ON sync_entities WHEN {scope} IS NOT NULL
-                 BEGIN
-                   INSERT INTO durable_rows(tbl,id,seq,deleted,at,scope)
-                   VALUES('sync_entities:'||OLD.collection,OLD.id,0,1,CAST(strftime('%s','now') AS INTEGER),{scope})
-                   ON CONFLICT(tbl,id) DO UPDATE SET at=excluded.at,scope=excluded.scope;
-                 END;"
-            ))?;
-        }
     }
     Ok(())
 }
@@ -447,6 +514,18 @@ pub fn seed_legacy_reparented_rows<T>(
     }
     let result = seed();
     install(connection)?;
+    let read = crate::peer_update_settings::canvas_read(connection);
+    if read.table_exists::<crate::publication_schema::Publications>()?
+        && !read.table_exists::<crate::settings_schema::PayloadMigrations>()?
+    {
+        if connection.is_autocommit() {
+            let transaction = connection.unchecked_transaction()?;
+            crate::bootstrap::install_current_producers(&transaction)?;
+            transaction.commit()?;
+        } else {
+            crate::bootstrap::install_current_producers(connection)?;
+        }
+    }
     result
 }
 
@@ -454,12 +533,664 @@ pub fn seed_legacy_reparented_rows<T>(
 mod tests {
     use crate::{AgentId, AgentRepository};
 
+    // Bypass payload admission deliberately: these witnesses exercise the SQL
+    // guards against raw corruption, including duplicate JSON member names.
+    fn raw_publication(
+        db: &rusqlite::Connection,
+        collection: &str,
+        id: &str,
+        payload: &str,
+        replace: bool,
+    ) -> rusqlite::Result<usize> {
+        use crate::consolidation_kinds::CanvasPublicationsKind;
+        use crate::repositories::sync_documents::publication_queries::EntityRowidHigh;
+        let label = crate::publication_collection::CollectionName::from_stored(collection.into());
+        let rowid = crate::peer_update_settings::canvas_read(db).named(
+            &EntityRowidHigh::QUERY,
+            &EntityRowidHigh {
+                kind: CanvasPublicationsKind::SyncEntities,
+            },
+        )? + 1;
+        let identity =
+            studio_db_api::migration::encode_key(&(collection.to_owned(), id.to_owned()));
+        let collection_kind = label.kind();
+        let agent = label.agent().map(AsRef::<str>::as_ref);
+        let non_transcript = label.non_transcript();
+        let params = rusqlite::params![
+            CanvasPublicationsKind::DB_CODE_SYNCENTITIES,
+            identity,
+            rowid,
+            collection,
+            collection_kind,
+            agent,
+            id,
+            payload,
+            non_transcript,
+        ];
+        if replace {
+            db.execute("INSERT OR REPLACE INTO publications(kind,identity,source_rowid,publication_seq,deleted,collection_order,collection_kind,collection_agent,entity_id,entity_hash,entity_payload,non_transcript) VALUES(?1,?2,?3,1,0,?4,?5,?6,?7,'fixture',?8,?9)", params)
+        } else {
+            db.execute("INSERT INTO publications(kind,identity,source_rowid,publication_seq,deleted,collection_order,collection_kind,collection_agent,entity_id,entity_hash,entity_payload,non_transcript) VALUES(?1,?2,?3,1,0,?4,?5,?6,?7,'fixture',?8,?9)", params)
+        }
+    }
+
+    mod canonical {
+        use crate::change_schema::{Changes, DurableRows};
+        use crate::consolidation_kinds::CanvasPublicationsKind;
+        use crate::metadata_values::StoredBoolean;
+        use crate::peer_update_settings::{canvas_read, canvas_tx};
+        use crate::publication_collection::CollectionName;
+        use crate::publication_schema::{
+            DocumentValue, EntityValue, Publications, SyncDocuments, SyncEntities,
+        };
+        use studio_db_api::{Table, migration::encode_key};
+
+        fn fixture() -> rusqlite::Connection {
+            let db = rusqlite::Connection::open_in_memory().unwrap();
+            Publications::descriptor().install_if_absent(&db).unwrap();
+            Changes::descriptor().install_if_absent(&db).unwrap();
+            db
+        }
+
+        fn install(db: &rusqlite::Connection) {
+            db.execute_batch(&super::super::publication_trigger_sql())
+                .unwrap();
+        }
+
+        fn put(db: &rusqlite::Transaction<'_>, id: &str, payload: &str) -> rusqlite::Result<()> {
+            canvas_tx(db)
+                .partition::<SyncEntities>()
+                .put(&entity(id, 1, payload))
+        }
+
+        fn entity(id: &str, source_rowid: i64, payload: &str) -> SyncEntities {
+            let collection_order = CollectionName::from_stored("fixture".into());
+            SyncEntities {
+                identity: encode_key(&("fixture".to_owned(), id.to_owned())),
+                source_rowid,
+                publication_seq: 1,
+                deleted: StoredBoolean::Valid(false),
+                collection_kind: collection_order.kind(),
+                collection_agent: None,
+                non_transcript: true,
+                collection_order,
+                entity_id: id.into(),
+                entity_hash: "hash".into(),
+                entity_payload: EntityValue::from_stored(
+                    "fixture",
+                    id,
+                    StoredBoolean::Valid(false),
+                    Some(payload.into()),
+                )
+                .unwrap(),
+            }
+        }
+
+        fn refuse<T: std::fmt::Debug, E: std::fmt::Display + std::fmt::Debug>(
+            result: Result<T, E>,
+        ) {
+            let error = result.expect_err("immutable publication scope");
+            assert!(
+                error
+                    .to_string()
+                    .contains(super::super::IMMUTABLE_SCOPE_ERROR),
+                "{error}"
+            );
+        }
+
+        fn evidence(db: &rusqlite::Connection) -> Option<DurableRows> {
+            canvas_read(db)
+                .get::<DurableRows>(&(encode_key(&(
+                    "sync_entities:fixture".to_owned(),
+                    "x".to_owned(),
+                )),))
+                .unwrap()
+        }
+
+        #[test]
+        fn canonical_publication_fixture_reseed_restores_guards() {
+            let mut db = fixture();
+            let tx = db.transaction().unwrap();
+            install(&tx);
+            put(
+                &tx,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha"}}"#,
+            )
+            .unwrap();
+            super::super::seed_legacy_reparented_rows(&tx, || Ok(())).unwrap();
+            refuse(put(
+                &tx,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"beta"}}"#,
+            ));
+            tx.rollback().unwrap();
+        }
+
+        #[test]
+        fn canonical_publication_duplicate_insert_refusal() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            install(&db);
+            for payload in [
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha","agent":"beta"}}"#,
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha"},"value":{"agent":"beta"}}"#,
+                r#"{"id":"x","id":"y","collection":"fixture","value":{}}"#,
+                r#"{"id":"x","collection":"fixture","collection":"other","value":{}}"#,
+            ] {
+                refuse(db.execute(
+                    "INSERT INTO publications(kind,identity,source_rowid,publication_seq,deleted,collection_order,collection_kind,entity_id,entity_hash,entity_payload,non_transcript) VALUES(?1,?2,1,1,0,'fixture',?3,'x','hash',?4,1)",
+                    rusqlite::params![CanvasPublicationsKind::DB_CODE_SYNCENTITIES, encode_key(&("fixture".to_owned(),"x".to_owned())), crate::publication_collection::CollectionKind::DB_CODE_OTHER, payload],
+                ));
+            }
+        }
+
+        #[test]
+        fn canonical_publication_mirror_scope_key_and_restore_fences() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            install(&db);
+            let original =
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha","rootId":"root"}}"#;
+            put(&db, "x", original).unwrap();
+            for payload in [
+                r#"{"id":"x","collection":"fixture","value":{"agent":"beta","rootId":"root"}}"#,
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha","rootId":"other"}}"#,
+                r#"{"id":"y","collection":"fixture","value":{"agent":"alpha","rootId":"root"}}"#,
+                r#"{"id":"x","collection":"other","value":{"agent":"alpha","rootId":"root"}}"#,
+            ] {
+                refuse(db.execute("UPDATE publications SET entity_payload=?1", [payload]));
+                refuse(put(&db, "x", payload));
+            }
+            for sql in [
+                "UPDATE publications SET entity_id='y'",
+                "UPDATE publications SET collection_order='transcript:alpha'",
+                "UPDATE publications SET identity=x'00'",
+            ] {
+                refuse(db.execute(sql, []));
+            }
+            db.execute("UPDATE publications SET deleted=1", []).unwrap();
+            refuse(db.execute("UPDATE publications SET deleted=0,entity_payload=json_set(entity_payload,'$.value.agent','beta')", []));
+            db.execute(
+                "UPDATE publications SET deleted=0,entity_payload=?1",
+                [original],
+            )
+            .unwrap();
+            let error = db
+                .execute("UPDATE publications SET entity_payload='broken'", [])
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(super::super::INVALID_RECORD_JSON_ERROR)
+            );
+        }
+
+        #[test]
+        fn canonical_publication_hard_delete_last_member_and_collision_evidence() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            let raw = r#"{"id":"x","collection":"fixture","value":{"agent":17},"value":{"agent":17,"agent":"alpha","rootId":"root","secret":"discard"}}"#;
+            put(&db, "x", raw).unwrap();
+            install(&db);
+            db.execute("UPDATE publications SET entity_payload=entity_payload", [])
+                .unwrap();
+            db.execute("DELETE FROM publications", []).unwrap();
+            let first = evidence(&db).unwrap();
+            assert_eq!(first.sequence, 0);
+            assert_eq!(first.deleted.as_stored(), 1);
+            assert_eq!(first.source_label.as_str(), "sync_entities:fixture");
+            assert_eq!(first.durable_id, "x");
+            let scope = first.scope.unwrap();
+            assert_eq!(scope.value().agent.as_deref(), Some("alpha"));
+            assert_eq!(scope.value().root_id.as_deref(), Some("root"));
+            assert!(!scope.raw().contains("secret"));
+            refuse(put(
+                &db,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"beta","rootId":"root"}}"#,
+            ));
+            put(
+                &db,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha","rootId":"root"}}"#,
+            )
+            .unwrap();
+            db.execute("DELETE FROM publications", []).unwrap();
+            let second = evidence(&db).unwrap();
+            assert_eq!(first.source_rowid, second.source_rowid);
+            assert_eq!(second.scope.unwrap().raw(), scope.raw());
+        }
+
+        #[test]
+        fn canonical_publication_invalid_last_selector_and_unchanged_raw_bytes() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            let raw = r#"{"id":"x","collection":"fixture","value":{"agent":"alpha","agent":17}}"#;
+            put(&db, "x", raw).unwrap();
+            install(&db);
+            db.execute("UPDATE publications SET entity_payload=entity_payload", [])
+                .unwrap();
+            refuse(db.execute(
+                "UPDATE publications SET entity_payload=entity_payload||' '",
+                [],
+            ));
+            db.execute("DELETE FROM publications", []).unwrap();
+            put(
+                &db,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"beta"}}"#,
+            )
+            .unwrap();
+        }
+
+        #[test]
+        fn canonical_publication_replace_insert_refuses_scope_and_mirror_moves() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            install(&db);
+            put(
+                &db,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"alpha"}}"#,
+            )
+            .unwrap();
+            for payload in [
+                r#"{"id":"x","collection":"fixture","value":{"agent":"beta"}}"#,
+                r#"{"id":"y","collection":"fixture","value":{"agent":"alpha"}}"#,
+            ] {
+                refuse(db.execute(
+                    "INSERT OR REPLACE INTO publications(kind,identity,source_rowid,publication_seq,deleted,collection_order,collection_kind,entity_id,entity_hash,entity_payload,non_transcript) SELECT kind,identity,source_rowid,publication_seq,deleted,collection_order,collection_kind,entity_id,entity_hash,?1,non_transcript FROM publications",
+                    [payload],
+                ));
+            }
+        }
+
+        #[test]
+        fn canonical_publication_collision_retains_previous_scoped_evidence() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            put(
+                &db,
+                "x",
+                r#"{"id":"x","collection":"fixture","value":{"agent":"beta"}}"#,
+            )
+            .unwrap();
+            canvas_tx(&db)
+                .partition::<DurableRows>()
+                .put(&DurableRows {
+                    identity: encode_key(&("sync_entities:fixture".to_owned(), "x".to_owned())),
+                    source_rowid: -7,
+                    source_label: crate::change_schema::DurableSource::from_stored(
+                        "sync_entities:fixture".into(),
+                    ),
+                    durable_id: "x".into(),
+                    sequence: 23,
+                    deleted: StoredBoolean::Valid(true),
+                    deleted_at: 1,
+                    scope: Some(
+                        crate::json_record_codec::ExactJson::from_stored(
+                            r#"{ "agent":"alpha", "rootId":null }"#.into(),
+                        )
+                        .unwrap(),
+                    ),
+                })
+                .unwrap();
+            install(&db);
+            canvas_tx(&db)
+                .partition::<SyncEntities>()
+                .delete(&(encode_key(&("fixture".to_owned(), "x".to_owned())),))
+                .unwrap();
+            let retained = evidence(&db).unwrap();
+            assert_eq!(retained.source_rowid, -7);
+            assert_eq!(retained.sequence, 23);
+            assert_eq!(retained.deleted.as_stored(), 1);
+            assert!(retained.deleted_at > 1);
+            assert_eq!(
+                retained.scope.unwrap().raw(),
+                r#"{ "agent":"alpha", "rootId":null }"#
+            );
+        }
+
+        #[test]
+        fn canonical_publication_document_partitions_excluded() {
+            let mut connection = fixture();
+            let db = connection.transaction().unwrap();
+            install(&db);
+            let mut document = SyncDocuments {
+                identity: encode_key(&(1_i64,)),
+                source_rowid: 1,
+                publication_seq: 1,
+                deleted: StoredBoolean::Valid(false),
+                document_scope: "scope".into(),
+                document_id: "x".into(),
+                document_payload: DocumentValue::from_stored("scope", "x", "broken".into())
+                    .unwrap(),
+            };
+            canvas_tx(&db)
+                .partition::<SyncDocuments>()
+                .put(&document)
+                .unwrap();
+            document.document_scope = "other".into();
+            document.document_payload =
+                DocumentValue::from_stored("other", "x", "still broken".into()).unwrap();
+            canvas_tx(&db)
+                .partition::<SyncDocuments>()
+                .put(&document)
+                .unwrap();
+            canvas_tx(&db)
+                .delete::<SyncDocuments>(&(document.identity,))
+                .unwrap();
+            assert!(evidence(&db).is_none());
+            let error = put(&db, "x", "broken").unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains(super::super::INVALID_RECORD_JSON_ERROR)
+            );
+        }
+
+        #[test]
+        fn canonical_publication_transaction_rollback_restores_row_and_evidence() {
+            let mut db = fixture();
+            let setup = db.transaction().unwrap();
+            install(&setup);
+            let original = r#"{"id":"x","collection":"fixture","value":{"agent":"alpha"}}"#;
+            put(&setup, "x", original).unwrap();
+            setup.commit().unwrap();
+            {
+                let tx = db.transaction().unwrap();
+                tx.execute("DELETE FROM publications", []).unwrap();
+                assert!(evidence(&tx).is_some());
+                refuse(put(
+                    &tx,
+                    "x",
+                    r#"{"id":"x","collection":"fixture","value":{"agent":"beta"}}"#,
+                ));
+                tx.rollback().unwrap();
+            }
+            assert!(evidence(&db).is_none());
+            let row = canvas_read(&db)
+                .get::<SyncEntities>(&(encode_key(&("fixture".to_owned(), "x".to_owned())),))
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.entity_payload.value().raw(), Some(original));
+        }
+
+        #[derive(studio_db_api::DbQuery)]
+        #[db_query(database=crate::peer_update_settings::Canvas, mode=write, cardinality=none, result=(),
+            tables(rows=Publications), columns(kind=Publications::KIND,id=Publications::ENTITY_ID),
+            sql="INSERT OR REPLACE INTO {rows} SELECT * FROM {rows} WHERE {kind}=?1 AND {id}='x'")]
+        struct InsertProbe {
+            #[db(column=Publications::KIND)]
+            kind: CanvasPublicationsKind,
+        }
+
+        #[derive(studio_db_api::DbQuery)]
+        #[db_query(database=crate::peer_update_settings::Canvas, mode=write, cardinality=none, result=(),
+            tables(rows=crate::planning_work::PlanRow),
+            sql="INSERT OR REPLACE INTO {rows} SELECT * FROM {rows}")]
+        struct SourceInsertProbe;
+
+        #[test]
+        fn canonical_source_hard_delete_scope_fence_uses_changes_identity_index() {
+            use crate::json_record_codec::ExactJson;
+            use crate::planning_work::PlanRow;
+            use std::sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            };
+            let mut measurements = Vec::new();
+            for unrelated in [0, 2_000] {
+                let mut connection = fixture();
+                PlanRow::descriptor()
+                    .install_if_absent(&connection)
+                    .unwrap();
+                crate::metadata_schema::Metadata::descriptor()
+                    .install_if_absent(&connection)
+                    .unwrap();
+                let db = connection.transaction().unwrap();
+                crate::clock_schema::seed_fresh_clock_rows(&db).unwrap();
+                for n in 0..unrelated {
+                    let id = format!("retained-{n}");
+                    canvas_tx(&db)
+                        .partition::<DurableRows>()
+                        .put(&DurableRows {
+                            identity: encode_key(&("runtime_plans".to_owned(), id.clone())),
+                            source_rowid: n + 2,
+                            source_label: crate::change_schema::DurableSource::from_stored(
+                                "runtime_plans".into(),
+                            ),
+                            durable_id: id,
+                            sequence: 0,
+                            deleted: StoredBoolean::Valid(true),
+                            deleted_at: 1,
+                            scope: None,
+                        })
+                        .unwrap();
+                }
+                crate::bootstrap::install_current_producers(&db).unwrap();
+                let mut plan = PlanRow {
+                    id: "x".into(),
+                    record: ExactJson::from_stored(
+                        r#"{"id":"x","rootId":"alpha","text":"","version":1,"updated":null}"#
+                            .into(),
+                    )
+                    .unwrap(),
+                };
+                canvas_tx(&db).insert(&plan).unwrap();
+                canvas_tx(&db)
+                    .delete::<PlanRow>(&("x".to_owned(),))
+                    .unwrap();
+                super::super::install(&db).unwrap();
+                let key = encode_key(&("runtime_plans".to_owned(), "x".to_owned()));
+                let deleted = canvas_read(&db)
+                    .get::<DurableRows>(&(key,))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(deleted.deleted.as_stored(), 1);
+                assert_eq!(
+                    deleted.scope.unwrap().value().root_id.as_deref(),
+                    Some("alpha")
+                );
+                plan.record = ExactJson::from_stored(
+                    r#"{"id":"x","rootId":"beta","text":"","version":1,"updated":null}"#.into(),
+                )
+                .unwrap();
+                refuse(canvas_tx(&db).insert(&plan));
+                assert!(
+                    canvas_read(&db)
+                        .get::<PlanRow>(&("x".to_owned(),))
+                        .unwrap()
+                        .is_none()
+                );
+                db.set_db_config(
+                    rusqlite::config::DbConfig::SQLITE_DBCONFIG_TRIGGER_EQP,
+                    true,
+                )
+                .unwrap();
+                let index = studio_db_api::query_index::<
+                    crate::peer_update_settings::Canvas,
+                    Changes,
+                >(&Changes::INDEX_CHANGES_DURABLE_WINDOW_MEMBERS);
+                let steps = crate::query_plan_test_support::explain(
+                    &db,
+                    SourceInsertProbe::QUERY.sql(),
+                    &SourceInsertProbe,
+                )
+                .unwrap();
+                assert!(
+                    steps.iter().any(|line| line.contains("SEARCH previous")
+                        && line.contains(index)
+                        && line.contains("source_label=? AND deleted=? AND durable_id=?")),
+                    "{steps:?}"
+                );
+                plan.record = ExactJson::from_stored(
+                    r#"{"id":"x","rootId":"alpha","text":"","version":1,"updated":null}"#.into(),
+                )
+                .unwrap();
+                let counter = Arc::new(AtomicUsize::new(0));
+                let counted = counter.clone();
+                db.progress_handler(
+                    1,
+                    Some(move || {
+                        counted.fetch_add(1, Ordering::Relaxed);
+                        false
+                    }),
+                )
+                .unwrap();
+                canvas_tx(&db).insert(&plan).unwrap();
+                db.progress_handler(0, None::<fn() -> bool>).unwrap();
+                measurements.push(counter.load(Ordering::Relaxed));
+                eprintln!(
+                    "unrelated={unrelated} source_vm={}",
+                    measurements.last().unwrap()
+                );
+            }
+            assert!(measurements[1] <= measurements[0] + 100, "{measurements:?}");
+        }
+
+        #[test]
+        fn canonical_publication_insert_guards_use_indexes_with_flat_vm_work() {
+            use std::sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            };
+            let mut measurements = Vec::new();
+            for unrelated in [0, 2_000] {
+                let mut connection = fixture();
+                let db = connection.transaction().unwrap();
+                let raw = r#"{"id":"x","collection":"fixture","value":{"agent":"alpha"}}"#;
+                put(&db, "x", raw).unwrap();
+                for n in 0..unrelated {
+                    let id = format!("unrelated-{n}");
+                    canvas_tx(&db)
+                        .partition::<SyncEntities>()
+                        .put(&entity(&id, n + 2, raw))
+                        .unwrap();
+                    canvas_tx(&db)
+                        .partition::<DurableRows>()
+                        .put(&DurableRows {
+                            identity: encode_key(&("unrelated".to_owned(), id.clone())),
+                            source_rowid: n + 1,
+                            source_label: crate::change_schema::DurableSource::from_stored(
+                                "unrelated".into(),
+                            ),
+                            durable_id: id,
+                            sequence: 0,
+                            deleted: StoredBoolean::Valid(true),
+                            deleted_at: 1,
+                            scope: None,
+                        })
+                        .unwrap();
+                }
+                install(&db);
+                db.set_db_config(
+                    rusqlite::config::DbConfig::SQLITE_DBCONFIG_TRIGGER_EQP,
+                    true,
+                )
+                .unwrap();
+                let plan = crate::query_plan_test_support::explain(
+                    &db,
+                    InsertProbe::QUERY.sql(),
+                    &InsertProbe {
+                        kind: CanvasPublicationsKind::SyncEntities,
+                    },
+                )
+                .unwrap();
+                for (alias, index) in [
+                    (
+                        "previous",
+                        studio_db_api::query_index::<
+                            crate::peer_update_settings::Canvas,
+                            Publications,
+                        >(&Publications::INDEX_PUBLICATIONS_ENTITY_IDENTITY),
+                    ),
+                    (
+                        "previous",
+                        studio_db_api::query_index::<crate::peer_update_settings::Canvas, Changes>(
+                            &Changes::INDEX_CHANGES_DURABLE_WINDOW_MEMBERS,
+                        ),
+                    ),
+                ] {
+                    assert!(
+                        plan.iter().any(|line| line.contains("SEARCH")
+                            && line.contains(alias)
+                            && line.contains(index)),
+                        "{plan:?}"
+                    );
+                }
+                let steps = Arc::new(AtomicUsize::new(0));
+                let counter = Arc::clone(&steps);
+                db.progress_handler(
+                    1,
+                    Some(move || {
+                        counter.fetch_add(1, Ordering::Relaxed);
+                        false
+                    }),
+                )
+                .unwrap();
+                put(&db, "x", raw).unwrap();
+                db.progress_handler(0, None::<fn() -> bool>).unwrap();
+                measurements.push(steps.load(Ordering::Relaxed));
+                eprintln!(
+                    "unrelated={unrelated} vm_steps={} trigger_plan={plan:?}",
+                    measurements.last().unwrap()
+                );
+            }
+            assert!(measurements[1] <= measurements[0] + 100, "{measurements:?}");
+        }
+    }
+
     #[test]
     fn key_scoped_raw_payload_can_gain_tombstone_envelope_but_team_scoped_cannot() {
         let mut db = crate::fresh_state::test_canvas();
         let tx = db.transaction().unwrap();
         for collection in ["transcript:fixture", "model", "rateLimit", "fixture"] {
-            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES(?1,'row',1,'one','{\"id\":\"row\",\"unknown\":[1,2]}',0)", [collection]).unwrap();
+            if collection == "transcript:fixture" {
+                let page = studio_json::json!({"items":[],"truncated":false});
+                crate::TranscriptRepository::pull_payload(
+                    &tx,
+                    collection,
+                    0,
+                    &page,
+                    false,
+                    Some(1),
+                )
+                .unwrap();
+                crate::TranscriptRepository::cache_revision_payload(
+                    &tx,
+                    collection,
+                    &page.to_string(),
+                )
+                .unwrap();
+                let deleted = crate::TranscriptRepository::pull_payload(
+                    &tx,
+                    collection,
+                    0,
+                    &studio_json::json!({}),
+                    true,
+                    Some(2),
+                )
+                .expect("key-scoped transcript can gain its deleted cache shape");
+                crate::TranscriptRepository::cache_revision_payload(&tx, collection, "{}").unwrap();
+                assert_eq!(deleted["documents"][0]["_deleted"], true);
+                let revision = crate::test_fixtures::canvas::entities(&tx)
+                    .unwrap()
+                    .into_iter()
+                    .find(|row| row.collection == collection && row.id == "@revision")
+                    .unwrap();
+                assert_eq!(revision.payload.as_deref(), Some("{}"));
+                continue;
+            }
+            raw_publication(
+                &tx,
+                collection,
+                "row",
+                r#"{"id":"row","unknown":[1,2]}"#,
+                false,
+            )
+            .unwrap();
             let result = crate::SyncDocumentsRepository::put_entity_hash(
                 &tx, collection, "row", "two", true,
             );
@@ -477,11 +1208,39 @@ mod tests {
     }
 
     #[test]
+    fn non_revision_transcript_cached_payload_is_refused() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        raw_publication(
+            &tx,
+            "transcript:fixture",
+            "row",
+            r#"{"id":"row","unknown":[1,2]}"#,
+            false,
+        )
+        .unwrap();
+        let error = crate::SyncDocumentsRepository::put_entity_hash(
+            &tx,
+            "transcript:fixture",
+            "row",
+            "two",
+            true,
+        )
+        .expect_err("only the revision identity admits a cached transcript payload");
+        assert!(
+            error
+                .to_string()
+                .contains("Only transcript revision rows admit cached payloads"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn duplicate_publication_container_cannot_disagree_with_scoped_readers() {
         let mut db = crate::fresh_state::test_canvas();
         let tx = db.transaction().unwrap();
         let payload = r#"{"collection":"fixture","id":"x","value":{"rootId":"alpha"},"value":{"rootId":"beta"}}"#;
-        assert!(tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',?1,0)", [payload]).is_err());
+        assert!(raw_publication(&tx, "fixture", "x", payload, false).is_err());
     }
 
     #[test]
@@ -563,30 +1322,42 @@ mod tests {
             let tx = db.transaction().unwrap();
             if route != "insert" {
                 tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":\"alpha\"}')", []).unwrap();
-                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture','{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"alpha\"}}',0)", []).unwrap();
+                raw_publication(
+                    &tx,
+                    "fixture",
+                    "x",
+                    r#"{"collection":"fixture","id":"x","value":{"rootId":"alpha"}}"#,
+                    false,
+                )
+                .unwrap();
             }
             if route == "restore" {
                 tx.execute("DELETE FROM runtime_plans WHERE id='x'", [])
                     .unwrap();
-                tx.execute("DELETE FROM sync_entities WHERE collection='fixture'", [])
-                    .unwrap();
+                tx.execute(
+                    "DELETE FROM publications WHERE kind=2 AND collection_order='fixture'",
+                    [],
+                )
+                .unwrap();
             }
             let row_sql = if route == "update" {
                 "UPDATE runtime_plans SET record=?1 WHERE id='x'"
             } else {
                 "INSERT OR REPLACE INTO runtime_plans(id,record) VALUES('x',?1)"
             };
-            let publication_sql = if route == "update" {
-                "UPDATE sync_entities SET payload=?1 WHERE collection='fixture'"
-            } else {
-                "INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',?1,0)"
-            };
             assert!(
                 tx.execute(row_sql, [r#"{"id":"x","rootId":"alpha","rootId":"beta"}"#])
                     .is_err(),
                 "{route}: row"
             );
-            assert!(tx.execute(publication_sql, [r#"{"collection":"fixture","id":"x","value":{"rootId":"alpha","rootId":"beta"}}"#]).is_err(), "{route}: publication");
+            let payload =
+                r#"{"collection":"fixture","id":"x","value":{"rootId":"alpha","rootId":"beta"}}"#;
+            let result = if route == "update" {
+                tx.execute("UPDATE publications SET entity_payload=?1 WHERE kind=2 AND collection_order='fixture'", [payload])
+            } else {
+                raw_publication(&tx, "fixture", "x", payload, route != "insert")
+            };
+            assert!(result.is_err(), "{route}: publication");
         }
     }
 
@@ -596,17 +1367,17 @@ mod tests {
         let tx = db.transaction().unwrap();
         super::seed_legacy_reparented_rows(&tx, || {
             tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":1,\"rootId\":\"alpha\"}')", [])?;
-            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture','{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":1,\"rootId\":\"alpha\"}}',0)", [])?;
+            raw_publication(&tx, "fixture", "x", r#"{"collection":"fixture","id":"x","value":{"rootId":1,"rootId":"alpha"}}"#, false)?;
             Ok(())
         }).unwrap();
         tx.execute(
-            "UPDATE sync_entities SET hash='unchanged-payload' WHERE collection='fixture'",
+            "UPDATE publications SET entity_hash='unchanged-entity_payload' WHERE kind=2 AND collection_order='fixture'",
             [],
         )
         .expect("metadata can change without admitting duplicate payload bytes");
         assert!(
             tx.execute(
-                "UPDATE sync_entities SET payload=payload||' ' WHERE collection='fixture'",
+                "UPDATE publications SET entity_payload=entity_payload||' ' WHERE kind=2 AND collection_order='fixture'",
                 []
             )
             .is_err()
@@ -618,13 +1389,13 @@ mod tests {
             )
             .is_err()
         );
-        assert!(tx.execute("UPDATE sync_entities SET payload='{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"beta\"}}' WHERE collection='fixture'", []).is_err());
+        assert!(tx.execute("UPDATE publications SET entity_payload='{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"beta\"}}' WHERE kind=2 AND collection_order='fixture'", []).is_err());
         tx.execute(
             "UPDATE runtime_plans SET record='{\"id\":\"x\",\"rootId\":\"alpha\"}' WHERE id='x'",
             [],
         )
         .expect("same last owner can be canonicalized");
-        tx.execute("UPDATE sync_entities SET payload='{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"alpha\"}}' WHERE collection='fixture'", []).expect("same published owner can be canonicalized");
+        tx.execute("UPDATE publications SET entity_payload='{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"alpha\"}}' WHERE kind=2 AND collection_order='fixture'", []).expect("same published owner can be canonicalized");
     }
 
     #[test]
@@ -669,7 +1440,14 @@ mod tests {
                 [original],
             )
             .unwrap();
-            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',json_object('collection','fixture','id','x','value',json(?1)),0)", [original]).unwrap();
+            raw_publication(
+                &tx,
+                "fixture",
+                "x",
+                &format!(r#"{{"collection":"fixture","id":"x","value":{original}}}"#),
+                false,
+            )
+            .unwrap();
             for invalid in [
                 "17",
                 "true",
@@ -681,13 +1459,16 @@ mod tests {
             ] {
                 assert!(tx.execute("UPDATE runtime_plans SET record=json_set(record,'$.rootId',json(?1)) WHERE id='x'", [invalid]).is_err());
                 assert!(tx.execute("INSERT OR REPLACE INTO runtime_plans(id,record) VALUES('x',json_set(?1,'$.rootId',json(?2)))", [original, invalid]).is_err());
-                assert!(tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.rootId',json(?1)) WHERE collection='fixture'", [invalid]).is_err());
-                assert!(tx.execute("INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',json_object('collection','fixture','id','x','value',json_set(?1,'$.rootId',json(?2))),0)", [original, invalid]).is_err());
+                assert!(tx.execute("UPDATE publications SET entity_payload=json_set(entity_payload,'$.value.rootId',json(?1)) WHERE kind=2 AND collection_order='fixture'", [invalid]).is_err());
+                assert!(raw_publication(&tx, "fixture", "x", &format!(r#"{{"collection":"fixture","id":"x","value":{{"id":"x","rootId":{invalid}}}}}"#), true).is_err());
             }
             tx.execute("DELETE FROM runtime_plans WHERE id='x'", [])
                 .unwrap();
-            tx.execute("DELETE FROM sync_entities WHERE collection='fixture'", [])
-                .unwrap();
+            tx.execute(
+                "DELETE FROM publications WHERE kind=2 AND collection_order='fixture'",
+                [],
+            )
+            .unwrap();
             for invalid in [
                 "17",
                 "true",
@@ -698,7 +1479,7 @@ mod tests {
                 r#"["nested",{}]"#,
             ] {
                 assert!(tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x',json_set(?1,'$.rootId',json(?2)))", [original, invalid]).is_err());
-                assert!(tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',json_object('collection','fixture','id','x','value',json_set(?1,'$.rootId',json(?2))),0)", [original, invalid]).is_err());
+                assert!(raw_publication(&tx, "fixture", "x", &format!(r#"{{"collection":"fixture","id":"x","value":{{"id":"x","rootId":{invalid}}}}}"#), false).is_err());
             }
             assert!(tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":17}')", []).is_err());
             tx.execute(
@@ -724,19 +1505,26 @@ mod tests {
             .unwrap();
             if collection == "deleted" {
                 tx.execute(
-                    "DELETE FROM sync_entities WHERE collection=?1",
+                    "DELETE FROM publications WHERE kind=2 AND collection_order=?1",
                     [collection],
                 )
                 .unwrap();
             }
-            let sql = if collection == "updated" {
-                "UPDATE sync_entities SET payload=json_set(payload,'$.value.rootId','repaired') WHERE collection=?1"
+            let repair = if collection == "updated" {
+                tx.execute("UPDATE publications SET entity_payload=json_set(entity_payload,'$.value.rootId','repaired') WHERE kind=2 AND collection_order=?1", [collection])
             } else {
-                "INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES(?1,'x',1,'fixture',json_object('collection',?1,'id','x','value',json_object('rootId','repaired','agent','known')),0)"
+                raw_publication(
+                    &tx,
+                    collection,
+                    "x",
+                    &format!(
+                        r#"{{"collection":"{collection}","id":"x","value":{{"rootId":"repaired","agent":"known"}}}}"#
+                    ),
+                    true,
+                )
             };
-            tx.execute(sql, [collection])
-                .expect("repair does not move known agent selector");
-            assert!(tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.agent','other') WHERE collection=?1", [collection]).is_err());
+            repair.expect("repair does not move known agent selector");
+            assert!(tx.execute("UPDATE publications SET entity_payload=json_set(entity_payload,'$.value.agent','other') WHERE kind=2 AND collection_order=?1", [collection]).is_err());
         }
     }
 
@@ -745,43 +1533,83 @@ mod tests {
         let mut db = crate::fresh_state::test_canvas();
         let tx = db.transaction().unwrap();
         for collection in ["rateLimit", "model", "transcript:alpha"] {
-            crate::SyncDocumentsRepository::put_entity(
-                &tx,
-                collection,
-                "x",
-                studio_json::json!({"agent":"alpha"}),
-                false,
-            )
-            .unwrap();
-            tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.agent','beta','$.value.rootId','beta') WHERE collection=?1 AND id='x'", [collection]).unwrap();
+            let transcript = collection == "transcript:alpha";
+            let id = if transcript { "@revision" } else { "x" };
+            let page = studio_json::json!({"items":[],"truncated":false,"value":{"agent":"alpha"}});
+            if transcript {
+                crate::TranscriptRepository::pull_payload(
+                    &tx,
+                    collection,
+                    0,
+                    &page,
+                    false,
+                    Some(1),
+                )
+                .unwrap();
+                crate::TranscriptRepository::cache_revision_payload(
+                    &tx,
+                    collection,
+                    &page.to_string(),
+                )
+                .unwrap();
+            } else {
+                crate::SyncDocumentsRepository::put_entity(
+                    &tx,
+                    collection,
+                    id,
+                    studio_json::json!({"agent":"alpha"}),
+                    false,
+                )
+                .unwrap();
+            }
+            tx.execute("UPDATE publications SET entity_payload=json_set(entity_payload,'$.value.agent','beta','$.value.rootId','beta') WHERE kind=2 AND collection_order=?1 AND entity_id=?2", [collection,id]).unwrap();
             let error = tx
                 .execute(
-                    "UPDATE sync_entities SET id='y' WHERE collection=?1 AND id='x'",
-                    [collection],
+                    "UPDATE publications SET entity_id='y' WHERE kind=2 AND collection_order=?1 AND entity_id=?2",
+                    [collection,id],
                 )
                 .expect_err("scope fixed by key requires immutable key");
             assert!(error.to_string().contains(super::IMMUTABLE_SCOPE_ERROR));
             tx.execute(
-                "DELETE FROM sync_entities WHERE collection=?1 AND id='x'",
-                [collection],
+                "DELETE FROM publications WHERE kind=2 AND collection_order=?1 AND entity_id=?2",
+                [collection, id],
             )
             .unwrap();
-            let evidence: i64 = tx
-                .query_row(
-                    "SELECT count(*) FROM durable_rows WHERE tbl='sync_entities:'||?1 AND id='x'",
-                    [collection],
-                    |row| row.get(0),
+            let evidence = crate::test_fixtures::canvas::changes(&tx)
+                .unwrap()
+                .into_iter()
+                .filter(|row| {
+                    row.source_label == format!("sync_entities:{collection}")
+                        && row.durable_id == id
+                })
+                .count();
+            assert_eq!(evidence, 0);
+            if transcript {
+                crate::TranscriptRepository::pull_payload(
+                    &tx,
+                    collection,
+                    0,
+                    &page,
+                    false,
+                    Some(2),
+                )
+                .expect("normalized payload cannot change scope fixed by key");
+                crate::TranscriptRepository::cache_revision_payload(
+                    &tx,
+                    collection,
+                    &page.to_string(),
                 )
                 .unwrap();
-            assert_eq!(evidence, 0);
-            crate::SyncDocumentsRepository::put_entity(
-                &tx,
-                collection,
-                "x",
-                studio_json::json!({}),
-                false,
-            )
-            .expect("normalized payload cannot change scope fixed by key");
+            } else {
+                crate::SyncDocumentsRepository::put_entity(
+                    &tx,
+                    collection,
+                    "x",
+                    studio_json::json!({}),
+                    false,
+                )
+                .expect("normalized payload cannot change scope fixed by key");
+            }
         }
     }
 
@@ -812,7 +1640,7 @@ mod tests {
                 if step == 1 {
                     crate::durable_seq::keep_counter(tx).unwrap();
                     tx.execute(
-                        "DELETE FROM sync_entities WHERE collection='fixture' AND id='x'",
+                        "DELETE FROM publications WHERE kind=2 AND collection_order='fixture' AND entity_id='x'",
                         [],
                     )
                     .unwrap();
@@ -829,14 +1657,16 @@ mod tests {
             }
             assert_eq!(snapshot(&guarded), snapshot(&baseline), "step {step}");
         }
-        let (seq, scope): (i64, String) = guarded
-            .query_row(
-                "SELECT seq,scope FROM durable_rows WHERE tbl='sync_entities:fixture' AND id='x'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
+        let evidence = crate::test_fixtures::canvas::changes(&guarded)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.source_label == "sync_entities:fixture" && row.durable_id == "x")
             .unwrap();
-        assert_eq!(seq, 0, "scope evidence does not allocate a sequence");
+        let scope = evidence.scope.unwrap();
+        assert_eq!(
+            evidence.seq, 0,
+            "scope evidence does not allocate a sequence"
+        );
         assert!(!scope.contains("secret"));
         assert!(!scope.contains("private content"));
     }
@@ -854,12 +1684,12 @@ mod tests {
         )
         .unwrap();
         tx.execute(
-            "DELETE FROM sync_entities WHERE collection='fixture' AND id='x'",
+            "DELETE FROM publications WHERE kind=2 AND collection_order='fixture' AND entity_id='x'",
             [],
         )
         .unwrap();
         tx.execute(
-            "UPDATE durable_rows SET at=0 WHERE tbl='sync_entities:fixture'",
+            "UPDATE changes SET deleted_at=0 WHERE kind=1 AND source_label='sync_entities:fixture'",
             [],
         )
         .unwrap();
@@ -867,13 +1697,11 @@ mod tests {
         let floor = crate::durable_seq::high_and_floor(&tx).unwrap().1;
         tx.execute("DELETE FROM runtime_plans WHERE id='plan'", [])
             .unwrap();
-        let remaining: i64 = tx
-            .query_row(
-                "SELECT count(*) FROM durable_rows WHERE tbl='sync_entities:fixture'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let remaining = crate::test_fixtures::canvas::changes(&tx)
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.source_label == "sync_entities:fixture")
+            .count();
         assert_eq!(remaining, 0);
         assert_eq!(crate::durable_seq::high_and_floor(&tx).unwrap().1, floor);
         crate::SyncDocumentsRepository::put_entity(
@@ -899,7 +1727,7 @@ mod tests {
         )
         .unwrap();
         tx.execute(
-            "DELETE FROM sync_entities WHERE collection='fixture' AND id='x'",
+            "DELETE FROM publications WHERE kind=2 AND collection_order='fixture' AND entity_id='x'",
             [],
         )
         .unwrap();
@@ -936,7 +1764,7 @@ mod tests {
         .unwrap();
         for field in ["$.id", "$.collection"] {
             let error = tx.execute(
-                "INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) SELECT collection,id,seq,hash,json_set(payload,?1,'y'),deleted FROM sync_entities WHERE collection='fixture' AND id='x'",
+                "INSERT OR REPLACE INTO publications(kind,identity,source_rowid,collection_kind,collection_agent,non_transcript,collection_order,entity_id,publication_seq,entity_hash,entity_payload,deleted) SELECT kind,identity,source_rowid,collection_kind,collection_agent,non_transcript,collection_order,entity_id,publication_seq,entity_hash,json_set(entity_payload,?1,'y'),deleted FROM publications WHERE kind=2 AND collection_order='fixture' AND entity_id='x'",
                 [field],
             ).expect_err("replacement inserts retain identity mirrors");
             assert!(error.to_string().contains(super::IMMUTABLE_SCOPE_ERROR));
@@ -956,12 +1784,12 @@ mod tests {
         )
         .unwrap();
         tx.execute(
-            "UPDATE sync_entities SET deleted=1, payload=json_remove(payload,'$.value.rootId','$.value.agent') WHERE collection='fixture' AND id='global'",
+            "UPDATE publications SET deleted=1, entity_payload=json_remove(entity_payload,'$.value.rootId','$.value.agent') WHERE kind=2 AND collection_order='fixture' AND entity_id='global'",
             [],
         )
         .unwrap();
         let error = tx.execute(
-            "UPDATE sync_entities SET deleted=0, payload=json_set(payload,'$.value.agent','beta') WHERE collection='fixture' AND id='global'",
+            "UPDATE publications SET deleted=0, entity_payload=json_set(entity_payload,'$.value.agent','beta') WHERE kind=2 AND collection_order='fixture' AND entity_id='global'",
             [],
         ).expect_err("global scope remains immutable after deletion");
         assert!(error.to_string().contains(super::IMMUTABLE_SCOPE_ERROR));
@@ -1008,12 +1836,22 @@ mod tests {
             false,
         )
         .unwrap();
-        let error = tx.execute_batch("UPDATE sync_entities SET collection='transcript:alpha' WHERE collection='fixture' AND id='x';
-            UPDATE sync_entities SET collection='fixture',payload=json_set(payload,'$.value.agent','beta') WHERE collection='transcript:alpha' AND id='x';")
+        let error = tx.execute_batch("UPDATE publications SET collection_order='transcript:alpha' WHERE kind=2 AND collection_order='fixture' AND entity_id='x';
+            UPDATE publications SET collection_order='fixture',entity_payload=json_set(entity_payload,'$.value.agent','beta') WHERE kind=2 AND collection_order='transcript:alpha' AND entity_id='x';")
             .expect_err("collection identity is immutable even for a transcript cache");
         assert!(error.to_string().contains(super::IMMUTABLE_SCOPE_ERROR));
-        let owner: String = tx.query_row("SELECT json_extract(payload,'$.value.agent') FROM sync_entities WHERE collection='fixture' AND id='x'", [], |row| row.get(0)).unwrap();
-        assert_eq!(owner, "alpha");
+        let payload = crate::test_fixtures::canvas::entities(&tx)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.collection == "fixture" && row.id == "x")
+            .unwrap()
+            .payload
+            .unwrap();
+        let owner =
+            crate::publication_payload::PublicationSelectors::from_envelope(&payload).unwrap();
+        assert!(
+            matches!(owner.agent, crate::publication_payload::Selector::Text(ref agent) if agent == "alpha")
+        );
     }
 
     #[test]
@@ -1039,7 +1877,7 @@ mod tests {
         )
         .unwrap();
         for path in ["$.id", "$.collection"] {
-            assert!(tx.execute("UPDATE sync_entities SET payload=json_set(payload,?1,'y') WHERE collection='fixture' AND id='x'", [path]).expect_err("published identity is immutable").to_string().contains(super::IMMUTABLE_SCOPE_ERROR));
+            assert!(tx.execute("UPDATE publications SET entity_payload=json_set(entity_payload,?1,'y') WHERE kind=2 AND collection_order='fixture' AND entity_id='x'", [path]).expect_err("published identity is immutable").to_string().contains(super::IMMUTABLE_SCOPE_ERROR));
         }
     }
 
@@ -1100,12 +1938,12 @@ mod tests {
             true,
         )
         .unwrap();
-        let tombstone: String = tx
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='fixture' AND id='published'",
-                [],
-                |row| row.get(0),
-            )
+        let tombstone = crate::test_fixtures::canvas::entities(&tx)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.collection == "fixture" && row.id == "published")
+            .unwrap()
+            .payload
             .unwrap();
         assert!(!tombstone.contains("secret"));
         assert!(!tombstone.contains("discard on deletion"));
@@ -1210,13 +2048,16 @@ mod tests {
 
     #[test]
     fn tombstone_function_consumers_match_the_named_owner() {
-        assert_eq!(
-            crate::bootstrap::SYNC_SCHEMA
-                .matches(super::SCOPE_TOMBSTONE_FUNCTION)
-                .count(),
-            10,
-            "entity_scopes::SCOPE_TOMBSTONE_FUNCTION owns every SQL tombstone call"
-        );
+        for (sql, calls) in [
+            (crate::event_publication_triggers::trigger_sql(), 5),
+            (crate::feature_schema::summary_delete_trigger_sql(), 4),
+        ] {
+            assert_eq!(
+                sql.matches(super::SCOPE_TOMBSTONE_FUNCTION).count(),
+                calls,
+                "entity_scopes::SCOPE_TOMBSTONE_FUNCTION owns every SQL tombstone call"
+            );
+        }
     }
 
     #[test]

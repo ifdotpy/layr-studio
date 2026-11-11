@@ -82,6 +82,8 @@ fn database() -> Connection {
     connection
         .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
         .expect("volatile agent table creates");
+    crate::test_fixtures::canvas::install_canonical(&connection)
+        .expect("canonical scheduler storage");
     let transaction = connection.transaction().expect("index transaction begins");
     SchedulerRepository::prepare_account_wake_index(&transaction).expect("wake index prepares");
     transaction.commit().expect("index commits");
@@ -143,7 +145,10 @@ fn with<T>(connection: &mut Connection, change: impl FnOnce(&Transaction<'_>) ->
 fn quarantined_input_publishes_typed_agent_error() {
     let mut connection = database();
     put(&connection, json!({"status":"idle"}));
-    connection.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('agent',?1,1,'h',?2,0)", params![AGENT, json!({"collection":"agent","id":AGENT,"value":{"id":AGENT}}).to_string()]).unwrap();
+    with(&mut connection, |tx| {
+        crate::SyncDocumentsRepository::put_entity(tx, "agent", AGENT, json!({"id":AGENT}), false)
+            .expect("agent publication seed");
+    });
     with(&mut connection, |tx| {
         SchedulerRepository::quarantine_pending_events(
             tx,

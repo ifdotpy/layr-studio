@@ -1730,7 +1730,7 @@ async fn startup_reconciles_reserved_callback_once() {
             Ok(())
         }).await
         .unwrap();
-    let application_before = application_table_snapshot(&store);
+    let initial_application = application_table_snapshot(&store);
     assert!(dispatch_case(&store, seed, expected, None).await.is_err());
     store
         .transaction_with::<_, StoreError>(|tx| {
@@ -1755,13 +1755,15 @@ async fn startup_reconciles_reserved_callback_once() {
     );
     assert_eq!(
         application_table_snapshot(&store),
-        application_before,
+        initial_application,
         "the failed send transaction wrote no application rows"
     );
     drop(store);
 
     // Reopen the real store and invoke the callback owner's startup recovery.
     let restarted = RuntimeStore::open(Some(root.path())).await.unwrap();
+    // Startup records the schema version after the transient trigger was removed.
+    let application_before = application_table_snapshot(&restarted);
     assert_eq!(
         crate::provider_callbacks::recover_connection(&restarted, "default", "connection", 30.0)
             .await

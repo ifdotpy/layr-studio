@@ -27,8 +27,6 @@ const COLLECTION_SHAPE: &str = studio_db_api::static_sql!(
 );
 const DOCUMENTS: &str = studio_db_api::static_sql!("kind=", Kind::DB_CODE_SYNCDOCUMENTS);
 const ENTITIES: &str = studio_db_api::static_sql!("kind=", Kind::DB_CODE_SYNCENTITIES);
-const NON_TRANSCRIPT: &str =
-    studio_db_api::static_sql!("kind=", Kind::DB_CODE_SYNCENTITIES, " AND non_transcript=1");
 const TOMBSTONES: &str = studio_db_api::static_sql!(
     "kind=",
     Kind::DB_CODE_SYNCENTITIES,
@@ -37,16 +35,16 @@ const TOMBSTONES: &str = studio_db_api::static_sql!(
 
 #[derive(DbTable)]
 #[db(table="publications",database=Canvas,partitioned_by=Kind,
-    index(name="publications_sequence",columns(publication_seq)),
+    index(name="publications_sequence",columns(publication_seq,source_rowid)),
     index(name="publications_document_identity",columns(document_scope,document_id),unique,predicate=DOCUMENTS),
     index(name="publications_document_scope_sequence",columns(document_scope,publication_seq),predicate=DOCUMENTS),
     index(name="publications_entity_identity",columns(collection_order,entity_id),unique,predicate=ENTITIES),
     index(name="publications_source_rowid",columns(kind,source_rowid),unique),
     index(name="publications_entity_collection_deleted",columns(collection_order,deleted),predicate=ENTITIES),
-    index(name="publications_entity_collection_sequence",columns(collection_order,publication_seq),predicate=ENTITIES),
-    index(name="publications_entity_non_transcript_sequence",columns(publication_seq),predicate=NON_TRANSCRIPT),
+    index(name="publications_entity_collection_sequence",columns(kind,collection_order,publication_seq,source_rowid)),
+    index(name="publications_entity_non_transcript_sequence",columns(kind,non_transcript,publication_seq,source_rowid)),
     index(name="publications_entity_prune_order",columns(publication_seq,collection_order,entity_id),predicate=TOMBSTONES),
-    index(name="publications_entity_id",columns(entity_id),predicate=ENTITIES))]
+    index(name="publications_entity_id",columns(kind,entity_id)))]
 pub(crate) struct Publications {
     #[db(key)]
     kind: Kind,

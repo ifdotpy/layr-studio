@@ -1364,7 +1364,11 @@ mod tests {
                         ],
                     )?;
                 }
-                tx.execute_batch("INSERT INTO runtime_peer_update_settings VALUES(1,0);")?;
+                studio_runtime_store::peer_update_settings::PeerUpdateSettings {
+                    id: 1,
+                    auto_update: 0,
+                }
+                .upsert(tx)?;
                 Ok::<_, studio_runtime_store::StoreError>(())
             })
             .await

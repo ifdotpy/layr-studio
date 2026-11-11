@@ -817,18 +817,16 @@ mod tests {
             },
         )
         .expect("independent agent writes");
-        transaction
-            .execute(
-                "INSERT INTO sync_entities VALUES('agent','other',2,'hash',?1,0)",
-                [json!({
-                    "collection":"agent", "id":"other",
-                    "value":{"id":"other", "status":"queued", "overview":{
-                        "result":"", "resultTruncated":false, "resultTurnId":null
-                    }}
-                })
-                .to_string()],
-            )
-            .expect("independent sync projection writes");
+        crate::SyncDocumentsRepository::put_entity(
+            &transaction,
+            "agent",
+            "other",
+            json!({"id":"other", "status":"queued", "overview":{
+                "result":"", "resultTruncated":false, "resultTurnId":null
+            }}),
+            false,
+        )
+        .expect("independent sync projection writes");
         transaction
             .execute(
                 "INSERT INTO runtime_events VALUES('other-first','other','user','input','pending',1,1,NULL,NULL)",

@@ -16,8 +16,17 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     conditional_triggers: &[],
     connection_functions: &[],
     bootstrap_tables: &[TableRequirement {
-        name: "sync_entities",
-        columns: &["collection", "id", "seq", "hash", "payload", "deleted"],
+        name: <crate::publication_schema::Publications as studio_db_api::Table>::NAME,
+        columns: &[
+            crate::publication_schema::Publications::__DB_COLUMN_KIND,
+            crate::publication_schema::Publications::__DB_COLUMN_IDENTITY,
+            crate::publication_schema::Publications::__DB_COLUMN_PUBLICATION_SEQ,
+            crate::publication_schema::Publications::__DB_COLUMN_DELETED,
+            crate::publication_schema::Publications::__DB_COLUMN_COLLECTION_ORDER,
+            crate::publication_schema::Publications::__DB_COLUMN_ENTITY_ID,
+            crate::publication_schema::Publications::__DB_COLUMN_ENTITY_HASH,
+            crate::publication_schema::Publications::__DB_COLUMN_ENTITY_PAYLOAD,
+        ],
     }],
     bootstrap_triggers: &[
         TriggerRequirement {

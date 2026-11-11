@@ -1,7 +1,9 @@
 //! Legacy settings and migration metadata descriptors. Physical format and owner units are unchanged.
 use crate::json_record_codec::{ExactJson, ExactJsonCodec};
 use crate::peer_update_settings::Canvas;
-use studio_db_api::{DbTable, Table};
+use studio_db_api::DbTable;
+#[cfg(test)]
+use studio_db_api::Table;
 
 /// Known federation selector; all other members remain exact evidence.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -134,6 +136,7 @@ pub struct OnlineMigrationDirty {
     pub key: studio_db_api::migration::DirtyKey,
 }
 
+#[cfg(test)]
 pub(crate) fn prepare_features(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
     crate::canvas_schema::install(
         connection,
@@ -150,32 +153,51 @@ pub(crate) fn prepare_features(connection: &rusqlite::Connection) -> rusqlite::R
 
 impl AccessSettings {
     pub fn get(connection: &rusqlite::Connection) -> rusqlite::Result<Option<Self>> {
-        crate::peer_update_settings::canvas_read(connection).get::<Self>(&(1,))
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::metadata_schema::AccessSettings>(&(
+                studio_db_api::migration::encode_key(&(1_i64,)),
+            ))?
+            .map(|row| Self {
+                id: row.integer_key,
+                auto_pair: row.auto_pair.as_stored(),
+            }))
     }
     pub fn set_auto_pair(
         transaction: &rusqlite::Transaction<'_>,
         value: i64,
     ) -> rusqlite::Result<()> {
-        crate::peer_update_settings::canvas_tx(transaction).update_existing(&Self {
-            id: 1,
-            auto_pair: value,
-        })?;
+        crate::peer_update_settings::canvas_tx(transaction).update_existing(
+            &crate::metadata_schema::AccessSettings {
+                identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                source_rowid: 1,
+                integer_key: 1,
+                auto_pair: crate::metadata_values::StoredBoolean::from_stored(value),
+            },
+        )?;
         Ok(())
     }
 }
 
 impl AccessLocalAlias {
     pub fn get(connection: &rusqlite::Connection) -> rusqlite::Result<Option<Self>> {
-        crate::peer_update_settings::canvas_read(connection).get::<Self>(&(1,))
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::metadata_schema::AccessLocalAlias>(&(
+                studio_db_api::migration::encode_key(&(1_i64,)),
+            ))?
+            .map(|row| Self {
+                id: row.integer_key,
+                alias: row.alias,
+            }))
     }
     pub fn upsert(&self, transaction: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
-        crate::peer_update_settings::canvas_tx(transaction).upsert(self)
-    }
-}
-
-impl SidebarOrder {
-    pub(crate) fn get(connection: &rusqlite::Connection) -> rusqlite::Result<Option<Self>> {
-        crate::peer_update_settings::canvas_read(connection).get::<Self>(&("current".to_owned(),))
+        crate::peer_update_settings::canvas_tx(transaction)
+            .partition::<crate::metadata_schema::AccessLocalAlias>()
+            .put(&crate::metadata_schema::AccessLocalAlias {
+                identity: studio_db_api::migration::encode_key(&(self.id,)),
+                source_rowid: self.id,
+                integer_key: self.id,
+                alias: self.alias.clone(),
+            })
     }
 }
 
@@ -184,4 +206,79 @@ fn federation_settings_state_check(
 ) -> rusqlite::Result<studio_db_api::StateCheck> {
     use crate::repositories::federation_messaging::{FederationTable, check_table_state};
     crate::state_check::storage_report(check_table_state(connection, FederationTable::Settings))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn access_metadata_preserves_absence_update_only_alias_and_rollback() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        assert!(AccessSettings::get(&db).unwrap().is_none());
+        assert!(AccessLocalAlias::get(&db).unwrap().is_none());
+        {
+            let transaction = db.transaction().unwrap();
+            AccessSettings::set_auto_pair(&transaction, 2).unwrap();
+            assert!(
+                AccessSettings::get(&transaction).unwrap().is_none(),
+                "setting cannot insert an absent singleton"
+            );
+            crate::peer_update_settings::canvas_tx(&transaction)
+                .partition::<crate::metadata_schema::AccessSettings>()
+                .put(&crate::metadata_schema::AccessSettings {
+                    identity: studio_db_api::migration::encode_key(&(1_i64,)),
+                    source_rowid: 1,
+                    integer_key: 1,
+                    auto_pair: crate::metadata_values::StoredBoolean::from_stored(-7),
+                })
+                .unwrap();
+            assert_eq!(
+                AccessSettings::get(&transaction)
+                    .unwrap()
+                    .unwrap()
+                    .auto_pair,
+                -7
+            );
+            AccessSettings::set_auto_pair(&transaction, 2).unwrap();
+            assert_eq!(
+                AccessSettings::get(&transaction)
+                    .unwrap()
+                    .unwrap()
+                    .auto_pair,
+                2
+            );
+            AccessLocalAlias {
+                id: 1,
+                alias: "one".into(),
+            }
+            .upsert(&transaction)
+            .unwrap();
+            AccessLocalAlias {
+                id: 1,
+                alias: "two".into(),
+            }
+            .upsert(&transaction)
+            .unwrap();
+            assert!(
+                AccessLocalAlias {
+                    id: 2,
+                    alias: "invalid".into()
+                }
+                .upsert(&transaction)
+                .is_err()
+            );
+            assert_eq!(
+                AccessLocalAlias::get(&transaction).unwrap().unwrap().alias,
+                "two"
+            );
+            let read = crate::peer_update_settings::canvas_read(&transaction);
+            assert!(!read.table_exists::<AccessLocalAlias>().unwrap());
+            assert!(!read.table_exists::<AccessSettings>().unwrap());
+        }
+        assert!(AccessSettings::get(&db).unwrap().is_none());
+        assert!(AccessLocalAlias::get(&db).unwrap().is_none());
+    }
 }

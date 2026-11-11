@@ -240,7 +240,6 @@ fn build_staging(staging: &Path, final_root: &Path) -> StoreResult<()> {
     let mut canvas = Connection::open(staging.join("canvas.sqlite3"))?;
     crate::schema::register_python_trigger_functions(&canvas)?;
     let transaction = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    crate::bootstrap::prepare_sync_schema(&transaction)?;
     seed_python_lazy_markers(staging)?;
     seed_workspace(&transaction, final_root)?;
     transaction.commit()?;
@@ -313,7 +312,6 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
     if schema_name == "canvas.sqlite3" {
         crate::schema::prepare_item_turn_scope(&transaction)?;
         crate::bootstrap::prepare_runtime_event_indexes(&transaction)?;
-        crate::AgentRepository::prepare_change_journal(&transaction)?;
         crate::MonitorsRepository::prepare_indexes(&transaction)?;
     } else {
         crate::schema::prepare_publication_overflow_receipts(&transaction)?;
@@ -361,7 +359,6 @@ pub fn test_canvas() -> Connection {
         .expect("in-memory canvas");
     crate::schema::register_python_trigger_functions(&connection).expect("projection functions");
     let tx = connection.transaction().expect("fixture transaction");
-    crate::bootstrap::prepare_sync_schema(&tx).expect("sync schema");
     crate::migrations::prepare_current_canvas(&tx).expect("current canvas format");
     // Migrations drop old indexes; startup recreates the retained ones from their owners.
     crate::bootstrap::prepare_runtime_event_indexes(&tx).expect("owned indexes");
@@ -395,10 +392,25 @@ impl TestStoreTemplate {
         tokio::fs::write(root.join("analytics.sqlite3"), &self.analytics).await?;
         let store = crate::RuntimeStore::open(Some(root)).await?;
         let root = store.root().to_path_buf();
-        store.transaction(move |tx| {
-            tx.execute_batch("DELETE FROM sync_identity; INSERT INTO sync_identity(id) VALUES(lower(hex(randomblob(16))))")?;
-            seed_workspace(tx, &root)
-        }).await?;
+        store
+            .transaction(move |tx| {
+                let mut typed = crate::peer_update_settings::canvas_tx(tx);
+                for row in
+                    studio_db_api::db_query!(typed.read(), crate::metadata_schema::SyncIdentity)?
+                {
+                    typed.delete::<crate::metadata_schema::SyncIdentity>(&(row.identity,))?;
+                }
+                let text_key = Some(uuid::Uuid::new_v4().simple().to_string());
+                typed
+                    .partition::<crate::metadata_schema::SyncIdentity>()
+                    .put(&crate::metadata_schema::SyncIdentity {
+                        identity: crate::consolidation_codec::nullable_text_identity(&text_key, 1),
+                        source_rowid: 1,
+                        text_key,
+                    })?;
+                seed_workspace(tx, &root)
+            })
+            .await?;
         Ok(store)
     }
 }
@@ -422,10 +434,15 @@ mod template_tests {
             .expect("second");
         let inspect = |store: &crate::RuntimeStore| {
             let db = store.test_reader().expect("reader");
-            let identity: String = db
-                .query_row("SELECT id FROM sync_identity", [], |row| row.get(0))
-                .expect("identity");
-            let state_dir: String = db.query_row("SELECT json_extract(payload, '$.value.stateDir') FROM sync_entities WHERE collection='workspace' AND id='current'", [], |row| row.get(0)).expect("workspace");
+            let identity = crate::SyncDocumentsRepository::workspace_id(&db).expect("identity");
+            let workspace = crate::SyncDocumentsRepository::entities_after(&db, 0, 1000)
+                .expect("publications")
+                .into_iter()
+                .find(|row| row.collection == "workspace" && row.id == "current")
+                .expect("workspace");
+            let payload: studio_runtime_schema::generated::SyncWorkspaceEntityPayload =
+                studio_json::from_str(&workspace.payload.unwrap()).unwrap();
+            let state_dir = payload.value.state_dir.unwrap().unwrap();
             assert_eq!(state_dir, store.root().to_string_lossy().as_ref());
             identity
         };
@@ -456,7 +473,11 @@ fn seed_workspace(transaction: &rusqlite::Transaction<'_>, state_dir: &Path) -> 
         "agent_organization_fields",
         "3",
     )?;
-    crate::clock_schema::SyncEntityMeta::insert_if_absent(transaction, "event_window_seq", "0")?;
+    crate::clock_schema::SyncEntityMeta::insert_if_absent(
+        transaction,
+        crate::metadata_values::EVENT_WINDOW_SEQUENCE_KEY,
+        "0",
+    )?;
     crate::clock_schema::SyncEntityMeta::insert_if_absent(
         transaction,
         "task_window_migrated",

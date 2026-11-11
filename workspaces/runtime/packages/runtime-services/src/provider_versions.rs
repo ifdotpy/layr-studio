@@ -25,7 +25,6 @@ use studio_runtime_providers::ProviderKind;
 
 use process_wrap::std::CommandWrap;
 use regex::Regex;
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use studio_json::{Map, Value, json};
 use studio_runtime_process::child_priority::ChildPriority;
@@ -280,58 +279,88 @@ impl ProviderVersionStore for SyncProviderVersionStore {
         let observed_accounts = observed_accounts.to_vec();
         let warnings = warnings.to_vec();
         Box::pin(async move {
-            self.0.transaction(move |transaction| {
-            let raw: Option<String> = transaction
-                .query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0",
-                    [],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let current: Value = match raw {
-                Some(text) => studio_json::from_str(&text).map_err(|_| StoreError::InvalidSyncObject {
-                    scope: "workspace".into(),
-                    id: "current".into(),
-                })?,
-                None => json!({"nativeNotices": []}),
-            };
-            let mut notices = match current.pointer("/value/nativeNotices") {
-                None | Some(Value::Null) => Vec::new(),
-                Some(Value::Array(rows)) => rows.clone(),
-                _ => return Err(StoreError::InvalidSyncObject { scope: "workspace".into(), id: "current".into() }),
-            };
-            let observed_accounts = observed_accounts.iter().map(String::as_str).collect::<std::collections::BTreeSet<_>>();
-            let is_observed_warning = |notice: &Value| {
-                notice.get("id").and_then(Value::as_str).is_some_and(is_provider_warning_id)
-                    && notice.get("accountKey").and_then(Value::as_str).is_some_and(|account| observed_accounts.contains(account))
-            };
-            let previous = notices
-                .iter()
-                .filter(|notice| is_observed_warning(notice))
-                .cloned()
-                .collect::<Vec<_>>();
-            notices.retain(|notice| !is_observed_warning(notice));
-            for warning in &warnings {
-                let id = warning.get("id").and_then(Value::as_str).ok_or(StoreError::InvalidSyncObject { scope: "workspace".into(), id: "current".into() })?;
-                if !is_provider_warning_id(id) {
-                    continue;
-                }
-                let same_version = previous
-                    .iter()
-                    .find(|old| old.get("id").and_then(Value::as_str) == Some(id) && old.get("version") == warning.get("version"));
-                if let Some(old) = same_version {
-                    notices.push(old.clone());
-                } else {
-                    notices.push(warning.clone());
-                }
-            }
-            let old_projection = current.pointer("/value/nativeNotices").and_then(Value::as_array);
-            if old_projection.is_some_and(|old| old == &notices) {
-                return Ok(());
-            }
-            SyncDocumentsRepository::patch_entity(transaction, "workspace", "current", json!({"nativeNotices":notices}))?;
-            Ok(())
-        }).await?;
+            self.0
+                .transaction(move |transaction| {
+                    let raw = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        transaction,
+                        "workspace",
+                        "current",
+                        true,
+                    )?;
+                    let current: Value = match raw {
+                        Some(text) => studio_json::from_str(&text).map_err(|_| {
+                            StoreError::InvalidSyncObject {
+                                scope: "workspace".into(),
+                                id: "current".into(),
+                            }
+                        })?,
+                        None => json!({"nativeNotices": []}),
+                    };
+                    let mut notices = match current.pointer("/value/nativeNotices") {
+                        None | Some(Value::Null) => Vec::new(),
+                        Some(Value::Array(rows)) => rows.clone(),
+                        _ => {
+                            return Err(StoreError::InvalidSyncObject {
+                                scope: "workspace".into(),
+                                id: "current".into(),
+                            });
+                        }
+                    };
+                    let observed_accounts = observed_accounts
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<std::collections::BTreeSet<_>>();
+                    let is_observed_warning = |notice: &Value| {
+                        notice
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(is_provider_warning_id)
+                            && notice
+                                .get("accountKey")
+                                .and_then(Value::as_str)
+                                .is_some_and(|account| observed_accounts.contains(account))
+                    };
+                    let previous = notices
+                        .iter()
+                        .filter(|notice| is_observed_warning(notice))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    notices.retain(|notice| !is_observed_warning(notice));
+                    for warning in &warnings {
+                        let id = warning.get("id").and_then(Value::as_str).ok_or(
+                            StoreError::InvalidSyncObject {
+                                scope: "workspace".into(),
+                                id: "current".into(),
+                            },
+                        )?;
+                        if !is_provider_warning_id(id) {
+                            continue;
+                        }
+                        let same_version = previous.iter().find(|old| {
+                            old.get("id").and_then(Value::as_str) == Some(id)
+                                && old.get("version") == warning.get("version")
+                        });
+                        if let Some(old) = same_version {
+                            notices.push(old.clone());
+                        } else {
+                            notices.push(warning.clone());
+                        }
+                    }
+                    let old_projection = current
+                        .pointer("/value/nativeNotices")
+                        .and_then(Value::as_array);
+                    if old_projection.is_some_and(|old| old == &notices) {
+                        return Ok(());
+                    }
+                    SyncDocumentsRepository::patch_entity(
+                        transaction,
+                        "workspace",
+                        "current",
+                        json!({"nativeNotices":notices}),
+                    )?;
+                    Ok(())
+                })
+                .await?;
             Ok(())
         })
     }
@@ -1403,3 +1432,17 @@ fn save_cache(
 #[cfg(test)]
 #[path = "provider_versions/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod f1_canonical_tests {
+    use super::*;
+    #[tokio::test]
+    async fn f1_provider_versions_canonical_caller_without_source_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
+        SyncProviderVersionStore(store)
+            .persist_warnings(&[], &[])
+            .await
+            .unwrap();
+    }
+}

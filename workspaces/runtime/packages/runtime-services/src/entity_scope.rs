@@ -14,7 +14,7 @@
 //!   (`durable_seq::AGENT_VIEW_MARK`) that the publisher writes when a row the view
 //!   reads changes, gives the views that change's number.
 //!
-//! The other collections still come from `sync_entities`. One merge by change number keeps
+//! The other collections come from canonical publications. One merge by change number keeps
 //! the paging rules of `SyncDocumentsRepository`: a page is cut at a whole unit, and
 //! `checkpoint` is the last unit taken.
 
@@ -25,24 +25,12 @@ use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
-    AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult,
-    SyncDocumentsRepository, WINDOW_COLLECTIONS, WORK_COLLECTIONS, WorkItemRecord,
-    WorkItemsRepository, WorkStatus, durable_seq, work_history,
+    AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, EntityPage, EntityRow, EntityScopeQueries,
+    StoreError, StoreResult, SyncDocumentsRepository, WINDOW_COLLECTIONS, WORK_COLLECTIONS,
+    WorkItemRecord, WorkItemsRepository, WorkStatus, durable_seq,
 };
 
 use crate::work_write::{WorkWriteError, current_submission_refusal};
-
-/// One history row of `work_history`: change id, seq, tombstone flag, record, parent
-/// work id, index, and the parent's `rootId`.
-type HistoryRow = (
-    String,
-    i64,
-    bool,
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-    Option<String>,
-);
 
 /// Rows that share one change number. A unit is never cut inside.
 struct Unit {
@@ -438,7 +426,7 @@ fn wanted(collections_json: Option<&str>) -> StoreResult<BTreeSet<&'static str>>
 
 /// A main table with one document per row in each of `collections`.
 struct DirectSource {
-    /// The `durable_rows` table: a main table, or a mark name for a view of several.
+    /// The durable source label: a main table, or a mark name for a view of several.
     table: &'static str,
     collections: &'static [&'static str],
 }
@@ -505,33 +493,22 @@ fn direct_units(
         if !source.collections.iter().any(|c| wanted.contains(c)) {
             continue;
         }
-        let query = if source.table == "runtime_tasks" {
-            // One explicit task also depends on whether its owner is visible.
-            // Read the owner's durable sequence in the same interval; no copied view or mark.
-            "SELECT id,MAX(seq),MAX(deleted) FROM (
-               SELECT id,seq,deleted FROM durable_rows
-               WHERE tbl=?1 AND seq>?2 AND seq<=?3 AND (deleted=0 OR seq>?4) AND id=?5
-               UNION ALL
-               SELECT task.id,owner.seq,0 FROM runtime_tasks task
-               JOIN durable_rows owner ON owner.tbl='runtime_agents'
-                 AND owner.id=json_extract(task.record,'$.agent')
-               WHERE task.id=?5 AND owner.seq>?2 AND owner.seq<=?3
-             ) GROUP BY id ORDER BY MAX(seq) LIMIT ?6"
+        let changed = if source.table == "runtime_tasks" {
+            EntityScopeQueries::task_changes(connection, after, through, deletes_after, id, fetch)?
         } else {
-            "SELECT id,seq,deleted FROM durable_rows
-             WHERE tbl=?1 AND seq>?2 AND seq<=?3 AND (deleted=0 OR seq>?4)
-               AND (?5 IS NULL OR id=?5)
-             ORDER BY seq LIMIT ?6"
-        };
-        let changed: Vec<(String, i64, bool)> = connection
-            .prepare_cached(query)?
-            .query_map(
-                params![source.table, after, through, deletes_after, id, fetch],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
+            EntityScopeQueries::direct_changes(
+                connection,
+                source.table,
+                after,
+                through,
+                deletes_after,
+                id,
+                fetch,
             )?
-            .collect::<Result<_, _>>()?;
+        };
         let snapshot = deletes_after == i64::MAX;
         for (row_id, seq, deleted) in changed {
+            let deleted = deleted != 0;
             let rows = if deleted {
                 tombstones(source.collections, wanted, &row_id, seq)
             } else {
@@ -679,20 +656,15 @@ fn agent_units(
     // Cleanup uses soft deletion, retaining the root until its tombstone is emitted.
     // Arbitrary hard deletes have no scoped provenance; only snapshots reconcile them.
     // The agent row and its view mark both name the agent: one unit at the later one.
-    let changed: Vec<(String, i64)> = prepare_agent_changes(connection, after, through)?
-        .query_map(
-            params![
-                durable_seq::AGENT_VIEW_MARK,
-                after,
-                through,
-                deletes_after,
-                id,
-                fetch,
-                agent
-            ],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?
-        .collect::<Result<_, _>>()?;
+    let changed = EntityScopeQueries::agent_changes(
+        connection,
+        after,
+        through,
+        deletes_after,
+        id,
+        fetch,
+        agent,
+    )?;
     let project_through =
         project_through.min(projection_through(&units, (fetch - 1) as usize, through));
     let contexts = if wanted.contains("agentSummary") {
@@ -738,33 +710,6 @@ fn agent_units(
     Ok(units)
 }
 
-// Owner: entity_scope. Maximum narrow range in durable_rows sequence numbers;
-// larger ranges retain the planner's table-key scan for broad snapshots.
-const SEQ_INDEX_RANGE_MAX: i64 = 1024;
-
-const AGENT_CHANGES_SQL: &str = "SELECT id,MAX(seq) AS last FROM durable_rows
-             WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
-               AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
-               AND (?7 IS NULL OR id=?7 OR id IN
-                 (SELECT id FROM runtime_agents WHERE root_id=?7))
-             GROUP BY id ORDER BY last LIMIT ?6";
-
-/// Prepare the grouped agent change read used by every entity page.
-fn prepare_agent_changes(
-    connection: &Connection,
-    after: i64,
-    through: i64,
-) -> StoreResult<rusqlite::CachedStatement<'_>> {
-    if through.saturating_sub(after) <= SEQ_INDEX_RANGE_MAX {
-        return Ok(connection.prepare_cached(&AGENT_CHANGES_SQL.replacen(
-            "FROM durable_rows",
-            "FROM durable_rows INDEXED BY durable_rows_seq",
-            1,
-        ))?);
-    }
-    Ok(connection.prepare_cached(AGENT_CHANGES_SQL)?)
-}
-
 /// Only lead tails. Four scalar columns from owner tables; no summary/domain aggregation.
 fn tail_units(
     connection: &Connection,
@@ -774,7 +719,8 @@ fn tail_units(
     id: Option<&str>,
     fetch: i64,
 ) -> StoreResult<Vec<Unit>> {
-    let changed=connection.prepare_cached("SELECT id,MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents','runtime_agent_volatile') AND seq>?1 AND seq<=?2 AND (deleted=0 OR seq>?3) AND (?4 IS NULL OR id=?4) GROUP BY id ORDER BY MAX(seq) LIMIT ?5")?.query_map(params![after,through,deletes_after,id,fetch],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
+    let changed =
+        EntityScopeQueries::tail_changes(connection, after, through, deletes_after, id, fetch)?;
     let snapshot = deletes_after == i64::MAX;
     let mut units = Vec::new();
     for (id, seq) in changed {
@@ -842,11 +788,7 @@ fn agent_docs_with_context(
     let seq = match seq {
         Some(seq) => seq,
         None => {
-            let current: Option<i64> = connection
-                .prepare_cached(
-                    "SELECT MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents',?1) AND id=?2",
-                )?
-                .query_row(params![durable_seq::AGENT_VIEW_MARK, id], |row| row.get(0))?;
+            let current = EntityScopeQueries::agent_sequence(connection, id)?;
             let Some(current) = current else {
                 return Ok(Vec::new());
             };
@@ -931,26 +873,17 @@ fn window_units(
         if !wanted.contains(collection) {
             continue;
         }
-        let changed: Vec<(String, i64, bool)> = connection
-            .prepare_cached(
-                "SELECT x.id,MAX(x.seq) AS last,w.deleted FROM (
-                   SELECT id,seq FROM durable_rows WHERE tbl=?1 AND seq>?3 AND seq<=?4
-                     AND (deleted=0 OR seq>?5)
-                   UNION ALL
-                   SELECT d.id,d.seq FROM durable_rows d WHERE d.tbl=?2 AND d.deleted=0
-                     AND d.seq>?3 AND d.seq<=?4
-                     AND EXISTS(SELECT 1 FROM durable_rows w WHERE w.tbl=?1 AND w.id=d.id AND w.deleted=0)
-                 ) x JOIN durable_rows w ON w.tbl=?1 AND w.id=x.id
-                 WHERE ?6 IS NULL OR x.id=?6
-                 GROUP BY x.id ORDER BY last LIMIT ?7",
-            )?
-            .query_map(
-                params![window, source, after, through, deletes_after, id, fetch],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
-            )?
-            .collect::<Result<_, _>>()?;
+        let changed = EntityScopeQueries::window_changes(
+            connection,
+            window,
+            source,
+            (after, through),
+            deletes_after,
+            id,
+            fetch,
+        )?;
         for (member, seq, left) in changed {
-            let view = if left {
+            let view = if left != 0 {
                 None
             } else {
                 crate::sync_policy::window_view(connection, collection, &member).or_else(
@@ -1025,10 +958,7 @@ pub fn direct_document(
         .iter()
         .find(|source| source.collections.contains(&collection))
         .ok_or(StoreError::RecordContract("not a direct collection"))?;
-    let seq: Option<i64> = connection
-        .prepare_cached("SELECT seq FROM durable_rows WHERE tbl=?1 AND id=?2 AND deleted=0")?
-        .query_row(params![source.table, id], |row| row.get(0))
-        .optional()?;
+    let seq = EntityScopeQueries::direct_sequence(connection, source.table, id)?;
     let Some(seq) = seq else {
         return Ok(None);
     };
@@ -1058,20 +988,10 @@ fn work_units(
 ) -> StoreResult<Vec<Unit>> {
     let mut units = Vec::new();
     // Work rows, live or deleted. A deleted row is the work tombstone.
-    let changed: Vec<(String, i64, bool)> = transaction
-        .prepare(
-            "SELECT d.id,d.seq,d.deleted FROM durable_rows d LEFT JOIN runtime_work w ON w.id=d.id
-             WHERE d.tbl='runtime_work' AND d.seq>?1 AND d.seq<=?2 AND (d.deleted=0 OR d.seq>?3)
-               AND (?4 IS NULL OR d.deleted=1 OR json_extract(w.record,'$.rootId')=?4)
-             ORDER BY d.seq LIMIT ?5",
-        )?
-        .query_map(
-            params![after, through, deletes_after, agent, fetch],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
-        )?
-        .collect::<Result<_, _>>()?;
+    let changed =
+        EntityScopeQueries::work_changes(transaction, after, through, deletes_after, agent, fetch)?;
     for (id, seq, deleted) in &changed {
-        let rows = if *deleted {
+        let rows = if *deleted != 0 {
             tombstones(&["work", "workDetail"], wanted, id, *seq)
         } else {
             work_docs(transaction, id, *seq, wanted, false)?
@@ -1084,35 +1004,17 @@ fn work_units(
         if !wanted.contains(collection) {
             continue;
         }
-        let table = work_history::table_of(kind);
-        // Raw SQL: history publication joins durable tombstones and the parent's JSON team selector.
-        let entries: Vec<HistoryRow> =
-            transaction
-                .prepare(&format!(
-                    "SELECT d.id,d.seq,d.deleted,c.record,c.work,c.idx,json_extract(w.record,'$.rootId')
-                     FROM durable_rows d LEFT JOIN {table} c ON c.id=d.id
-                     LEFT JOIN runtime_work w ON w.id=c.work
-                     WHERE d.tbl='{table}' AND d.seq>?1 AND d.seq<=?2 AND (d.deleted=0 OR d.seq>?3)
-                       AND (?4 IS NULL OR d.deleted=1 OR json_extract(w.record,'$.rootId')=?4)
-                     ORDER BY d.seq LIMIT ?5"
-                ))?
-                .query_map(
-                    params![after, through, deletes_after, agent, fetch],
-                    |row| {
-                        Ok((
-                            row.get(0)?,
-                            row.get(1)?,
-                            row.get::<_, i64>(2)? != 0,
-                            row.get(3)?,
-                            row.get(4)?,
-                            row.get(5)?,
-                            row.get(6)?,
-                        ))
-                    },
-                )?
-                .collect::<Result<_, _>>()?;
+        let entries = EntityScopeQueries::history_changes(
+            transaction,
+            kind,
+            after,
+            through,
+            deletes_after,
+            agent,
+            fetch,
+        )?;
         for (id, seq, deleted, record, work, index, root) in entries {
-            let rows = match (deleted, record, work, index, root) {
+            let rows = match (deleted != 0, record, work, index, root) {
                 (true, ..) => tombstones(&[collection], wanted, &id, seq),
                 (false, Some(raw), Some(work), Some(index), Some(root)) => {
                     let entry = crate::sync_views::work_history_entry(
@@ -1134,25 +1036,9 @@ fn work_units(
     }
     // Fan-out: a changed owner agent, execution run or dependency refreshes the
     // `workDetail` of the works it affects. Each trigger keeps its own change number.
-    let owners: Vec<(String, i64)> = transaction
-        .prepare(
-            "SELECT d.id,d.seq FROM durable_rows d WHERE d.tbl='runtime_agents'
-               AND d.seq>?1 AND d.seq<=?2 ORDER BY d.seq LIMIT ?3",
-        )?
-        .query_map(params![after, through, fetch], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<_, _>>()?;
-    let runs: Vec<(String, i64)> = transaction
-        .prepare(
-            "SELECT r.agent,d.seq FROM durable_rows d JOIN runtime_execution_runs r ON r.id=d.id
-               WHERE d.tbl='runtime_execution_runs' AND d.deleted=0
-                 AND d.seq>?1 AND d.seq<=?2 ORDER BY d.seq LIMIT ?3",
-        )?
-        .query_map(params![after, through, fetch], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<_, _>>()?;
+    let owners =
+        EntityScopeQueries::changed_ids(transaction, "runtime_agents", after, through, fetch)?;
+    let runs = EntityScopeQueries::changed_runs(transaction, after, through, fetch)?;
     for (owner, seq) in owners.iter().chain(runs.iter()) {
         let works = transaction
             .prepare(
@@ -1167,15 +1053,8 @@ fn work_units(
         }
         units.push(Unit { seq: *seq, rows });
     }
-    let changed_works: Vec<(String, i64)> = transaction
-        .prepare(
-            "SELECT id,seq FROM durable_rows WHERE tbl='runtime_work'
-               AND seq>?1 AND seq<=?2 ORDER BY seq LIMIT ?3",
-        )?
-        .query_map(params![after, through, fetch], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<_, _>>()?;
+    let changed_works =
+        EntityScopeQueries::changed_ids(transaction, "runtime_work", after, through, fetch)?;
     for (changed, seq) in changed_works {
         // A deleted dependency is still named by its dependents.
         let dependents = transaction
@@ -1308,33 +1187,17 @@ fn work_error(error: WorkWriteError) -> StoreError {
 }
 
 #[cfg(test)]
-mod catch_up_query_tests {
+mod canonical_scope_tests {
     use super::*;
-    use rusqlite::StatementStatus;
 
-    fn fixture() -> Connection {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(
-            "CREATE TABLE durable_rows(tbl TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,
-                 deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(tbl,id));
-             CREATE INDEX durable_rows_seq ON durable_rows(seq);
-             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,root_id TEXT);
-             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300000)
-             INSERT INTO durable_rows SELECT 'unrelated',CAST(x AS TEXT),x,0 FROM n;
-             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
-             INSERT INTO durable_rows SELECT 'runtime_agents',CAST(x AS TEXT),x,0 FROM n;
-             INSERT INTO durable_rows VALUES
-                 ('runtime_agents','a',300001,0),('runtime_agents','b',300003,1),
-                 ('runtime_agents','c',300004,0),('runtime_agents','outside',300011,0);
-             INSERT INTO runtime_agents VALUES('a','root'),('b','root'),('c','other');",
-        )
-        .unwrap();
-        db.execute(
-            "INSERT INTO durable_rows VALUES(?1,'a',300002,0)",
-            [durable_seq::AGENT_VIEW_MARK],
-        )
-        .unwrap();
-        db
+    #[test]
+    fn canonical_scope_direct_candidates_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        assert!(
+            direct_units(&db, 0, 10, 0, &BTreeSet::from(["plan"]), None, None, 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -1416,145 +1279,127 @@ mod catch_up_query_tests {
     }
 
     #[test]
-    fn narrow_agent_changes_seek_sequence_range() {
-        let db = fixture();
-        for (deletes_after, id, root, limit, expected) in [
-            (
+    fn canonical_scope_task_candidates_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        assert!(
+            direct_units(
+                &db,
                 0,
-                None,
-                None,
-                100,
-                vec![("a", 300002), ("b", 300003), ("c", 300004)],
-            ),
-            (
-                i64::MAX,
-                None,
-                None,
-                100,
-                vec![("a", 300002), ("c", 300004)],
-            ),
-            (0, Some("a"), None, 100, vec![("a", 300002)]),
-            (
+                10,
                 0,
+                &BTreeSet::from(["taskDetail"]),
+                Some("missing"),
                 None,
-                Some("root"),
-                100,
-                vec![("a", 300002), ("b", 300003)],
-            ),
-            (0, None, None, 1, vec![("a", 300002)]),
-        ] {
-            let mut query = prepare_agent_changes(&db, 300000, 300010).unwrap();
-            let rows = query
-                .query_map(
-                    params![
-                        durable_seq::AGENT_VIEW_MARK,
-                        300000,
-                        300010,
-                        deletes_after,
-                        id,
-                        limit,
-                        root
-                    ],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-                )
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            assert_eq!(
-                rows,
-                expected
-                    .into_iter()
-                    .map(|(id, seq)| (id.to_owned(), seq))
-                    .collect::<Vec<_>>()
-            );
-            let steps = query.reset_status(StatementStatus::VmStep);
-            eprintln!("narrow agent changes id={id:?} root={root:?} VM steps={steps}");
-            assert!(
-                steps < 2000,
-                "a ten-number delta must avoid historical agents: {steps}"
-            );
-        }
-    }
-
-    #[test]
-    fn agent_changes_range_plan_boundaries() {
-        let db = fixture();
-        for (after, through, indexed, empty) in [
-            (298986, 300010, true, false),  // Exactly 1024 sequence numbers.
-            (298985, 300010, false, false), // Exactly 1025 sequence numbers.
-            (300010, 300010, true, true),
-            (300010, 300009, true, true),
-        ] {
-            let mut query = prepare_agent_changes(&db, after, through).unwrap();
-            assert_eq!(
-                query.expanded_sql().unwrap().contains("INDEXED BY"),
-                indexed
-            );
-            let parameters = params![
-                durable_seq::AGENT_VIEW_MARK,
-                after,
-                through,
-                0,
-                None::<&str>,
-                100,
-                None::<&str>
-            ];
-            let read =
-                |row: &rusqlite::Row<'_>| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?));
-            let actual = query
-                .query_map(parameters, read)
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            let mut original = db.prepare(AGENT_CHANGES_SQL).unwrap();
-            let expected = original
-                .query_map(parameters, read)
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            assert_eq!(actual, expected);
-            assert_eq!(actual.is_empty(), empty);
-            let steps = query.reset_status(StatementStatus::VmStep);
-            let before = original.get_status(StatementStatus::VmStep);
-            eprintln!("range=({after},{through}] indexed={indexed} VM steps={before}->{steps}");
-            if indexed {
-                assert!(steps < 8000);
-            } else {
-                assert_eq!(steps, before);
-            }
-        }
-    }
-
-    #[test]
-    fn broad_agent_changes_keep_table_plan() {
-        let db = fixture();
-        let mut query = prepare_agent_changes(&db, 0, 300010).unwrap();
-        let rows = query
-            .query_map(
-                params![
-                    durable_seq::AGENT_VIEW_MARK,
-                    0,
-                    300010,
-                    i64::MAX,
-                    None::<&str>,
-                    i64::MAX,
-                    None::<&str>
-                ],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                10
             )
             .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(rows.len(), 10002);
-        assert_eq!(
-            &rows[rows.len() - 2..],
-            &[("a".to_owned(), 300002), ("c".to_owned(), 300004)]
+            .is_empty()
         );
-        let steps = query.reset_status(StatementStatus::VmStep);
-        eprintln!("broad agent changes 300000 unrelated rows VM steps={steps}");
+    }
+    #[test]
+    fn canonical_scope_agent_candidates_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
         assert!(
-            steps < 500000,
-            "broad snapshots must avoid unrelated sequence history: {steps}"
+            agent_units(
+                &db,
+                0,
+                10,
+                0,
+                &BTreeSet::from(["agentDetail"]),
+                None,
+                None,
+                10,
+                10
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+    #[test]
+    fn canonical_scope_tail_candidates_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        assert!(tail_units(&db, 0, 10, 0, None, 10).unwrap().is_empty());
+    }
+    #[test]
+    fn canonical_scope_agent_sequence_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        assert!(
+            agent_docs_with_context(
+                &db,
+                "missing",
+                None,
+                &BTreeSet::from(["agentDetail"]),
+                true,
+                None
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+    #[test]
+    fn canonical_scope_window_candidates_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        assert!(
+            window_units(
+                &db,
+                0,
+                10,
+                0,
+                &BTreeSet::from(["task", "monitor"]),
+                None,
+                None,
+                10
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+    #[test]
+    fn canonical_scope_direct_sequence_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        assert!(direct_document(&db, "plan", "missing").unwrap().is_none());
+    }
+    #[test]
+    fn canonical_scope_work_and_history_fanout_need_no_legacy_table() {
+        let db = studio_runtime_store::test_canvas();
+        let wanted = WORK_COLLECTIONS.iter().copied().collect();
+        assert!(
+            work_units(&db, 0, 10, 0, &wanted, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn canonical_scope_work_history_and_fanout_keep_service_envelopes() {
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        let raw = r#"{"id":"work","status":"ready","rootId":"root","title":"example","results":[{"text":"result"}],"decisions":[{"text":"decision"}],"releases":["release"]}"#;
+        let record = WorkItemRecord::decode("work", raw).unwrap();
+        studio_runtime_store::Table::new(&tx).put(&record).unwrap();
+        studio_runtime_store::work_history::reconcile(&tx, "work", &record.value()).unwrap();
+        let high = durable_seq::high(&tx).unwrap();
+        let wanted = WORK_COLLECTIONS
+            .iter()
+            .copied()
+            .filter(|name| *name != "workDetail")
+            .collect();
+        let units = work_units(&tx, 0, high, 0, &wanted, Some("root"), 100).unwrap();
+        let rows: Vec<_> = units.into_iter().flat_map(|unit| unit.rows).collect();
+        assert!(
+            rows.iter()
+                .any(|row| row.collection == "work" && row.id == "work" && !row.deleted)
+        );
+        for kind in WorkHistoryKind::ALL {
+            assert!(rows.iter().any(|row| row.collection == kind.collection()
+                && row.id == "work:0"
+                && !row.deleted));
+        }
+        assert!(
+            work_units(&tx, 0, high, 0, &wanted, Some("other"), 100)
+                .unwrap()
+                .iter()
+                .all(|unit| unit.rows.is_empty())
         );
     }
 }

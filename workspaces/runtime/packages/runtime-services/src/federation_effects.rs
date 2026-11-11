@@ -124,13 +124,8 @@ pub enum FederationAction {
 pub async fn ensure_enabled(store: &RuntimeStore) -> Result<()> {
     let enabled = store
         .read_async("runtime-services/federation_effects", |tx| {
-            let enabled = tx
-                .query_row(
-                    "SELECT COALESCE(json_extract(record,'$.enabled'),0) FROM runtime_federation_settings WHERE id='global'",
-                    [],
-                    |row| row.get::<_, bool>(0),
-                )
-                .optional()?;
+            let enabled =
+                studio_runtime_store::ProjectionPublicationQueries::federation_enabled(tx)?;
             Ok::<_, StoreError>(enabled.unwrap_or(false))
         })
         .await?;
@@ -452,11 +447,7 @@ async fn handle_pair(
         if current_identity != local_identity_id {
             return Err(Error::Conflict("local identity changed"));
         }
-        let enabled: bool = tx.query_row(
-            "SELECT COALESCE(json_extract(record,'$.enabled'),0) FROM runtime_federation_settings WHERE id='global'",
-            [],
-            |row| row.get(0),
-        ).map_err(StoreError::from)?;
+        let enabled: bool = studio_runtime_store::ProjectionPublicationQueries::federation_enabled(tx).and_then(|value| value.ok_or(rusqlite::Error::QueryReturnedNoRows)).map_err(StoreError::from)?;
         if !enabled {
             return Err(Error::Forbidden("federation is disabled"));
         }
@@ -977,3 +968,18 @@ pub(crate) async fn reconcile(
 #[cfg(test)]
 #[path = "../tests/federation/corpus.rs"]
 mod federation_corpus;
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_federation_effects_disabled_is_forbidden() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            super::ensure_enabled(&store).await,
+            Err(super::Error::Forbidden("federation is disabled"))
+        ));
+    }
+}

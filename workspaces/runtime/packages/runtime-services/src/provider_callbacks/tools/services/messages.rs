@@ -1174,16 +1174,32 @@ mod receipt_tests {
         };
         use studio_runtime_store::request_results::{Admission, RequestReference, RequestResults};
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE request_results(id TEXT PRIMARY KEY,signature TEXT NOT NULL,status TEXT,ref_kind TEXT,ref_id TEXT,ref_rev INTEGER,result TEXT,created INTEGER NOT NULL); CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT); CREATE TABLE runtime_chat_messages(id TEXT PRIMARY KEY,room TEXT,sender TEXT,deliveries TEXT,rev INTEGER); ").unwrap();
+        studio_runtime_store::receipt_schema::create(&db).expect("receipt schema");
+        <studio_runtime_store::interaction_tables::ChatMessagesRow as studio_db_api::Table>::descriptor()
+            .install_if_absent(&db)
+            .expect("message schema");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("current Canvas schema");
         let id = RequestIdentity::issue_root();
         let identity = RequestIdentity::new("agent_message", &["sender"], &id, &[]).unwrap();
         let now = chrono::Utc::now().timestamp_millis();
         let tx = db.transaction().unwrap();
-        tx.execute(
-            "INSERT INTO runtime_chat_messages VALUES(?1,'room','sender',?2,1)",
-            rusqlite::params![id, r#"{"recipient":{"status":"queued","error":null}}"#],
-        )
-        .unwrap();
+        let mut message = studio_runtime_store::interaction_tables::ChatMessagesRow {
+            seq: 1,
+            id: id.clone(),
+            room: "room".into(),
+            sender: "sender".into(),
+            text: String::new(),
+            created: 0.0,
+            deliveries: studio_runtime_store::json_record_codec::ExactJson::from_stored(
+                r#"{"recipient":{"status":"queued","error":null}}"#.into(),
+            )
+            .unwrap(),
+            rev: 1,
+        };
+        studio_runtime_store::peer_update_settings::canvas_tx(&tx)
+            .upsert(&message)
+            .unwrap();
         let Admission::Fresh(admitted) = RequestResults::admit(&tx, &identity, "sig", now).unwrap()
         else {
             panic!("fresh")
@@ -1198,11 +1214,14 @@ mod receipt_tests {
             },
         )
         .unwrap();
-        tx.execute(
-            "UPDATE runtime_chat_messages SET deliveries=?1,rev=2 WHERE id=?2",
-            rusqlite::params![r#"{"recipient":{"status":"delivered","error":null}}"#, id],
+        message.deliveries = studio_runtime_store::json_record_codec::ExactJson::from_stored(
+            r#"{"recipient":{"status":"delivered","error":null}}"#.into(),
         )
         .unwrap();
+        message.rev = 2;
+        studio_runtime_store::peer_update_settings::canvas_tx(&tx)
+            .upsert(&message)
+            .unwrap();
         let reply = super::saved_private_message(&tx, &id, "sender", "room", "sig", now)
             .unwrap()
             .unwrap();

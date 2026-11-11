@@ -17,6 +17,8 @@ pub trait Table: Sized + 'static {
     const INSERT: &'static str;
     const DELETE: &'static str;
     const COLUMNS: &'static [ColumnDescriptor];
+    /// Logical key names in binding order, emitted from the same field declarations.
+    const KEY_COLUMNS: &'static [&'static str] = &[];
     fn read(connection: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<Self>;
     fn bind<T>(
         &self,
@@ -170,6 +172,9 @@ pub struct ColumnDescriptor {
 pub struct IndexDescriptor {
     pub name: &'static str,
     pub sql: &'static str,
+    /// Partial predicate from the same typed declaration as the index DDL.
+    #[serde(skip)]
+    pub predicate: Option<&'static str>,
 }
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct CatalogEntry {

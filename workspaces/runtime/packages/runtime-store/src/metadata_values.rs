@@ -214,6 +214,9 @@ impl SearchPhase {
     }
 }
 
+/// Wire key of the last published event sequence, measured in shared sync numbers.
+pub(crate) const EVENT_WINDOW_SEQUENCE_KEY: &str = "event_window_seq";
+
 /// The key owns the meaning and unit of each text value. Unknown keys stay open.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SyncMetaKey {
@@ -237,7 +240,7 @@ pub enum SyncMetaKey {
 impl SyncMetaKey {
     pub fn from_stored(key: &str) -> Self {
         match key {
-            "migration_catalog" => Self::MigrationCatalog,
+            crate::migrations::MIGRATION_CATALOG_KEY => Self::MigrationCatalog,
             "seeded" => Self::Seeded,
             "agent_organization_fields" => Self::AgentOrganizationFields,
             crate::AGENT_PROJECTIONS_SEED_MARKER => Self::AgentProjections,
@@ -245,8 +248,10 @@ impl SyncMetaKey {
             crate::CONVERSATION_DETAILS_SEED_MARKER => Self::ConversationDetails,
             crate::WORK_DETAILS_SEED_MARKER => Self::WorkDetails,
             "task_window_migrated" => Self::TaskWindowMigrated,
-            "event_window_seq" => Self::EventWindowSequence,
-            "entity_tombstone_count" => Self::EntityTombstoneCount,
+            EVENT_WINDOW_SEQUENCE_KEY => Self::EventWindowSequence,
+            crate::repositories::sync_documents::ENTITY_TOMBSTONE_COUNT_KEY => {
+                Self::EntityTombstoneCount
+            }
             "entity_tombstone_floor" => Self::EntityTombstoneFloor,
             "transcript_copies" => Self::TranscriptCopies,
             _ => {

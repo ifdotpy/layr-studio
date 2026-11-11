@@ -10,11 +10,10 @@
 //! excludes these retired keys; rebuilding a current projection is a no-op,
 //! while a stale projection is repaired through the sequenced entity writer.
 
-use rusqlite::{OptionalExtension, Transaction};
 use serde::Serialize;
 use studio_json::Value;
 use studio_runtime_schema::room_record::RoomRecord;
-use studio_runtime_store::{RuntimeStore, StoreResult, SyncDocumentsRepository};
+use studio_runtime_store::{RuntimeStore, StoreResult, SyncDocumentsRepository, Transaction};
 
 /// Counts rows changed by the retired-review cleanup.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
@@ -57,12 +56,8 @@ fn remove_review_assignments_in_transaction(
             counts.rooms += 1;
         }
     }
-    if table_exists(transaction, "sync_entities")? {
-        let mut statement = transaction.prepare("SELECT id FROM sync_entities WHERE collection='room' AND deleted=0 AND CASE WHEN json_valid(payload) THEN json_type(payload,'$.value.reviewTargets') IS NOT NULL ELSE 0 END")?;
-        let ids = statement
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
+    if studio_runtime_store::DiagnosticPublicationQueries::publications_available(transaction)? {
+        let ids = studio_runtime_store::DiagnosticPublicationQueries::stale_rooms(transaction)?;
         for id in ids {
             remove_projection_field(transaction, "room", &id, "reviewTargets")?;
         }
@@ -84,13 +79,11 @@ fn remove_projection_field(
     id: &str,
     field: &str,
 ) -> StoreResult<()> {
-    let row = transaction
-        .query_row(
-            "SELECT payload,deleted FROM sync_entities WHERE collection=?1 AND id=?2",
-            rusqlite::params![collection, id],
-            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, i64>(1)?)),
-        )
-        .optional()?;
+    let row = studio_runtime_store::DiagnosticPublicationQueries::projection(
+        transaction,
+        collection,
+        id,
+    )?;
     let Some((Some(payload), 0)) = row else {
         return Ok(());
     };
@@ -188,43 +181,32 @@ mod tests {
         )
         .unwrap();
         remove_review_assignments_in_transaction(&tx).unwrap();
-        let payload: String = tx
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='room' AND id='room-a'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &tx, "room", "room-a", false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         let value: Value = studio_json::from_str(&payload).unwrap();
         assert!(value["value"].get("reviewTargets").is_none());
     }
 
     fn seed(connection: &Connection) {
+        studio_runtime_store::test_fixtures::canvas::install_canonical(connection)
+            .expect("canonical storage");
         connection
-            .execute_batch(
-                &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            .execute_batch(&format!(
+                "{}{}",
+                studio_runtime_store::agent_columns::fixture_sql(
+                    "CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_rooms(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_events(
                     id TEXT PRIMARY KEY,agent TEXT,kind TEXT,text TEXT,status TEXT,
                     created REAL,epoch INTEGER,turn_id TEXT,error TEXT
-                 );
-                 CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,
-                    deleted INTEGER,PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER PRIMARY KEY,scope TEXT,id TEXT,payload TEXT,
-                    deleted INTEGER,UNIQUE(scope,id));
-                 CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);
-                 CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
-                 CREATE TABLE runtime_agent_record_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL);
-                 INSERT INTO runtime_agent_record_generation VALUES(1,0);
-                 CREATE TRIGGER runtime_agent_record_generation_insert AFTER INSERT ON runtime_agents
-                 BEGIN UPDATE runtime_agent_record_generation SET value=value+1 WHERE id=1; END;
-                 CREATE TRIGGER runtime_agent_record_generation_update AFTER UPDATE OF record ON runtime_agents
-                 WHEN OLD.record IS NOT NEW.record
-                 BEGIN UPDATE runtime_agent_record_generation SET value=value+1 WHERE id=1; END;
-                 CREATE TRIGGER runtime_agent_record_generation_delete AFTER DELETE ON runtime_agents
-                 BEGIN UPDATE runtime_agent_record_generation SET value=value+1 WHERE id=1; END;"),
-            )
-            .expect("fixture schema creates");
+                 );"
+                ),
+                studio_runtime_store::test_fixtures::canvas::agent_clock_trigger_sql(),
+            ))
+            .expect("fixture schema and canonical clock producers create");
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
@@ -312,44 +294,36 @@ mod tests {
             .expect("events query runs")
             .map(|row| row.expect("event row reads"))
             .collect::<Vec<_>>();
-        let entities = connection
-            .prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities ORDER BY collection,id")
-            .expect("sync entities query prepares")
-            .query_map([], |row| {
-                Ok(json!({
-                    "collection": row.get::<_, String>(0)?,
-                    "id": row.get::<_, String>(1)?,
-                    "seq": row.get::<_, i64>(2)?,
-                    "hash": row.get::<_, String>(3)?,
-                    "payload": row.get::<_, Option<String>>(4)?,
-                    "deleted": row.get::<_, i64>(5)?,
-                }))
-            })
-            .expect("sync entities query runs")
-            .map(|row| row.expect("sync entity row reads"))
+        let entities = studio_runtime_store::test_fixtures::canvas::entities(connection)
+            .expect("sync entities read")
+            .into_iter()
+            .map(|studio_runtime_store::test_fixtures::canvas::EntitySnapshot { collection, id, seq, hash, payload, deleted, .. }| json!({
+                "collection":collection,"id":id,"seq":seq,"hash":hash,"payload":payload,"deleted":deleted
+            }))
             .collect::<Vec<_>>();
-        let documents = connection
-            .prepare("SELECT seq,scope,id,payload,deleted FROM sync_documents ORDER BY seq")
-            .expect("sync documents query prepares")
-            .query_map([], |row| {
-                Ok(json!({
-                    "seq": row.get::<_, i64>(0)?,
-                    "scope": row.get::<_, String>(1)?,
-                    "id": row.get::<_, String>(2)?,
-                    "payload": row.get::<_, String>(3)?,
-                    "deleted": row.get::<_, i64>(4)?,
-                }))
-            })
-            .expect("sync documents query runs")
-            .map(|row| row.expect("sync document row reads"))
-            .collect::<Vec<_>>();
-        let agent_generation: i64 = connection
-            .query_row(
-                "SELECT value FROM runtime_agent_record_generation WHERE id=1",
-                [],
-                |row| row.get(0),
+        let documents = studio_runtime_store::test_fixtures::canvas::documents(connection)
+            .expect("sync documents read")
+            .into_iter()
+            .map(
+                |studio_runtime_store::test_fixtures::canvas::DocumentSnapshot {
+                     seq,
+                     scope,
+                     id,
+                     payload,
+                     deleted,
+                     ..
+                 }| {
+                    json!({
+                        "seq":seq,"scope":scope,"id":id,"payload":payload,"deleted":deleted
+                    })
+                },
             )
-            .expect("agent generation reads");
+            .collect::<Vec<_>>();
+        let agent_generation =
+            studio_runtime_store::clock_schema::AgentRecordGeneration::get(connection)
+                .expect("agent generation reads")
+                .expect("generation singleton")
+                .value;
         json!({"agents":agents,"rooms":rooms,"events":events,"sync_entities":entities,"sync_documents":documents,"agent_generation":agent_generation})
     }
 
@@ -470,5 +444,44 @@ mod tests {
             ReviewCleanupCounts::default()
         );
         transaction.commit().expect("transaction commits");
+    }
+}
+
+#[cfg(test)]
+mod f1_canonical_tests {
+    use super::*;
+    #[tokio::test]
+    async fn f1_maintenance_canonical_caller_without_source_tables() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(
+                    !studio_runtime_store::peer_update_settings::canvas_read(tx)
+                        .table_exists::<studio_runtime_store::clock_schema::SyncEntities>()?
+                );
+
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "room",
+                    "stale",
+                    studio_json::json!({"id":"stale","reviewTargets":[]}),
+                    false,
+                )?;
+                let result = remove_review_assignments_in_transaction(tx).unwrap();
+                assert_eq!(result, ReviewCleanupCounts::default());
+                let rows = SyncDocumentsRepository::entities_after(tx, 0, 100)?;
+                let row = rows
+                    .iter()
+                    .find(|row| row.collection == "room" && row.id == "stale")
+                    .unwrap();
+                let payload: Value = studio_json::from_str(row.payload.as_deref().unwrap())?;
+                assert!(payload["value"].get("reviewTargets").is_none());
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

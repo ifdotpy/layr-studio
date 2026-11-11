@@ -6,6 +6,27 @@ use sha2::{Digest, Sha256};
 
 use crate::{MutableTable, Table, Tx};
 
+/// Maximum stored cell bytes decoded into one copy page. One larger row still
+/// advances alone; numeric cells count as eight bytes and NULL as zero.
+pub const COPY_PAGE_MAX_BYTES: usize = 2 * 1024 * 1024;
+
+/// Stored cell payload bytes in a source row, shared by paging and migration
+/// measurements. This borrows cells and never decodes a typed payload.
+pub fn copy_row_bytes(row: &rusqlite::Row<'_>) -> rusqlite::Result<usize> {
+    let mut row_bytes = 0usize;
+    for column in 0..row.as_ref().column_count() {
+        let size = match row.get_ref(column)? {
+            rusqlite::types::ValueRef::Null => 0,
+            rusqlite::types::ValueRef::Integer(_) | rusqlite::types::ValueRef::Real(_) => 8,
+            rusqlite::types::ValueRef::Text(value) | rusqlite::types::ValueRef::Blob(value) => {
+                value.len()
+            }
+        };
+        row_bytes = row_bytes.saturating_add(size);
+    }
+    Ok(row_bytes)
+}
+
 /// A key component keeps its SQLite storage class. Floating-point keys are
 /// deliberately unsupported; nullable legacy identities must include a tie key.
 pub trait KeyPart: Sized {
@@ -322,38 +343,87 @@ where
             .collect::<Vec<_>>()
             .join(",");
         let mut values = after.map(MigrationKey::values).unwrap_or_default();
-        let predicate = if after.is_some() {
-            // SQLite's ASC ordering puts NULL first. `IS` compares nullable
-            // components without losing rows whose legacy identity has NULLs.
-            let mut prefix = Vec::new();
-            let mut terms = Vec::new();
-            for (i, column) in self.source_keys.iter().enumerate() {
-                let column = identifier(column);
-                let parameter = format!("?{}", i + 1);
-                let greater = format!(
-                    "({column}>{parameter} OR ({parameter} IS NULL AND {column} IS NOT NULL))"
-                );
-                let mut term = prefix.clone();
-                term.push(greater);
-                terms.push(format!("({})", term.join(" AND ")));
-                prefix.push(format!("{column} IS {parameter}"));
-            }
-            format!(" WHERE ({})", terms.join(" OR "))
-        } else {
-            String::new()
-        };
+        let predicate = cursor_predicate(self.source_keys, &values, after.is_some());
         values.push(Value::Integer(limit.try_into().unwrap_or(i64::MAX)));
         let sql = format!(
             "{}{predicate} ORDER BY {columns} LIMIT ?{}",
             L::SELECT,
             values.len()
         );
-        db.prepare_cached(&sql)?
-            .query_map(params_from_iter(values), |row| {
-                let row = L::read(db, row)?;
-                Ok(((self.source_key)(&row), row))
-            })?
-            .collect()
+        let mut statement = db.prepare_cached(&sql)?;
+        let mut cursor = statement.query(params_from_iter(values))?;
+        let mut page = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(row) = cursor.next()? {
+            // Inspect borrowed cells before the typed decoder allocates strings,
+            // blobs or nested records for another row of the page.
+            let row_bytes = copy_row_bytes(row)?;
+            if !page.is_empty() && bytes.saturating_add(row_bytes) > COPY_PAGE_MAX_BYTES {
+                break;
+            }
+            let row = L::read(db, row)?;
+            bytes = bytes.saturating_add(row_bytes);
+            page.push(((self.source_key)(&row), row));
+            if bytes >= COPY_PAGE_MAX_BYTES {
+                break;
+            }
+        }
+        Ok(page)
+    }
+    /// Page logical target keys without decoding payloads. The selector and key
+    /// columns both come from the typed target owner.
+    pub fn target_keys_after(
+        &self,
+        db: &Connection,
+        after: Option<&T::Key>,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<T::Key>>
+    where
+        T::Key: MigrationKey,
+    {
+        let keys = T::KEY_COLUMNS;
+        if keys.is_empty()
+            || keys
+                .iter()
+                .any(|name| !T::COLUMNS.iter().any(|column| column.name == *name))
+        {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        let columns = keys
+            .iter()
+            .map(|name| identifier(name))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut values = after.map(MigrationKey::values).unwrap_or_default();
+        if after.is_some() && values.len() != keys.len() {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        let predicate = cursor_predicate(keys, &values, after.is_some());
+        values.push(Value::Integer(limit.try_into().unwrap_or(i64::MAX)));
+        let sql = format!(
+            "SELECT {columns} FROM ({}){predicate} ORDER BY {columns} LIMIT ?{}",
+            self.target_select.sql(),
+            values.len()
+        );
+        let mut statement = db.prepare_cached(&sql)?;
+        let mut cursor = statement.query(params_from_iter(values))?;
+        let mut page = Vec::new();
+        let mut bytes = 0usize;
+        while let Some(row) = cursor.next()? {
+            let row_bytes = copy_row_bytes(row)?;
+            if !page.is_empty() && bytes.saturating_add(row_bytes) > COPY_PAGE_MAX_BYTES {
+                break;
+            }
+            let values = (0..keys.len())
+                .map(|index| row.get(index))
+                .collect::<rusqlite::Result<Vec<Value>>>()?;
+            page.push(T::Key::from_values(values)?);
+            bytes = bytes.saturating_add(row_bytes);
+            if bytes >= COPY_PAGE_MAX_BYTES {
+                break;
+            }
+        }
+        Ok(page)
     }
     pub fn read_one(&self, db: &Connection, key: &L::Key) -> rusqlite::Result<Option<L>> {
         L::bind_key(key, |params| {
@@ -423,6 +493,41 @@ pub fn migration_skeleton(id: &str, legacy: &str, target: &str) -> String {
         "// Migration {id}\nfn plan() -> CopyPlan<{legacy}, {target}> {{\n    CopyPlan {{\n        name: \"{}\",\n        source_keys: &[],\n        source_key, target_key, transform, source_evidence, target_evidence,\n        target_select: {target}::SELECT_QUERY, finish: switch_and_retire,\n    }}\n}}\n",
         id.replace('-', "_")
     )
+}
+
+fn cursor_predicate(keys: &[&str], values: &[Value], has_cursor: bool) -> String {
+    let columns = keys
+        .iter()
+        .map(|name| identifier(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    if has_cursor && values.iter().all(|value| !matches!(value, Value::Null)) {
+        // A non-NULL cursor permits an index range seek. SQLite compares
+        // tuples left-to-right, so later prefixes still admit NULL suffixes.
+        let parameters = (1..=values.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(" WHERE ({columns})>({parameters})")
+    } else if has_cursor {
+        // SQLite's ASC ordering puts NULL first. `IS` compares nullable
+        // components without losing rows whose legacy identity has NULLs.
+        let mut prefix = Vec::new();
+        let mut terms = Vec::new();
+        for (i, column) in keys.iter().enumerate() {
+            let column = identifier(column);
+            let parameter = format!("?{}", i + 1);
+            let greater =
+                format!("({column}>{parameter} OR ({parameter} IS NULL AND {column} IS NOT NULL))");
+            let mut term = prefix.clone();
+            term.push(greater);
+            terms.push(format!("({})", term.join(" AND ")));
+            prefix.push(format!("{column} IS {parameter}"));
+        }
+        format!(" WHERE ({})", terms.join(" OR "))
+    } else {
+        String::new()
+    }
 }
 
 #[cfg(test)]

@@ -76,10 +76,7 @@ fn account_destinations(
         id: studio_runtime_schema::account_key::AccountKey,
         eligibility: studio_runtime_schema::agent_progress::AccountEligibility,
     }
-    let raw: Option<String> = transaction.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='accounts' AND id='current' AND deleted=0",
-        [], |row| row.get(0),
-    ).optional()?;
+    let raw = studio_runtime_store::SyncPolicyQueries::account_destinations_payload(transaction)?;
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
@@ -510,6 +507,60 @@ fn pending_attention(
 
 #[cfg(test)]
 mod room_preparation_tests {
+    #[tokio::test]
+    async fn f1_n_canonical_account_destinations_missing_live_and_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(account_destinations(tx)?.is_empty());
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "accounts",
+                    "current",
+                    json!({"accounts":[{"id":"default","eligibility":{"kind":"available"}}]}),
+                    false,
+                )?;
+                assert_eq!(account_destinations(tx)?.len(), 1);
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "accounts",
+                    "current",
+                    json!({}),
+                    true,
+                )?;
+                assert!(account_destinations(tx)?.is_empty());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn f1_n_canonical_account_destinations_null_is_error() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                studio_runtime_store::SyncDocumentsRepository::put_entity_hash(
+                    tx, "accounts", "current", "hash", false,
+                )?;
+                assert!(matches!(
+                    account_destinations(tx),
+                    Err(studio_runtime_store::StoreError::Sqlite(
+                        rusqlite::Error::InvalidColumnType(..)
+                    ))
+                ));
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
     use super::*;
     use crate::submit_gates::{PeerTeamRow, StoredField};
     use std::sync::Arc;

@@ -2430,13 +2430,14 @@ mod persistence_tests {
 
     fn stored_workspace(store: &RuntimeStore) -> Value {
         let db = store.test_reader().unwrap();
-        let raw: String = db
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &db,
+            "workspace",
+            "current",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         studio_json::from_str(&raw).unwrap()
     }
 
@@ -2482,15 +2483,14 @@ mod persistence_tests {
 
         let entity = stored_workspace(&store);
         assert_eq!(entity["value"], json!({"stateDir":"fixture"}));
-        let raw: String = store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         let entity: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(entity["value"]["observation"], value);
         assert_eq!(
@@ -2536,7 +2536,7 @@ mod persistence_tests {
             .await
             .unwrap();
         store.transaction(|tx| {
-            tx.execute_batch("CREATE TRIGGER reject_limits BEFORE INSERT ON sync_entities WHEN NEW.collection='rateLimit' BEGIN SELECT RAISE(ABORT,'injected failure'); END;")?;
+            tx.execute_batch(&format!("CREATE TRIGGER reject_limits BEFORE INSERT ON publications WHEN NEW.kind={kind} AND NEW.collection_order='rateLimit' BEGIN SELECT RAISE(ABORT,'injected failure'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::DB_CODE_SYNCENTITIES))?;
             Ok(())
         }).await.unwrap();
         let before = stored_workspace(&store);
@@ -2828,15 +2828,14 @@ mod limits_runtime_tests {
             }
         }).await.expect("the failure refresh publishes current limits");
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 2);
-        let raw: String = store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         assert_eq!(
             studio_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
                 ["primary"]["usedPercent"],
@@ -2899,15 +2898,14 @@ mod limits_runtime_tests {
         )
         .await
         .unwrap();
-        let payload: String = store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         assert_eq!(
             studio_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"],
             "current"
@@ -2936,7 +2934,7 @@ mod limits_runtime_tests {
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(&store.test_reader().unwrap(), "rateLimit", "default", false).and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into())).unwrap();
                 if studio_json::from_str::<Value>(&payload).unwrap()["value"]["projection"]["status"]["kind"] == "current" { break; }
                 changes.notified().await;
             }
@@ -2963,18 +2961,33 @@ mod limits_runtime_tests {
             .unwrap()
             .unwrap();
         store.transaction(|tx| {
-            tx.execute_batch("CREATE TRIGGER reject_checking_result BEFORE UPDATE ON sync_entities WHEN NEW.collection='rateLimit' AND json_extract(NEW.payload,'$.value.projection.status.kind')='checking' AND json_extract(NEW.payload,'$.value.observation.data.rateLimits.primary.usedPercent')=0 BEGIN SELECT RAISE(ABORT,'result must finish atomically'); END;")?;
+            tx.execute_batch(&format!("CREATE TRIGGER reject_checking_result BEFORE UPDATE ON publications WHEN NEW.kind={kind} AND NEW.collection_order='rateLimit' AND json_extract(NEW.entity_payload,'$.value.projection.status.kind')='checking' AND json_extract(NEW.entity_payload,'$.value.observation.data.rateLimits.primary.usedPercent')=0 BEGIN SELECT RAISE(ABORT,'result must finish atomically'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::DB_CODE_SYNCENTITIES))?;
             Ok(())
         }).await.unwrap();
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String =
+                    studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        &store.test_reader().unwrap(),
+                        "rateLimit",
+                        "default",
+                        false,
+                    )
+                    .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+                    .unwrap();
                 let value: Value = studio_json::from_str(&payload).unwrap();
-                if value["value"]["projection"]["status"]["kind"] == "current" && value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"] == 0.0 { break; }
+                if value["value"]["projection"]["status"]["kind"] == "current"
+                    && value["value"]["observation"]["data"]["rateLimits"]["primary"]["usedPercent"]
+                        == 0.0
+                {
+                    break;
+                }
                 changes.notified().await;
             }
-        }).await.expect("provider result and completed status publish together");
+        })
+        .await
+        .expect("provider result and completed status publish together");
     }
 
     #[tokio::test]
@@ -3016,11 +3029,22 @@ mod limits_runtime_tests {
         tokio::time::timeout(Duration::from_secs(12), async {
             loop {
                 let value = f.runtime.limits_snapshot("default").unwrap();
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String =
+                    studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        &store.test_reader().unwrap(),
+                        "rateLimit",
+                        "default",
+                        false,
+                    )
+                    .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+                    .unwrap();
                 let view: Value = studio_json::from_str(&payload).unwrap();
                 if value.get("error").and_then(Value::as_str).is_some()
                     && view["value"]["projection"]["status"]["kind"] == "current"
-                    && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) {
+                    && view["value"]["projection"]["reset"]["credits"]
+                        .as_array()
+                        .is_some_and(Vec::is_empty)
+                {
                     break;
                 }
                 changes.notified().await;
@@ -3051,15 +3075,14 @@ mod limits_runtime_tests {
             .await
             .unwrap()
             .unwrap();
-        let payload: String = store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         let checking: Value = studio_json::from_str(&payload).unwrap();
         assert_eq!(
             checking["value"]["projection"]["status"]["kind"],
@@ -3075,12 +3098,28 @@ mod limits_runtime_tests {
         release.send(()).unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                let payload: String = store.test_reader().unwrap().query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0)).unwrap();
+                let payload: String =
+                    studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        &store.test_reader().unwrap(),
+                        "rateLimit",
+                        "default",
+                        false,
+                    )
+                    .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+                    .unwrap();
                 let view: Value = studio_json::from_str(&payload).unwrap();
-                if view["value"]["projection"]["status"]["kind"] == "current" && view["value"]["projection"]["reset"]["credits"].as_array().is_some_and(Vec::is_empty) { break; }
+                if view["value"]["projection"]["status"]["kind"] == "current"
+                    && view["value"]["projection"]["reset"]["credits"]
+                        .as_array()
+                        .is_some_and(Vec::is_empty)
+                {
+                    break;
+                }
                 changes.notified().await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(f.provider.calls.load(Ordering::SeqCst), 1);
     }
 
@@ -3098,7 +3137,7 @@ mod limits_runtime_tests {
         .await
         .unwrap();
         store.transaction(|tx| {
-            let raw: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0))?;
+            let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "rateLimit", "default", false).and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))?;
             let mut view: Value = studio_json::from_str::<Value>(&raw)?["value"].clone();
             let agent = |reset| json!({"eligibility":{"accountKey":"default","agentId":"a","model":"m","provider":"codex","state":"blocked","validUntil":null,"buckets":[],"overage":"unavailable"},"recovery":{"title":"Limit","message":"Wait","action":{"kind":"none"},"timing":{"kind":"waiting","resetAt":reset}}});
             view["projection"]["agents"] = json!({"a":agent(100.0),"b":agent(200.0)});
@@ -3133,9 +3172,14 @@ mod limits_runtime_tests {
             .unwrap()
             .unwrap();
         let read_view = || -> Value {
-            let payload: String = store.test_reader().unwrap().query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0),
-            ).unwrap();
+            let payload: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                &store.test_reader().unwrap(),
+                "rateLimit",
+                "default",
+                false,
+            )
+            .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+            .unwrap();
             studio_json::from_str::<Value>(&payload).unwrap()["value"].clone()
         };
         assert_eq!(read_view()["projection"]["status"]["kind"], "checking");
@@ -3209,15 +3253,14 @@ mod limits_runtime_tests {
         assert!(f.runtime.ingest_limits(newer).await.unwrap());
         assert!(wake.notified().now_or_never().is_some());
         let store = f.runtime.store.as_ref().unwrap();
-        let raw: String = store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         assert_eq!(
             studio_json::from_str::<Value>(&raw).unwrap()["value"]["observation"]["data"]["rateLimits"]
                 ["primary"]["usedPercent"],
@@ -3247,15 +3290,14 @@ mod limits_runtime_tests {
             after > before,
             "timestamp-only observations must publish sync changes"
         );
-        let raw: String = store
-            .test_reader()
-            .unwrap()
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let raw: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &store.test_reader().unwrap(),
+            "rateLimit",
+            "default",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .unwrap();
         let envelope: Value = studio_json::from_str(&raw).unwrap();
         assert_eq!(envelope["value"]["observation"]["at"], repeated.observed_at);
         assert!(envelope["value"]["projection"]["runway"]["computedAt"].is_number());

@@ -233,7 +233,7 @@ impl RequestResults {
         Self::stored(tx, admitted.id(), admitted.signature())
     }
     pub fn expired_before_ms(tx: &Connection) -> Result<i64> {
-        Ok(tx.query_row("SELECT coalesce(json_extract(record,'$.expired_before_ms'),0) FROM runtime_orchestration_settings WHERE id='global'", [], |row| row.get(0)).optional()?.unwrap_or(0))
+        Ok(crate::repositories::orchestration_settings::request_expiration_floor(tx)?)
     }
 
     /// Ordinary ID lookup includes migrated rows. A miss grants no admission.
@@ -343,7 +343,7 @@ impl RequestResults {
         let cutoff = now_ms.saturating_sub(REQUEST_RESULT_TTL_MS);
         let floor = cutoff.max(Self::expired_before_ms(tx)?);
         let deleted = tx.execute("DELETE FROM request_results WHERE id IN (SELECT id FROM request_results INDEXED BY request_results_created WHERE created<=?1 ORDER BY created,id LIMIT ?2)", params![cutoff,REQUEST_RESULT_GC_BATCH_ROWS as i64])?;
-        tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('expired_before_ms',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.expired_before_ms',?1)", [floor])?;
+        crate::repositories::orchestration_settings::set_request_expiration_floor(tx, floor)?;
         Ok(deleted)
     }
 }
@@ -354,6 +354,44 @@ mod tests {
     use crate::{Connection, RuntimeStore, StoreError};
     use std::sync::Arc;
     use studio_runtime_schema::persistence::REQUEST_ID_FUTURE_SKEW_MS;
+
+    #[tokio::test]
+    async fn canonical_expiration_floor_reads_and_gc_are_atomic_without_legacy_settings() {
+        let directory = tempfile::tempdir().expect("state");
+        let store = RuntimeStore::open(Some(directory.path()))
+            .await
+            .expect("store");
+        let db = store.test_reader().expect("reader");
+        assert_eq!(
+            RequestResults::expired_before_ms(&db).expect("missing floor"),
+            0
+        );
+        let rolled_back: crate::StoreResult<()> = store
+            .transaction(|tx| {
+                RequestResults::gc(tx, REQUEST_RESULT_TTL_MS + 101)?;
+                assert_eq!(RequestResults::expired_before_ms(tx)?, 101);
+                Err(StoreError::SchemaMismatch("test rollback".into()))
+            })
+            .await;
+        assert!(matches!(rolled_back, Err(StoreError::SchemaMismatch(_))));
+        assert_eq!(
+            RequestResults::expired_before_ms(&db).expect("rolled back"),
+            0
+        );
+        store
+            .transaction(|tx| {
+                RequestResults::gc(tx, REQUEST_RESULT_TTL_MS + 102)?;
+                RequestResults::gc(tx, REQUEST_RESULT_TTL_MS + 51)?;
+                assert_eq!(RequestResults::expired_before_ms(tx)?, 102);
+                Ok(())
+            })
+            .await
+            .expect("commit");
+        assert_eq!(
+            RequestResults::expired_before_ms(&db).expect("committed"),
+            102
+        );
+    }
 
     #[test]
     fn abandoned_result_and_exact_outbox_are_settled_together() {
@@ -481,7 +519,8 @@ mod tests {
         let mut db = database();
         let cutover = REQUEST_RESULT_TTL_MS * 2;
         let tx = db.transaction().expect("tx");
-        tx.execute("INSERT INTO runtime_orchestration_settings VALUES('global',json_object('expired_before_ms',?1))",[cutover]).expect("seed floor");
+        crate::repositories::orchestration_settings::set_request_expiration_floor(&tx, cutover)
+            .expect("seed floor");
         let token = crate::receipt_migration_contract::admitted_owner_token(
             "ordinary imported pk",
             "sig",
@@ -613,7 +652,12 @@ mod tests {
     fn database() -> Connection {
         let db = Connection::open_in_memory().expect("database");
         crate::receipt_schema::create(&db).expect("target schema");
-        db.execute_batch("CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE counter(n INTEGER NOT NULL); INSERT INTO counter VALUES(0)").expect("owner");
+        use studio_db_api::Table;
+        crate::metadata_schema::Metadata::descriptor()
+            .install_if_absent(&db)
+            .expect("metadata");
+        db.execute_batch("CREATE TABLE counter(n INTEGER NOT NULL); INSERT INTO counter VALUES(0)")
+            .expect("owner");
         db
     }
     /// Disposable owner caller: admission, mutation and exact settlement share the writer tx.

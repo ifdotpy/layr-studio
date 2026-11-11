@@ -10,36 +10,50 @@
 //! reads every replaced value back inside the same transaction, and commits
 //! only when the read-back values are the converted values and decode to the
 //! originals. The batch records a SHA-256 of the original texts in
-//! `runtime_stored_text_batches`. Nothing is deleted: a value is replaced only
+//! the database's batch receipts. Nothing is deleted: a value is replaced only
 //! by another form of the same text.
 
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
+use studio_db_api::{DbQuery, Table};
 
+use crate::consolidation_kinds::CanvasMetadataKind;
+use crate::metadata_schema::{Metadata, StoredTextBatches};
+use crate::migration_progress;
+use crate::peer_update_settings::{Canvas, canvas_read, canvas_tx};
 use crate::stored_text;
 use crate::{CachedSql, StoreError, StoreResult};
 
 /// A column whose values the conversion passes rewrite.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CompactedColumn {
+    /// Database that owns the values and their compaction metadata.
+    pub database: CompactionDatabase,
     /// Table that holds the column.
     pub table: &'static str,
     /// Unique text key of a row, compared before a value is replaced.
     pub key: &'static str,
     /// The owned stored-text column.
     pub column: &'static str,
-    /// Name of the compaction progress row in `runtime_payload_migrations`
-    /// and of its batch rows in `runtime_stored_text_batches`, in the
-    /// database that holds the column.
+    /// Name of the compaction progress and its batch receipts, in the
+    /// database that owns the column.
     pub progress: &'static str,
     /// Name of the column's trained dictionary in
     /// `analytics_stored_text_dictionaries`, or `None` for frames without one.
     pub dictionary: Option<&'static str>,
 }
 
+/// Declared database ownership of a compacted column.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompactionDatabase {
+    Canvas,
+    Analytics,
+}
+
 /// `runtime_item_fulltext.body`, owned by [`stored_text`].
 pub const FULLTEXT_BODY: CompactedColumn = CompactedColumn {
+    database: CompactionDatabase::Canvas,
     table: "runtime_item_fulltext",
     key: "id",
     column: "body",
@@ -50,6 +64,7 @@ pub const FULLTEXT_BODY: CompactedColumn = CompactedColumn {
 /// `analytics_items.record` in `analytics.sqlite3`, compressed with its
 /// trained dictionary. `main.` skips the decoding view of the same name.
 pub const ANALYTICS_ITEMS_RECORD: CompactedColumn = CompactedColumn {
+    database: CompactionDatabase::Analytics,
     table: "main.analytics_items",
     key: "id",
     column: "record",
@@ -57,11 +72,25 @@ pub const ANALYTICS_ITEMS_RECORD: CompactedColumn = CompactedColumn {
     dictionary: Some(crate::stored_text_dictionary::ANALYTICS_ITEMS_RECORD),
 };
 
-/// Batch records of the compaction and inflate passes, in each database that
-/// holds a compacted column.
+/// Legacy Analytics batch records of the compaction and inflate passes.
 pub(crate) fn prepare_batches(connection: &Connection) -> rusqlite::Result<()> {
-    use studio_db_api::Table;
     crate::settings_schema::StoredTextBatches::descriptor().install_if_absent(connection)
+}
+
+/// Canvas batch receipts share the canonical metadata target.
+pub(crate) fn prepare_canvas_batches(connection: &Connection) -> rusqlite::Result<()> {
+    Metadata::descriptor().install_if_absent(connection)
+}
+
+#[derive(DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,result=Option<i64>,decode=Metadata::BATCH,
+    tables(rows=Metadata),columns(batch=Metadata::BATCH,kind=Metadata::KIND,name=Metadata::TEXT_KEY),
+    sql="SELECT MAX({batch}) AS {batch} FROM {rows} WHERE {kind}=?1 AND {name}=?2")]
+struct BatchHigh<'a> {
+    #[db(column=Metadata::KIND)]
+    kind: CanvasMetadataKind,
+    #[db(column=Metadata::TEXT_KEY)]
+    name: Option<&'a str>,
 }
 
 /// Rowids that one reader window inspects. Unit: rows.
@@ -143,6 +172,16 @@ pub fn progress(
     connection: &Connection,
     column: CompactedColumn,
 ) -> StoreResult<CompactionProgress> {
+    if column.database == CompactionDatabase::Canvas {
+        return Ok(
+            migration_progress::load(&canvas_read(connection), column.progress)?
+                .map(|row| CompactionProgress {
+                    cursor: row.cursor,
+                    complete: row.complete != 0,
+                })
+                .unwrap_or_default(),
+        );
+    }
     Ok(connection
         .query_row_cached(
             "SELECT cursor,complete FROM runtime_payload_migrations WHERE name=?1",
@@ -326,7 +365,51 @@ pub fn apply_window(
     }
     if let (Some(first), Some(last)) = (first, last) {
         let originals = data_encoding::HEXLOWER.encode(&originals.finalize());
-        transaction.execute_cached(
+        if column.database == CompactionDatabase::Canvas {
+            let mut tx = canvas_tx(transaction);
+            let name = window.direction.batch_name(column);
+            let kind = CanvasMetadataKind::StoredTextBatches;
+            let ordinal = tx
+                .read()
+                .named(
+                    &BatchHigh::QUERY,
+                    &BatchHigh {
+                        kind,
+                        name: Some(&name),
+                    },
+                )?
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(StoreError::RecordContract(
+                    "stored-text batch ordinal exhausted",
+                ))?;
+            let source_rowid = tx
+                .read()
+                .named(
+                    &crate::clock_schema::queries::MetaRowidHigh::QUERY,
+                    &crate::clock_schema::queries::MetaRowidHigh { kind },
+                )?
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or(StoreError::RecordContract(
+                    "stored-text batch rowid exhausted",
+                ))?;
+            tx.partition::<StoredTextBatches>()
+                .put(&StoredTextBatches {
+                    identity: studio_db_api::migration::encode_key(&(name.clone(), ordinal)),
+                    source_rowid,
+                    text_key: name,
+                    batch: ordinal,
+                    first_rowid: first,
+                    last_rowid: last,
+                    batch_rows: batch.converted as i64,
+                    plain_bytes: batch.plain_bytes as i64,
+                    stored_bytes: batch.stored_bytes as i64,
+                    sha256: originals,
+                    batch_created: now,
+                })?;
+        } else {
+            transaction.execute_cached(
             "INSERT INTO runtime_stored_text_batches\
              (name,batch,first_rowid,last_rowid,rows,plain_bytes,stored_bytes,sha256,created) \
              VALUES(?1,(SELECT coalesce(max(batch),0)+1 FROM runtime_stored_text_batches WHERE name=?1),\
@@ -342,6 +425,7 @@ pub fn apply_window(
                 now
             ],
         )?;
+        }
     }
     if window.direction == Direction::Compress {
         save_progress(
@@ -397,6 +481,15 @@ pub fn save_progress(
     now: f64,
 ) -> StoreResult<()> {
     let status = if done { "complete" } else { status };
+    if column.database == CompactionDatabase::Canvas {
+        let mut row = canvas_progress(transaction, column)?;
+        row.cursor = cursor;
+        row.complete = i64::from(done);
+        row.status = status.into();
+        row.updated = Some(now);
+        row.error = None;
+        return migration_progress::save(&mut canvas_tx(transaction), row);
+    }
     transaction.execute_cached(
         "INSERT INTO runtime_payload_migrations(name,cursor,complete,status,updated,error) \
          VALUES(?1,?2,?3,?4,?5,NULL) ON CONFLICT(name) DO UPDATE SET \
@@ -410,6 +503,9 @@ pub fn save_progress(
 /// Forget compaction progress, so that a later compaction pass inspects the
 /// whole column again. An inflate pass ends with this.
 pub fn reset_progress(transaction: &Transaction<'_>, column: CompactedColumn) -> StoreResult<()> {
+    if column.database == CompactionDatabase::Canvas {
+        return migration_progress::reset(&mut canvas_tx(transaction), column.progress);
+    }
     transaction.execute_cached(
         "DELETE FROM runtime_payload_migrations WHERE name=?1",
         [column.progress],
@@ -424,6 +520,13 @@ pub fn record_error(
     message: &str,
     now: f64,
 ) -> StoreResult<()> {
+    if column.database == CompactionDatabase::Canvas {
+        let mut row = canvas_progress(transaction, column)?;
+        row.status = "error".into();
+        row.updated = Some(now);
+        row.error = Some(message.into());
+        return migration_progress::save(&mut canvas_tx(transaction), row);
+    }
     transaction.execute_cached(
         "INSERT INTO runtime_payload_migrations(name,cursor,complete,status,updated,error) \
          VALUES(?1,0,0,'error',?2,?3) ON CONFLICT(name) DO UPDATE SET \
@@ -431,6 +534,27 @@ pub fn record_error(
         params![column.progress, now, message],
     )?;
     Ok(())
+}
+
+fn canvas_progress(
+    connection: &Connection,
+    column: CompactedColumn,
+) -> StoreResult<migration_progress::State> {
+    Ok(
+        migration_progress::load(&canvas_read(connection), column.progress)?.unwrap_or_else(|| {
+            migration_progress::State {
+                name: column.progress.into(),
+                cursor: 0,
+                complete: 0,
+                status: "pending".into(),
+                updated: None,
+                error: None,
+                cursor_key: None,
+                copy_source_rows: None,
+                copy_target_rows: None,
+            }
+        }),
+    )
 }
 
 /// One value in a batch hash: rowid and byte length as little-endian 64-bit
@@ -451,22 +575,337 @@ fn round_trip_failure(column: CompactedColumn, key: &str) -> StoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata_schema::StoredTextBatches;
+    use crate::peer_update_settings::canvas_read;
     use crate::stored_text::StoredText;
+    use studio_db_api::Table;
+    use studio_db_api::migration::encode_key;
 
     const NOW: f64 = 2_000_000_000.0;
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("database");
+        prepare_canvas_batches(&connection).expect("canonical metadata target");
+        crate::item_monitor_terminal::ItemFulltextRow::descriptor()
+            .install_if_absent(&connection)
+            .expect("column");
         connection
-            .execute_batch(
-                "CREATE TABLE runtime_item_fulltext (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-                 CREATE TABLE runtime_payload_migrations (name TEXT PRIMARY KEY,
-                     cursor INTEGER NOT NULL DEFAULT 0, complete INTEGER NOT NULL DEFAULT 0,
-                     status TEXT NOT NULL DEFAULT 'pending', updated REAL, error TEXT);",
-            )
-            .expect("column and progress tables");
-        prepare_batches(&connection).expect("batch table");
-        connection
+    }
+
+    #[test]
+    fn canvas_target_defaults_and_batch_rollback_are_atomic() {
+        let mut connection = database();
+        assert_eq!(
+            progress(&connection, FULLTEXT_BODY).expect("absent progress"),
+            CompactionProgress::default()
+        );
+        insert(&connection, "a", SqlValue::Text(body(1)));
+        let window = scan_window(&connection, FULLTEXT_BODY, Direction::Compress, 0).expect("scan");
+        {
+            let transaction = connection.transaction().expect("transaction");
+            apply_window(&transaction, FULLTEXT_BODY, &window, NOW).expect("apply");
+            assert_eq!(stored(&transaction, "a"), ("blob".into(), body(1)));
+            let receipt = canvas_read(&transaction)
+                .get::<StoredTextBatches>(&(encode_key(&(
+                    FULLTEXT_BODY.progress.to_owned(),
+                    1_i64,
+                )),))
+                .expect("receipt read")
+                .expect("receipt");
+            assert_eq!(receipt.sha256, expected_hash(&[(1, &body(1))]));
+            assert_eq!(
+                progress(&transaction, FULLTEXT_BODY)
+                    .expect("progress")
+                    .cursor,
+                window.next_cursor
+            );
+            transaction.rollback().expect("rollback");
+        }
+        assert_eq!(stored(&connection, "a"), ("text".into(), body(1)));
+        assert!(
+            canvas_read(&connection)
+                .get::<StoredTextBatches>(&(encode_key(&(
+                    FULLTEXT_BODY.progress.to_owned(),
+                    1_i64
+                )),))
+                .expect("receipt read")
+                .is_none()
+        );
+        assert_eq!(
+            progress(&connection, FULLTEXT_BODY).expect("rolled back progress"),
+            CompactionProgress::default()
+        );
+    }
+
+    #[test]
+    fn canvas_error_and_reset_preserve_unrelated_progress_and_receipts() {
+        use crate::migration_progress::{self, State};
+        use crate::peer_update_settings::canvas_tx;
+        for legacy in [false, true] {
+            let mut connection = database();
+            if legacy {
+                crate::settings_schema::PayloadMigrations::descriptor()
+                    .install_if_absent(&connection)
+                    .expect("legacy authority");
+            }
+            insert(&connection, "a", SqlValue::Text(body(1)));
+            let transaction = connection.transaction().expect("transaction");
+            let mut tx = canvas_tx(&transaction);
+            for name in [FULLTEXT_BODY.progress, "unrelated"] {
+                migration_progress::save(
+                    &mut tx,
+                    State {
+                        name: name.into(),
+                        cursor: 17,
+                        complete: 2,
+                        status: "complete".into(),
+                        updated: Some(1.25),
+                        error: Some("old".into()),
+                        cursor_key: Some(vec![0, 255]),
+                        copy_source_rows: Some(9),
+                        copy_target_rows: Some(8),
+                    },
+                )
+                .expect("seed progress");
+            }
+            record_error(&transaction, FULLTEXT_BODY, "failed", NOW).expect("error");
+            let row = migration_progress::load(&tx.read(), FULLTEXT_BODY.progress)
+                .expect("read")
+                .expect("row");
+            assert_eq!((row.cursor, row.complete), (17, 2));
+            assert_eq!(
+                (row.status.as_str(), row.error.as_deref(), row.updated),
+                ("error", Some("failed"), Some(NOW))
+            );
+            assert_eq!(
+                (row.cursor_key, row.copy_source_rows, row.copy_target_rows),
+                (Some(vec![0, 255]), Some(9), Some(8))
+            );
+            let window =
+                scan_window(&transaction, FULLTEXT_BODY, Direction::Compress, 0).expect("scan");
+            apply_window(&transaction, FULLTEXT_BODY, &window, NOW).expect("apply");
+            let row = migration_progress::load(&tx.read(), FULLTEXT_BODY.progress)
+                .expect("read")
+                .expect("row");
+            assert_eq!(
+                (row.cursor, row.complete, row.error),
+                (window.next_cursor, 0, None)
+            );
+            assert_eq!(row.status, "running");
+            assert_eq!(
+                (row.cursor_key, row.copy_source_rows, row.copy_target_rows),
+                (Some(vec![0, 255]), Some(9), Some(8))
+            );
+            reset_progress(&transaction, FULLTEXT_BODY).expect("reset");
+            assert!(
+                migration_progress::load(&tx.read(), FULLTEXT_BODY.progress)
+                    .expect("read")
+                    .is_none()
+            );
+            let unrelated = migration_progress::load(&tx.read(), "unrelated")
+                .expect("read")
+                .expect("unrelated");
+            assert_eq!(
+                (
+                    unrelated.cursor,
+                    unrelated.complete,
+                    unrelated.error.as_deref()
+                ),
+                (17, 2, Some("old"))
+            );
+            assert!(
+                tx.get::<StoredTextBatches>(&(encode_key(&(
+                    FULLTEXT_BODY.progress.to_owned(),
+                    1_i64
+                )),))
+                    .expect("receipt")
+                    .is_some()
+            );
+            record_error(&transaction, FULLTEXT_BODY, "absent", NOW).expect("absent error");
+            let row = migration_progress::load(&tx.read(), FULLTEXT_BODY.progress)
+                .expect("read")
+                .expect("row");
+            assert_eq!(
+                (
+                    row.cursor,
+                    row.complete,
+                    row.status.as_str(),
+                    row.error.as_deref()
+                ),
+                (0, 0, "error", Some("absent"))
+            );
+            assert_eq!(
+                (row.cursor_key, row.copy_source_rows, row.copy_target_rows),
+                (None, None, None)
+            );
+            transaction.commit().expect("commit");
+        }
+    }
+
+    fn receipt(name: &str, batch: i64, source_rowid: i64) -> StoredTextBatches {
+        StoredTextBatches {
+            identity: encode_key(&(name.to_owned(), batch)),
+            source_rowid,
+            text_key: name.into(),
+            batch,
+            first_rowid: 1,
+            last_rowid: 1,
+            batch_rows: 1,
+            plain_bytes: 1,
+            stored_bytes: 1,
+            sha256: "historical".into(),
+            batch_created: NOW,
+        }
+    }
+
+    #[test]
+    fn canvas_receipts_keep_per_name_ordinals_separate_from_source_rowids() {
+        let mut connection = database();
+        insert(&connection, "a", SqlValue::Text(body(1)));
+        let window = scan_window(&connection, FULLTEXT_BODY, Direction::Compress, 0).expect("scan");
+        let transaction = connection.transaction().expect("transaction");
+        let mut tx = canvas_tx(&transaction);
+        tx.partition::<StoredTextBatches>()
+            .put(&receipt(FULLTEXT_BODY.progress, 7, 41))
+            .expect("prior batch");
+        tx.partition::<StoredTextBatches>()
+            .put(&receipt("unrelated", 91, 42))
+            .expect("unrelated batch");
+        apply_window(&transaction, FULLTEXT_BODY, &window, NOW).expect("first batch");
+        // Inflate and compress again in the same transaction: each name has its own ordinal.
+        let inflate =
+            scan_window(&transaction, FULLTEXT_BODY, Direction::Inflate, 0).expect("inflate scan");
+        apply_window(&transaction, FULLTEXT_BODY, &inflate, NOW).expect("inflate");
+        apply_window(&transaction, FULLTEXT_BODY, &window, NOW).expect("next batch");
+        for (name, batch, source_rowid) in [
+            (FULLTEXT_BODY.progress.to_owned(), 8_i64, 43),
+            (format!("{}:inflate", FULLTEXT_BODY.progress), 1, 44),
+            (FULLTEXT_BODY.progress.to_owned(), 9, 45),
+        ] {
+            let row = tx
+                .get::<StoredTextBatches>(&(encode_key(&(name, batch)),))
+                .expect("read")
+                .expect("receipt");
+            assert_eq!(row.source_rowid, source_rowid);
+            assert_eq!(row.sha256, expected_hash(&[(1, &body(1))]));
+        }
+        let unrelated = tx
+            .get::<StoredTextBatches>(&(encode_key(&("unrelated".to_owned(), 91_i64)),))
+            .expect("read")
+            .expect("unrelated");
+        assert_eq!(
+            (unrelated.source_rowid, unrelated.sha256.as_str()),
+            (42, "historical")
+        );
+        transaction.commit().expect("commit");
+    }
+
+    #[test]
+    fn canvas_progress_failure_rolls_back_converted_data_and_receipt() {
+        use crate::metadata_schema::PayloadMigrations;
+        let mut connection = database();
+        let transaction = connection.transaction().expect("seed transaction");
+        let mut tx = canvas_tx(&transaction);
+        migration_progress::save(
+            &mut tx,
+            canvas_progress(&transaction, FULLTEXT_BODY).expect("default state"),
+        )
+        .expect("seed state");
+        let identity = crate::consolidation_codec::nullable_text_identity(
+            &Some(FULLTEXT_BODY.progress.into()),
+            0,
+        );
+        let mut row = tx
+            .get::<PayloadMigrations>(&(identity.clone(),))
+            .expect("read")
+            .expect("state");
+        tx.partition::<PayloadMigrations>()
+            .delete(&(identity,))
+            .expect("delete seed");
+        row.text_key = Some("unrelated".into());
+        row.identity = crate::consolidation_codec::nullable_text_identity(&row.text_key, 0);
+        row.source_rowid = i64::MAX;
+        tx.partition::<PayloadMigrations>()
+            .put(&row)
+            .expect("exhaust source rowids");
+        transaction.commit().expect("seed commit");
+        insert(&connection, "a", SqlValue::Text(body(1)));
+        let window = scan_window(&connection, FULLTEXT_BODY, Direction::Compress, 0).expect("scan");
+        let transaction = connection.transaction().expect("transaction");
+        assert!(matches!(
+            apply_window(&transaction, FULLTEXT_BODY, &window, NOW),
+            Err(StoreError::RecordContract(
+                "migration progress rowid exhausted"
+            ))
+        ));
+        assert!(
+            canvas_read(&transaction)
+                .get::<StoredTextBatches>(&(encode_key(&(
+                    FULLTEXT_BODY.progress.to_owned(),
+                    1_i64
+                )),))
+                .expect("uncommitted receipt")
+                .is_some()
+        );
+        transaction.rollback().expect("rollback");
+        assert_eq!(stored(&connection, "a"), ("text".into(), body(1)));
+        assert!(
+            studio_db_api::db_query!(canvas_read(&connection), StoredTextBatches)
+                .expect("receipts")
+                .is_empty()
+        );
+        assert_eq!(
+            progress(&connection, FULLTEXT_BODY).expect("progress"),
+            CompactionProgress::default()
+        );
+        assert!(
+            migration_progress::load(&canvas_read(&connection), "unrelated")
+                .expect("unrelated state")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn canvas_receipt_allocators_check_overflow_and_roll_back_values() {
+        for (name, batch, source_rowid, message) in [
+            (
+                "unrelated",
+                1,
+                i64::MAX,
+                "stored-text batch rowid exhausted",
+            ),
+            (
+                FULLTEXT_BODY.progress,
+                i64::MAX,
+                1,
+                "stored-text batch ordinal exhausted",
+            ),
+        ] {
+            let mut connection = database();
+            let transaction = connection.transaction().expect("seed transaction");
+            canvas_tx(&transaction)
+                .partition::<StoredTextBatches>()
+                .put(&receipt(name, batch, source_rowid))
+                .expect("seed receipt");
+            transaction.commit().expect("seed commit");
+            insert(&connection, "a", SqlValue::Text(body(1)));
+            let window =
+                scan_window(&connection, FULLTEXT_BODY, Direction::Compress, 0).expect("scan");
+            let transaction = connection.transaction().expect("transaction");
+            assert!(
+                matches!(apply_window(&transaction, FULLTEXT_BODY, &window, NOW), Err(StoreError::RecordContract(actual)) if actual == message)
+            );
+            transaction.rollback().expect("rollback");
+            assert_eq!(stored(&connection, "a"), ("text".into(), body(1)));
+            let receipts = studio_db_api::db_query!(canvas_read(&connection), StoredTextBatches)
+                .expect("receipts");
+            assert_eq!(receipts.len(), 1);
+            assert_eq!(receipts[0].sha256, "historical");
+            assert_eq!(
+                progress(&connection, FULLTEXT_BODY).expect("progress"),
+                CompactionProgress::default()
+            );
+        }
     }
 
     fn insert(connection: &Connection, id: &str, body: rusqlite::types::Value) {
@@ -556,16 +995,26 @@ mod tests {
             )
             .expect("compressed row");
         assert_eq!(untouched, compressed);
-        let (rows, first, last, hash): (i64, i64, i64, String) = connection
-            .query_row(
-                "SELECT rows,first_rowid,last_rowid,sha256 FROM runtime_stored_text_batches \
-                 WHERE name=?1 AND batch=1",
-                [FULLTEXT_BODY.progress],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .expect("batch row");
-        assert_eq!((rows, first, last), (2, 1, 3));
-        assert_eq!(hash, expected_hash(&[(1, &body(1)), (3, &body(3))]));
+        let receipt = canvas_read(&connection)
+            .get::<StoredTextBatches>(&(encode_key(&(FULLTEXT_BODY.progress.to_owned(), 1_i64)),))
+            .expect("batch row")
+            .expect("receipt");
+        assert_eq!(
+            (receipt.batch_rows, receipt.first_rowid, receipt.last_rowid),
+            (2, 1, 3)
+        );
+        assert_eq!(
+            receipt.sha256,
+            expected_hash(&[(1, &body(1)), (3, &body(3))])
+        );
+        assert_eq!(
+            (receipt.plain_bytes, receipt.stored_bytes),
+            (batch.plain_bytes as i64, batch.stored_bytes as i64)
+        );
+        assert_eq!(
+            (receipt.batch, receipt.source_rowid, receipt.batch_created),
+            (1, 1, NOW)
+        );
         assert_eq!(
             progress(&connection, FULLTEXT_BODY).expect("progress"),
             CompactionProgress {
@@ -596,13 +1045,15 @@ mod tests {
         }
         assert_eq!(stored(&connection, "a"), ("text".to_owned(), body(1)));
         assert_eq!(stored(&connection, "b"), ("text".to_owned(), body(2)));
-        let hashes: Vec<(String, String)> = connection
-            .prepare("SELECT name,sha256 FROM runtime_stored_text_batches ORDER BY name")
-            .expect("statement")
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .expect("rows")
-            .collect::<Result<_, _>>()
-            .expect("batch rows");
+        let hashes: Vec<(String, String)> = studio_db_api::db_query!(
+            canvas_read(&connection),
+            StoredTextBatches,
+            order_by(StoredTextBatches::TEXT_KEY.asc)
+        )
+        .expect("batch rows")
+        .into_iter()
+        .map(|row| (row.text_key, row.sha256))
+        .collect();
         let expected = expected_hash(&[(1, &body(1)), (2, &body(2))]);
         assert_eq!(
             hashes,
@@ -637,14 +1088,9 @@ mod tests {
         transaction.commit().expect("commit");
         assert_eq!((batch.converted, batch.skipped), (0, 1));
         assert_eq!(stored(&connection, "a"), ("text".to_owned(), body(2)));
-        let batches: i64 = connection
-            .query_row(
-                "SELECT count(*) FROM runtime_stored_text_batches",
-                [],
-                |row| row.get(0),
-            )
-            .expect("batch count");
-        assert_eq!(batches, 0);
+        let batches = studio_db_api::db_query!(canvas_read(&connection), StoredTextBatches)
+            .expect("batch rows");
+        assert!(batches.is_empty());
         finish(&mut connection, window.next_cursor);
         assert_eq!(
             progress(&connection, FULLTEXT_BODY).expect("progress"),
@@ -747,13 +1193,10 @@ mod tests {
             progress(&connection, FULLTEXT_BODY).expect("progress"),
             CompactionProgress::default()
         );
-        let status: String = connection
-            .query_row(
-                "SELECT status FROM runtime_payload_migrations WHERE name=?1",
-                [FULLTEXT_BODY.progress],
-                |row| row.get(0),
-            )
-            .expect("status");
+        let status = migration_progress::load(&canvas_read(&connection), FULLTEXT_BODY.progress)
+            .expect("status")
+            .expect("progress")
+            .status;
         assert_eq!(status, "running");
     }
 
@@ -788,6 +1231,15 @@ mod tests {
             .expect("table");
         dictionaries::ensure_analytics_schema(&connection).expect("schema");
         dictionaries::install_analytics_sql(&connection).expect("sql");
+        assert!(
+            !connection
+                .table_exists(None, Metadata::NAME)
+                .expect("no Canvas metadata")
+        );
+        assert_eq!(
+            progress(&connection, ANALYTICS_ITEMS_RECORD).expect("absent progress"),
+            CompactionProgress::default()
+        );
         let record = |index: usize| {
             studio_json::json!({"id": format!("item-{index:05}"), "agentId": "agent",
                 "type": "agentMessage", "output": {"bytes": index}})
@@ -861,5 +1313,30 @@ mod tests {
             )
             .expect("count");
         assert_eq!(plain, 2_500);
+        let transaction = connection.transaction().expect("error transaction");
+        record_error(&transaction, ANALYTICS_ITEMS_RECORD, "legacy error", NOW)
+            .expect("legacy error");
+        assert_eq!(
+            progress(&transaction, ANALYTICS_ITEMS_RECORD)
+                .expect("error cursor")
+                .cursor,
+            COMPACTION_BATCH_ROWS as i64
+        );
+        reset_progress(&transaction, ANALYTICS_ITEMS_RECORD).expect("legacy reset");
+        transaction.commit().expect("commit");
+        assert_eq!(
+            progress(&connection, ANALYTICS_ITEMS_RECORD).expect("reset progress"),
+            CompactionProgress::default()
+        );
+        assert!(
+            connection
+                .table_exists(None, "runtime_stored_text_batches")
+                .expect("legacy receipts")
+        );
+        assert!(
+            !connection
+                .table_exists(None, Metadata::NAME)
+                .expect("no Canvas metadata")
+        );
     }
 }

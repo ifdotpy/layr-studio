@@ -389,6 +389,11 @@ async fn failed_store_calls_roll_back_card_outbox_and_publication_before_handoff
         let trigger_table = table.to_owned();
         let trigger_event = event.to_owned();
         store.transaction_with::<_,studio_runtime_store::StoreError>(move |tx| {
+            if trigger_table == "durable_rows" {
+                use studio_runtime_store::test_fixtures::canvas::{set_failpoint, FailpointPartition, FailpointOperation};
+                set_failpoint(tx, FailpointPartition::Changes(studio_runtime_store::consolidation_kinds::CanvasChangesKind::DurableRows), FailpointOperation::Update, true)?;
+                return Ok(());
+            }
             tx.execute_batch(&format!("CREATE TRIGGER callback_failpoint BEFORE {trigger_event} ON {trigger_table} BEGIN SELECT RAISE(ABORT,'callback failpoint'); END"))?; Ok(())
         }).await.unwrap();
         let before = snapshot(&store);

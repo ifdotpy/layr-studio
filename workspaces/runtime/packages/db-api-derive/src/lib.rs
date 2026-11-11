@@ -398,6 +398,10 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         .map(|f| format!("{}=?", quoted(&f.column)))
         .collect::<Vec<_>>()
         .join(" AND ");
+    let logical_key_columns = keys
+        .iter()
+        .map(|field| field.column.as_str())
+        .collect::<Vec<_>>();
     let key_columns = keys
         .iter()
         .map(|f| quoted(&f.column))
@@ -679,13 +683,19 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             .get(offset)
             .ok_or_else(|| syn::Error::new_spanned(&sql, "expected CREATE INDEX name ON table"))?;
         let index_name = index_name.trim_matches('"');
-        index_sql.push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: #sql }));
+        let index_constant = format_ident!("INDEX_{}", index_name.to_ascii_uppercase());
+        let index_position = index_sql.len();
+        constants.push(quote!(pub const #index_constant: ::studio_db_api::TableIndex<Self> = ::studio_db_api::TableIndex::from_descriptor(#index_position);));
+        index_sql.push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: #sql, predicate: None }));
     }
     for index in indexes {
         let index_name = index
             .name
             .ok_or_else(|| syn::Error::new_spanned(name, "index requires a name"))?;
         identifier(&index_name.value(), &index_name)?;
+        let index_constant = format_ident!("INDEX_{}", index_name.value().to_ascii_uppercase());
+        let index_position = index_sql.len();
+        constants.push(quote!(pub const #index_constant: ::studio_db_api::TableIndex<Self> = ::studio_db_api::TableIndex::from_descriptor(#index_position);));
         if index.columns.is_empty() {
             return Err(syn::Error::new_spanned(
                 index_name,
@@ -714,20 +724,22 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             .predicate
             .map(|p| predicate_sql(&p, &fields))
             .transpose()?;
-        let index_text = match (partition_owner.is_some(), predicate) {
-            (true, Some(predicate)) => quote!(
-                ::studio_db_api::static_sql!(#base, " WHERE ", #partition_predicate, " AND (", #predicate, ")")
-            ),
-            (true, None) => {
-                quote!(::studio_db_api::static_sql!(#base, " WHERE ", #partition_predicate))
-            }
-            (false, Some(predicate)) => {
-                quote!(::studio_db_api::static_sql!(#base, " WHERE ", #predicate))
-            }
-            (false, None) => base,
+        let owned_predicate = match (partition_owner.is_some(), predicate) {
+            (true, Some(predicate)) => Some(quote!(
+                ::studio_db_api::static_sql!(#partition_predicate, " AND (", #predicate, ")")
+            )),
+            (true, None) => Some(partition_predicate.clone()),
+            (false, Some(predicate)) => Some(predicate),
+            (false, None) => None,
         };
-        index_sql
-            .push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: #index_text }));
+        let (index_text, predicate_metadata) = match owned_predicate {
+            Some(predicate) => (
+                quote!(::studio_db_api::static_sql!(#base, " WHERE ", #predicate)),
+                quote!(Some(#predicate)),
+            ),
+            None => (base, quote!(None)),
+        };
+        index_sql.push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: #index_text, predicate: #predicate_metadata }));
     }
     let key_types = keys.iter().map(|f| &f.ty).collect::<Vec<_>>();
     let key_assertions = key_types.iter().map(|ty| quote!(assert!(!<#ty as ::studio_db_api::DbValue>::NULLABLE, "primary keys cannot be nullable");));
@@ -896,6 +908,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             const INSERT: &'static str = #insert;
             const DELETE: &'static str = #delete;
             const COLUMNS: &'static [::studio_db_api::ColumnDescriptor] = #columns;
+            const KEY_COLUMNS: &'static [&'static str] = &[#(#logical_key_columns),*];
             fn read(_connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>) -> ::studio_db_api::rusqlite::Result<Self> { let value = Self { #(#reads),* }; ::studio_db_api::Table::validate(&value)?; Ok(value) }
             #validate
             #state_check

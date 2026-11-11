@@ -46,14 +46,6 @@ struct AgentDeletion {
 }
 
 impl AgentRepository {
-    /// Seed the singleton rows the change-journal triggers update when a
-    /// schema-only state lacks them; without them no change is journaled.
-    pub(crate) fn prepare_change_journal(
-        transaction: &rusqlite::Transaction<'_>,
-    ) -> StoreResult<()> {
-        crate::clock_schema::prepare_agent_change_journal(transaction)
-    }
-
     pub fn get_raw(connection: &Connection, id: &AgentId) -> StoreResult<Option<String>> {
         Ok(Table::<AgentRecord>::new(connection)
             .get_with_raw(id)?

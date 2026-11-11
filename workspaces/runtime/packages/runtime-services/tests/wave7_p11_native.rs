@@ -206,11 +206,9 @@ impl Acceptance for Accept {
     }
 }
 fn db(case: &Value) -> Connection {
-    let db = Connection::open_in_memory().expect("fixture db");
-    db.execute_batch(&studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE effects(value TEXT);")).expect("Python table shapes");
-    studio_runtime_store::receipt_schema::create(&db).expect("receipt target schema");
-    db.execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
-        .expect("volatile agent table creates");
+    let db = studio_runtime_store::test_canvas();
+    db.execute_batch("CREATE TABLE effects(value TEXT);")
+        .expect("effect witness table");
     let mut agent = case["agent"].clone();
     agent
         .as_object_mut()
@@ -1003,11 +1001,7 @@ fn resolve_review(plan: &mut ReviewPlan) {
     plan.set_prepared_assignment(assignment, base);
 }
 fn review_db(case: &Value) -> Connection {
-    let db = db(case);
-    studio_runtime_store::approvals::create_schema(&db).expect("approval schema");
-    db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT,record TEXT); CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL, monitor_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN COALESCE(record->>'$.status','lost') ELSE 'lost' END) STORED);").expect("projection schema");
-    db.execute_batch("CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,turn_id TEXT,error TEXT); CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT); CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0); CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE INDEX durable_rows_seq ON durable_rows(seq); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").expect("review fixture schema");
-    db
+    db(case)
 }
 impl native_review::ReviewCreator for Creator {
     fn child(
@@ -1323,10 +1317,6 @@ fn fork_persisted_ticket_holds_and_accepts_only_exact_receipt() {
     use studio_runtime_services::thread_fork_runtime as fork;
     let case = &corpus()["forks"][0];
     let mut db = db(case);
-    db.execute_batch(
-        "CREATE TABLE runtime_workspace_operations(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-    )
-    .expect("operation table");
     db.execute(
         "INSERT INTO runtime_workspace_operations VALUES('branch-request',?1)",
         [case["operation"].to_string()],
@@ -1525,10 +1515,16 @@ fn stored_native_action_errors_name_the_table_and_row() {
     let case = &corpus()["actions"][0];
     let db = db(case);
     // Keep the schema-invalid witness writable under the explicit-provider column.
-    db.execute(
-        "UPDATE runtime_agents SET record=?1 WHERE id='lead'",
-        [json!({"id":"lead","provider":studio_runtime_schema::ProviderKind::Codex}).to_string()],
-    )
+    studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(&db, || {
+        db.execute(
+            "UPDATE runtime_agents SET record=?1 WHERE id='lead'",
+            [
+                json!({"id":"lead","provider":studio_runtime_schema::ProviderKind::Codex})
+                    .to_string(),
+            ],
+        )?;
+        Ok(())
+    })
     .expect("corrupt agent fixture");
     assert_eq!(case["request"]["action"], "compact");
     let request = Request {
@@ -1566,10 +1562,13 @@ fn stored_native_action_errors_name_the_table_and_row() {
     assert!(reason.starts_with("record_decode;"));
     assert!(!reason.contains("SECRET_STORED_SENTINEL"));
     drop(tx);
-    db.execute(
-        "UPDATE runtime_agents SET record=?1 WHERE id='lead'",
-        [case["agent"].to_string()],
-    )
+    studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(&db, || {
+        db.execute(
+            "UPDATE runtime_agents SET record=?1 WHERE id='lead'",
+            [case["agent"].to_string()],
+        )?;
+        Ok(())
+    })
     .expect("restore valid agent");
     db.execute(
         r#"INSERT INTO runtime_outbox(id,kind,owner_kind,owner_id,signature,status,payload,created) VALUES('["native-action","broken-receipt"]','native_action','agent','lead','sig','unknown','{',0)"#,

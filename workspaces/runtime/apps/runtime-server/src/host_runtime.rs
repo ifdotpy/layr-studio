@@ -100,6 +100,15 @@ fn resolve_install_root_from_executable(
     Err(located())
 }
 
+fn limits_reset_accounts(
+    connection: &studio_runtime_store::Transaction<'_>,
+) -> studio_runtime_store::StoreResult<Vec<String>> {
+    Ok(studio_runtime_store::HttpPublicationQueries::live_ids(
+        connection,
+        "rateLimit",
+    )?)
+}
+
 pub struct HostRuntime {
     shutdown: Shutdown,
     task: JoinHandle<Result<(), WorkerError>>,
@@ -171,15 +180,7 @@ impl HostRuntime {
                 loop {
                     ticks.tick().await;
                     let accounts = store
-                        .read_async("limits/reset-check", |tx| {
-                            let mut rows = tx.prepare(
-                                "SELECT id FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
-                            )?;
-                            let ids = rows
-                                .query_map([], |row| row.get::<_, String>(0))?
-                                .collect::<rusqlite::Result<Vec<_>>>()?;
-                            Ok::<_, studio_runtime_store::StoreError>(ids)
-                        })
+                        .read_async("limits/reset-check", limits_reset_accounts)
                         .await
                         .unwrap_or_default();
                     let now = std::time::SystemTime::now()
@@ -1169,7 +1170,7 @@ mod voice_composition_tests {
         .unwrap();
         store.transaction(move |tx| {
             let cutover = identity.issued_ms() + 1;
-            tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('expired_before_ms',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.expired_before_ms',?1)", [cutover])?;
+            studio_runtime_store::test_fixtures::canvas::seed_orchestration_settings(tx, &json!({"expired_before_ms":cutover}).to_string())?;
             assert_eq!(RequestResults::expired_before_ms(tx)?, cutover);
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES('expired-agent',?1)", [json!({"compactions":0,"id":"expired-agent","rootId":"expired-agent","epoch":3,"status":"idle","isLead":true,"provider":"codex","threadId":"voice-thread","accountKey":"voice-account"}).to_string()])?;
             // A saved row with a different signature must not mask the expiry refusal.
@@ -1851,5 +1852,60 @@ mod launch_profile_tests {
         assert_eq!(selected_home, home.to_string_lossy());
         assert!(isolated && profile.is_none());
         assert!(super::selected_account(&write("pending"), "login-fixture").is_err());
+    }
+}
+
+#[cfg(test)]
+mod limits_reset_tests {
+    #[tokio::test]
+    async fn canonical_limits_reset_callback_reads_only_live_rate_limits() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                use studio_runtime_store::HttpPublicationQueries;
+                HttpPublicationQueries::test_seed_entity(
+                    tx,
+                    "rateLimit",
+                    "live-null",
+                    10001,
+                    0,
+                    None,
+                )?;
+                HttpPublicationQueries::test_seed_entity(
+                    tx,
+                    "rateLimit",
+                    "deleted",
+                    10002,
+                    1,
+                    None,
+                )?;
+                HttpPublicationQueries::test_seed_entity(
+                    tx,
+                    "rateLimit",
+                    "other-integer",
+                    10003,
+                    2,
+                    None,
+                )?;
+                HttpPublicationQueries::test_seed_entity(
+                    tx,
+                    "fixture",
+                    "unrelated",
+                    10004,
+                    0,
+                    None,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let ids = store
+            .read_async("limits/reset-check", super::limits_reset_accounts)
+            .await
+            .expect("actual periodic callback reads canonical limits");
+        assert_eq!(ids, vec!["live-null".to_owned()]);
     }
 }

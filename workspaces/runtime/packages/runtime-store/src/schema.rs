@@ -147,10 +147,48 @@ pub(crate) fn verify(canvas_path: &Path, analytics_path: &Path) -> StoreResult<(
 pub(crate) fn verify_core(canvas_path: &Path, analytics_path: &Path) -> StoreResult<()> {
     let canvas = open_read_only(canvas_path)?;
     let analytics = open_read_only(analytics_path)?;
+    use studio_db_api::Table;
+    let legacy = crate::peer_update_settings::canvas_read(&canvas)
+        .table_exists::<crate::settings_schema::PayloadMigrations>()?;
+    let targets = [
+        crate::metadata_schema::Metadata::NAME,
+        crate::change_schema::Changes::NAME,
+        crate::publication_schema::Publications::NAME,
+    ];
+    if legacy {
+        for (name, columns) in [
+            (
+                crate::clock_schema::AgentRecordGeneration::NAME,
+                &[
+                    crate::clock_schema::AgentRecordGeneration::__DB_COLUMN_ID,
+                    crate::clock_schema::AgentRecordGeneration::__DB_COLUMN_VALUE,
+                ][..],
+            ),
+            (
+                crate::clock_schema::SchedulerAgentChangeState::NAME,
+                &[
+                    crate::clock_schema::SchedulerAgentChangeState::__DB_COLUMN_ID,
+                    crate::clock_schema::SchedulerAgentChangeState::__DB_COLUMN_ENTRIES,
+                    crate::clock_schema::SchedulerAgentChangeState::__DB_COLUMN_TOTAL,
+                    crate::clock_schema::SchedulerAgentChangeState::__DB_COLUMN_GENERATION,
+                ][..],
+            ),
+            (
+                crate::clock_schema::SchedulerAgentChanges::NAME,
+                &[
+                    crate::clock_schema::SchedulerAgentChanges::__DB_COLUMN_ID,
+                    crate::clock_schema::SchedulerAgentChanges::__DB_COLUMN_GENERATION,
+                ][..],
+            ),
+        ] {
+            require_columns(&canvas, "canvas.sqlite3", name, columns)?;
+        }
+    }
     for registration in crate::repositories::schema_registrations() {
         let requirements = registration.requirements;
         for table in requirements.tables {
-            if is_bootstrap_table(requirements, table) {
+            if is_bootstrap_table(requirements, table) || (legacy && targets.contains(&table.name))
+            {
                 continue;
             }
             require_columns(&canvas, "canvas.sqlite3", table.name, table.columns)?;
@@ -158,7 +196,9 @@ pub(crate) fn verify_core(canvas_path: &Path, analytics_path: &Path) -> StoreRes
         for conditional in requirements.conditional_tables {
             if table_exists(&canvas, conditional.table_exists)? {
                 for table in conditional.tables {
-                    if is_bootstrap_table(requirements, table) {
+                    if is_bootstrap_table(requirements, table)
+                        || (legacy && targets.contains(&table.name))
+                    {
                         continue;
                     }
                     require_columns(&canvas, "canvas.sqlite3", table.name, table.columns)?;
@@ -536,17 +576,43 @@ enum PayloadMigrationState {
     Complete,
 }
 
-fn verify_payload_migration(connection: &Connection) -> StoreResult<PayloadMigrationState> {
-    if !table_exists(connection, "runtime_payload_migrations")? {
-        return Ok(PayloadMigrationState::NotStarted);
+#[cfg(any(test, feature = "test-support"))]
+impl crate::RuntimeStore {
+    /// Number of rows retained by the current event publication producer.
+    pub fn event_window_rows() -> usize {
+        crate::event_publication_triggers::EVENT_WINDOW_ROWS
     }
-    require_columns(
-        connection,
-        "canvas.sqlite3",
-        "runtime_payload_migrations",
-        &["name", "cursor", "complete", "status", "updated", "error"],
-    )?;
-    let marker = connection
+
+    /// Inspect the canonical progress owner without exposing its storage descriptor.
+    pub fn payload_migration_checkpoint_exists(
+        connection: &Connection,
+        name: &str,
+    ) -> StoreResult<bool> {
+        Ok(crate::migration_progress::load(
+            &crate::peer_update_settings::canvas_read(connection),
+            name,
+        )?
+        .is_some())
+    }
+}
+
+fn verify_payload_migration(connection: &Connection) -> StoreResult<PayloadMigrationState> {
+    let marker = if !crate::peer_update_settings::canvas_read(connection)
+        .table_exists::<crate::settings_schema::PayloadMigrations>()?
+    {
+        crate::migration_progress::load(
+            &crate::peer_update_settings::canvas_read(connection),
+            "payload-v1:tasks",
+        )?
+        .map(|state| (state.cursor, state.complete, Some(state.status)))
+    } else {
+        require_columns(
+            connection,
+            "canvas.sqlite3",
+            "runtime_payload_migrations",
+            &["name", "cursor", "complete", "status", "updated", "error"],
+        )?;
+        connection
         .query_row("SELECT cursor,complete,status FROM runtime_payload_migrations WHERE name='payload-v1:tasks'", [], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -554,7 +620,8 @@ fn verify_payload_migration(connection: &Connection) -> StoreResult<PayloadMigra
                 row.get::<_, Option<String>>(2)?,
             ))
         })
-        .optional()?;
+        .optional()?
+    };
     let Some((cursor, complete, status)) = marker else {
         return Ok(PayloadMigrationState::NotStarted);
     };
@@ -825,6 +892,11 @@ mod tests {
     #[test]
     fn absent_in_progress_and_complete_payload_markers_are_distinct() {
         let db = Connection::open_in_memory().expect("in-memory SQLite opens");
+        crate::canvas_schema::install(
+            &db,
+            &[<crate::metadata_schema::Metadata as studio_db_api::Table>::descriptor()],
+        )
+        .unwrap();
         assert_eq!(
             verify_payload_migration(&db).expect("absent marker is accepted"),
             PayloadMigrationState::NotStarted

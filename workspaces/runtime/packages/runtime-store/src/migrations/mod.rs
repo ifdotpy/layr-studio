@@ -5,6 +5,7 @@ mod m2026_11_09_immutable_entity_scopes;
 pub(crate) mod m2026_11_09_online_keys;
 mod m2026_11_09_repair_invalid_entity_scopes;
 mod m2026_11_09_retired_objects;
+mod m2026_11_11_consolidate_f1;
 mod m2026_11_11_remove_account_throttle;
 mod m2026_11_11_retired_agent_keys;
 mod m2026_11_11_strict_native_review;
@@ -179,6 +180,7 @@ pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
         .chain(std::iter::once(
             m2026_11_11_remove_account_throttle::REGISTRY_DEFINITION,
         ))
+        .chain(std::iter::once(m2026_11_11_consolidate_f1::DEFINITION))
 }
 
 /// Position in the currently migrating source, measured in SQLite rowids.
@@ -206,8 +208,36 @@ fn catalog_fingerprint(catalog: &[SqlMigration], target: MigrationTarget) -> Str
         .collect::<Vec<_>>();
     crate::sha256_hex(ids.join("\0").as_bytes())
 }
+/// Canvas catalog marker key; its value is catalog fingerprint plus SQLite schema generation.
+pub(crate) const MIGRATION_CATALOG_KEY: &str = "migration_catalog";
+
+fn current_canvas_fingerprint() -> String {
+    let ids = RETIRED
+        .iter()
+        .filter(|(target, _, receipt)| *target == MigrationTarget::Canvas && !receipt)
+        .map(|(_, id, _)| *id)
+        .chain(
+            catalog()
+                .filter(|definition| definition.target == MigrationTarget::Canvas)
+                .map(|definition| definition.id),
+        )
+        .collect::<Vec<_>>();
+    crate::sha256_hex(ids.join("\0").as_bytes())
+}
+fn write_current_canvas_catalog(tx: &Transaction<'_>) -> StoreResult<()> {
+    crate::clock_schema::SyncEntityMeta::put(
+        tx,
+        MIGRATION_CATALOG_KEY,
+        &catalog_marker(tx, &current_canvas_fingerprint())?,
+    )?;
+    Ok(())
+}
+
+fn schema_version(db: &Connection) -> rusqlite::Result<i64> {
+    db.pragma_query_value(None, "schema_version", |row| row.get(0))
+}
 fn catalog_marker(db: &Connection, fingerprint: &str) -> rusqlite::Result<String> {
-    let version: i64 = db.pragma_query_value(None, "schema_version", |r| r.get(0))?;
+    let version = schema_version(db)?;
     Ok(format!("{fingerprint}:{version}"))
 }
 fn receipt_finish_name(id: &str) -> String {
@@ -231,6 +261,30 @@ fn checkpoints() -> impl Iterator<Item = String> {
         .map(|(_, id, _)| receipt_finish_name(id))
         .chain(INDIVIDUAL.iter().map(|id| (*id).to_owned()))
 }
+fn current_canvas_authority(db: &Connection) -> StoreResult<bool> {
+    Ok(!crate::peer_update_settings::canvas_read(db)
+        .table_exists::<crate::settings_schema::PayloadMigrations>()?)
+}
+fn verify_current_canvas_catalog(db: &Connection) -> StoreResult<()> {
+    let marker = crate::clock_schema::SyncEntityMeta::value(db, MIGRATION_CATALOG_KEY)?
+        .ok_or_else(|| too_old("canvas", MIGRATION_CATALOG_KEY))?;
+    let current = schema_version(db)?;
+    let valid = marker
+        .split_once(':')
+        .is_some_and(|(fingerprint, version)| {
+            fingerprint == current_canvas_fingerprint()
+                && !version.is_empty()
+                && version.bytes().all(|b| b.is_ascii_digit())
+                && version
+                    .parse::<i64>()
+                    .is_ok_and(|version| version > 0 && version <= current)
+        });
+    if !valid {
+        return Err(too_old("canvas", MIGRATION_CATALOG_KEY));
+    }
+    Ok(())
+}
+
 fn verify_catalog(
     db: &Connection,
     table: &str,
@@ -248,7 +302,7 @@ fn verify_catalog(
     let marker = read()
         .map_err(|_| too_old(name, "migration_catalog"))?
         .ok_or_else(|| too_old(name, "migration_catalog"))?;
-    let current: i64 = db.pragma_query_value(None, "schema_version", |r| r.get(0))?;
+    let current = schema_version(db)?;
     let valid = marker
         .split_once(':')
         .is_some_and(|(fingerprint, version)| {
@@ -274,12 +328,16 @@ pub(crate) fn verify_baseline(root: &Path) -> StoreResult<()> {
         &root.join("analytics.sqlite3"),
         OpenFlags::SQLITE_OPEN_READ_ONLY,
     )?;
-    verify_catalog(
-        &canvas,
-        "sync_entity_meta",
-        MigrationTarget::Canvas,
-        "canvas",
-    )?;
+    if current_canvas_authority(&canvas)? {
+        verify_current_canvas_catalog(&canvas)?;
+    } else {
+        verify_catalog(
+            &canvas,
+            "sync_entity_meta",
+            MigrationTarget::Canvas,
+            "canvas",
+        )?;
+    }
     verify_catalog(
         &analytics,
         "analytics_meta",
@@ -287,14 +345,11 @@ pub(crate) fn verify_baseline(root: &Path) -> StoreResult<()> {
         "analytics",
     )?;
     for id in checkpoints() {
-        let state = canvas
-            .query_row(
-                "SELECT complete,status FROM runtime_payload_migrations WHERE name=?1",
-                [&id],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
-            )
-            .optional()
-            .map_err(|_| too_old("canvas", &id))?;
+        let state = crate::migration_progress::completion(
+            &crate::peer_update_settings::canvas_read(&canvas),
+            &id,
+        )
+        .map_err(|_| too_old("canvas", &id))?;
         // The verified catalog covers this pre-ledger transition. Its missing row
         // is valid; an explicitly incomplete row still refuses, as apply_once did.
         if state != Some((1, "complete".into()))
@@ -357,10 +412,42 @@ pub(crate) fn verify_baseline(root: &Path) -> StoreResult<()> {
 /// Fresh stores seed retired evidence only after the current catalog was installed.
 pub(crate) fn seed_baseline(tx: &Transaction<'_>, target: MigrationTarget) -> StoreResult<()> {
     if target == MigrationTarget::Canvas {
+        use crate::metadata_schema::{AccessSettings, SyncIdentity};
+        use crate::metadata_values::StoredBoolean;
+        use crate::peer_update_settings::canvas_tx;
+        use studio_db_api::migration::encode_key;
+        crate::clock_schema::seed_fresh_clock_rows(tx)?;
+        let mut typed = canvas_tx(tx);
+        typed.insert_new(&AccessSettings {
+            identity: encode_key(&(1_i64,)),
+            source_rowid: 1,
+            integer_key: 1,
+            auto_pair: StoredBoolean::Valid(true),
+        })?;
+        let text_key = Some(uuid::Uuid::new_v4().simple().to_string());
+        typed.insert_new(&SyncIdentity {
+            identity: crate::consolidation_codec::nullable_text_identity(&text_key, 1),
+            source_rowid: 1,
+            text_key,
+        })?;
         crate::command_watermarks::CommandWatermarks::install_send_admissions(tx, 0)?;
         for id in checkpoints() {
-            tx.execute("INSERT INTO runtime_payload_migrations(name,cursor,complete,status,updated,cutover_ms) VALUES(?1,0,1,'complete',0,0)", [id])?;
+            crate::migration_progress::save(
+                &mut typed,
+                crate::migration_progress::State {
+                    name: id,
+                    cursor: 0,
+                    complete: 1,
+                    status: "complete".into(),
+                    updated: Some(0.0),
+                    error: None,
+                    cursor_key: None,
+                    copy_source_rows: None,
+                    copy_target_rows: None,
+                },
+            )?;
         }
+        return write_current_canvas_catalog(tx);
     }
     write_catalog(tx, target, &[])
 }
@@ -404,9 +491,7 @@ fn rolled_back(
 pub(crate) fn prepare_current_canvas(tx: &Transaction<'_>) -> StoreResult<()> {
     crate::schema::prepare_peer_update_settings(tx)?;
     crate::schema::prepare_item_turn_scope(tx)?;
-    crate::bootstrap::prepare_sync_schema(tx)?;
     crate::bootstrap::prepare_runtime_event_indexes(tx)?;
-    crate::AgentRepository::prepare_change_journal(tx)?;
     crate::feature_schema::prepare(tx)?;
     crate::MonitorsRepository::prepare_indexes(tx)?;
     crate::AgentIndexedReads::prepare_index(tx)?;
@@ -450,6 +535,14 @@ pub(crate) fn run(
     )?;
     crate::schema::register_python_trigger_functions(&canvas)?;
     crate::sqlite_durability::configure_writer(&canvas)?;
+    if current_canvas_authority(&canvas)? {
+        verify_current_canvas_catalog(&canvas)?;
+        let tx = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        prepare_current_canvas(&tx)?;
+        write_current_canvas_catalog(&tx)?;
+        tx.commit()?;
+        return Ok(());
+    }
     let tx = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let marker: Option<String> = tx
         .query_row(
@@ -458,11 +551,19 @@ pub(crate) fn run(
             |r| r.get(0),
         )
         .optional()?;
-    let current = catalog_marker(&tx, &catalog_fingerprint(CATALOG, MigrationTarget::Canvas))?;
-    for step in CATALOG.iter().filter(|step| {
-        step.definition.target == MigrationTarget::Canvas
-            && marker.as_deref() != Some(current.as_str())
-    }) {
+    let admitted_end = marker
+        .as_deref()
+        .and_then(|value| value.split_once(':'))
+        .and_then(|(fingerprint, _)| {
+            (0..=CATALOG.len()).find(|end| {
+                fingerprint == catalog_fingerprint(&CATALOG[..*end], MigrationTarget::Canvas)
+            })
+        })
+        .ok_or_else(|| too_old("canvas", MIGRATION_CATALOG_KEY))?;
+    for step in CATALOG[admitted_end..]
+        .iter()
+        .filter(|step| step.definition.target == MigrationTarget::Canvas)
+    {
         if let Err(source) = (step.apply)(&tx) {
             return Err(rolled_back(
                 tx,
@@ -472,25 +573,20 @@ pub(crate) fn run(
             ));
         }
     }
-    prepare_current_canvas(&tx)?;
-    write_catalog(&tx, MigrationTarget::Canvas, CATALOG)?;
-    match tx.execute_batch("COMMIT") {
-        Ok(()) => Ok(()),
-        Err(error) if tx.is_autocommit() => Err(StoreError::Migration {
-            id: "2026-11-09-retired-objects",
-            target: MigrationTarget::Canvas,
-            phase: MigrationPhase::Commit,
-            rollback: MigrationRollbackOutcome::Unknown,
-            source: Box::new(error.into()),
-            rollback_error: None,
-        }),
-        Err(error) => Err(rolled_back(
-            tx,
-            "2026-11-09-retired-objects",
-            MigrationTarget::Canvas,
-            error.into(),
-        )),
+    // Lazy legacy owners are materialized before the bounded copy begins. No target
+    // serving caller runs until the final authority transaction has committed.
+    for descriptor in m2026_11_11_consolidate_f1::legacy_source_descriptors() {
+        descriptor.install_if_absent(&tx)?;
     }
+    crate::clock_schema::prepare_durable_scope(&tx)?;
+    write_catalog(&tx, MigrationTarget::Canvas, CATALOG)?;
+    tx.commit()?;
+    m2026_11_11_consolidate_f1::run(&mut canvas)?;
+    let tx = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    prepare_current_canvas(&tx)?;
+    write_current_canvas_catalog(&tx)?;
+    tx.commit()?;
+    Ok(())
 }
 pub(crate) fn supervisor(db: &mut Connection) -> StoreResult<()> {
     let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%')", [], |r| r.get(0))?;
@@ -520,8 +616,11 @@ pub(crate) fn retire_agent_fixture_keys(tx: &Transaction<'_>) -> crate::StoreRes
 /// Canvas catalog fingerprints written by released servers. The catalog is
 /// append-only: each one must stay a prefix fingerprint so those stores open.
 #[cfg(test)]
-const RELEASED_CANVAS_CATALOGS: &[&str] =
-    &["561c94aa6bffe48d6de89805793b296560ace24b89a3b914d38635215eae5f53"];
+const RELEASED_CANVAS_CATALOGS: &[&str] = &[
+    "561c94aa6bffe48d6de89805793b296560ace24b89a3b914d38635215eae5f53",
+    "e07877dd5a4eef610f66b99336716fb9e32515094d81713b45d30ec61d09cd63",
+    "85c8d18a41f9de456bfa310c7b4f119d2b78045f6a2dabb8fb2634c7b3c29bc9",
+];
 
 #[cfg(test)]
 mod released_catalog_tests {

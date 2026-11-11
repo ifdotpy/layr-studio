@@ -1290,7 +1290,7 @@ mod tests {
                 tx.execute("INSERT INTO request_results(id,signature,result,created) VALUES(?1,?2,?3,?4)",
                     rusqlite::params![id,signature,studio_json::to_string(&saved)?,now_ms()])?;
             }
-            tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('expired_before_ms',?1)) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.expired_before_ms',?1)", [now_ms() + 1])?;
+            studio_runtime_store::receipt_migration_contract::seed_expired_before_ms(tx, now_ms() + 1).expect("expiry floor seed");
             Ok(())
         }).await.expect("migrated exact reply");
         let session = Arc::new(session);

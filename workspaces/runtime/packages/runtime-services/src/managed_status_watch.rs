@@ -2217,10 +2217,7 @@ mod tests {
         assert_eq!(rule, 0);
         store
             .transaction_with(|tx| {
-                tx.execute_batch(
-                    "CREATE TRIGGER fail_rule_documents BEFORE INSERT ON durable_rows \
-                     WHEN NEW.tbl='runtime_rules' BEGIN SELECT RAISE(ABORT,'rule change failpoint'); END;",
-                )?;
+                tx.execute_batch(&format!("CREATE TRIGGER fail_rule_documents BEFORE INSERT ON changes WHEN NEW.kind={kind} AND NEW.source_label='runtime_rules' BEGIN SELECT RAISE(ABORT,'rule change failpoint'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasChangesKind::DB_CODE_DURABLEROWS))?;
                 Ok::<_, studio_runtime_store::StoreError>(())
             })
             .await
@@ -2275,13 +2272,11 @@ mod tests {
                 connection
                     .query_row("SELECT COUNT(*) FROM runtime_rules", [], |row| row.get(0))
                     .expect("count rule rows"),
-                connection
-                    .query_row(
-                        "SELECT COUNT(*) FROM durable_rows WHERE tbl='runtime_rules'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .expect("count rule change rows"),
+                studio_runtime_store::test_fixtures::canvas::changes(&connection)
+                    .expect("count rule change rows")
+                    .into_iter()
+                    .filter(|row| row.source_label == "runtime_rules")
+                    .count() as i64,
             )
         };
         assert_eq!(rule_count, 0);

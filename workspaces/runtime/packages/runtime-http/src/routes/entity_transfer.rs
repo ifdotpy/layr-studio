@@ -811,9 +811,12 @@ mod tests {
                     false,
                 )?;
                 // A stored payload the current contract rejects, as a legacy row can be.
-                tx.execute(
-                    "UPDATE sync_entities SET payload=json_object('collection','workspace','id','unreadable','value','not-an-object') WHERE collection='workspace' AND id='unreadable'",
-                    [],
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "workspace",
+                    "unreadable",
+                    "not-an-object",
+                    false,
                 )?;
                 Ok(())
             })
@@ -847,11 +850,26 @@ mod tests {
     async fn snapshot_continuation_below_tombstone_floor_makes_bounded_progress() {
         let (_directory, state) = fixture().await;
         let store = state.store.as_ref().expect("store");
-        store.transaction(|tx| {
-            for index in 0..513 { SyncDocumentsRepository::put_entity(tx, "workspace", &format!("old-{index}"), json!({"stateDir":"fixture"}), false)?; }
-            tx.execute("INSERT INTO sync_entity_meta(key,value) VALUES('entity_tombstone_floor','1000') ON CONFLICT(key) DO UPDATE SET value=excluded.value", [])?;
-            Ok(())
-        }).await.expect("old live rows and a pruned tombstone floor");
+        store
+            .transaction(|tx| {
+                for index in 0..513 {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        &format!("old-{index}"),
+                        json!({"stateDir":"fixture"}),
+                        false,
+                    )?;
+                }
+                studio_runtime_store::test_fixtures::canvas::set_meta(
+                    tx,
+                    "entity_tombstone_floor",
+                    Some("1000"),
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("old live rows and a pruned tombstone floor");
         store
             .test_read_transaction(|tx| {
                 let first = SyncDocumentsRepository::resume_entity_scope(
@@ -1263,9 +1281,13 @@ mod tests {
         // A cursor below the durable floor gets a snapshot, not a delta.
         store
             .transaction(|tx| {
-                tx.execute(
-                    "UPDATE durable_floor SET floor=(SELECT MAX(seq) FROM durable_rows) WHERE id=1",
-                    [],
+                studio_runtime_store::test_fixtures::canvas::seed_durable_floor(
+                    tx,
+                    studio_runtime_store::test_fixtures::canvas::changes(tx)?
+                        .iter()
+                        .map(|row| row.seq)
+                        .max()
+                        .expect("durable rows exist"),
                 )?;
                 Ok(())
             })

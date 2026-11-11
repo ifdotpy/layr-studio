@@ -154,14 +154,7 @@ fn publish(
     entities: &BTreeMap<String, ProjectMirror>,
 ) -> Result<(), StoreError> {
     let prefix = format!("{ID_PREFIX}{server}:");
-    let mut statement = tx.prepare(
-        "SELECT id FROM sync_entities WHERE collection='project' AND deleted=0 \
-         AND substr(id,1,length(?1))=?1",
-    )?;
-    let stale = statement
-        .query_map([&prefix], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
+    let stale = studio_runtime_store::ProjectionPublicationQueries::peer_project_ids(tx, &prefix)?;
     for id in stale.iter().filter(|id| !entities.contains_key(*id)) {
         SyncDocumentsRepository::put_entity(tx, "project", id, (), true)?;
     }
@@ -173,16 +166,11 @@ fn publish(
 
 /// Servers that have published entities.
 fn published_servers(tx: &Transaction<'_>) -> Result<BTreeSet<String>, StoreError> {
-    let mut statement = tx.prepare(
-        "SELECT DISTINCT json_extract(payload,'$.value.homeServerId') FROM sync_entities \
-         WHERE collection='project' AND deleted=0 AND substr(id,1,?1)=?2",
+    let servers = studio_runtime_store::ProjectionPublicationQueries::peer_servers(
+        tx,
+        ID_PREFIX,
+        ID_PREFIX.len() as i64,
     )?;
-    let servers = statement
-        .query_map(
-            rusqlite::params![ID_PREFIX.len() as i64, ID_PREFIX],
-            |row| row.get::<_, Option<String>>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
     Ok(servers.into_iter().flatten().collect())
 }
 
@@ -578,18 +566,25 @@ mod tests {
     async fn published(store: &RuntimeStore) -> BTreeMap<String, Value> {
         store
             .read_async("test", |tx| {
-                let mut statement = tx.prepare(
-                    "SELECT id,payload FROM sync_entities WHERE collection='project' AND deleted=0 AND id LIKE 'peer:%' ORDER BY id",
-                )?;
-                let rows = statement
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
+                let rows = studio_runtime_store::ProjectionPublicationQueries::peer_project_ids(
+                    tx, ID_PREFIX,
+                )?
+                .into_iter()
+                .map(|id| {
+                    let payload = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+                        tx, "project", &id, true,
+                    )?
+                    .expect("published peer project");
+                    Ok((id, payload))
+                })
+                .collect::<Result<Vec<_>, StoreError>>()?;
                 Ok::<_, StoreError>(
                     rows.into_iter()
                         .map(|(id, payload)| {
-                            (id, studio_json::from_str::<Value>(&payload).unwrap()["value"].clone())
+                            (
+                                id,
+                                studio_json::from_str::<Value>(&payload).unwrap()["value"].clone(),
+                            )
                         })
                         .collect(),
                 )
@@ -712,5 +707,40 @@ mod tests {
             })
             .await;
         assert_eq!(*f.peer.notices.lock().unwrap(), 1);
+    }
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_peer_project_scan_retires_only_matching_server() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                for (id, server) in [("peer:s:a", "s"), ("peer:t:a", "t")] {
+                    studio_runtime_store::SyncDocumentsRepository::put_entity(
+                        tx,
+                        "project",
+                        id,
+                        studio_json::json!({"id":id,"homeServerId":server}),
+                        false,
+                    )?;
+                }
+                assert_eq!(
+                    super::published_servers(tx)?,
+                    std::collections::BTreeSet::from(["s".into(), "t".into()])
+                );
+                super::publish(tx, "s", &std::collections::BTreeMap::new())?;
+                assert_eq!(
+                    super::published_servers(tx)?,
+                    std::collections::BTreeSet::from(["t".into()])
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 }

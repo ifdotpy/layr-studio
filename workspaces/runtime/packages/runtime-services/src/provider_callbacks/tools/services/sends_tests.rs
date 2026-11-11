@@ -163,7 +163,12 @@ async fn message_delivers_between_user_grouped_leads() {
         let sent = messages::send(tx, &snapshot, &json!({"target":lead,"text":"hello"}), &RequestIdentity::issue_root(), request_time())?;
         let sent: Value = studio_json::from_str(sent.as_str())?;
         assert!(sent["deliveries"].as_object().unwrap().contains_key(&lead));
-        let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='room' AND id=?1", [sent["room"].as_str().unwrap()], |row| row.get(0))?;
+        let payload = studio_runtime_store::test_fixtures::canvas::entities(tx)?
+            .into_iter()
+            .find(|row| row.collection == "room" && row.id == sent["room"].as_str().unwrap())
+            .expect("published peer room")
+            .payload
+            .expect("peer room payload");
         let projection: Value = studio_json::from_str(&payload)?;
         assert_eq!(projection["value"]["peerTeamId"], "peers");
         Ok::<_, CallbackError>(())

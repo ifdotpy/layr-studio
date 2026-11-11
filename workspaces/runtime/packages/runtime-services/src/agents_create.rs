@@ -787,6 +787,8 @@ mod tests {
     }
 
     fn create_schema(connection: &Connection) {
+        studio_runtime_store::test_fixtures::canvas::install_canonical(connection)
+            .expect("canonical storage");
         connection
             .execute_batch(
                 &studio_runtime_store::agent_columns::fixture_sql("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
@@ -798,9 +800,9 @@ mod tests {
                  CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL);
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
-                 CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
-                 CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
-                 CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,record TEXT); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE INDEX durable_rows_seq ON durable_rows(seq); CREATE TABLE IF NOT EXISTS agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT);  CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);"),
+                 
+                 
+                 CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,record TEXT);        "),
             )
             .expect("agent-create tables exist");
         studio_runtime_store::approvals::create_schema(connection)
@@ -879,8 +881,6 @@ mod tests {
         let mut connection =
             Connection::open(root.path().join("canvas.sqlite3")).expect("fixture writer");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt schema");
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS sync_entity_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);").expect("settings and sync metadata");
         let tx = connection.transaction().expect("transaction");
         let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle","name":"Before","isLead":true,"autoWake":true,"cwd":"/project"});
         super::save_agent(&tx, &record, &|_, _| true).expect("agent");
@@ -927,8 +927,6 @@ mod tests {
         let mut connection =
             Connection::open(root.path().join("canvas.sqlite3")).expect("fixture writer");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt schema");
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS sync_entity_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);").expect("settings and sync metadata");
         let tx = connection.transaction().expect("transaction");
         let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle","name":"Before","isLead":true,"autoWake":true,"cwd":"/project"});
         super::save_agent(&tx, &record, &|_, _| true).expect("agent");
@@ -1117,13 +1115,14 @@ mod tests {
                 ["id"],
             "agent-a"
         );
-        let project: String = connection
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='project' AND id='/project'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("project projection exists");
+        let project: String = studio_runtime_store::ProjectionPublicationQueries::raw_payload(
+            &connection,
+            "project",
+            "/project",
+            false,
+        )
+        .and_then(|row| row.ok_or_else(|| rusqlite::Error::QueryReturnedNoRows.into()))
+        .expect("project projection exists");
         let project = studio_json::from_str::<studio_json::Value>(&project)
             .expect("project projection JSON")["value"]
             .clone();
@@ -1189,7 +1188,7 @@ mod tests {
     fn creation_failpoints_rollback_every_row_and_retry_once_after_restart() {
         let failure_points = [
             ("agent row", "runtime_agents", "INSERT"),
-            ("agent views mark", "durable_rows", "INSERT"),
+            ("agent views mark", "changes", "INSERT"),
             ("initial event", "runtime_events", "INSERT"),
             ("event queue metadata", "runtime_event_meta", "INSERT"),
             // Queueing a created agent leaves its stored record unchanged, and
@@ -1203,9 +1202,14 @@ mod tests {
                 .join(format!("creation-failpoint-{index}.sqlite3"));
             let mut connection = Connection::open(&path).expect("failure database opens");
             create_schema(&connection);
+            let predicate = if table == "changes" {
+                format!("WHEN NEW.kind={} AND NEW.source_label='agent_views'", studio_runtime_store::consolidation_kinds::CanvasChangesKind::DB_CODE_DURABLEROWS)
+            } else {
+                String::new()
+            };
             connection
                 .execute_batch(&format!(
-                    "CREATE TRIGGER injected_creation_failure AFTER {operation} ON {table}
+                    "CREATE TRIGGER injected_creation_failure AFTER {operation} ON {table} {predicate}
                      BEGIN SELECT RAISE(ABORT,'injected creation failure'); END;"
                 ))
                 .expect("install targeted failpoint");
@@ -1236,12 +1240,7 @@ mod tests {
             drop(transaction);
             drop(connection);
             let connection = Connection::open(&path).expect("restart after failed transaction");
-            for table in [
-                "runtime_agents",
-                "sync_entities",
-                "runtime_events",
-                "runtime_event_meta",
-            ] {
+            for table in ["runtime_agents", "runtime_events", "runtime_event_meta"] {
                 let count: i64 = connection
                     .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
                         row.get(0)
@@ -1249,6 +1248,12 @@ mod tests {
                     .expect("count rows after rollback");
                 assert_eq!(count, 0, "failpoint {index} left rows in {table}");
             }
+            assert!(
+                studio_runtime_store::test_fixtures::canvas::entities(&connection)
+                    .expect("entities after rollback")
+                    .is_empty(),
+                "failpoint {index} left publication rows"
+            );
             connection
                 .execute_batch("DROP TRIGGER injected_creation_failure")
                 .expect("remove failpoint");
@@ -1280,15 +1285,17 @@ mod tests {
             )
             .expect("same creation intent replays");
             transaction.commit().expect("replay commits");
-            let (agents, events, projections): (i64, i64, i64) = connection
+            let (agents, events): (i64, i64) = connection
                 .query_row(
                     "SELECT (SELECT COUNT(*) FROM runtime_agents),
-                            (SELECT COUNT(*) FROM runtime_events),
-                            (SELECT COUNT(*) FROM sync_entities)",
+                            (SELECT COUNT(*) FROM runtime_events)",
                     [],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .expect("count successful retry rows");
+            let projections = studio_runtime_store::test_fixtures::canvas::entities(&connection)
+                .expect("retry entities")
+                .len() as i64;
             assert_eq!(
                 (agents, events, projections),
                 (1, 1, 0),

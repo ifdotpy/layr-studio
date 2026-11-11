@@ -131,30 +131,27 @@ mod tests {
     async fn startup_removes_account_throttle_and_preserves_other_waits() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
-        let store = crate::RuntimeStore::open(Some(root)).await.unwrap();
-        store.transaction_with(|tx| {
-            for reason in ["slot", "pause", "start_queue", "model_catalog", "provider_session", "dependency", "disk"] {
-                let record = json!({"id":reason,"rootId":reason,"provider":"codex","accountKey":"default","epoch":3,"compactions":0,"status":"queued","autoWake":true,"startWait":{"reason":reason,"epoch":3}});
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![reason,record.to_string()])?;
-            }
-            Ok::<_,StoreError>(())
-        }).await.unwrap();
-        drop(store);
-        // Force the preceding catalog so this resembles a pre-upgrade database.
-        let db = rusqlite::Connection::open(root.join("canvas.sqlite3")).unwrap();
-        let previous = super::super::catalog_fingerprint(
-            &super::super::CATALOG[..super::super::CATALOG
-                .iter()
-                .position(|step| step.definition().id == "2026-11-11-remove-account-throttle")
-                .unwrap()],
-            studio_runtime_schema::studio_errors::MigrationTarget::Canvas,
-        );
-        let marker = super::super::catalog_marker(&db, &previous).unwrap();
-        db.execute(
-            "UPDATE sync_entity_meta SET value=?1 WHERE key='migration_catalog'",
-            [&marker],
-        )
-        .unwrap();
+        crate::test_fixtures::canvas::write_supported_fixture(root).unwrap();
+        let mut db = crate::test_fixtures::canvas::open_supported_canvas(root).unwrap();
+        crate::test_fixtures::canvas::install_legacy_source_schema(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        for reason in [
+            "slot",
+            "pause",
+            "start_queue",
+            "model_catalog",
+            "provider_session",
+            "dependency",
+            "disk",
+        ] {
+            let record = json!({"id":reason,"rootId":reason,"provider":"codex","accountKey":"default","epoch":3,"compactions":0,"status":"queued","autoWake":true,"startWait":{"reason":reason,"epoch":3}});
+            tx.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                rusqlite::params![reason, record.to_string()],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
         drop(db);
         std::fs::create_dir_all(root.join("accounts")).unwrap();
         let registry_path = root.join("accounts/registry.json");

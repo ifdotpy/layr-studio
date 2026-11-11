@@ -44,7 +44,7 @@ fn complete_rows(store: &RuntimeStore, id: &str) -> Value {
         .expect("monitor exists");
     let requests = studio_runtime_services::provider_callbacks::legacy_view::views(&connection);
     let events = fixtures::events(store);
-    let projections = ["sync_entities", "sync_documents", "sync_entity_meta"]
+    let projections = ["publications", "metadata"]
         .into_iter()
         .map(|table| {
             let mut statement = connection

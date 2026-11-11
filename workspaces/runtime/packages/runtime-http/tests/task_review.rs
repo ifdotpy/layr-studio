@@ -353,7 +353,7 @@ async fn legacy_work_is_available_in_the_first_sse_baseline_without_an_entity_pu
         let legacy_work = json!({"id":"old-work","rootId":"lead","title":"Legacy assignment","status":"review","created":1,"updated":1,"version":1,"results":[{"id":"old-result","agent":"lead","text":"Legacy evidence","checks":"Checked","revision":"abc","files":[],"created":1}]});
         tx.execute("INSERT INTO runtime_work(id,record) VALUES('old-work',?1)",[legacy_work.to_string()])?;
         studio_runtime_store::work_history::reconcile(tx, "old-work", &legacy_work)?;
-        tx.execute("DELETE FROM sync_entity_meta WHERE key=?1",[studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
+        studio_runtime_store::test_fixtures::canvas::set_meta(tx, studio_runtime_store::WORK_DETAILS_SEED_MARKER, None)?;
         Ok(())
     }).await.unwrap();
     studio_runtime_services::entity_publication::install(&store)

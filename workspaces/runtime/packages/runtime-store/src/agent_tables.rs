@@ -55,8 +55,19 @@ use studio_db_api::DbTable;
 pub struct AgentsStorageRow {
     #[db(key)]
     pub id: String,
+    /// Existing generated selector; the storage owner never writes this field.
+    #[db(generated, codec=crate::agent_columns::typed::AgentIdCodec)]
+    pub root_id: Option<crate::AgentId>,
+    /// Existing generated deletion time, in seconds; read-only.
+    #[db(generated)]
+    pub deleted_at: Option<f64>,
     #[db(codec = JsonRecordCodec<crate::AgentRecord>)]
     pub record: RawJsonRecord<crate::AgentRecord>,
+}
+
+impl AgentsStorageRow {
+    /// Existing SQLite insertion order, available to narrow read projections.
+    pub const ROWID: studio_db_api::Rowid<Self> = studio_db_api::Rowid::<Self>::COLUMN;
 }
 
 fn check_runtime_agents(row: &AgentsStorageRow) -> crate::StoreResult<()> {
@@ -324,6 +335,71 @@ fn check_turn(row: &TurnsStorageRow) -> crate::StoreResult<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn live_agent_visibility_columns_are_generated_and_never_written() {
+        use studio_db_api::Table;
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        super::AgentVolatileStorageRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        super::AgentsStorageRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let record = crate::json_record_codec::RawJsonRecord::from_stored(
+            &db,
+            "worker",
+            r#"{"id":"worker","provider":"codex","accountKey":"default","rootId":"root","epoch":1,"status":"idle","deletedAt":1.5}"#.into(),
+        )
+        .unwrap();
+        let transaction = db.unchecked_transaction().unwrap();
+        crate::peer_update_settings::canvas_tx(&transaction)
+            .insert(&super::AgentsStorageRow {
+                id: "worker".into(),
+                record,
+                root_id: None,
+                deleted_at: Some(99.0),
+            })
+            .unwrap();
+        let row = crate::peer_update_settings::canvas_read(&transaction)
+            .get::<super::AgentsStorageRow>(&("worker".into(),))
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.root_id.as_ref().map(AsRef::as_ref), Some("root"));
+        assert_eq!(row.deleted_at, Some(1.5));
+        #[derive(studio_db_api::DbProjection)]
+        #[db(of=super::AgentsStorageRow)]
+        struct IdentityOrder {
+            #[db(field=rowid)]
+            source_rowid: i64,
+        }
+        let identities = studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(&transaction),
+            super::AgentsStorageRow,
+            project(IdentityOrder),
+            filter(super::AgentsStorageRow::ID.eq_ref("worker"))
+        )
+        .unwrap();
+        assert_eq!(identities.len(), 1);
+        assert!(identities[0].source_rowid > 0);
+
+        assert!(!super::AgentsStorageRow::INSERT.contains("root_id"));
+        assert!(!super::AgentsStorageRow::INSERT.contains("deleted_at"));
+        transaction.commit().unwrap();
+        // The same descriptor also admits an existing table without replacement.
+        super::AgentsStorageRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let actual = studio_db_api::catalog::export(&db).unwrap();
+        assert_eq!(
+            actual
+                .iter()
+                .find(|entry| entry.name == "runtime_agents")
+                .unwrap()
+                .sql,
+            super::AgentsStorageRow::DDL
+        );
+    }
+
     #[test]
     fn agent_family_descriptors_preserve_catalog_and_legacy_reports() {
         #[derive(serde::Deserialize)]

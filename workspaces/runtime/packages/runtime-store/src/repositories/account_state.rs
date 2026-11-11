@@ -2,10 +2,27 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
+use crate::peer_update_settings::{Canvas, canvas_read};
+use crate::publication_schema::Publications;
+use crate::receipt_tables::AccountStateRow;
 use crate::records::{RecordOrder, RecordPredicate, Table, UsageResumeRecord};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult, Transaction};
 use studio_runtime_schema::persistence::ProviderScope;
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,native,
+    result=(String,Option<Vec<u8>>,Option<i64>,Option<Vec<u8>>,Option<i64>),
+    tables(rows=Publications,accounts=AccountStateRow),
+    indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_DELETED),predicates(entities=rows),
+    columns(id=Publications::ENTITY_ID,payload=Publications::ENTITY_PAYLOAD,
+        collection=Publications::COLLECTION_ORDER,deleted=Publications::DELETED,
+        account=AccountStateRow::ACCOUNT,receipt=AccountStateRow::LIMITS_OBSERVATION,rowid=Publications::SOURCE_ROWID),
+    sql="SELECT {id},substr(CAST({payload} AS BLOB),1,?1),length(CAST({payload} AS BLOB)),substr(CAST(a.{receipt} AS BLOB),1,?1),length(CAST(a.{receipt} AS BLOB)) FROM {rows} LEFT JOIN {accounts} a ON a.{account}={id} WHERE {entities} AND {collection}='rateLimit' AND {deleted}=0 ORDER BY {rowid}")]
+struct LimitsSnapshots {
+    #[db(column=Publications::PUBLICATION_SEQ)]
+    prefix_bytes: i64,
+}
 
 pub const MAX_PERSISTED_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_PERSISTED_DOCUMENT_DEPTH: usize = 128;
@@ -20,8 +37,15 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     connection_functions: &[],
     bootstrap_tables: &[
         TableRequirement {
-            name: "sync_entities",
-            columns: &["collection", "id", "payload", "deleted"],
+            name: <crate::publication_schema::Publications as studio_db_api::Table>::NAME,
+            columns: &[
+                crate::publication_schema::Publications::__DB_COLUMN_KIND,
+                crate::publication_schema::Publications::__DB_COLUMN_IDENTITY,
+                crate::publication_schema::Publications::__DB_COLUMN_COLLECTION_ORDER,
+                crate::publication_schema::Publications::__DB_COLUMN_ENTITY_ID,
+                crate::publication_schema::Publications::__DB_COLUMN_ENTITY_PAYLOAD,
+                crate::publication_schema::Publications::__DB_COLUMN_DELETED,
+            ],
         },
         TableRequirement {
             name: "runtime_account_state",
@@ -166,10 +190,7 @@ pub fn typed_limits_snapshot(
     account: &str,
     stamp: &LimitsStamp,
 ) -> StoreResult<Option<studio_runtime_schema::usage_limits::UsageLimitsResponse>> {
-    let raw: Option<String> = connection.query_row(
-        "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1 AND deleted=0",
-        [account], |row| row.get(0),
-    ).optional()?;
+    let raw = super::sync_documents::publication_payload(connection, "rateLimit", account, true)?;
     Ok(raw.map(|raw| {
         let (view, _) = normalized_limits_view(account, raw.as_bytes(), 0.0);
         let mut response = view.observation;
@@ -422,86 +443,83 @@ pub fn latest_limits_snapshot(
 /// Move persisted v3 workspace snapshots once, without changing their account identity.
 /// Restore bounded, validated per-account observations; invalid accounts remain isolated.
 pub fn limits_snapshots(connection: &Connection) -> StoreResult<LimitsRead> {
-    let mut statement = connection.prepare(
-        "SELECT e.id,substr(CAST(e.payload AS BLOB),1,?1),length(CAST(e.payload AS BLOB)),substr(CAST(a.limits_observation AS BLOB),1,?1),length(CAST(a.limits_observation AS BLOB)) FROM sync_entities e LEFT JOIN runtime_account_state a ON a.account=e.id WHERE e.collection='rateLimit' AND e.deleted=0",
-    )?;
-    let mut rows = statement.query(rusqlite::params![MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1])?;
     let mut result = LimitsRead {
         snapshots: Vec::new(),
         diagnostics: Vec::new(),
     };
-    while let Some(row) = rows.next()? {
-        let key: String = row.get(0)?;
-        let bytes: Option<Vec<u8>> = row.get(1)?;
-        let length: Option<i64> = row.get(2)?;
-        let receipt: Option<Vec<u8>> = row.get(3)?;
-        let receipt_length: Option<i64> = row.get(4)?;
-        let decoded = (|| {
-            #[derive(serde::Deserialize)]
-            struct Envelope {
-                value: Projected,
-            }
-            #[derive(serde::Deserialize)]
-            struct Projected {
-                observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
-            }
-            fn decode<T: serde::de::DeserializeOwned>(
-                bytes: &[u8],
-                length: Option<i64>,
-                prefix: &str,
-            ) -> Result<T, (String, String)> {
-                if length.unwrap_or_default() > MAX_PERSISTED_DOCUMENT_BYTES as i64
-                    || !persisted_document_within_bounds(bytes)
-                {
-                    return Err(("/".into(), "resourceLimit".into()));
+    canvas_read(connection).visit(
+        &LimitsSnapshots::QUERY,
+        &LimitsSnapshots {
+            prefix_bytes: MAX_PERSISTED_DOCUMENT_BYTES as i64 + 1,
+        },
+        |(key, bytes, length, receipt, receipt_length)| {
+            let decoded = (|| {
+                #[derive(serde::Deserialize)]
+                struct Envelope {
+                    value: Projected,
                 }
-                let mut deserializer = studio_json::Deserializer::from_slice(bytes);
-                serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
-                    let path = error.path().to_string();
-                    let path = path
-                        .strip_prefix(prefix)
-                        .unwrap_or(&path)
-                        .trim_start_matches('.');
-                    let first = path.split('.').next().unwrap_or("");
-                    let pointer = if first.is_empty() {
-                        "/value".into()
-                    } else {
-                        format!("/{first}")
-                    };
-                    (pointer, "type".into())
-                })
-            }
-            let stamp = match receipt {
-                Some(bytes) => {
-                    decode::<Option<LimitsStamp>>(&bytes, receipt_length, "")?.unwrap_or_default()
+                #[derive(serde::Deserialize)]
+                struct Projected {
+                    observation: studio_runtime_schema::usage_limits::UsageLimitsResponse,
                 }
-                None => LimitsStamp::default(),
+                fn decode<T: serde::de::DeserializeOwned>(
+                    bytes: &[u8],
+                    length: Option<i64>,
+                    prefix: &str,
+                ) -> Result<T, (String, String)> {
+                    if length.unwrap_or_default() > MAX_PERSISTED_DOCUMENT_BYTES as i64
+                        || !persisted_document_within_bounds(bytes)
+                    {
+                        return Err(("/".into(), "resourceLimit".into()));
+                    }
+                    let mut deserializer = studio_json::Deserializer::from_slice(bytes);
+                    serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
+                        let path = error.path().to_string();
+                        let path = path
+                            .strip_prefix(prefix)
+                            .unwrap_or(&path)
+                            .trim_start_matches('.');
+                        let first = path.split('.').next().unwrap_or("");
+                        let pointer = if first.is_empty() {
+                            "/value".into()
+                        } else {
+                            format!("/{first}")
+                        };
+                        (pointer, "type".into())
+                    })
+                }
+                let stamp = match receipt {
+                    Some(bytes) => decode::<Option<LimitsStamp>>(&bytes, receipt_length, "")?
+                        .unwrap_or_default(),
+                    None => LimitsStamp::default(),
+                };
+                let bytes = bytes.ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
+                let mut response = decode::<Envelope>(&bytes, length, "value.observation")?
+                    .value
+                    .observation;
+                if response.account_key != key {
+                    return Err(("/accountKey".into(), "identity".into()));
+                }
+                stamp.apply(&mut response);
+                Ok(response)
+            })();
+            let (snapshot, invalid) = match decoded {
+                Ok(snapshot) => (Some(snapshot), None),
+                Err(error) => (None, Some(error)),
             };
-            let bytes = bytes.ok_or_else(|| ("/value".to_owned(), "type".to_owned()))?;
-            let mut response = decode::<Envelope>(&bytes, length, "value.observation")?
-                .value
-                .observation;
-            if response.account_key != key {
-                return Err(("/accountKey".into(), "identity".into()));
+            if let Some((pointer, keyword)) = invalid {
+                result.diagnostics.push(LimitsReadDiagnostic {
+                    workspace_row: "rateLimit",
+                    account_key: key,
+                    pointer,
+                    keyword,
+                });
+            } else if let Some(snapshot) = snapshot {
+                result.snapshots.push((key, snapshot));
             }
-            stamp.apply(&mut response);
-            Ok(response)
-        })();
-        let (snapshot, invalid) = match decoded {
-            Ok(snapshot) => (Some(snapshot), None),
-            Err(error) => (None, Some(error)),
-        };
-        if let Some((pointer, keyword)) = invalid {
-            result.diagnostics.push(LimitsReadDiagnostic {
-                workspace_row: "rateLimit",
-                account_key: key,
-                pointer,
-                keyword,
-            });
-        } else if let Some(snapshot) = snapshot {
-            result.snapshots.push((key, snapshot));
-        }
-    }
+            Ok(())
+        },
+    )?;
     Ok(result)
 }
 
@@ -562,6 +580,250 @@ mod tests {
     use super::{authentication_recovery_account_keys, limits_snapshots};
     use rusqlite::Connection;
     use studio_json::{Value, json};
+
+    fn canonical_limits_entity(
+        db: &Connection,
+        deleted: crate::metadata_values::StoredBoolean,
+        raw: Option<String>,
+    ) {
+        canonical_limits_row(db, "alpha", 1, deleted, raw);
+    }
+
+    fn canonical_limits_row(
+        db: &Connection,
+        account: &str,
+        rowid: i64,
+        deleted: crate::metadata_values::StoredBoolean,
+        raw: Option<String>,
+    ) {
+        use crate::peer_update_settings::canvas_tx;
+        use crate::publication_collection::CollectionName;
+        use crate::publication_schema::{EntityValue, SyncEntities};
+        use studio_db_api::migration::encode_key;
+        let collection = CollectionName::from_stored("rateLimit".into());
+        let row = SyncEntities {
+            identity: encode_key(&("rateLimit".to_owned(), account.to_owned())),
+            source_rowid: rowid,
+            publication_seq: 42,
+            deleted,
+            collection_kind: collection.kind(),
+            collection_agent: collection.agent().cloned(),
+            non_transcript: collection.non_transcript(),
+            collection_order: collection,
+            entity_id: account.into(),
+            entity_hash: "hash".into(),
+            entity_payload: EntityValue::from_stored("rateLimit", account, deleted, raw).unwrap(),
+        };
+        let tx = db.unchecked_transaction().unwrap();
+        canvas_tx(&tx)
+            .partition::<SyncEntities>()
+            .put(&row)
+            .unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn f1_limits_snapshots_canonical_deleted_null_malformed_and_receipt() {
+        use crate::metadata_values::StoredBoolean;
+        use studio_db_api::Table;
+        let db = Connection::open_in_memory().unwrap();
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::receipt_schema::create(&db).unwrap();
+        assert!(limits_snapshots(&db).unwrap().snapshots.is_empty());
+        for deleted in [StoredBoolean::Valid(true), StoredBoolean::LegacyInteger(2)] {
+            canonical_limits_entity(&db, deleted, None);
+            let read = limits_snapshots(&db).unwrap();
+            assert!(read.snapshots.is_empty() && read.diagnostics.is_empty());
+        }
+        for raw in [None, Some("not JSON".into())] {
+            canonical_limits_entity(&db, StoredBoolean::Valid(false), raw);
+            let read = limits_snapshots(&db).unwrap();
+            assert!(read.snapshots.is_empty());
+            assert_eq!(read.diagnostics.len(), 1);
+            assert_eq!(read.diagnostics[0].account_key, "alpha");
+            assert_eq!(read.diagnostics[0].keyword, "type");
+        }
+        canonical_limits_entity(&db, StoredBoolean::Valid(false), Some(r#"{"value":{"observation":{"accountKey":"alpha","at":1.0,"data":{"accountId":"A"}}}}"#.into()));
+        let tx = db.unchecked_transaction().unwrap();
+        super::put_limits_observation(
+            &tx,
+            "alpha",
+            &super::LimitsStamp {
+                at: Some(9.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let read = limits_snapshots(&db).unwrap();
+        assert!(read.diagnostics.is_empty());
+        assert_eq!(read.snapshots[0].1.at, Some(9.0));
+        let params = super::LimitsSnapshots { prefix_bytes: 17 };
+        let plan = crate::query_plan_test_support::explain(
+            &db,
+            super::LimitsSnapshots::QUERY.sql(),
+            &params,
+        )
+        .unwrap();
+        assert!(
+            plan.iter().any(|line| line.contains("SEARCH")
+                && line.contains("publications_entity_collection_deleted")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|line| line.contains("SEARCH") && line.contains("runtime_account_state")),
+            "{plan:?}"
+        );
+        let row = super::canvas_read(&db)
+            .collect(&super::LimitsSnapshots::QUERY, &params)
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(row.1.unwrap().len(), 17);
+        assert!(row.2.unwrap() > 17);
+        let oversized = " ".repeat(super::MAX_PERSISTED_DOCUMENT_BYTES + 1);
+        canonical_limits_entity(&db, StoredBoolean::Valid(false), Some(oversized));
+        let read = limits_snapshots(&db).unwrap();
+        assert!(read.snapshots.is_empty());
+        assert_eq!(read.diagnostics[0].keyword, "resourceLimit");
+        canonical_limits_entity(
+            &db,
+            StoredBoolean::Valid(false),
+            Some(r#"{"value":{"observation":{"accountKey":"alpha","at":1.0}}}"#.into()),
+        );
+        let mut account = super::canvas_read(&db)
+            .get::<crate::receipt_tables::AccountStateRow>(&("alpha".to_owned(),))
+            .unwrap()
+            .unwrap();
+        account.limits_observation = Some(
+            crate::json_record_codec::ExactJson::from_stored(format!(
+                "{{\"padding\":\"{}\"}}",
+                "a".repeat(super::MAX_PERSISTED_DOCUMENT_BYTES)
+            ))
+            .unwrap(),
+        );
+        let tx = db.unchecked_transaction().unwrap();
+        crate::peer_update_settings::canvas_tx(&tx)
+            .upsert(&account)
+            .unwrap();
+        tx.commit().unwrap();
+        let bounded = super::canvas_read(&db)
+            .collect(
+                &super::LimitsSnapshots::QUERY,
+                &super::LimitsSnapshots { prefix_bytes: 17 },
+            )
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(bounded.3.unwrap().len(), 17);
+        assert!(bounded.4.unwrap() > super::MAX_PERSISTED_DOCUMENT_BYTES as i64);
+        let read = limits_snapshots(&db).unwrap();
+        assert!(read.snapshots.is_empty());
+        assert_eq!(read.diagnostics[0].pointer, "/");
+        assert_eq!(read.diagnostics[0].keyword, "resourceLimit");
+    }
+
+    #[test]
+    fn f1_limits_snapshots_canonical_account_isolation_and_source_order() {
+        use crate::metadata_values::StoredBoolean;
+        use studio_db_api::Table;
+        let db = Connection::open_in_memory().unwrap();
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::receipt_schema::create(&db).unwrap();
+        canonical_limits_entity(
+            &db,
+            StoredBoolean::Valid(false),
+            Some(r#"{"value":{"observation":{"accountKey":"alpha","at":1.0}}}"#.into()),
+        );
+        canonical_limits_row(
+            &db,
+            "beta",
+            -9,
+            StoredBoolean::Valid(false),
+            Some(r#"{"value":{"observation":{"accountKey":"beta","at":2.0}}}"#.into()),
+        );
+        let read = limits_snapshots(&db).unwrap();
+        assert!(read.diagnostics.is_empty());
+        assert_eq!(
+            read.snapshots
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            ["beta", "alpha"]
+        );
+        canonical_limits_row(
+            &db,
+            "beta",
+            -9,
+            StoredBoolean::Valid(false),
+            Some(r#"{"value":{"observation":{"accountKey":"foreign","at":2.0}}}"#.into()),
+        );
+        let read = limits_snapshots(&db).unwrap();
+        assert_eq!(read.snapshots.len(), 1);
+        assert_eq!(read.snapshots[0].0, "alpha");
+        assert_eq!(read.diagnostics[0].account_key, "beta");
+        assert_eq!(read.diagnostics[0].pointer, "/accountKey");
+        assert_eq!(read.diagnostics[0].keyword, "identity");
+    }
+
+    #[test]
+    fn canonical_limits_caller_preserves_missing_null_deleted_and_stamp() {
+        use crate::metadata_values::StoredBoolean;
+        use crate::publication_schema::Publications;
+        use studio_db_api::Table;
+
+        let db = Connection::open_in_memory().unwrap();
+        Publications::descriptor().install_if_absent(&db).unwrap();
+        let stamp = super::LimitsStamp {
+            at: Some(9.0),
+            read_at: Some(10.0),
+            ..Default::default()
+        };
+        assert!(
+            super::typed_limits_snapshot(&db, "alpha", &stamp)
+                .unwrap()
+                .is_none()
+        );
+        for (deleted, raw) in [
+            (StoredBoolean::Valid(false), None),
+            (StoredBoolean::Valid(true), None),
+            (StoredBoolean::LegacyInteger(2), None),
+            (
+                StoredBoolean::Valid(false),
+                Some(
+                    r#"{"value":{"accountKey":"alpha","at":1.0,"data":{"status":"ready"},"eligibility":false}}"#,
+                ),
+            ),
+            (
+                StoredBoolean::Valid(false),
+                Some(r#"{"value":{"accountKey":"foreign","at":1.0,"data":{"status":"ready"}}}"#),
+            ),
+        ] {
+            canonical_limits_entity(&db, deleted, raw.map(str::to_owned));
+            let result = super::typed_limits_snapshot(&db, "alpha", &stamp);
+            if deleted.as_stored() != 0 {
+                assert!(result.unwrap().is_none());
+            } else if raw.is_none() {
+                assert!(matches!(
+                    result,
+                    Err(crate::StoreError::Sqlite(
+                        rusqlite::Error::InvalidColumnType(_, _, rusqlite::types::Type::Null)
+                    ))
+                ));
+            } else {
+                let result = result.unwrap().unwrap();
+                assert_eq!(result.account_key, "alpha");
+                assert_eq!(result.at, Some(9.0));
+                assert_eq!(result.read_at, Some(10.0));
+                assert_eq!(result.data.is_some(), raw.unwrap().contains("eligibility"));
+            }
+        }
+    }
 
     #[test]
     fn agent_provider_stream_keeps_legacy_admission_and_state_guards() {
@@ -737,18 +999,11 @@ mod tests {
     fn receipt_account_observation_restores_without_receipt_table() {
         let db = Connection::open_in_memory().expect("SQLite");
         crate::receipt_schema::create(&db).expect("target schema");
-        db.execute_batch(
-            "CREATE TABLE sync_entities(collection TEXT,id TEXT,payload TEXT,deleted INTEGER)",
-        )
-        .expect("entities");
-        db.execute(
-            "INSERT INTO sync_entities VALUES('rateLimit','alpha',?1,0)",
-            [
-                json!({"value":{"observation":{"accountKey":"alpha","at":1.0,"data":{"accountId":"A"}}}})
-                    .to_string(),
-            ],
-        )
-        .expect("snapshot");
+        use studio_db_api::Table;
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        canonical_limits_entity(&db, crate::metadata_values::StoredBoolean::Valid(false), Some(r#"{"value":{"observation":{"accountKey":"alpha","at":1.0,"data":{"accountId":"A"}}}}"#.into()));
         db.execute(
             "INSERT INTO runtime_account_state VALUES('alpha',7,NULL,NULL,0,0,'null',?1,NULL)",
             [json!({"scope":null,"cursor":0,"at":2.0}).to_string()],
@@ -776,30 +1031,32 @@ mod tests {
 
     fn database(payload: &Value) -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
-        connection.execute_batch("CREATE TABLE sync_entities(collection TEXT, id TEXT, payload TEXT, deleted INTEGER)").expect("fixture tables");
+        use studio_db_api::Table;
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&connection)
+            .unwrap();
         crate::receipt_schema::create(&connection).expect("account state");
         if let Some(accounts) = payload
             .pointer("/value/rateLimitsByAccount")
             .and_then(Value::as_object)
         {
-            for (key, snapshot) in accounts {
-                connection
-                    .execute(
-                        "INSERT INTO sync_entities VALUES('rateLimit',?1,?2,0)",
-                        rusqlite::params![
-                            key,
-                            json!({"value":{"observation":snapshot}}).to_string()
-                        ],
-                    )
-                    .expect("fixture row");
+            for (n, (key, snapshot)) in accounts.iter().enumerate() {
+                canonical_limits_row(
+                    &connection,
+                    key,
+                    n as i64 + 1,
+                    crate::metadata_values::StoredBoolean::Valid(false),
+                    Some(json!({"value":{"observation":snapshot}}).to_string()),
+                );
             }
         } else if payload["value"] == false {
-            connection
-                .execute(
-                    "INSERT INTO sync_entities VALUES('rateLimit','default',?1,0)",
-                    [payload.to_string()],
-                )
-                .expect("invalid fixture row");
+            canonical_limits_row(
+                &connection,
+                "default",
+                1,
+                crate::metadata_values::StoredBoolean::Valid(false),
+                Some(payload.to_string()),
+            );
         }
         connection
     }
@@ -863,17 +1120,16 @@ mod tests {
             "]".repeat(10_000)
         );
         let db = Connection::open_in_memory().expect("SQLite");
-        db.execute(
-            "CREATE TABLE sync_entities(collection TEXT,id TEXT,payload TEXT,deleted INTEGER)",
-            [],
-        )
-        .expect("table");
+        use studio_db_api::Table;
+        crate::publication_schema::Publications::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
         crate::receipt_schema::create(&db).expect("account state");
-        db.execute(
-            "INSERT INTO sync_entities VALUES('rateLimit','default',?1,0)",
-            [deep],
-        )
-        .expect("row");
+        canonical_limits_entity(
+            &db,
+            crate::metadata_values::StoredBoolean::Valid(false),
+            Some(deep),
+        );
         let read = limits_snapshots(&db).expect("bounded read");
         assert_eq!(read.diagnostics[0].keyword, "resourceLimit");
     }

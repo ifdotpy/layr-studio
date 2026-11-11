@@ -7,7 +7,7 @@ async fn startup_reseed_holds_unreadable_active_and_terminal_monitors_and_serves
     let state = tempfile::tempdir().expect("state");
     let store = RuntimeStore::open(Some(state.path())).await.unwrap();
     store.transaction(|tx| {
-        tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
+        studio_runtime_store::test_fixtures::canvas::set_meta(tx, studio_runtime_store::WORK_DETAILS_SEED_MARKER, None)?;
         tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)",
             [studio_json::json!({"id":"owner","rootId":"owner","compactions":0,"provider":"codex","epoch":0,"status":"completed","autoWake":true,"accountKey":"default"}).to_string()])?;
         for (id, status) in [("bad-active", "running"), ("bad-terminal", "completed")] {
@@ -181,8 +181,33 @@ async fn migration_startup_failure_prevents_listener_and_readiness() {
 async fn migration_startup_unfinished_receipts_prevent_all_recovery() {
     let state = tempfile::tempdir().expect("state");
     drop(RuntimeStore::open(Some(state.path())).await.expect("fresh"));
-    let db = rusqlite::Connection::open(state.path().join("canvas.sqlite3")).expect("database");
-    db.execute("UPDATE runtime_payload_migrations SET status='pending',complete=0 WHERE name LIKE '%receipts-tools-finish:%'", []).expect("unfinished receipt checkpoint");
+    let mut db = rusqlite::Connection::open(state.path().join("canvas.sqlite3")).expect("database");
+    let finish = "2026-10-28-receipts-tools-finish";
+    let name = format!("receipts:{}:{finish}:", finish.len());
+    assert_eq!(
+        studio_runtime_store::test_fixtures::canvas::migration_progress(&db, &name)
+            .expect("completed receipt checkpoint"),
+        Some((1, "complete".into()))
+    );
+    let tx = db.transaction().expect("checkpoint transaction");
+    studio_runtime_store::test_fixtures::canvas::seed_migration_progress(
+        &tx,
+        &studio_runtime_store::settings_schema::PayloadMigrations {
+            name: name.clone(),
+            cursor: 0,
+            complete: 0,
+            status: "pending".into(),
+            updated: Some(0.0),
+            error: None,
+            cutover_ms: None,
+            receipt_enum_guard: None,
+            cursor_key: None,
+            copy_source_rows: None,
+            copy_target_rows: None,
+        },
+    )
+    .expect("unfinished receipt checkpoint");
+    tx.commit().expect("checkpoint commits");
     let mut command = tokio::process::Command::new(
         std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
             .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
@@ -207,5 +232,9 @@ async fn migration_startup_unfinished_receipts_prevent_all_recovery() {
         "provider recovery must not start: {stderr}"
     );
     assert!(!stderr.contains("listener-bound"), "{stderr}");
-    assert_eq!(db.query_row("SELECT status FROM runtime_payload_migrations WHERE name LIKE '%receipts-tools-finish:%'", [], |row| row.get::<_, String>(0)).expect("checkpoint retained"), "pending");
+    assert_eq!(
+        studio_runtime_store::test_fixtures::canvas::migration_progress(&db, &name)
+            .expect("checkpoint retained"),
+        Some((0, "pending".into()))
+    );
 }

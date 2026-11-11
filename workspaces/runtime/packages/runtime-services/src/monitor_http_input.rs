@@ -394,11 +394,9 @@ mod tests {
     #[test]
     fn receipt_pivot_monitor_expired_input_replays_permanent_result() {
         let mut db = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
         studio_runtime_store::receipt_schema::create(&db).expect("schema");
-        db.execute_batch(
-            "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-        )
-        .expect("policy");
         let root = RequestIdentity::issue_root();
         let identity = identity(&root).expect("identity");
         let operation: Operation = Operation {
@@ -472,11 +470,9 @@ mod tests {
     #[test]
     fn receipt_pivot_monitor_unknown_survives_time_and_late_exact_ack_settles() {
         let mut db = Connection::open_in_memory().expect("database");
+        studio_runtime_store::test_fixtures::canvas::install_canonical(&db)
+            .expect("canonical storage");
         studio_runtime_store::receipt_schema::create(&db).expect("target schema");
-        db.execute_batch(
-            "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
-        )
-        .expect("policy");
         let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let identity = studio_runtime_schema::persistence::RequestIdentity::new(
             "monitor-http-input",

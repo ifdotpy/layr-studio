@@ -2,6 +2,7 @@ use super::*;
 use crate::event_write::{CallerAdmission, RequestKey, begin_request};
 use std::sync::Arc;
 use studio_runtime_schema::peer_team_ingress::TeamMutation;
+use studio_runtime_store::ProjectionPublicationQueries;
 
 pub async fn peer_team_write(
     store: Arc<RuntimeStore>,
@@ -54,83 +55,214 @@ pub async fn peer_team_write(
     let signature = peer_team_signature(&body)?;
     let key = format!("peer-team:{request_id}");
     let (prepared, path) = super::prepare_path(store.clone(), path_value, false).await?;
-    store.transaction_with(move |tx| {
-        prepared.recheck(tx)?;
-        let server = RuntimeStore::transaction_local_server_id(tx)?.ok_or(ProjectsError::Invalid("The local server ID is unavailable"))?;
-        let admitted = match begin_request::<studio_json::OwnedRawJson>(tx,RequestKey::new("peer-team", &[&server,"owner-api"], &request_id).raw(&key).operation(&["write"]), &signature,(now_seconds()*1000.0) as i64).map_err(StoreError::from)? {
-            CallerAdmission::Fresh(admitted) => admitted,
-            CallerAdmission::Replay(reply) => return studio_json::from_str(reply.as_str()).map_err(StoreError::from).map_err(Into::into),
-        };
-        let mut project = match load_project(tx, &path)? {
-            Some(project) => project,
-            None if path.starts_with("project:") => return Err(ProjectsError::Invalid("select an existing project")),
-            None => { let account = project_account(&prepared, tx, &path, &default_account)?; new_project(&prepared, &path, &project_name(None, &path)?, &account, &known_accounts)? }
-        };
-        let current = revision_of(Some(&project), "peerTeamsRevision", &path)?;
-        if revision != current { return Err(ProjectsError::Conflict("Peer teams changed. Reload before saving")); }
-        let raw_teams = project.get("peerTeams").and_then(Value::as_array).cloned().unwrap_or_default();
-        let mut previous_ids = raw_teams.iter().map(|team| {
-            let value = team.get("id").and_then(Value::as_str)
-                .ok_or_else(|| ProjectsError::InvalidStored { table: "runtime_projects", id: path.clone() })?;
-            Uuid::parse_str(value).map(|uuid| uuid.to_string())
-                .map_err(|_| ProjectsError::InvalidStored { table: "runtime_projects", id: path.clone() })
-        }).collect::<Result<std::collections::HashSet<_>,_>>()?;
-        let agents = project_agents(tx)?;
-        let mut teams = live_teams(&raw_teams, &agents, &path, &prepared)?;
-        let mut statement = tx.prepare_cached("SELECT id FROM sync_entities WHERE collection='peerTeam' AND json_extract(payload,'$.value.projectPath')=?1")?;
-        previous_ids.extend(statement.query_map([&path], |row| row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?);
-        drop(statement);
-        match body {
-            TeamMutation::Save(_) => {
-                let team_id = team_id.as_deref().ok_or(ProjectsError::Invalid("peer team ID is invalid"))?;
-                for member in &members {
-                    let id = member.as_str();
-                    if !agents.get(id).is_some_and(|agent| is_project_lead(agent, &path, &prepared)) { return Err(ProjectsError::Invalid("select live lead chats from this project only")); }
+    store
+        .transaction_with(move |tx| {
+            prepared.recheck(tx)?;
+            let server = RuntimeStore::transaction_local_server_id(tx)?
+                .ok_or(ProjectsError::Invalid("The local server ID is unavailable"))?;
+            let admitted = match begin_request::<studio_json::OwnedRawJson>(
+                tx,
+                RequestKey::new("peer-team", &[&server, "owner-api"], &request_id)
+                    .raw(&key)
+                    .operation(&["write"]),
+                &signature,
+                (now_seconds() * 1000.0) as i64,
+            )
+            .map_err(StoreError::from)?
+            {
+                CallerAdmission::Fresh(admitted) => admitted,
+                CallerAdmission::Replay(reply) => {
+                    return studio_json::from_str(reply.as_str())
+                        .map_err(StoreError::from)
+                        .map_err(Into::into);
                 }
-                if teams.iter().any(|team| team.get("id").and_then(Value::as_str) != Some(team_id)
-                    && team.get("members").and_then(Value::as_array).is_some_and(|existing| existing.iter().any(|member| member.as_str().is_some_and(|member| members.iter().any(|selected| selected == member))))) {
-                    return Err(ProjectsError::Invalid("a chat already belongs to another peer team"));
+            };
+            let mut project = match load_project(tx, &path)? {
+                Some(project) => project,
+                None if path.starts_with("project:") => {
+                    return Err(ProjectsError::Invalid("select an existing project"));
                 }
-                let selected = json!({"id":team_id,"name":name,"members":members});
-                if let Some(old) = teams.iter_mut().find(|team| team.get("id").and_then(Value::as_str) == Some(team_id)) { *old = selected; } else { teams.push(selected); }
+                None => {
+                    let account = project_account(&prepared, tx, &path, &default_account)?;
+                    new_project(
+                        &prepared,
+                        &path,
+                        &project_name(None, &path)?,
+                        &account,
+                        &known_accounts,
+                    )?
+                }
+            };
+            let current = revision_of(Some(&project), "peerTeamsRevision", &path)?;
+            if revision != current {
+                return Err(ProjectsError::Conflict(
+                    "Peer teams changed. Reload before saving",
+                ));
             }
-            TeamMutation::Delete(_) => teams.retain(|team| team.get("id").and_then(Value::as_str) != team_id.as_deref()),
-            TeamMutation::Move(movement) => {
-                let member = python_strip(&movement.member);
-                if member.is_empty() || member.chars().count() > 255 || !agents.get(member).is_some_and(|agent| is_project_lead(agent, &path, &prepared)) { return Err(ProjectsError::Invalid("select a live lead chat from this project only")); }
-                let source = teams.iter().position(|team| team.get("members").and_then(Value::as_array).is_some_and(|items| items.iter().any(|item| item.as_str() == Some(member))));
-                let target = team_id.as_deref().and_then(|id| teams.iter().position(|team| team.get("id").and_then(Value::as_str) == Some(id)));
-                if team_id.is_some() && target.is_none() { return Err(ProjectsError::Invalid("the destination team is no longer available")); }
-                if source == target { return Err(ProjectsError::Invalid("the chat already has this team membership")); }
-                if let Some(index) = source
-                    && let Some(list) = teams[index]["members"].as_array_mut()
-                { list.retain(|item| item.as_str() != Some(member)); }
-                if let Some(index) = target
-                    && let Some(list) = teams[index]["members"].as_array_mut()
-                { list.push(json!(member)); }
-                teams.retain(|team| team.get("members").and_then(Value::as_array).is_some_and(|items| items.len() >= 2));
+            let raw_teams = project
+                .get("peerTeams")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let mut previous_ids = raw_teams
+                .iter()
+                .map(|team| {
+                    let value = team.get("id").and_then(Value::as_str).ok_or_else(|| {
+                        ProjectsError::InvalidStored {
+                            table: "runtime_projects",
+                            id: path.clone(),
+                        }
+                    })?;
+                    Uuid::parse_str(value)
+                        .map(|uuid| uuid.to_string())
+                        .map_err(|_| ProjectsError::InvalidStored {
+                            table: "runtime_projects",
+                            id: path.clone(),
+                        })
+                })
+                .collect::<Result<std::collections::HashSet<_>, _>>()?;
+            let agents = project_agents(tx)?;
+            let mut teams = live_teams(&raw_teams, &agents, &path, &prepared)?;
+            previous_ids.extend(ProjectionPublicationQueries::project_team_ids(tx, &path)?);
+            match body {
+                TeamMutation::Save(_) => {
+                    let team_id = team_id
+                        .as_deref()
+                        .ok_or(ProjectsError::Invalid("peer team ID is invalid"))?;
+                    for member in &members {
+                        let id = member.as_str();
+                        if !agents
+                            .get(id)
+                            .is_some_and(|agent| is_project_lead(agent, &path, &prepared))
+                        {
+                            return Err(ProjectsError::Invalid(
+                                "select live lead chats from this project only",
+                            ));
+                        }
+                    }
+                    if teams.iter().any(|team| {
+                        team.get("id").and_then(Value::as_str) != Some(team_id)
+                            && team.get("members").and_then(Value::as_array).is_some_and(
+                                |existing| {
+                                    existing.iter().any(|member| {
+                                        member.as_str().is_some_and(|member| {
+                                            members.iter().any(|selected| selected == member)
+                                        })
+                                    })
+                                },
+                            )
+                    }) {
+                        return Err(ProjectsError::Invalid(
+                            "a chat already belongs to another peer team",
+                        ));
+                    }
+                    let selected = json!({"id":team_id,"name":name,"members":members});
+                    if let Some(old) = teams
+                        .iter_mut()
+                        .find(|team| team.get("id").and_then(Value::as_str) == Some(team_id))
+                    {
+                        *old = selected;
+                    } else {
+                        teams.push(selected);
+                    }
+                }
+                TeamMutation::Delete(_) => teams
+                    .retain(|team| team.get("id").and_then(Value::as_str) != team_id.as_deref()),
+                TeamMutation::Move(movement) => {
+                    let member = python_strip(&movement.member);
+                    if member.is_empty()
+                        || member.chars().count() > 255
+                        || !agents
+                            .get(member)
+                            .is_some_and(|agent| is_project_lead(agent, &path, &prepared))
+                    {
+                        return Err(ProjectsError::Invalid(
+                            "select a live lead chat from this project only",
+                        ));
+                    }
+                    let source = teams.iter().position(|team| {
+                        team.get("members")
+                            .and_then(Value::as_array)
+                            .is_some_and(|items| {
+                                items.iter().any(|item| item.as_str() == Some(member))
+                            })
+                    });
+                    let target = team_id.as_deref().and_then(|id| {
+                        teams
+                            .iter()
+                            .position(|team| team.get("id").and_then(Value::as_str) == Some(id))
+                    });
+                    if team_id.is_some() && target.is_none() {
+                        return Err(ProjectsError::Invalid(
+                            "the destination team is no longer available",
+                        ));
+                    }
+                    if source == target {
+                        return Err(ProjectsError::Invalid(
+                            "the chat already has this team membership",
+                        ));
+                    }
+                    if let Some(index) = source
+                        && let Some(list) = teams[index]["members"].as_array_mut()
+                    {
+                        list.retain(|item| item.as_str() != Some(member));
+                    }
+                    if let Some(index) = target
+                        && let Some(list) = teams[index]["members"].as_array_mut()
+                    {
+                        list.push(json!(member));
+                    }
+                    teams.retain(|team| {
+                        team.get("members")
+                            .and_then(Value::as_array)
+                            .is_some_and(|items| items.len() >= 2)
+                    });
+                }
             }
-        }
-        project["peerTeams"] = json!(teams);
-        project["peerTeamsRevision"] = json!(current + 1);
-        project["updated"] = json!(now_seconds());
-        ProjectsRepository::put_project(tx, &project)?;
-        let team_values = project.get("peerTeams").and_then(Value::as_array).cloned().unwrap_or_default();
-        let live = live_teams(&team_values, &agents, &path, &prepared)?;
-        let project_id = project.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
-        let peer_leads = crate::project_projection::peer_leads_of(tx, &project_id)?;
-        let mut live_ids = std::collections::HashSet::new();
-        for team in &live {
-            let id = team.get("id").and_then(Value::as_str).ok_or(ProjectsError::InvalidStored { table: "runtime_projects", id: path.clone() })?;
-            live_ids.insert(id.to_owned());
-            SyncDocumentsRepository::put_entity(tx, "peerTeam", id, peer_team_projection(team, &path, current + 1, &peer_leads)?, false)?;
-        }
-        for id in previous_ids.difference(&live_ids) { SyncDocumentsRepository::put_entity(tx, "peerTeam", id, json!({}), true)?; }
-        refresh_project_rooms(tx, &path, &prepared)?;
-        let reply = studio_json::to_raw_value(&project).map_err(StoreError::from)?;
-        crate::event_write::settle_request(tx, &admitted, None, &reply).map_err(StoreError::from)?;
-        Ok(project)
-    }).await
+            project["peerTeams"] = json!(teams);
+            project["peerTeamsRevision"] = json!(current + 1);
+            project["updated"] = json!(now_seconds());
+            ProjectsRepository::put_project(tx, &project)?;
+            let team_values = project
+                .get("peerTeams")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let live = live_teams(&team_values, &agents, &path, &prepared)?;
+            let project_id = project
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            let peer_leads = crate::project_projection::peer_leads_of(tx, &project_id)?;
+            let mut live_ids = std::collections::HashSet::new();
+            for team in &live {
+                let id =
+                    team.get("id")
+                        .and_then(Value::as_str)
+                        .ok_or(ProjectsError::InvalidStored {
+                            table: "runtime_projects",
+                            id: path.clone(),
+                        })?;
+                live_ids.insert(id.to_owned());
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "peerTeam",
+                    id,
+                    peer_team_projection(team, &path, current + 1, &peer_leads)?,
+                    false,
+                )?;
+            }
+            for id in previous_ids.difference(&live_ids) {
+                SyncDocumentsRepository::put_entity(tx, "peerTeam", id, json!({}), true)?;
+            }
+            refresh_project_rooms(tx, &path, &prepared)?;
+            let reply = studio_json::to_raw_value(&project).map_err(StoreError::from)?;
+            crate::event_write::settle_request(tx, &admitted, None, &reply)
+                .map_err(StoreError::from)?;
+            Ok(project)
+        })
+        .await
 }
 
 pub(crate) fn project_agents(
@@ -394,5 +526,47 @@ mod sidebar_signature_tests {
             sidebar_signature(&body).unwrap(),
             "b253b17fedf5317dd24bcccca6f1d6eb2166326039b3f14fa442c55de2a17f14"
         );
+    }
+}
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_peer_team_write_retires_orphan_projection() {
+        let root = tempfile::tempdir().unwrap();
+        let project_dir = tempfile::tempdir().unwrap();
+        let path = studio_runtime_store::path_identity::resolve(project_dir.path())
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let store = std::sync::Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .unwrap(),
+        );
+        store
+            .set_local_server_id(Some("canonical-server".into()))
+            .unwrap();
+        let stored_path = path.clone();
+        store.transaction(move|tx| {
+            studio_runtime_store::ProjectsRepository::put_project(tx,&studio_json::json!({"id":stored_path,"path":stored_path,"name":"Canonical","peerTeams":[],"peerTeamsRevision":0}))?;
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx,"peerTeam","orphan",studio_json::json!({"projectPath":stored_path}),false)?;
+            Ok(())
+        }).await.unwrap();
+        let body=studio_json::from_str(&studio_json::json!({"action":"delete","path":path,"expected_revision":0,"request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"team_id":"11111111-1111-4111-8111-111111111111"}).to_string()).unwrap();
+        super::peer_team_write(store.clone(), body, "default".into(), Vec::new())
+            .await
+            .unwrap();
+        store
+            .read_async("canonical-peer-team", |tx| {
+                assert!(
+                    studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+                        tx, "peerTeam", "orphan", true
+                    )?
+                    .is_some()
+                );
+                Ok::<_, studio_runtime_store::StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 }

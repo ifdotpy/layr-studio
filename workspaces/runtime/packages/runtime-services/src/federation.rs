@@ -286,15 +286,13 @@ async fn accept_peer(
     }
     uuid::Uuid::parse_str(state_id)
         .map_err(|_| FederationError::Refused("Peer state identity is invalid".to_owned()))?;
-    let enabled = store.read_async("runtime-services/federation", |tx| {
-        tx.query_row(
-            "SELECT COALESCE(json_extract(record,'$.enabled'),0) FROM runtime_federation_settings WHERE id='global'",
-            [],
-            |row| row.get::<_, bool>(0),
-        )
-        .map_err(StoreError::from)
-    })
-    .await?;
+    let enabled = store
+        .read_async("runtime-services/federation", |tx| {
+            studio_runtime_store::ProjectionPublicationQueries::federation_enabled(tx)
+                .and_then(|value| value.ok_or(rusqlite::Error::QueryReturnedNoRows))
+                .map_err(StoreError::from)
+        })
+        .await?;
     if !enabled {
         return Err(FederationError::Refused(
             "Enable federation before pairing".to_owned(),
@@ -693,14 +691,9 @@ async fn project_grants_view(
 async fn require_federation_enabled(store: &RuntimeStore) -> Result<(), FederationError> {
     let enabled = store
         .read_async("runtime-services/federation", |tx| {
-            tx.query_row(
-                "SELECT COALESCE(json_extract(record,'$.enabled'),0) FROM runtime_federation_settings WHERE id='global'",
-                [],
-                |row| row.get::<_, bool>(0),
-            )
-            .optional()
-            .map(|value| value.unwrap_or(false))
-            .map_err(StoreError::from)
+            studio_runtime_store::ProjectionPublicationQueries::federation_enabled(tx)
+                .map(|value| value.unwrap_or(false))
+                .map_err(StoreError::from)
         })
         .await?;
     if enabled {
@@ -818,5 +811,20 @@ mod tests {
         let identity: studio_json::Value = studio_json::from_str(&identity).expect("identity JSON");
         assert_eq!(identity["tailscaleUser"], "owner@example.test");
         assert_eq!(identity["tailscaleStatus"], "verified");
+    }
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_federation_disabled_is_business_error() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        assert!(matches!(
+            super::require_federation_enabled(&store).await,
+            Err(super::FederationError::Refused(_))
+        ));
     }
 }

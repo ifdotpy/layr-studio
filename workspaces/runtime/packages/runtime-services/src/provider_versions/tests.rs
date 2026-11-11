@@ -400,19 +400,21 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
     };
     let read_notice_state = || {
         let connection = store.test_reader().expect("read notice state");
-        let raw: Option<(i64, String)> = connection
-            .query_row(
-                "SELECT seq,payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+        studio_runtime_store::test_fixtures::canvas::entities(&connection)
+            .expect("read workspace entity")
+            .into_iter()
+            .find(|row| row.collection == "workspace" && row.id == "current" && row.deleted == 0)
+            .map(
+                |studio_runtime_store::test_fixtures::canvas::EntitySnapshot {
+                     seq,
+                     payload,
+                     ..
+                 }| (seq, payload.expect("workspace payload")),
             )
-            .optional()
-            .expect("read workspace entity");
-        raw
     };
 
     let initial = read_notice_state();
-    warn_write("CREATE TRIGGER provider_notice_before_insert BEFORE INSERT ON sync_entities WHEN NEW.collection='workspace' AND NEW.id='current' BEGIN SELECT RAISE(ABORT,'before durable notice write'); END; CREATE TRIGGER provider_notice_before_update BEFORE UPDATE ON sync_entities WHEN NEW.collection='workspace' AND NEW.id='current' BEGIN SELECT RAISE(ABORT,'before durable notice write'); END;")
+    warn_write(&format!("CREATE TRIGGER provider_notice_before_insert BEFORE INSERT ON publications WHEN NEW.kind={kind} AND NEW.collection_order='workspace' AND NEW.entity_id='current' BEGIN SELECT RAISE(ABORT,'before durable notice write'); END; CREATE TRIGGER provider_notice_before_update BEFORE UPDATE ON publications WHEN NEW.kind={kind} AND NEW.collection_order='workspace' AND NEW.entity_id='current' BEGIN SELECT RAISE(ABORT,'before durable notice write'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::DB_CODE_SYNCENTITIES))
         .await.expect("before-write trigger installed");
     let connected_accounts = vec!["connected".to_owned()];
     assert!(
@@ -429,7 +431,7 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         "failure before the write is quiescent"
     );
 
-    warn_write("CREATE TRIGGER provider_notice_after_insert AFTER INSERT ON sync_entities WHEN NEW.collection='workspace' AND NEW.id='current' BEGIN SELECT RAISE(ABORT,'after durable notice write'); END; CREATE TRIGGER provider_notice_after_update AFTER UPDATE ON sync_entities WHEN NEW.collection='workspace' AND NEW.id='current' BEGIN SELECT RAISE(ABORT,'after durable notice write'); END;")
+    warn_write(&format!("CREATE TRIGGER provider_notice_after_insert AFTER INSERT ON publications WHEN NEW.kind={kind} AND NEW.collection_order='workspace' AND NEW.entity_id='current' BEGIN SELECT RAISE(ABORT,'after durable notice write'); END; CREATE TRIGGER provider_notice_after_update AFTER UPDATE ON publications WHEN NEW.kind={kind} AND NEW.collection_order='workspace' AND NEW.entity_id='current' BEGIN SELECT RAISE(ABORT,'after durable notice write'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::DB_CODE_SYNCENTITIES))
         .await.expect("after-write trigger installed");
     assert!(
         adapter
@@ -526,10 +528,15 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         .await
         .expect("restart replay");
     assert_eq!(
-        restarted.test_reader().expect("read after restart").query_row(
-            "SELECT seq,payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [],
-            |row| Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?)),
-        ).expect("replayed row"),
+        studio_runtime_store::test_fixtures::canvas::entities(
+            &restarted.test_reader().expect("read after restart")
+        )
+        .map(|rows| rows
+            .into_iter()
+            .find(|row| row.collection == "workspace" && row.id == "current" && row.deleted == 0)
+            .map(|row| (row.seq, row.payload.expect("workspace payload")))
+            .expect("workspace row"))
+        .expect("replayed row"),
         written,
         "replay preserves original notice timestamp and sequence",
     );
@@ -545,10 +552,16 @@ async fn provider_update_notice_durable_failure_restart_and_replay_matrix() {
         )
         .await
         .expect("changed content under same id");
-    let changed_row: (i64, String) = restarted.test_reader().expect("read changed state").query_row(
-        "SELECT seq,payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [],
-        |row| Ok((row.get(0)?,row.get(1)?)),
-    ).expect("changed workspace row");
+    let changed_row: (i64, String) = studio_runtime_store::test_fixtures::canvas::entities(
+        &restarted.test_reader().expect("read changed state"),
+    )
+    .map(|rows| {
+        rows.into_iter()
+            .find(|row| row.collection == "workspace" && row.id == "current" && row.deleted == 0)
+            .map(|row| (row.seq, row.payload.expect("workspace payload")))
+            .expect("workspace row")
+    })
+    .expect("changed workspace row");
     assert!(changed_row.0 > written.0);
     let changed_payload: Value =
         studio_json::from_str(&changed_row.1).expect("changed entity JSON");
@@ -590,7 +603,7 @@ async fn preference_read_error_fails_closed_without_an_upstream_request() {
     );
     runtime
         .transaction(|transaction| {
-            transaction.execute_batch("DROP TABLE sync_entities")?;
+            transaction.execute_batch("DROP TABLE publications")?;
             Ok(())
         })
         .await

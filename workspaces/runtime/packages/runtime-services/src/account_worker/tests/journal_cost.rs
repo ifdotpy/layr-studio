@@ -404,9 +404,10 @@ async fn publications_drain_in_sequence_order_with_one_delete_transaction() {
     let generation = async |store: &Arc<RuntimeStore>| {
         store
             .transaction_with_commit_generation(|tx| -> Result<(), WorkerError> {
-                tx.execute(
-                    "INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('drainProbe',random())) ON CONFLICT(id) DO UPDATE SET record=json_set(record,'$.drainProbe',random())",
-                    [],
+                studio_runtime_store::clock_schema::SyncEntityMeta::put(
+                    tx,
+                    "drainProbe",
+                    &uuid::Uuid::new_v4().to_string(),
                 )?;
                 Ok(())
             })

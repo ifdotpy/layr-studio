@@ -17,6 +17,52 @@ pub struct Tx<'c, D: Database> {
     transaction: &'c Transaction<'c>,
     database: PhantomData<D>,
 }
+/// Named writes in a transaction owned by the caller. This view cannot start,
+/// commit or roll back the outer transaction; autocommit connections are refused.
+pub struct ConnectionWrite<'c, D: Database> {
+    connection: &'c Connection,
+    database: PhantomData<D>,
+}
+impl<'c, D: Database> ConnectionWrite<'c, D> {
+    pub fn from_adapter(connection: &'c Connection, _capability: &D) -> rusqlite::Result<Self> {
+        if connection.is_autocommit() {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        Ok(Self {
+            connection,
+            database: PhantomData,
+        })
+    }
+    pub fn named<P: QueryParams, R, C: SingleCardinality>(
+        &mut self,
+        query: &NamedQuery<D, P, R, WriteMode, C>,
+        params: &P,
+    ) -> rusqlite::Result<C::Output<R>> {
+        named_savepoint(self.connection, |connection| {
+            query.run(connection, params, false)
+        })
+    }
+}
+fn named_savepoint<T>(
+    connection: &Connection,
+    operation: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+) -> rusqlite::Result<T> {
+    if connection.is_autocommit() {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    connection.execute_batch("SAVEPOINT db_api_named_query")?;
+    match operation(connection) {
+        Ok(value) => {
+            connection.execute_batch("RELEASE db_api_named_query")?;
+            Ok(value)
+        }
+        Err(error) => {
+            connection
+                .execute_batch("ROLLBACK TO db_api_named_query; RELEASE db_api_named_query")?;
+            Err(error)
+        }
+    }
+}
 /// A capability-bound read view; it cannot execute mutations through this API.
 /// ```compile_fail
 /// use studio_db_api::{Database, DbTable, Read, db_delete};
@@ -35,6 +81,16 @@ pub struct Read<'c, D: Database> {
     database: PhantomData<D>,
 }
 impl<'c, D: Database> Read<'c, D> {
+    /// Resolve a descriptor-owned table in this read snapshot. This deliberately
+    /// bypasses the statement cache so retirement changes authority immediately.
+    pub fn table_exists<T: Table<Database = D>>(&self) -> rusqlite::Result<bool> {
+        self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?1)",
+            [T::NAME],
+            |row| row.get(0),
+        )
+    }
+
     pub fn visit<P: QueryParams, R>(
         &self,
         query: &NamedQuery<D, P, R, ReadMode, Many>,
@@ -224,21 +280,9 @@ impl<'c, D: Database> Tx<'c, D> {
         &mut self,
         operation: impl FnOnce(&Connection) -> rusqlite::Result<T>,
     ) -> rusqlite::Result<T> {
-        self.transaction
-            .execute_batch("SAVEPOINT db_api_named_query")?;
-        match operation(self.transaction) {
-            Ok(value) => {
-                self.transaction
-                    .execute_batch("RELEASE db_api_named_query")?;
-                Ok(value)
-            }
-            Err(error) => {
-                self.transaction
-                    .execute_batch("ROLLBACK TO db_api_named_query; RELEASE db_api_named_query")?;
-                Err(error)
-            }
-        }
+        named_savepoint(self.transaction, operation)
     }
+
     pub fn partition<P: PartitionTable<Database = D>>(&mut self) -> Partition<'_, 'c, D, P> {
         Partition {
             tx: self,

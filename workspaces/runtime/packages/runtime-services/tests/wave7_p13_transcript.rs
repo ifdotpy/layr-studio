@@ -79,13 +79,15 @@ async fn transcript_cases(group: usize) {
         keep_copies(&store).await;
         seed_transcript_replies(&store, orphan_replies).await;
         let db = store.test_reader().expect("migrated snapshot reader");
-        let workspace_sequence: i64 = db
-            .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='workspace' AND id='current'",
-                [],
-                |row| row.get(0),
+        let workspace_sequence =
+            studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+                &db,
+                "workspace",
+                "current",
+                false,
             )
-            .expect("migrated workspace sequence");
+            .expect("migrated workspace sequence")
+            .expect("workspace publication");
         assert_eq!(
             workspace_sequence, fixture_workspace_sequence,
             "reopening a migrated workspace keeps its sequence"
@@ -324,8 +326,8 @@ async fn transcript_cases(group: usize) {
                         } else {
                             operation.as_str()
                         };
-                        let condition = if operation == "CACHE" { " AND NEW.payload IS NOT NULL" } else { "" };
-                        tx.execute_batch(&format!("CREATE TEMP TRIGGER p13_fail {timing} {sql_operation} ON sync_entities WHEN {row}.collection='transcript:agent' AND {row}.id='{literal}'{condition} BEGIN SELECT RAISE(ABORT,'p13 failpoint'); END;"))?;
+                        let condition = if operation == "CACHE" { " AND NEW.entity_payload IS NOT NULL" } else { "" };
+                        tx.execute_batch(&format!("CREATE TEMP TRIGGER p13_fail {timing} {sql_operation} ON publications WHEN {row}.kind={kind} AND {row}.collection_order='transcript:agent' AND {row}.entity_id='{literal}'{condition} BEGIN SELECT RAISE(ABORT,'p13 failpoint'); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64))?;
                         Ok(())
                     }).await.expect("install failpoint");
                     assert!(
@@ -356,7 +358,7 @@ async fn transcript_cases(group: usize) {
             fault_count += 1;
             // Deferred constraint fails the actual COMMIT, after all result writes.
             store.transaction(|tx| {
-                tx.execute_batch("CREATE TEMP TABLE p13_parent(id INTEGER PRIMARY KEY); CREATE TEMP TABLE p13_commit(id INTEGER REFERENCES p13_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER p13_commit_fail AFTER UPDATE ON sync_entities WHEN NEW.collection='transcript:agent' AND NEW.id='@revision' BEGIN INSERT INTO p13_commit VALUES(1); END;")?;
+                tx.execute_batch(&format!("CREATE TEMP TABLE p13_parent(id INTEGER PRIMARY KEY); CREATE TEMP TABLE p13_commit(id INTEGER REFERENCES p13_parent(id) DEFERRABLE INITIALLY DEFERRED); CREATE TEMP TRIGGER p13_commit_fail AFTER UPDATE ON publications WHEN NEW.kind={kind} AND NEW.collection_order='transcript:agent' AND NEW.entity_id='@revision' BEGIN INSERT INTO p13_commit VALUES(1); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::SyncEntities as i64))?;
                 Ok(())
             }).await.expect("commit fault");
             assert!(
@@ -378,13 +380,14 @@ async fn transcript_cases(group: usize) {
                     .expect("pull");
             // The workspace limits write and every agent, request and work number come
             // before the transcript allocations, so the highest durable number is the shift.
-            let durable_high: i64 = store
-                .test_reader()
-                .expect("reader")
-                .query_row("SELECT COALESCE(MAX(seq),0) FROM durable_rows", [], |row| {
-                    row.get(0)
-                })
-                .expect("durable high");
+            let durable_high = studio_runtime_store::test_fixtures::canvas::changes(
+                &store.test_reader().expect("reader"),
+            )
+            .expect("durable high")
+            .into_iter()
+            .map(|row| row.seq)
+            .max()
+            .unwrap_or(0);
             assert_pull(
                 &got,
                 expected,
@@ -573,10 +576,7 @@ fn assert_pull(
 async fn keep_copies(store: &RuntimeStore) {
     store
         .transaction(|tx| {
-            tx.execute(
-                "DELETE FROM sync_entity_meta WHERE key='transcript_copies'",
-                [],
-            )?;
+            studio_runtime_store::test_fixtures::canvas::set_meta(tx, "transcript_copies", None)?;
             Ok(())
         })
         .await
@@ -585,21 +585,20 @@ async fn keep_copies(store: &RuntimeStore) {
 
 fn sync_snapshot(store: &RuntimeStore) -> Value {
     let db = store.test_reader().expect("reader");
-    let mut statement=db.prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities ORDER BY collection,id").expect("snapshot");
-    let rows = statement
-        .query_map([], |r| {
-            Ok(json!([
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, i64>(5)?
-            ]))
+    let rows = studio_runtime_store::test_fixtures::canvas::entities(&db)
+        .expect("canonical entity snapshot")
+        .into_iter()
+        .map(|row| {
+            json!([
+                row.collection,
+                row.id,
+                row.seq,
+                row.hash,
+                row.payload,
+                row.deleted
+            ])
         })
-        .expect("rows")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("valid rows");
+        .collect::<Vec<_>>();
     json!({"rows":rows,"sequence":studio_runtime_store::SyncDocumentsRepository::entity_sequence(&db).expect("sequence")})
 }
 
@@ -629,6 +628,36 @@ fn restore_snapshot(fixture: &Path, state: &Path, root: &Path) {
             );
         crate::recovery_fixtures::database(state, name, &sql);
     }
+    // These synthetic pruning tombstones were generated with the placeholder
+    // "stale", not captured from a release. Give only that test shape a real digest.
+    let mut db = studio_runtime_store::test_fixtures::canvas::open_supported_canvas(state)
+        .expect("synthetic tombstone source");
+    let tx = db.transaction().expect("synthetic tombstone seed");
+    let mut typed = studio_runtime_store::peer_update_settings::canvas_tx(&tx);
+    use studio_runtime_store::clock_schema::SyncEntities;
+    let rows = studio_db_api::db_query!(
+        typed.read(),
+        SyncEntities,
+        filter(
+            SyncEntities::COLLECTION.eq_ref("transcript:agent"),
+            SyncEntities::HASH.eq_ref("stale"),
+            SyncEntities::DELETED.eq(&1_i64)
+        )
+    )
+    .expect("synthetic tombstones");
+    assert!(
+        [0, 512, 513].contains(&rows.len()),
+        "preserve the frozen pruning population"
+    );
+    for mut row in rows {
+        assert!(row.id.starts_with("item:stale-"));
+        row.hash = studio_runtime_store::sha256_hex(row.id.as_bytes());
+        typed
+            .upsert(&row)
+            .expect("valid synthetic tombstone digest");
+    }
+    tx.commit().expect("synthetic tombstones seeded");
+    drop(db);
     let blobs: BTreeMap<String, String> = studio_json::from_str(
         &std::fs::read_to_string(fixture.join("blobs.json")).expect("frozen blobs"),
     )

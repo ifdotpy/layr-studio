@@ -20,6 +20,18 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 
 use crate::StoreResult;
+use crate::peer_update_settings::{Canvas, canvas_read};
+use crate::publication_schema::Publications;
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,native,result=String,
+    tables(rows=Publications),indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_DELETED),
+    predicates(entities=rows),columns(id=Publications::ENTITY_ID,collection=Publications::COLLECTION_ORDER,deleted=Publications::DELETED,rowid=Publications::SOURCE_ROWID),
+    sql="SELECT {id} FROM {rows} WHERE {entities} AND {collection}=?1 AND {deleted}=0 ORDER BY {rowid}")]
+struct LivePublishedOwners<'a> {
+    #[db(column=Publications::COLLECTION_ORDER)]
+    collection: Option<&'a str>,
+}
 
 /// The projection that publishes the rows a writer transaction changed.
 pub trait EntityPublisher: Send + Sync {
@@ -344,12 +356,16 @@ pub(crate) fn pending(
             } else {
                 // Deleted source rows no longer carry their owner. Recheck only
                 // existing queue views; this path never scans event history.
-                let mut statement = transaction.prepare_cached(
-                    "SELECT id FROM sync_entities WHERE collection='queue' AND deleted=0",
+                canvas_read(transaction).visit(
+                    &LivePublishedOwners::QUERY,
+                    &LivePublishedOwners {
+                        collection: Some("queue"),
+                    },
+                    |id| {
+                        pending.queues.insert(id);
+                        Ok(())
+                    },
                 )?;
-                for id in statement.query_map([], |row| row.get::<_, String>(0))? {
-                    pending.queues.insert(id?);
-                }
             }
         }
     }
@@ -358,12 +374,16 @@ pub(crate) fn pending(
             if let Some(id) = id {
                 pending.terminals.insert(id.clone());
             } else {
-                let mut statement = transaction.prepare_cached(
-                    "SELECT id FROM sync_entities WHERE collection='terminal' AND deleted=0",
+                canvas_read(transaction).visit(
+                    &LivePublishedOwners::QUERY,
+                    &LivePublishedOwners {
+                        collection: Some("terminal"),
+                    },
+                    |id| {
+                        pending.terminals.insert(id);
+                        Ok(())
+                    },
                 )?;
-                for id in statement.query_map([], |row| row.get::<_, String>(0))? {
-                    pending.terminals.insert(id?);
-                }
             }
         }
     }
@@ -454,6 +474,96 @@ pub(crate) fn pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn f1_pending_deleted_sources_read_canonical_live_owners() {
+        use studio_db_api::Table;
+        let mut db = Connection::open_in_memory().unwrap();
+        for descriptor in [
+            crate::publication_schema::Publications::descriptor(),
+            crate::metadata_schema::Metadata::descriptor(),
+            crate::change_schema::Changes::descriptor(),
+        ] {
+            descriptor.install_if_absent(&db).unwrap();
+        }
+        crate::queue_schema::EventsRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        crate::item_monitor_terminal::TerminalsRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        for collection in ["queue", "terminal", "other"] {
+            for (id, deleted) in [("live", false), ("deleted", true)] {
+                crate::SyncDocumentsRepository::put_entity(&tx, collection, id, (), deleted)
+                    .unwrap();
+            }
+            crate::SyncDocumentsRepository::put_entity_hash(&tx, collection, "null", "hash", false)
+                .unwrap();
+        }
+        for collection in ["queue", "terminal"] {
+            let plan = crate::query_plan_test_support::explain(
+                &tx,
+                LivePublishedOwners::QUERY.sql(),
+                &LivePublishedOwners {
+                    collection: Some(collection),
+                },
+            )
+            .unwrap();
+            assert!(
+                plan.iter().any(|line| line.contains("SEARCH")
+                    && line.contains("publications_entity_collection_deleted")),
+                "{plan:?}"
+            );
+        }
+        let mut counts = Vec::new();
+        for history in [0, 2000] {
+            for n in 0..history {
+                crate::SyncDocumentsRepository::put_entity(
+                    &tx,
+                    "history",
+                    &n.to_string(),
+                    (),
+                    false,
+                )
+                .unwrap();
+            }
+            use std::sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            };
+            let steps = Arc::new(AtomicUsize::new(0));
+            let counter = steps.clone();
+            tx.progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            let result = pending(
+                &tx,
+                Journal(vec![
+                    Event::Row(Source::Event, 9999),
+                    Event::Row(Source::Terminal, 9999),
+                ]),
+            )
+            .unwrap();
+            tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+            counts.push(steps.load(Ordering::Relaxed));
+            assert_eq!(
+                result.queues,
+                BTreeSet::from(["live".into(), "null".into()])
+            );
+            assert_eq!(
+                result.terminals,
+                BTreeSet::from(["live".into(), "null".into()])
+            );
+        }
+        eprintln!("pending canonical VM steps: {counts:?}");
+        assert!(counts[1] <= counts[0] + 20 && counts[1] < 500, "{counts:?}");
+    }
 
     #[test]
     fn pending_resolves_changed_agents_and_events() {

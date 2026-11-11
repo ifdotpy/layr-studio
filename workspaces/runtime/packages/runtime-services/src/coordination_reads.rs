@@ -448,10 +448,19 @@ pub fn delete_room(
         studio_runtime_store::interaction_tables::RoomRow::put(tx, &room)?;
     }
     let deleted = projection.is_none();
-    if !deleted || tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='room' AND id=?1 AND deleted=0)", [id], |r| r.get::<_,bool>(0))? {
+    if !deleted
+        || studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+            tx, "room", id, false,
+        )?
+        .is_some()
+    {
         match projection {
-            Some(view) => { SyncDocumentsRepository::put_entity(tx, "room", id, view, false)?; }
-            None => { SyncDocumentsRepository::put_entity(tx, "room", id, json!({}), true)?; }
+            Some(view) => {
+                SyncDocumentsRepository::put_entity(tx, "room", id, view, false)?;
+            }
+            None => {
+                SyncDocumentsRepository::put_entity(tx, "room", id, json!({}), true)?;
+            }
         }
     }
     Ok(json!({"deleted":[id]}))
@@ -629,5 +638,52 @@ mod delivery_tests {
         ] {
             assert!(message_deliveries(&db, "m", &saved.to_string()).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod canonical_publication_tests {
+    #[tokio::test]
+    async fn canonical_delete_room_retires_empty_projection() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction_with(|tx| {
+                let room =
+                    studio_json::from_str(r#"{"id":"canonical","kind":"private","members":[]}"#)
+                        .unwrap();
+                studio_runtime_store::interaction_tables::RoomRow::put(tx, &room)?;
+                studio_runtime_store::SyncDocumentsRepository::put_entity(
+                    tx,
+                    "room",
+                    "canonical",
+                    (),
+                    false,
+                )?;
+                super::delete_room(tx, "canonical", |_| true)?;
+                assert!(
+                    studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+                        tx,
+                        "room",
+                        "canonical",
+                        false
+                    )?
+                    .is_none()
+                );
+                assert!(
+                    studio_runtime_store::ProjectionPublicationQueries::publication_sequence(
+                        tx,
+                        "room",
+                        "canonical",
+                        true
+                    )?
+                    .is_some()
+                );
+                Ok::<_, super::CoordinationError>(())
+            })
+            .await
+            .unwrap();
     }
 }
