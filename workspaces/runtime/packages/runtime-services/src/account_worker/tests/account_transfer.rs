@@ -12,10 +12,24 @@ const TRANSFER: &str = "5a300f72-4ea6-4d30-8a0e-9b2c13c4a001";
 
 struct SuccessfulTransferSession {
     source_path: String,
+    invalid_transfer_proposal: bool,
     requests: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 impl AccountSessionPort for SuccessfulTransferSession {
+    fn transfer_preparation_error(&self) -> Option<studio_runtime_store::StoreError> {
+        self.invalid_transfer_proposal.then(|| {
+            self.requests
+                .lock()
+                .unwrap()
+                .push(("default".into(), "fixture/invalid-transfer-proposal".into()));
+            studio_runtime_store::StoreError::InvalidStoredObject {
+                table: "runtime_account_transfers",
+                id: TRANSFER.into(),
+            }
+        })
+    }
+
     fn current_scope(&self, account: &str) -> Option<ConnectionScope> {
         Some(ConnectionScope {
             account: account.into(),
@@ -118,6 +132,7 @@ async fn transfer_completes_before_next_turn_on_destination() {
     request_transfer(&state, "default").await;
     let session = Arc::new(SuccessfulTransferSession {
         source_path: source_path.display().to_string(),
+        invalid_transfer_proposal: false,
         requests: Default::default(),
     });
     let mut resources = test_resources().unwrap();
@@ -566,5 +581,83 @@ async fn terminal_frame_releases_a_waiting_member_without_another_input() {
         peer.writes.try_recv().is_err(),
         "the old account sends no new native request"
     );
+    worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn invalid_transfer_proposal_blocks_once_without_ending_account_worker() {
+    let state = State::new().await;
+    edit_agent(&state, |row| {
+        row.account_key = "source".into();
+        row.execution_settings_account_key =
+            studio_runtime_schema::queue_command::Field::Value("source".into());
+    })
+    .await;
+    let source_home = state.root.join("source-home");
+    let target_home = state.root.join("target-home");
+    let source_path = source_home.join("sessions/source.jsonl");
+    std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(&target_home).unwrap();
+    std::fs::write(
+        &source_path,
+        b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"fake-thread-0\"}}\n",
+    )
+    .unwrap();
+    request_transfer(&state, "default").await;
+    let session = Arc::new(SuccessfulTransferSession {
+        source_path: source_path.display().to_string(),
+        invalid_transfer_proposal: true,
+        requests: Default::default(),
+    });
+    let mut resources = test_resources().unwrap();
+    resources.model_catalog.retain_accounts(&[
+        json!({"id":"source","home":source_home,"provider":"codex"}),
+        json!({"id":"default","home":target_home,"provider":"codex"}),
+    ]);
+    resources.account_home = target_home.display().to_string();
+    resources.account_session = Some(session.clone());
+    resources
+        .model_catalog
+        .set_account_session(Some(session.clone()));
+    let mut peer = Peer::new();
+    let mut worker = peer
+        .open_worker_with_resources(state.bridge.clone(), resources)
+        .await;
+    let mut ready = peer.ready.clone();
+    while !*ready.borrow_and_update() {
+        ready.changed().await.unwrap();
+    }
+    state.wake(&worker).await;
+    worker_barrier(&worker).await;
+    let blocked = stored_transfer(&state).await;
+    let member = &blocked["members"][state.agent.as_str()];
+    assert_eq!(
+        member["phase"], "blocked",
+        "transfer must have a durable refusal"
+    );
+    assert!(
+        member["error"].as_str() == Some("Transfer preparation failed"),
+        "{member}"
+    );
+    assert!(peer.writes.try_recv().is_err());
+    let requests = session.requests.lock().unwrap().clone();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(_, method)| method == "fixture/invalid-transfer-proposal")
+            .count(),
+        1
+    );
+    for _ in 0..2 {
+        state.wake(&worker).await;
+        worker_barrier(&worker).await;
+    }
+    assert_eq!(
+        *session.requests.lock().unwrap(),
+        requests,
+        "blocked recovery must not retry"
+    );
+    assert_eq!(stored_transfer(&state).await, blocked);
+    assert_eq!(state.event_status("input").await, "pending");
     worker.shutdown().await.unwrap();
 }

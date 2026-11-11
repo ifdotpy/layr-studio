@@ -473,6 +473,12 @@ async fn prepare(
 
 fn transfer_error(error: crate::account_transfer::TransferError) -> WorkerError {
     match error {
+        crate::account_transfer::TransferError::Store(
+            error @ StoreError::InvalidStoredObject {
+                table: "runtime_account_transfers",
+                ..
+            },
+        ) => WorkerError::PreparationRefused(error.to_string()),
         crate::account_transfer::TransferError::Store(error) => WorkerError::Store(error),
         error @ crate::account_transfer::TransferError::Expired
         | error @ crate::account_transfer::TransferError::Stored { .. }
@@ -676,4 +682,18 @@ mod future_size_tests {
         let size = std::mem::size_of_val(&future);
         assert!(size <= limit, "claim stage future is {size} bytes");
     }
+}
+
+#[cfg(test)]
+#[test]
+fn unreadable_transfer_error_refuses_member_instead_of_killing_worker() {
+    let error = transfer_error(crate::account_transfer::TransferError::Store(
+        StoreError::InvalidStoredObject {
+            table: "runtime_account_transfers",
+            id: "move".into(),
+        },
+    ));
+    assert!(
+        matches!(error, WorkerError::PreparationRefused(reason) if reason.contains("runtime_account_transfers/move"))
+    );
 }

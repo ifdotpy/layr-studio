@@ -385,7 +385,7 @@ impl From<studio_runtime_schema::agent_entity_nested::ExecutionSettingsDto> for 
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DestinationSettings {
     #[serde(flatten)]
@@ -394,6 +394,51 @@ pub struct DestinationSettings {
     pub pending_settings: Field<TransferSettings>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub pending_settings_account_key: Field<AccountKey>,
+}
+
+impl<'de> Deserialize<'de> for DestinationSettings {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Flatten buffers nested raw JSON as Serde Content. Keep each value
+        // raw until its strict owner decodes it, without losing duplicate keys.
+        struct SettingsVisitor;
+        impl<'de> Visitor<'de> for SettingsVisitor {
+            type Value = studio_runtime_schema::raw_json::RawExtensions;
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("destination settings with unique keys")
+            }
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                let mut fields = Self::Value::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if fields.contains_key(&key) {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate destination setting: {key}"
+                        )));
+                    }
+                    fields.insert(key, map.next_value()?);
+                }
+                Ok(fields)
+            }
+        }
+        let mut fields = deserializer.deserialize_map(SettingsVisitor)?;
+        let pending_settings = fields
+            .remove("pendingSettings")
+            .map(|raw| studio_json::from_str(raw.as_str()))
+            .transpose()
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let pending_settings_account_key = fields
+            .remove("pendingSettingsAccountKey")
+            .map(|raw| studio_json::from_str(raw.as_str()))
+            .transpose()
+            .map_err(serde::de::Error::custom)?
+            .unwrap_or_default();
+        let encoded = studio_json::to_string(&fields).map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            settings: studio_json::from_str(&encoded).map_err(serde::de::Error::custom)?,
+            pending_settings,
+            pending_settings_account_key,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -1436,5 +1481,52 @@ mod tests {
                 difference(&original, &restored)
             );
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn destination_settings_roundtrip_keeps_pending_fields() {
+    let raw = r#"{"provider":"claude","model":"opus","permissionMode":"bypassPermissions","effort":"medium","nativeEffort":"medium","fastMode":false,"daybreakEnabled":false,"cyberAccessProgram":"standard","workerDefaults":{"model":"gpt-6.1-sol","effort":"medium","fastMode":false,"daybreakEnabled":false,"delegationDepth":1,"cyberAccessProgram":"standard"},"claudeOptions":null,"role":"orchestrator","profileInstructions":"","pendingSettings":null,"pendingSettingsAccountKey":null}"#;
+    let settings = studio_json::from_str::<DestinationSettings>(raw);
+    assert!(
+        settings.is_ok(),
+        "valid destination settings must roundtrip: {settings:?}"
+    );
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn destination_worker_defaults_roundtrip_through_transfer_repository() {
+    let root = tempfile::tempdir().unwrap();
+    let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+    let settings = studio_json::json!({"provider":"claude","model":"opus","workerDefaults":{"model":"child","extension":{"keep":[1,2]}},"pendingSettings":null,"pendingSettingsAccountKey":null});
+    let raw = studio_json::json!({"id":"move","leadId":"lead","targetAccountKey":"target","status":"pending","created":1,"members":{"lead":{"phase":"reading","sourceAccountKey":"source","targetSettings":settings}}}).to_string();
+    store
+        .transaction(move |tx| crate::AccountTransferRepository::put(tx, "move", &raw))
+        .await
+        .unwrap();
+    let restored = store
+        .read_async("test/destination-settings-roundtrip", |db| {
+            crate::AccountTransferRepository::get(db, "move")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(restored["members"]["lead"]["targetSettings"], settings);
+}
+
+#[cfg(test)]
+#[test]
+fn destination_settings_reject_duplicate_keys_before_collecting_values() {
+    for raw in [
+        r#"{"model":"first","model":"second"}"#,
+        r#"{"model":false,"model":"second"}"#,
+        r#"{"workerDefaults":false,"workerDefaults":{}}"#,
+    ] {
+        assert!(
+            studio_json::from_str::<DestinationSettings>(raw).is_err(),
+            "accepted duplicate settings: {raw}"
+        );
     }
 }

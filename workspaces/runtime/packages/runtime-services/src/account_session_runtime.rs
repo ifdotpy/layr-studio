@@ -118,6 +118,12 @@ pub struct ProfileRequest {
 /// registry/store lock. These defaults also allow composition one capability at a
 /// time without advertising success for an absent consumer.
 pub trait AccountSessionPort: Send + Sync {
+    /// Inject a preparation-store refusal through the real transfer driver in fixtures.
+    #[cfg(test)]
+    fn transfer_preparation_error(&self) -> Option<studio_runtime_store::StoreError> {
+        None
+    }
+
     /// The account worker's diagnostics snapshot; `None` when no worker serves it.
     fn worker_diagnostics(&self, _account: String) -> WorkerDiagnosticsFuture {
         Box::pin(async { None })

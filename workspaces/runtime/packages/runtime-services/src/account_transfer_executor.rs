@@ -1087,6 +1087,10 @@ impl TransferExecutor for AccountTransferExecutor {
         input: &'a TransferPreparation,
     ) -> driver::TransferFuture<'a, Result<PreparedTransfer, TransferError>> {
         Box::pin(async move {
+            #[cfg(test)]
+            if let Some(error) = self.session.transfer_preparation_error() {
+                return Err(TransferError::Store(error));
+            }
             let operation = input.operation();
             let agent = input.agent();
             let agent_id = agent.id.as_ref();
