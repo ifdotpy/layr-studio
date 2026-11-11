@@ -116,6 +116,39 @@ pub struct AccountIdentity {
     pub email: Option<String>,
 }
 
+/// Transaction recheck evidence, carried alongside an agent and never persisted.
+#[derive(Clone, Debug)]
+pub struct CreationDraft {
+    account: AccountIdentity,
+    parent_cwd: Option<String>,
+    parent_project_path: Option<String>,
+    parent_account_key: Option<String>,
+    parent_project_id: Option<String>,
+    parent_project_server_id: Option<String>,
+    /// Complete frozen project observation; transient and never persisted.
+    project_binding: Option<Value>,
+    pub project_lookup_id: Option<String>,
+}
+
+impl CreationDraft {
+    fn project_matches(&self, observed: Option<&Value>) -> bool {
+        self.project_binding.as_ref() == observed
+    }
+
+    fn account(account: &AccountIdentity) -> Self {
+        Self {
+            account: account.clone(),
+            parent_cwd: None,
+            parent_project_path: None,
+            parent_account_key: None,
+            parent_project_id: None,
+            parent_project_server_id: None,
+            project_binding: None,
+            project_lookup_id: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionSettings {
     pub model: String,
@@ -149,7 +182,7 @@ pub fn prepare(
     ids: [AgentId; 2],
     accounts: &[AccountIdentity; 2],
     catalog: &dyn CreationCatalog,
-) -> Result<[AgentRecord; 2], CreateError> {
+) -> Result<([AgentRecord; 2], [CreationDraft; 2]), CreateError> {
     let path = CanonicalPath::existing_utf8_directory(path)
         .map_err(|_| CreateError::InvalidCreation("path"))?
         .to_string_lossy()
@@ -203,10 +236,12 @@ pub fn prepare(
         value["worktree"] = json!(false);
         value["workerBaseRef"] = Value::Null;
         value["workerBaseCommit"] = Value::Null;
-        value["_p02CreationIdentity"] = identity_value(&accounts[index]);
         drafts.push(checked_agent(value, &ids[index])?);
     }
-    drafts.try_into().map_err(|_| CreateError::Internal)
+    Ok((
+        drafts.try_into().map_err(|_| CreateError::Internal)?,
+        accounts.each_ref().map(CreationDraft::account),
+    ))
 }
 
 /// Prepare an assigned host worker with the work item's frozen Git identity.
@@ -233,7 +268,7 @@ pub fn prepare_work_item(
     worktree: bool,
     fast_mode: bool,
     daybreak_enabled: bool,
-) -> Result<AgentRecord, CreateError> {
+) -> Result<(AgentRecord, CreationDraft), CreateError> {
     if parent_epoch < 0 {
         return Err(CreateError::InvalidCreation("parent epoch"));
     }
@@ -334,14 +369,19 @@ pub fn prepare_work_item(
     draft["workspaceModeExplicit"] =
         json!(body.get("workspace_explicit").and_then(Value::as_bool) == Some(true));
     draft["cyberAccessProgram"] = json!(settings.cyber_access_program);
-    draft["_p02CreationIdentity"] = identity_value(account);
-    draft["_p02ParentCwd"] = json!(parent_cwd);
-    draft["_p02ParentProjectPath"] = json!(parent_project_path);
-    draft["_p02ParentAccountKey"] = json!(parent_account_key);
-    draft["_p02ParentProjectId"] = parent_project_id.cloned().unwrap_or(Value::Null);
-    draft["_p02ParentProjectServerId"] = parent_project_server_id.cloned().unwrap_or(Value::Null);
-    draft["_p02ProjectBinding"] = project_binding.cloned().unwrap_or(Value::Null);
-    checked_agent(draft, &id)
+    let evidence = CreationDraft {
+        account: account.clone(),
+        parent_cwd: Some(parent_cwd.to_owned()),
+        parent_project_path: Some(parent_project_path.to_owned()),
+        parent_account_key: Some(parent_account_key.to_owned()),
+        parent_project_id: parent_project_id.and_then(Value::as_str).map(str::to_owned),
+        parent_project_server_id: parent_project_server_id
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        project_binding: project_binding.cloned(),
+        project_lookup_id: None,
+    };
+    Ok((checked_agent(draft, &id)?, evidence))
 }
 
 /// Recheck durable project and parent identity inside the caller's transaction.
@@ -350,16 +390,14 @@ pub fn prepare_work_item(
 pub fn recheck(
     transaction: &Transaction<'_>,
     drafts: &[AgentRecord; 2],
+    evidence: &[CreationDraft; 2],
     accounts: &[AccountIdentity; 2],
 ) -> Result<(), CreateError> {
     for (index, draft) in drafts.iter().enumerate() {
         recheck_record(transaction, draft)?;
-        let frozen = draft
-            .extra
-            .get("_p02CreationIdentity")
-            .ok_or(CreateError::IdentityChanged)?;
-        let observed = identity_value(&accounts[index]);
-        if frozen != &observed || draft.provider.value() != Some(&accounts[index].provider) {
+        if evidence[index].account != accounts[index]
+            || draft.provider.value() != Some(&accounts[index].provider)
+        {
             return Err(CreateError::IdentityChanged);
         }
     }
@@ -392,14 +430,12 @@ pub fn recheck(
 pub fn recheck_worker(
     transaction: &Transaction<'_>,
     draft: &AgentRecord,
+    evidence: &CreationDraft,
     parent_epoch: i64,
     account: &AccountIdentity,
 ) -> Result<(), CreateError> {
     recheck_record(transaction, draft)?;
-    let observed = identity_value(account);
-    if draft.extra.get("_p02CreationIdentity") != Some(&observed)
-        || draft.provider.value() != Some(&account.provider)
-    {
+    if &evidence.account != account || draft.provider.value() != Some(&account.provider) {
         return Err(CreateError::IdentityChanged);
     }
     recheck_parent_epoch(transaction, draft, parent_epoch)?;
@@ -410,64 +446,47 @@ pub fn recheck_worker(
     let parent =
         studio_runtime_store::AgentRepository::get(transaction, &AgentId::from(parent_id))?
             .ok_or(CreateError::IdentityChanged)?;
-    let frozen_cwd = draft.extra.get("_p02ParentCwd");
-    let frozen_account = draft.extra.get("_p02ParentAccountKey");
-    if parent.cwd.as_deref() != frozen_cwd.and_then(Value::as_str)
-        || Some(parent.account_key.as_str()) != frozen_account.and_then(Value::as_str)
-        || parent.project_id.as_deref()
-            != draft
-                .extra
-                .get("_p02ParentProjectId")
-                .and_then(Value::as_str)
-        || parent.project_server_id.as_deref()
-            != draft
-                .extra
-                .get("_p02ParentProjectServerId")
-                .and_then(Value::as_str)
+    if parent.cwd.as_deref() != evidence.parent_cwd.as_deref()
+        || Some(parent.account_key.as_str()) != evidence.parent_account_key.as_deref()
+        || parent.project_id.as_deref() != evidence.parent_project_id.as_deref()
+        || parent.project_server_id.as_deref() != evidence.parent_project_server_id.as_deref()
     {
         return Err(CreateError::IdentityChanged);
     }
-    let _guest_cwd = frozen_cwd
-        .and_then(Value::as_str)
+    let _guest_cwd = evidence
+        .parent_cwd
+        .as_deref()
         .ok_or(CreateError::IdentityChanged)?;
-    let project_path = draft
-        .extra
-        .get("_p02ParentProjectPath")
-        .and_then(Value::as_str)
+    let project_path = evidence
+        .parent_project_path
+        .as_deref()
         .ok_or(CreateError::IdentityChanged)?;
     if parent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
         && parent.host_project_path.value().map(String::as_str) != Some(project_path)
     {
         return Err(CreateError::IdentityChanged);
     }
-    let frozen_project = draft
-        .extra
-        .get("_p02ProjectBinding")
-        .filter(|value| !value.is_null())
-        .cloned();
-    let lookup_id = draft
-        .extra
-        .get("_p02ProjectLookupId")
-        .and_then(Value::as_str)
+    let lookup_id = evidence
+        .project_lookup_id
+        .as_deref()
         .unwrap_or(project_path);
     let current_project = ProjectsRepository::get(transaction, lookup_id)?
         .or(ProjectsRepository::get(transaction, project_path)?)
         .map(|(_, value)| value);
-    if current_project != frozen_project {
+    if !evidence.project_matches(current_project.as_ref()) {
         return Err(CreateError::IdentityChanged);
     }
     Ok(())
 }
 
-/// Remove P02's transient account observation before storing the checked record.
+/// Validate the prepared record before storing it.
 /// Call only after `recheck` or `recheck_worker` succeeds inside the writer transaction.
 pub fn persisted_record(draft: &AgentRecord) -> Result<AgentRecord, CreateError> {
-    let mut record = draft.clone();
-    record.extra.retain(|key, _| !key.starts_with("_p02"));
+    let record = draft.clone();
     if record.status != AgentStatus::Idle && record.status != AgentStatus::Queued {
         return Err(CreateError::InvalidStoredObject {
             table: "runtime_agents",
-            id: record.id.0.clone(),
+            id: record.id.0,
         });
     }
     validate_agent(&record)?;
@@ -602,15 +621,6 @@ fn required_string_value<'a>(value: &'a Value, key: &'static str) -> Result<&'a 
         .ok_or(CreateError::InvalidCreation(key))
 }
 
-fn identity_value(identity: &AccountIdentity) -> Value {
-    json!({
-        "provider": identity.provider,
-        "home": identity.home,
-        "accountId": identity.account_id,
-        "email": identity.email,
-    })
-}
-
 fn optional_string<'a>(
     value: &'a Value,
     key: &'static str,
@@ -718,6 +728,7 @@ mod tests {
     struct WorkerDraftFixture {
         database: Connection,
         draft: AgentRecord,
+        creation: CreationDraft,
         account: AccountIdentity,
         parent_id: AgentId,
         cwd: String,
@@ -854,7 +865,7 @@ mod tests {
             "account_key":"worker-account","name":name,
             "model":"model-one","prompt":prompt
         });
-        let draft = prepare_work_item(
+        let (draft, creation) = prepare_work_item(
             &body,
             Path::new(&cwd),
             child_id,
@@ -880,6 +891,7 @@ mod tests {
         WorkerDraftFixture {
             database,
             draft,
+            creation,
             account,
             parent_id,
             cwd,
@@ -922,7 +934,7 @@ mod tests {
             "model":"model-one","prompt":"Inspect the change"});
         let canonical_target =
             CanonicalPath::existing(target.path()).expect("canonical review target directory");
-        let draft = prepare_work_item(
+        let (draft, creation) = prepare_work_item(
             &body,
             target.path(),
             AgentId::from("review-child"),
@@ -946,12 +958,9 @@ mod tests {
         )
         .expect("review uses its validated target directory");
         assert_eq!(draft.cwd.as_deref(), canonical_target.to_str());
-        assert_eq!(
-            draft.extra.get("_p02ParentCwd").and_then(Value::as_str),
-            Some(fixture.cwd.as_str())
-        );
+        assert_eq!(creation.parent_cwd.as_deref(), Some(fixture.cwd.as_str()));
         let tx = fixture.database.transaction().expect("recheck transaction");
-        recheck_worker(&tx, &draft, 0, &fixture.account)
+        recheck_worker(&tx, &draft, &creation, 0, &fixture.account)
             .expect("parent identity is rechecked against the stored parent cwd");
     }
 
@@ -969,7 +978,7 @@ mod tests {
     fn assert_worker_recheck_refuses_without_writes(fixture: &mut WorkerDraftFixture) {
         let tx = fixture.database.transaction().expect("transaction");
         assert!(matches!(
-            recheck_worker(&tx, &fixture.draft, 0, &fixture.account),
+            recheck_worker(&tx, &fixture.draft, &fixture.creation, 0, &fixture.account),
             Err(CreateError::IdentityChanged)
         ));
         drop(tx);
@@ -986,15 +995,67 @@ mod tests {
     }
 
     #[test]
+    fn creation_project_observation_keeps_value_equality() {
+        let cases = [
+            None,
+            Some("null"),
+            Some(r#"{"id":"p","path":"/p"}"#),
+            Some(r#"{"path":"/p","id":"p"}"#),
+            Some(r#"{"id":"p","path":"/p","projectId":null}"#),
+            Some(r#"{"id":"p","path":"/p","projectId":"p1"}"#),
+            Some(r#"{"id":"p","path":"/p","projectServerId":"s1"}"#),
+            Some(r#"{"recordKind":"live","id":"p","path":"/p"}"#),
+            Some(r#"{"id":"p","path":"/p","created":1.0}"#),
+            Some(r#"{"id":"p","path":"/p","created":1e0}"#),
+            Some(r#"{"id":"p","path":"/p","created":1}"#),
+            Some(r#"{"id":"p","path":"/p","created":0.0}"#),
+            Some(r#"{"id":"p","path":"/p","created":-0.0}"#),
+        ]
+        .map(|raw| raw.map(|raw| studio_json::from_str::<Value>(raw).unwrap()));
+        for left in &cases {
+            for right in &cases {
+                let mut frozen = CreationDraft::account(&accounts()[0]);
+                frozen.project_binding = left.clone();
+                assert_eq!(
+                    left == right,
+                    frozen.project_matches(right.as_ref()),
+                    "{left:?} / {right:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn creation_draft_evidence_is_not_part_of_the_agent_record() {
+        let directory = tempdir().expect("temporary project");
+        let accounts = accounts();
+        let (drafts, _) = prepare(
+            &body(),
+            directory.path(),
+            [AgentId::from(IDS[0]), AgentId::from(IDS[1])],
+            &accounts,
+            &Catalog,
+        )
+        .unwrap();
+        for draft in drafts {
+            let encoded = studio_json::to_string(&draft).unwrap();
+            assert!(
+                !encoded.contains("_p02"),
+                "creation evidence leaked into AgentRecord: {encoded}"
+            );
+        }
+    }
+
+    #[test]
     fn radio_creation_builds_checked_typed_drafts_with_a_frozen_base() {
         let directory = tempdir().expect("temporary project directory");
         let ids = [AgentId::from(IDS[0]), AgentId::from(IDS[1])];
         let accounts = accounts();
-        let drafts =
+        let (drafts, evidence) =
             prepare(&body(), directory.path(), ids, &accounts, &Catalog).expect("checked drafts");
-        assert!(drafts[0].extra.contains_key("_p02CreationIdentity"));
+        assert_eq!(evidence[0].account, accounts[0]);
         let persisted = persisted_record(&drafts[0]).expect("persistable typed record");
-        assert!(!persisted.extra.contains_key("_p02CreationIdentity"));
+        assert!(!studio_json::to_string(&persisted).unwrap().contains("_p02"));
         for (draft, id) in drafts.iter().zip(IDS) {
             assert_eq!(draft.id.0, id);
             assert_eq!(draft.root_id.0, id);
@@ -1039,7 +1100,7 @@ mod tests {
     fn changed_account_observation_is_refused_before_project_lookup() {
         let directory = tempdir().expect("temporary project directory");
         let observed = accounts();
-        let drafts = prepare(
+        let (drafts, evidence) = prepare(
             &body(),
             directory.path(),
             [AgentId::from(IDS[0]), AgentId::from(IDS[1])],
@@ -1056,9 +1117,9 @@ mod tests {
             )
             .expect("project table");
         let tx = database.unchecked_transaction().expect("begin transaction");
-        let result = recheck(&tx, &drafts, &changed);
+        let result = recheck(&tx, &drafts, &evidence, &changed);
         assert!(matches!(result, Err(CreateError::IdentityChanged)));
-        assert!(recheck(&tx, &drafts, &observed).is_ok());
+        assert!(recheck(&tx, &drafts, &evidence, &observed).is_ok());
     }
 
     #[test]
@@ -1071,7 +1132,7 @@ mod tests {
             )
             .expect("project table");
         let accounts = accounts();
-        let drafts = prepare(
+        let (drafts, evidence) = prepare(
             &body(),
             project.path(),
             [AgentId::from(IDS[0]), AgentId::from(IDS[1])],
@@ -1097,7 +1158,7 @@ mod tests {
             )
             .expect("saved project");
         let tx = database.transaction().expect("begin recheck transaction");
-        let result = recheck(&tx, &drafts, &accounts);
+        let result = recheck(&tx, &drafts, &evidence, &accounts);
         assert!(matches!(result, Err(CreateError::IdentityChanged)));
         drop(tx);
         let after = database

@@ -211,7 +211,7 @@ async fn project_deletion_prefers_host_project_path_to_cwd() {
 #[tokio::test]
 async fn project_deletion_membership_and_retention() {
     let mut lead = agent("lead", None, "/p");
-    lead["archivedAt"] = json!(2);
+    lead["archived"] = json!(true);
     let mut archived = agent("archived", Some("lead"), "/worktrees/a");
     archived["deletedAt"] = json!(2);
     archived["agentArchive"] = json!({"at":2,"epoch":1});
@@ -379,7 +379,6 @@ async fn project_deletion_remote_and_ambiguous_membership_fail_closed() {
         json!({"projectId":"/prefix","projectServerId":"owner"}),
         json!({"parentId":"child"}),
         json!({"parentId":"child","projectId":"/p","projectServerId":"owner"}),
-        json!({"remoteWorker":{"serverId":"remote"}}),
     ] {
         let mut child = agent("child", Some("lead"), "/worktree");
         for (k, v) in patch.as_object().expect("patch") {
@@ -649,7 +648,7 @@ async fn project_deletion_unknown_interrupt_is_not_repeated() {
         }
     }
     let mut running = agent("lead", None, "/p");
-    for(k,v)in json!({"status":"running","inFlight":true,"accountKey":"account","connectionId":"connection","connectionGeneration":7,"threadId":"thread","turnId":"turn","startAttempt":{"id":"attempt","epoch":1,"submitted":true,"accountKey":"account","connectionId":"connection","connectionGeneration":7,"threadId":"thread","turnId":"turn","events":[]}}).as_object().expect("patch"){running[k]=v.clone();}
+    for(k,v)in json!({"status":"running","inFlight":true,"accountKey":"account","connectionId":"connection","threadId":"thread","turnId":"turn","startAttempt":{"id":"attempt","epoch":1,"submitted":true,"accountKey":"account","connectionId":"connection","connectionGeneration":7,"threadId":"thread","turnId":"turn","events":[]}}).as_object().expect("patch"){running[k]=v.clone();}
     let mut f = Fixture::new(vec![running], vec![], false).await;
     let broker = Arc::new(UnknownBroker {
         store: f.store.clone(),

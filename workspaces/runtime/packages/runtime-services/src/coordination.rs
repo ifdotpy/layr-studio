@@ -681,28 +681,30 @@ fn send_followup_inner(
 }
 
 fn safety_retry_active(agent: &studio_runtime_store::AgentRecord) -> bool {
-    const ACTIVE: &[&str] = &[
-        "turns",
-        "items",
-        "interrupt",
-        "verify_turns",
-        "verify_items",
-        "fork",
-        "start",
-        "unknown",
-    ];
+    use studio_runtime_schema::agent_entity_native::NativeSafetyStage;
     agent
-        .extra
-        .get("nativeSafetyRetry")
-        .and_then(Value::as_object)
+        .native_safety_retry
+        .as_ref()
+        .map(std::ops::Deref::deref)
         .is_some_and(|retry| {
-            retry
-                .get("stage")
-                .and_then(Value::as_str)
-                .is_some_and(|stage| ACTIVE.contains(&stage))
-                && retry.get("epoch").and_then(Value::as_i64) == Some(agent.epoch)
-                && retry.get("accountKey").and_then(Value::as_str)
-                    == Some(agent.account_key.as_str())
+            matches!(
+                retry.stage.value(),
+                Some(
+                    NativeSafetyStage::Turns
+                        | NativeSafetyStage::Items
+                        | NativeSafetyStage::Interrupt
+                        | NativeSafetyStage::VerifyTurns
+                        | NativeSafetyStage::VerifyItems
+                        | NativeSafetyStage::Fork
+                        | NativeSafetyStage::Start
+                        | NativeSafetyStage::Unknown
+                )
+            ) && retry
+                .epoch
+                .value()
+                .and_then(|epoch| epoch.number().as_i64())
+                == Some(agent.epoch)
+                && retry.account_key.value().map(String::as_str) == Some(agent.account_key.as_str())
         })
 }
 
@@ -763,13 +765,8 @@ fn capacity_reset(
     transaction: &Transaction<'_>,
     agent: &mut studio_runtime_store::AgentRecord,
 ) -> Result<(), CoordinationError> {
-    let retry = agent.extra.get("capacityRetry").cloned();
-    if let Some(retry) = retry {
-        let id = retry
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| invalid_stored("runtime_agents", &agent.id.0))?
-            .to_owned();
+    if let Some(retry) = agent.capacity_retry.value() {
+        let id = retry.id.as_str().to_owned();
         match studio_runtime_store::EventWriteRepository::finish_capacity_retry(
             transaction,
             &agent.id.0,
@@ -795,7 +792,7 @@ fn capacity_reset(
             agent.status = studio_runtime_store::AgentStatus::Failed;
         }
     }
-    agent.extra.remove("capacityRetry");
+    agent.capacity_retry = studio_runtime_schema::queue_command::Field::Missing;
     agent.capacity_retry_count = Default::default();
     Ok(())
 }
@@ -1565,8 +1562,6 @@ mod tests {
         .expect("fixture operation succeeds");
         lead.status = studio_runtime_store::AgentStatus::Completed;
         lead.workspace_mode = Some(studio_runtime_schema::records::WorkspaceMode::Image);
-        lead.extra
-            .insert("legacyWorkspaceFinished".into(), json!(true));
         lead.auto_wake = Some(false);
         studio_runtime_store::AgentRepository::put(&connection, &lead)
             .expect("fixture operation succeeds");

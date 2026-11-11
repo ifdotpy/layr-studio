@@ -342,7 +342,7 @@ async fn send_now_keeps_explicit_stop_and_other_start_owners_held() {
         ("nativeFailureHold", json!(true)),
         (
             "capacityRetry",
-            json!({"id":"capacity","status":"auth_wait"}),
+            json!({"id":"capacity","status":"starting","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":0,"maxAttempts":4,"settings":{},"threadId":"original-thread","turnId":"turn"}),
         ),
         ("usageResume", json!({"id":"usage","status":"auth_wait"})),
         ("accountTransferId", json!("transfer")),

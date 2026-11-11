@@ -389,26 +389,7 @@ pub(super) fn send(
         &args,
         id,
         now,
-        true,
     )
-}
-
-pub(crate) fn send_remote_worker(
-    tx: &Transaction<'_>,
-    sender: &str,
-    args: &crate::orchestration_worker::WorkerMessage,
-    id: &str,
-    now: f64,
-) -> Result<studio_json::OwnedRawJson, CallbackError> {
-    let actor = records::get(tx, "runtime_agents", sender)?
-        .ok_or(CallbackError::Invalid("The remote worker is unavailable"))?;
-    if actor["id"] != sender
-        || actor.get("autoWake") != Some(&Value::Bool(true))
-        || studio_runtime_store::truthy(actor.get("deletedAt"))
-    {
-        return Err(CallbackError::Invalid("The worker was stopped"));
-    }
-    send_as_actor(tx, &actor, sender, args, id, now, false)
 }
 
 fn send_as_actor(
@@ -418,12 +399,10 @@ fn send_as_actor(
     args: &crate::orchestration_worker::WorkerMessage,
     id: &str,
     now: f64,
-    resolve_direct: bool,
 ) -> Result<studio_json::OwnedRawJson, CallbackError> {
     let mut resolved_args = args.clone();
     let prepared = if let Some(supplied) = Some(args.target.as_str()).filter(|target| {
-        resolve_direct
-            && !matches!(*target, "user" | "parent" | "lead" | "broadcast" | "all")
+        !matches!(*target, "user" | "parent" | "lead" | "broadcast" | "all")
             && !target.starts_with("remote:")
             && !target.starts_with("federated:")
     }) {
@@ -494,11 +473,7 @@ fn send_as_actor(
             "Communication is limited to one team; use broadcast for your team",
         ));
     }
-    if studio_runtime_store::truthy(actor.get("remoteOrigin"))
-        && (target.starts_with("remote:") || target.starts_with("federated:"))
-    {
-        return Err(CallbackError::Dependency("federation/agent-message"));
-    }
+
     if target.starts_with("remote:") || target.starts_with("federated:") {
         let room = if let Some(peer) = target.strip_prefix("remote:") {
             let mut statement = tx.prepare_cached(

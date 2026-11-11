@@ -17,16 +17,14 @@ type RetainedItem = RetainedWorktreesData[number];
 /** The folder that cleanup kept for one worker, with its reason and path. */
 export const RetainedWorktree = observer(function RetainedWorktree({
   agent,
-  remoteWorker = "remoteWorker" in agent ? agent.remoteWorker : undefined,
 }: {
   agent: Agent | RetainedItem;
-  remoteWorker?: Agent["remoteWorker"];
 }) {
   const { canRevealPath, revealPath } = useServerFileDialogs();
   const owner = useServerOwner();
   const cleanup =
     "cleanup" in agent ? agent.cleanup : agent.workspaceCleanupIntent;
-  const canOpen = !remoteWorker && canRevealPath();
+  const canOpen = canRevealPath();
   if (!cleanup || !["not_sent", "unknown"].includes(cleanup.phase)) return null;
   return (
     <Owned

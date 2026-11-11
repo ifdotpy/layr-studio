@@ -62,8 +62,6 @@ pub(super) enum Unclaimed {
     Steer(Box<TurnIntent>, String, Box<preparation::PreparedSteer>),
     /// An unsubmitted preparation cannot resume yet, but its deadline remains active.
     Deferred(i64, String, super::PreparationDeadline),
-    /// A queued native review child: its first turn is `review/start`.
-    NativeReview,
     /// The disk is full: recheck free space after the recheck interval.
     DiskWait(i64),
     /// Nothing to start now.
@@ -110,23 +108,6 @@ pub(super) async fn wake(
 ) -> Box<Done> {
     let outcome = match claim_stage(&wake).await {
         Ok(Ok(intent)) => return Box::pin(run(start(intent, wake.effect))).await,
-        Ok(Err(Unclaimed::NativeReview)) => {
-            // The driver saves every outcome on the child before it returns.
-            if let Err(error) = crate::native_review_turn::run(
-                Arc::clone(&wake.bridge.store),
-                &wake.resources,
-                &wake.agent_id,
-                wake.epoch,
-            )
-            .await
-            {
-                eprintln!(
-                    "native review for agent {} did not start: {error}",
-                    wake.agent_id
-                );
-            }
-            Ok(Outcome::Unclaimed(Unclaimed::Nothing))
-        }
         Ok(Err(unclaimed)) => Ok(Outcome::Unclaimed(unclaimed)),
         Err(error) => Err(error),
     };
@@ -349,10 +330,6 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
         }
         crate::disk_space::TurnStorageAdmission::Failed
         | crate::disk_space::TurnStorageAdmission::Stale => return Ok(Err(Unclaimed::Nothing)),
-    }
-    // Python's dispatcher claims a pending native review before queued input.
-    if crate::native_review_turn::candidate(&bridge.store, agent_id, epoch, account).await? {
-        return Ok(Err(Unclaimed::NativeReview));
     }
     loop {
         let (a, g) = (account.clone(), agent_id.clone());

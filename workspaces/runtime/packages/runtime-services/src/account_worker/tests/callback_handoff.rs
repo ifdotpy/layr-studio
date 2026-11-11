@@ -1100,8 +1100,6 @@ async fn managed_saved_callback_cannot_resume_a_stopped_changed_or_deleted_actor
         "lead",
         "role",
         "execution",
-        "move",
-        "move-before",
         "transfer",
         "lazy",
     ] {
@@ -1118,7 +1116,7 @@ async fn managed_saved_callback_cannot_resume_a_stopped_changed_or_deleted_actor
             let actor = state.agent.clone();
             let epoch = state.epoch;
             state.bridge.store.transaction(move |tx| {
-                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','running','$.autoWake',json('true'),'$.inFlight',json('true'),'$.provider','claude','$.rootId',?1,'$.threadId','managed-thread','$.turnId','managed-turn','$.parentId',null,'$.role','implementer','$.isLead',json('true'),'$.executionMode',null,'$.executionMove',json('false'),'$.startAttempt',json(?2)) WHERE id=?1",
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','running','$.autoWake',json('true'),'$.inFlight',json('true'),'$.provider','claude','$.rootId',?1,'$.threadId','managed-thread','$.turnId','managed-turn','$.parentId',null,'$.role','implementer','$.isLead',json('true'),'$.executionMode',null,'$.startAttempt',json(?2)) WHERE id=?1",
                     rusqlite::params![actor,json!({"connectionGeneration":GENERATION,"connectionId":"original-connection"}).to_string()])?;
                 Ok(())
             }).await.unwrap();
@@ -1142,7 +1140,6 @@ async fn managed_saved_callback_cannot_resume_a_stopped_changed_or_deleted_actor
                     super::super::callback::ManagedReplyAuthority::for_test(
                         context,
                         state.agent.clone(),
-                        case == "move-before",
                     ),
                 );
             }
@@ -1164,9 +1161,6 @@ async fn managed_saved_callback_cannot_resume_a_stopped_changed_or_deleted_actor
                         "lead" => "record=json_set(record,'$.isLead',json('false'))".to_owned(),
                         "role" => "record=json_set(record,'$.role','reviewer')".to_owned(),
                         "execution" => "record=json_set(record,'$.executionMode','vm')".to_owned(),
-                        "move" | "move-before" => {
-                            "record=json_set(record,'$.executionMove',json('true'))".to_owned()
-                        }
                         "transfer" => "record=json_set(record,'$.accountTransferId','pending-transfer')".to_owned(),
                         "lazy" => "record=json_set(record,'$.lazyAccountTransfer',json('{\"id\":\"pending-transfer\"}'))".to_owned(),
                         _ => unreachable!(),
@@ -1229,6 +1223,10 @@ async fn managed_callback_first_handoff_captures_the_current_actor_authority() {
         .await
         .unwrap()
         .unwrap();
+    let encoded = studio_json::to_string(&submitted).unwrap();
+    assert!(!encoded.contains("\"moving\""), "{encoded}");
+    let decoded: callback_record::SavedReply = studio_json::from_str(&encoded).unwrap();
+    assert_eq!(studio_json::to_string(&decoded).unwrap(), encoded);
     let context = submitted.authority_context_for_test();
     assert_eq!(context.agent, actor["id"].as_str().unwrap());
     assert_eq!(context.epoch, actor["epoch"].as_u64().unwrap());
@@ -1530,4 +1528,34 @@ async fn a_submitted_record_of_an_ended_generation_is_retired_unsent() {
         "the ended generation's answer is not sent"
     );
     worker.shutdown().await.unwrap();
+}
+
+fn authority_fixture(legacy: &str) -> String {
+    format!(
+        r#"{{"context":{{"agent":"actor","account":"default","stream_id":"default","connection":"connection","generation":1,"epoch":0,"thread":"thread","turn":"turn"}},"root":"actor","provider":"claude","parent":null,"role":"implementer","isLead":true,"executionMode":null{legacy}}}"#
+    )
+}
+
+#[test]
+fn managed_reply_authority_accepts_false_or_absent_legacy_moving_without_writing_it() {
+    for legacy in ["", r#", "moving":false"#] {
+        let authority: super::super::callback::ManagedReplyAuthority =
+            studio_json::from_str(&authority_fixture(legacy))
+                .expect("legacy authority remains readable");
+        let encoded = studio_json::to_string(&authority).unwrap();
+        assert!(!encoded.contains("\"moving\""), "{encoded}");
+        let decoded: super::super::callback::ManagedReplyAuthority =
+            studio_json::from_str(&encoded).unwrap();
+        assert_eq!(authority, decoded);
+    }
+}
+
+#[test]
+fn managed_reply_authority_refuses_true_legacy_moving_with_its_owner_and_field() {
+    let error = studio_json::from_str::<super::super::callback::ManagedReplyAuthority>(
+        &authority_fixture(r#", "moving":true"#),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("ManagedReplyAuthority.moving"), "{error}");
 }

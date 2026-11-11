@@ -72,14 +72,6 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sender_epoch: Option<i64>,
     },
-    RemoteStop {
-        principal: String,
-        link: String,
-        target: String,
-        request_id: String,
-        control_epoch: i64,
-        reason: String,
-    },
     Delete {
         target: String,
         request_id: String,
@@ -115,7 +107,7 @@ impl Action {
             Self::Archive { actor, .. }
             | Self::Restore { actor, .. }
             | Self::Inspect { actor, .. } => Some(actor),
-            Self::RemoteStop { .. } | Self::Delete { .. } | Self::RestoreDeletedRoot { .. } => None,
+            Self::Delete { .. } | Self::RestoreDeletedRoot { .. } => None,
         }
     }
     /// The agent whose descendant tree scopes this action's history reads.
@@ -123,7 +115,6 @@ impl Action {
         match self {
             Self::Stop { target, .. }
             | Self::Pause { target, .. }
-            | Self::RemoteStop { target, .. }
             | Self::Delete { target, .. }
             | Self::RestoreDeletedRoot { target }
             | Self::Archive { target, .. }
@@ -309,8 +300,19 @@ impl ManagementSnapshot {
                     });
                 }
                 if table == "runtime_agents" {
+                    let checked: studio_runtime_store::AgentRecord =
+                        serde::Deserialize::deserialize(row).map_err(|_| invalid())?;
                     agents.push(Agent {
-                        identity: studio_json::from_value(row.clone()).map_err(|_| invalid())?,
+                        identity: Identity {
+                            id: checked.id.0,
+                            root_id: checked.root_id.0,
+                            epoch: checked.epoch,
+                            status: checked.status,
+                            parent_id: checked.parent_id,
+                            auto_wake: checked.auto_wake,
+                            is_lead: checked.is_lead,
+                            in_flight: checked.in_flight,
+                        },
                         record: row.clone(),
                     });
                 }
@@ -997,49 +999,6 @@ fn decide_inner(
                     reason: reason.as_deref(),
                     now,
                     live,
-                    remote_request: None,
-                },
-            )
-        }
-        Action::RemoteStop {
-            principal,
-            link,
-            target,
-            request_id,
-            control_epoch,
-            reason,
-        } => {
-            let agent = snapshot.agent(target)?;
-            let expected = json!({"server":principal,"link":link});
-            if agent.record.get("remoteWorker") != Some(&expected) || !agent.flag("movedTo") {
-                return Err(ManagementError::Invalid("The remote worker route changed"));
-            }
-            if agent
-                .record
-                .get("remoteStopRequest")
-                .and_then(Value::as_str)
-                == Some(request_id)
-            {
-                return Ok(Decision::result(json!({"stopped":[target]})));
-            }
-            if agent
-                .record
-                .get("remoteControlEpoch")
-                .and_then(Value::as_i64)
-                .is_some_and(|current| current > *control_epoch)
-            {
-                return Err(ManagementError::Invalid("The remote stop was superseded"));
-            }
-            stop(
-                snapshot,
-                target,
-                StopOptions {
-                    descendants: true,
-                    kind: StopKind::Pause,
-                    reason: Some(reason),
-                    now,
-                    live,
-                    remote_request: Some((request_id, *control_epoch)),
                 },
             )
         }
@@ -1052,7 +1011,6 @@ fn decide_inner(
                 reason: None,
                 now,
                 live,
-                remote_request: None,
             },
         ),
         Action::RestoreDeletedRoot { target } => restore_deleted_root(snapshot, target),
@@ -1208,7 +1166,6 @@ struct StopOptions<'a> {
     now: f64,
     live: bool,
     reason: Option<&'a str>,
-    remote_request: Option<(&'a str, i64)>,
 }
 
 /// A stop that only interrupts needs a running turn to end. An agent with a
@@ -1219,10 +1176,6 @@ fn needs_pause(agent: &Agent, effects: &[LifecycleEffectKind]) -> bool {
     let in_flight = agent.identity.in_flight == Some(true);
     (in_flight && !agent.flag("turnId"))
         || effects.contains(&LifecycleEffectKind::CancelResume)
-        || agent
-            .record
-            .get("remoteWorker")
-            .is_some_and(Value::is_object)
         || (!in_flight
             && agent
                 .record
@@ -1241,7 +1194,6 @@ fn stop(
         reason,
         now,
         live,
-        remote_request,
     } = options;
     let (delete, pause) = (kind == StopKind::Delete, kind == StopKind::Pause);
     let agents = snapshot.descendants(target, descendants)?;
@@ -1354,27 +1306,7 @@ fn stop(
         object.insert("epoch".to_owned(), json!(epoch));
         object.insert("status".to_owned(), json!("paused"));
         object.insert("error".to_owned(), json!(reason.clone()));
-        if let Some((request_id, control_epoch)) = remote_request
-            && agent.id() == target
-        {
-            object.insert("remoteStopRequest".to_owned(), json!(request_id));
-            object.insert("remoteControlEpoch".to_owned(), json!(control_epoch));
-        }
-        if agent.flag("autoWake")
-            && !agent.flag("movedTo")
-            && agent
-                .record
-                .get("remoteWorker")
-                .is_some_and(Value::is_object)
-        {
-            let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-            object.insert("remoteStopRequest".to_owned(), json!(request_id));
-            object.insert("remoteControlEpoch".to_owned(), json!(epoch));
-            required
-                .entry(agent.id())
-                .or_default()
-                .push(LifecycleEffectKind::RemoteStop);
-        }
+
         if delete {
             // Final deletion must revoke archive restoration while retaining
             // any previously requested cleanup and its exact effect identity.
@@ -1776,7 +1708,7 @@ mod lifecycle_scope_parity_tests {
         let mut child = agent("child", "lead", Some("lead"), false);
         root["deletedAt"] = json!(10.0);
         child["deletedAt"] = json!(10.0);
-        child["workspaceCleanupIntent"] = json!({"phase":"pending"});
+        child["workspaceCleanupIntent"] = json!({"action":"archive","phase":"queued"});
         let snapshot = ManagementSnapshot::from_records(Records {
             tables: BTreeMap::from([("runtime_agents".to_owned(), vec![root, child])]),
         })
@@ -2132,7 +2064,7 @@ mod lifecycle_scope_parity_tests {
             Action::Delete { .. } | Action::Stop { .. } | Action::Pause { .. } => {
                 assert!(!full_decision.writes.is_empty())
             }
-            Action::RemoteStop { .. } | Action::RestoreDeletedRoot { .. } => {
+            Action::RestoreDeletedRoot { .. } => {
                 unreachable!("not a scoped lifecycle fixture")
             }
         }
@@ -2290,6 +2222,27 @@ mod archive_parity_tests {
                 Vec::new(),
             ),
             "tool_requests",
+        );
+    }
+}
+
+#[cfg(test)]
+mod strict_marker_tests {
+    #[test]
+    fn management_refuses_malformed_park_receipt_before_decision() {
+        let mut row = studio_json::json!({"id":"bad-park","rootId":"bad-park","epoch":1,"status":"paused","compactions":0,"accountKey":"default","provider":"codex"});
+        let records = |row| super::Records {
+            tables: std::collections::BTreeMap::from([("runtime_agents".into(), vec![row])]),
+        };
+        assert!(
+            super::ManagementSnapshot::from_records(records(row.clone())).is_ok(),
+            "the control record must be admitted"
+        );
+        row["parkReceipt"] = studio_json::json!(3);
+        let records = records(row);
+        let result = super::ManagementSnapshot::from_records(records);
+        assert!(
+            matches!(result, Err(super::ManagementError::Stored {ref table, ref id}) if table=="runtime_agents" && id=="bad-park")
         );
     }
 }

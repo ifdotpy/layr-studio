@@ -393,6 +393,9 @@ async fn queued_active_snapshot(store: &Arc<RuntimeStore>) -> RecoverySnapshot {
         .find(|case| case["name"] == "queued-active")
         .expect("queued active fixture")["agent"]
         .clone();
+    agent["contextRepair"] = json!(studio_runtime_store::ContextRepair::test_fixture(
+        "unchanged"
+    ));
     agent["connectionRecovery"]["requestId"] = json!("queued-recovery");
     agent["compactions"] = json!(0);
     agent["connectionRecovery"]["requestState"] = json!("pending");

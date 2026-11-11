@@ -844,7 +844,10 @@ async fn seed_radio_interrupt(fixture: &Fixture, snapshot: &Value) {
                         if record.get("projectId").is_some() {
                             record["projectId"] = json!(stored_project_root.to_string_lossy());
                         }
-                        row["record"] = json!(record.to_string());
+                        let current = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+                            row["id"].as_str().expect("radio agent id"), &record.to_string(),
+                        )?;
+                        row["record"] = json!(current);
                     }
                     if table == "rooms" {
                         let mut record: Value =

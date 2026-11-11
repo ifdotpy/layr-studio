@@ -107,6 +107,7 @@ fn saved_identity(saved: &crate::ExecutionAttempt) -> StoreResult<Vec<InputIdent
 
 /// `_v7` drops the agent status, in-flight and turn terms: the agent columns
 /// that were retired are read through the chat and turn rows (`domain`).
+// Physical remote selector terms retire atomically with the index at the F2 agents-family cutover.
 const ACCOUNT_WAKE_INDEX: &str = "runtime_agent_account_wake_candidates_v7";
 
 /// The agent-column part of a wake candidate: a live agent that is not a remote
@@ -416,14 +417,9 @@ impl SchedulerRepository {
                 .disconnect_recovery
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
-            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.capacity_retry.is_some()
             || agent.usage_resume_truthy()
-            || agent
-                .extra
-                .get("manualRecoveryDeliveryHold")
-                .is_some_and(truthy)
-            || agent.extra.get("remoteWorker").is_some_and(truthy)
-            || agent.extra.get("remoteAnchor").is_some_and(truthy)
+            || agent.manual_recovery_delivery_hold.is_some()
             || agent
                 .native_release
                 .as_ref()
@@ -985,19 +981,6 @@ impl SchedulerRepository {
             || agent.auto_wake != Some(true)
             || agent.in_flight == Some(true)
             || agent.native_failure_held()
-            || agent.extra.get("remoteWorker").is_some_and(truthy)
-            || agent.extra.get("remoteAnchor").is_some_and(truthy)
-        {
-            return Ok(None);
-        }
-        // Python's dispatcher claims a pending native review before queued
-        // input (`codex_agent_review.claim`); the review driver owns this turn.
-        if agent
-            .extra
-            .get("nativeReview")
-            .and_then(|review| review.get("status"))
-            .and_then(Value::as_str)
-            == Some("pending")
         {
             return Ok(None);
         }

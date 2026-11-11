@@ -28,8 +28,7 @@ use studio_runtime_store::request_results::{
     AdmittedRequest, RequestReference, RequestResultError, RequestResults,
 };
 use studio_runtime_store::{
-    AgentId, AgentRepository, QueueWriteRepository, StoreError, SyncDocumentsRepository,
-    sha256_hex, truthy,
+    AgentId, AgentRepository, QueueWriteRepository, StoreError, SyncDocumentsRepository, sha256_hex,
 };
 
 use crate::principal::{Access, CommandClass, Principal, Scope, access};
@@ -144,20 +143,7 @@ pub fn authorize(
                 .map_err(|_| CommandError::Invalid("Invalid stored agent ancestry"))?;
             below.then_some(()).ok_or(CommandError::Forbidden)
         }
-        Access::Scoped(Scope::LinkWorker) => {
-            let Principal::Peer { server } = principal else {
-                return Err(CommandError::Forbidden);
-            };
-            let worker = AgentRepository::get(tx, &AgentId::from(command.target()))?
-                .ok_or(CommandError::Forbidden)?;
-            let linked = worker
-                .extra
-                .get("remoteWorker")
-                .and_then(|remote| remote.get("server"))
-                .and_then(studio_json::Value::as_str)
-                == Some(server.as_str());
-            linked.then_some(()).ok_or(CommandError::Forbidden)
-        }
+
         Access::Scoped(_) => Err(CommandError::Forbidden),
     }
 }
@@ -321,8 +307,6 @@ pub fn agent_reference(tx: &Transaction<'_>, id: &str) -> Result<RequestReferenc
 pub struct WithdrawInput {
     pub chat: String,
     pub deleted: bool,
-    /// The chat runs on another server (a remote worker or anchor).
-    pub remote: bool,
     /// The event with the message id, in this chat and epoch: pending (queued), or
     /// reserved or dispatching (held by the running turn).
     pub queued: Option<QueuedMessage>,
@@ -391,7 +375,6 @@ pub fn read_withdraw(
     Ok(WithdrawInput {
         chat: chat.into(),
         deleted: agent.is_deleted(),
-        remote: truthy(agent.extra.get("remoteWorker")) || truthy(agent.extra.get("remoteAnchor")),
         queued,
     })
 }
@@ -406,11 +389,7 @@ pub fn decide_withdraw(
     if input.deleted {
         return Err(CommandError::Invalid("This agent was deleted"));
     }
-    if input.remote {
-        return Err(CommandError::Invalid(
-            "Not implemented: requires cross-server/remote-events",
-        ));
-    }
+
     let queued = input
         .queued
         .as_ref()
@@ -843,20 +822,18 @@ mod withdraw_decision_tests {
         }
     }
 
-    fn input(deleted: bool, remote: bool, queued: Option<QueuedMessage>) -> WithdrawInput {
+    fn input(deleted: bool, queued: Option<QueuedMessage>) -> WithdrawInput {
         WithdrawInput {
             chat: "chat-1".into(),
             deleted,
-            remote,
             queued,
         }
     }
 
     #[test]
     fn a_queued_user_message_is_withdrawn_with_its_text() {
-        let decision =
-            decide_withdraw(&input(false, false, Some(queued("m1", "user", true))), "m1")
-                .expect("withdraw");
+        let decision = decide_withdraw(&input(false, Some(queued("m1", "user", true))), "m1")
+            .expect("withdraw");
         assert_eq!(decision.chat, "chat-1");
         assert_eq!(decision.message, "m1");
         assert_eq!(decision.text, "draft text");
@@ -865,8 +842,8 @@ mod withdraw_decision_tests {
 
     #[test]
     fn a_message_held_by_a_running_turn_is_withdrawn_and_interrupts_it() {
-        let decision = decide_withdraw(&input(false, false, Some(held("m1", "user"))), "m1")
-            .expect("withdraw held");
+        let decision =
+            decide_withdraw(&input(false, Some(held("m1", "user"))), "m1").expect("withdraw held");
         assert_eq!(decision.chat, "chat-1");
         assert_eq!(decision.message, "m1");
         assert_eq!(decision.text, "draft text");
@@ -875,7 +852,7 @@ mod withdraw_decision_tests {
 
     #[test]
     fn a_held_followup_is_refused_as_not_a_user_message() {
-        let error = decide_withdraw(&input(false, false, Some(held("m1", "followup"))), "m1")
+        let error = decide_withdraw(&input(false, Some(held("m1", "followup"))), "m1")
             .expect_err("held kind");
         assert!(matches!(
             error,
@@ -884,42 +861,17 @@ mod withdraw_decision_tests {
     }
 
     #[test]
-    fn the_deleted_and_remote_checks_come_before_the_held_case() {
-        let error = decide_withdraw(&input(true, false, Some(held("m1", "user"))), "m1")
-            .expect_err("deleted");
-        assert!(matches!(
-            error,
-            CommandError::Invalid("This agent was deleted")
-        ));
-        let error = decide_withdraw(&input(false, true, Some(held("m1", "user"))), "m1")
-            .expect_err("remote");
-        assert!(
-            matches!(error, CommandError::Invalid(text) if text.starts_with("Not implemented"))
-        );
-    }
-
-    #[test]
     fn a_deleted_chat_is_refused() {
-        let error = decide_withdraw(&input(true, false, None), "m1").expect_err("deleted");
+        let error = decide_withdraw(&input(true, None), "m1").expect_err("deleted");
         assert!(matches!(
             error,
             CommandError::Invalid("This agent was deleted")
-        ));
-    }
-
-    #[test]
-    fn a_remote_chat_is_refused() {
-        let error = decide_withdraw(&input(false, true, Some(queued("m1", "user", true))), "m1")
-            .expect_err("remote");
-        assert!(matches!(
-            error,
-            CommandError::Invalid("Not implemented: requires cross-server/remote-events")
         ));
     }
 
     #[test]
     fn a_message_that_is_not_queued_is_a_conflict() {
-        let error = decide_withdraw(&input(false, false, None), "m1").expect_err("not queued");
+        let error = decide_withdraw(&input(false, None), "m1").expect_err("not queued");
         assert!(matches!(
             error,
             CommandError::Conflict("This message already left the queue")
@@ -928,7 +880,7 @@ mod withdraw_decision_tests {
 
     #[test]
     fn a_queued_event_with_another_id_is_a_conflict() {
-        let error = decide_withdraw(&input(false, false, Some(queued("m2", "user", true))), "m1")
+        let error = decide_withdraw(&input(false, Some(queued("m2", "user", true))), "m1")
             .expect_err("other id");
         assert!(matches!(
             error,
@@ -938,11 +890,8 @@ mod withdraw_decision_tests {
 
     #[test]
     fn an_invalid_queued_event_is_refused() {
-        let error = decide_withdraw(
-            &input(false, false, Some(queued("m1", "user", false))),
-            "m1",
-        )
-        .expect_err("invalid");
+        let error = decide_withdraw(&input(false, Some(queued("m1", "user", false))), "m1")
+            .expect_err("invalid");
         assert!(matches!(
             error,
             CommandError::Invalid("Only a user message can be withdrawn")
@@ -951,11 +900,8 @@ mod withdraw_decision_tests {
 
     #[test]
     fn a_queued_event_that_is_not_a_user_message_is_refused() {
-        let error = decide_withdraw(
-            &input(false, false, Some(queued("m1", "followup", true))),
-            "m1",
-        )
-        .expect_err("kind");
+        let error = decide_withdraw(&input(false, Some(queued("m1", "followup", true))), "m1")
+            .expect_err("kind");
         assert!(matches!(
             error,
             CommandError::Invalid("Only a user message can be withdrawn")
@@ -963,30 +909,8 @@ mod withdraw_decision_tests {
     }
 
     #[test]
-    fn the_deleted_check_comes_before_the_remote_and_queue_checks() {
-        let error = decide_withdraw(&input(true, true, None), "m1").expect_err("deleted first");
-        assert!(matches!(
-            error,
-            CommandError::Invalid("This agent was deleted")
-        ));
-    }
-
-    #[test]
-    fn the_remote_check_comes_before_the_queue_checks() {
-        let error = decide_withdraw(
-            &input(false, true, Some(queued("m1", "followup", false))),
-            "m1",
-        )
-        .expect_err("remote first");
-        assert!(
-            matches!(error, CommandError::Invalid(text) if text.starts_with("Not implemented"))
-        );
-    }
-
-    #[test]
     fn the_queue_check_comes_before_the_kind_check() {
-        let error =
-            decide_withdraw(&input(false, false, None), "m1").expect_err("not queued first");
+        let error = decide_withdraw(&input(false, None), "m1").expect_err("not queued first");
         assert!(matches!(error, CommandError::Conflict(_)));
     }
 }

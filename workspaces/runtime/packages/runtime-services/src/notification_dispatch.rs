@@ -1429,23 +1429,6 @@ fn validate_agent_write_fields(
     if agent.id.as_ref() != agent_id || agent.epoch < 0 || agent.root_id.as_ref().is_empty() {
         return Err(stored("runtime_agents", agent_id));
     }
-    // TODO(agent-record-chain r3): notification counters still live in the remainder.
-    if let Some(counts) = agent.extra.get("unhandledNotifications") {
-        let counts = counts
-            .as_object()
-            .ok_or_else(|| stored("runtime_agents", agent_id))?;
-        for value in counts.values() {
-            if value.get("count").and_then(Value::as_u64).is_none()
-                || value.get("reasons").is_some_and(|reasons| {
-                    reasons.as_object().is_none_or(|reasons| {
-                        reasons.values().any(|count| count.as_u64().is_none())
-                    })
-                })
-            {
-                return Err(stored("runtime_agents", agent_id));
-            }
-        }
-    }
     Ok(())
 }
 
@@ -2354,21 +2337,16 @@ mod tests {
     }
 
     #[test]
-    fn notification_agent_write_preserves_legacy_row_bytes_with_typed_extension_storage() {
+    fn notification_agent_write_preserves_legacy_row_bytes_without_cloning_typed_name() {
         let mut connection = database();
         let tx = connection.transaction().unwrap();
         let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
             .unwrap()
             .unwrap();
-        agent
-            .extra
-            .insert("futureExtension".into(), json!([1, 2, 3]));
-        let allocation = agent.extra["futureExtension"].as_array().unwrap().as_ptr();
+        agent.name = Some("retained allocation".repeat(1024));
+        let allocation = agent.name.as_ref().unwrap().as_ptr();
         super::persist_agent(&tx, "agent", &mut agent).unwrap();
-        assert_eq!(
-            allocation,
-            agent.extra["futureExtension"].as_array().unwrap().as_ptr()
-        );
+        assert_eq!(allocation, agent.name.as_ref().unwrap().as_ptr());
         assert_eq!(
             NotificationDispatchRepository::agent_record(&tx, "agent")
                 .unwrap()

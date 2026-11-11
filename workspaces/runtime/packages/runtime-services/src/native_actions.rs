@@ -344,17 +344,13 @@ pub fn reserve(
         return Err(NativeError::Invalid("attempt"));
     }
     crate::context_repair::assert_available(&agent).map_err(|_| NativeError::Unknown)?;
-    let review_worker = request.action == Action::Review
-        && agent["nativeReview"]["status"] == "pending"
-        && agent["status"] == "queued";
     if agent["autoWake"] != true
         || crate::event_write::truthy(agent.get("inFlight"))
         || crate::event_write::truthy(agent.get("deletedAt"))
-        || (!review_worker
-            && matches!(
-                agent["status"].as_str(),
-                Some("queued" | "starting" | "running" | "approval" | "compacting")
-            ))
+        || matches!(
+            agent["status"].as_str(),
+            Some("queued" | "starting" | "running" | "approval" | "compacting")
+        )
     {
         return Err(NativeError::Invalid("agent.status"));
     }
@@ -482,17 +478,6 @@ pub fn reserve(
     agent["turnEpoch"] = agent["epoch"].clone();
     agent["startAttempt"] = json!({"id":attempt,"epoch":agent["epoch"],"events":[],"action":request.action,
         "submitted":false,"created":now,"actionRequestId":request.request_id,"rootRequestId":request.request_id,"actionIdentity":identity});
-    if review_worker {
-        // Python `codex_agent_review.claim` saves the account on the attempt.
-        agent["startAttempt"]["accountKey"] = identity["accountKey"].clone();
-        agent["startAttempt"]["reviewTarget"] = request
-            .context
-            .get("reviewTarget")
-            .cloned()
-            .unwrap_or_else(|| agent["nativeReview"]["target"].clone());
-        agent["nativeReview"]["status"] = json!("started");
-        agent["nativeReview"]["startedAt"] = json!(now);
-    }
     let now_ms = (now * 1000.0) as i64;
     let admitted = admit(
         tx,

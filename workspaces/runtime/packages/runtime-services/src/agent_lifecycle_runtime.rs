@@ -20,7 +20,6 @@ pub enum LifecycleEffectKind {
     ReleaseWork,
     FinalizeDeleted,
     VoiceStop,
-    RemoteStop,
 }
 impl LifecycleEffectKind {
     pub fn dependency(self) -> &'static str {
@@ -32,7 +31,6 @@ impl LifecycleEffectKind {
             Self::ReleaseWork => "work-driver/deletion-release",
             Self::FinalizeDeleted => "account-worker/deleted-settlement",
             Self::VoiceStop => "voice-driver/agent-stop",
-            Self::RemoteStop => "cross-server/agent-management",
         }
     }
 }

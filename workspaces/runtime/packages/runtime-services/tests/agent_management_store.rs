@@ -61,7 +61,7 @@ fn case(name: &str) -> Value {
                 .as_object_mut()
                 .expect("lead")
                 .extend(
-                    json!({"status":"starting","inFlight":true,"capacityRetry":{"id":"retry"},
+                    json!({"status":"starting","inFlight":true,"capacityRetry":{"id":"retry","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":3,"maxAttempts":4,"settings":{},"threadId":"thread","turnId":"turn","status":"scheduled"},
                         "startAttempt":{"id":"attempt","capacityRetryId":"retry","submitted":false}})
                     .as_object()
                     .expect("fields")

@@ -11,7 +11,7 @@ use studio_runtime_store::{
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecordFixture {
-    agent: AgentRecord,
+    agent: studio_json::OwnedRawJson,
     task: TaskRecord,
     work: WorkItemRecord,
 }
@@ -34,8 +34,33 @@ async fn seed_records(store: &RuntimeStore) {
     let fixture: RecordFixture =
         studio_json::from_str(include_str!("fixtures/record-round-trip.json"))
             .expect("historical record fixture decodes");
+    // The frozen root extensions are deliberately refused by current admission.
+    assert!(studio_json::from_str::<AgentRecord>(fixture.agent.as_str()).is_err());
+    let migrated = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+        "fixture-agent",
+        fixture.agent.as_str(),
+    )
+    .expect("retire historical agent root fields");
+    let mut value: Value = studio_json::from_str(&migrated).expect("migrated fixture JSON");
+    let mut evidence = json!({"message":"retained fixture evidence"});
+    for key in [
+        "fixtureFlag",
+        "fixtureInteger",
+        "fixtureUnicode",
+        "fixtureNested",
+    ] {
+        if let Some(saved) = value
+            .as_object_mut()
+            .expect("historical agent object")
+            .remove(key)
+        {
+            evidence[key] = saved;
+        }
+    }
+    value["error"] = evidence;
+    let agent = AgentRecord::from_value(value).expect("admitted fixture agent");
     store.transaction(move |tx| {
-        AgentRepository::put(tx, &fixture.agent)?;
+        AgentRepository::put(tx, &agent)?;
         TaskRepository::put(tx, &fixture.task)?;
         Table::<WorkItemRecord>::new(tx).put(&fixture.work)?;
         tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('cross-event','fixture-agent','work_review','{\"fixture\":true}','pending',1720000000.5,0)", [])?;
@@ -75,14 +100,14 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
     let agent = AgentRepository::get(&reader, &AgentId::from(agent_id.as_str()))
         .expect("cross-runtime test operation succeeds")
         .expect("cross-runtime test operation succeeds");
-    assert_eq!(agent.value()["fixtureFlag"], json!(true));
-    assert_eq!(agent.value()["fixtureInteger"].as_i64(), Some(7));
+    assert_eq!(agent.value()["error"]["fixtureFlag"], json!(true));
+    assert_eq!(agent.value()["error"]["fixtureInteger"].as_i64(), Some(7));
     assert_eq!(
-        agent.value()["fixtureUnicode"],
+        agent.value()["error"]["fixtureUnicode"],
         json!("Zażółć 東京\n\u{0000}")
     );
     assert_eq!(
-        agent.value()["fixtureNested"],
+        agent.value()["error"]["fixtureNested"],
         json!({"items":[0.1,5.0,9007199254740993_i64,true,{"text":"🦀\t"}]})
     );
     let task = TaskRepository::get(&reader, &TaskId::from("cross-task"))
@@ -162,7 +187,7 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
             let mut agent =
                 AgentRepository::get(transaction, &AgentId::from(write_agent_id.as_str()))?
                     .expect("record fixture contains the agent");
-            agent.extra.insert("rustAgentFlag".into(), json!(true));
+            agent.name = Some("Rust cross-runtime agent".into());
             AgentRepository::put(transaction, &agent)?;
             let mut task = TaskRepository::get(transaction, &TaskId::from("cross-task"))?
                 .expect("record fixture contains the task");
@@ -221,8 +246,8 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
     let agent = AgentRepository::get(&reader, &AgentId::from(agent_id.as_str()))
         .expect("cross-runtime test operation succeeds")
         .expect("Rust-written agent remains readable in Rust");
-    assert_eq!(agent.value()["fixtureFlag"], json!(true));
-    assert_eq!(agent.value()["rustAgentFlag"], json!(true));
+    assert_eq!(agent.value()["error"]["fixtureFlag"], json!(true));
+    assert_eq!(agent.name.as_deref(), Some("Rust cross-runtime agent"));
 
     let task = TaskRepository::get(&reader, &TaskId::from("cross-task"))
         .expect("cross-runtime test operation succeeds")

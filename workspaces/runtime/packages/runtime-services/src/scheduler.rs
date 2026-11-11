@@ -318,11 +318,8 @@ pub async fn recover_on_startup(store: &RuntimeStore) -> Result<usize, Scheduler
 
 /// Mirror Python's final per-agent startup cleanup after both recovery scans.
 fn clear_startup_agent_state(transaction: &rusqlite::Transaction<'_>) -> Result<(), StoreError> {
-    let mut statement = transaction.prepare_cached(
-        "SELECT id,record FROM runtime_agents \
-         WHERE COALESCE(json_extract(record,'$.remoteWorker'),0)=0 \
-           AND COALESCE(json_extract(record,'$.remoteAnchor'),0)=0 ORDER BY id",
-    )?;
+    let mut statement =
+        transaction.prepare_cached("SELECT id,record FROM runtime_agents ORDER BY id")?;
     let records = statement
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))

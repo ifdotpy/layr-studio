@@ -1003,14 +1003,10 @@ async fn a_lead_prepared_with_the_old_progress_file_resumes_its_thread() {
                     let mut row =
                         AgentRepository::get(tx, &AgentId::from(record_id.as_str()))?.unwrap();
                     row.permission_mode = Some(studio_runtime_schema::claude_permissions::PermissionMode::Default);
-                    row.extra
-                        .insert("nativeRoleGuidance".into(), json!(old_role));
+                    row.native_role_guidance = studio_runtime_schema::queue_command::Field::Value(old_role.into());
                     let versions =
                         json!({"roleSkill":role_version,"progressFile":progress_version});
-                    row.extra.insert(
-                        "preparedContext".into(),
-                        json!({"epoch":["fake-thread-0",0],"versions":versions}),
-                    );
+                    row.prepared_context = studio_runtime_schema::queue_command::Field::Value(serde::Deserialize::deserialize(json!({"epoch":["fake-thread-0",0],"versions":versions})).unwrap());
                     AgentRepository::put(tx, &row)?;
                     // The context of the last delivered turn, as live leads hold it.
                     preparation::ensure_context_tables(tx)

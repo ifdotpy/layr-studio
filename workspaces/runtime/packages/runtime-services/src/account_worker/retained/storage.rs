@@ -175,47 +175,51 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
     }
     let deleted_voice_stop = authorize_deleted_voice_stop(tx, call, actor, &agent_record)?;
     let repair_fork = if call.method == Method::ThreadFork {
-        let repair = agent_record
-            .extra
-            .get("contextRepair")
-            .unwrap_or(&Value::Null);
-        let source = &repair["source"];
-        let snapshot = &repair["snapshot"];
-        let fork_params = &repair["forkParams"];
-        let path_is_absolute = |value: &Value| {
-            value
-                .as_str()
-                .is_some_and(|path| std::path::Path::new(path).is_absolute())
-        };
-        repair["id"].as_str().is_some_and(|id| {
-            !id.is_empty()
-                && repair["agent"] == actor.agent
-                && repair["phase"] == "submitted"
-                && repair["rpcMethod"] == "thread/fork"
-                && repair["forkOperation"] == call.operation
-                && source["id"] == actor.agent
-                && source["epoch"].as_i64() == Some(actor.epoch)
-                && source["accountKey"].as_str() == Some(call.scope.account.as_str())
-                && source["threadId"].as_str() == agent_record.thread_id.as_deref()
-                && path_is_absolute(&snapshot["sourcePath"])
-                && path_is_absolute(&snapshot["copyPath"])
-                && snapshot["sourceSha256"]
-                    .as_str()
-                    .is_some_and(|value| !value.is_empty())
-                && snapshot["sourceBytes"].as_u64().is_some()
-                && snapshot["sourceFileIdentity"].is_object()
-                && snapshot["copySha256"]
-                    .as_str()
-                    .is_some_and(|value| !value.is_empty())
-                && snapshot["copyBytes"].as_u64().is_some()
-                && snapshot["eventIds"].is_array()
-                && snapshot["importThreadId"].as_str()
-                    == call.params.get("threadId").and_then(Value::as_str)
-                && snapshot["copyPath"].as_str() == call.params.get("path").and_then(Value::as_str)
-                && fork_params == &call.params
-                && call.params.get("excludeTurns") == Some(&json!(true))
-                && call.params.get("deferGoalContinuation") == Some(&json!(true))
-        })
+        agent_record
+            .context_repair
+            .as_ref()
+            .map(std::ops::Deref::deref)
+            .is_some_and(|repair| {
+                let studio_runtime_store::ContextRepair::Submitted(repair) = repair else {
+                    return false;
+                };
+                let source = &repair.source;
+                let snapshot = &repair.snapshot;
+                let params = &repair.fork_params;
+                !repair.id.is_empty()
+                    && repair.agent == actor.agent
+                    && repair.fork_operation == call.operation
+                    && source.id == actor.agent
+                    && source.epoch == actor.epoch
+                    && source.account_key == call.scope.account
+                    && Some(source.thread_id.as_str()) == agent_record.thread_id.as_deref()
+                    && std::path::Path::new(&snapshot.source_path).is_absolute()
+                    && snapshot
+                        .copy_path
+                        .as_deref()
+                        .is_some_and(|path| std::path::Path::new(path).is_absolute())
+                    && !snapshot.source_sha256.is_empty()
+                    && snapshot
+                        .copy_sha256
+                        .as_deref()
+                        .is_some_and(|digest| !digest.is_empty())
+                    && snapshot.copy_bytes.is_some()
+                    && Some(snapshot.import_thread_id.as_str())
+                        == call.params.get("threadId").and_then(Value::as_str)
+                    && snapshot.copy_path.as_deref()
+                        == call.params.get("path").and_then(Value::as_str)
+                    && Some(params.thread_id.as_str())
+                        == call.params.get("threadId").and_then(Value::as_str)
+                    && Some(params.path.as_str()) == call.params.get("path").and_then(Value::as_str)
+                    && params.exclude_turns
+                    && params.defer_goal_continuation
+                    && call.params.get("excludeTurns") == Some(&json!(true))
+                    && call.params.get("deferGoalContinuation") == Some(&json!(true))
+                    && call
+                        .params
+                        .as_object()
+                        .is_some_and(|params| params.len() == 4)
+            })
     } else {
         false
     };
@@ -527,15 +531,16 @@ fn thread_started_for_actor(
     let Some(actor) = &call.actor else {
         return Ok(false);
     };
-    let provenance: Option<String> = tx.query_row(
-        "SELECT value FROM runtime_agents, json_each(record,'$.threadProvenance') WHERE runtime_agents.id=?1 AND key=?2",
-        rusqlite::params![actor.agent, thread], |row| row.get(0),
-    ).optional()?;
-    let Some(provenance) = provenance else {
+    let Some(agent) = AgentRepository::get(tx, &AgentId::from(actor.agent.as_str()))? else {
         return Ok(false);
     };
-    let provenance: ThreadProvenance =
-        studio_json::from_str(&provenance).map_err(StoreError::from)?;
+    let Some(provenance) = agent
+        .thread_provenance
+        .as_ref()
+        .and_then(|map| map.get(thread))
+    else {
+        return Ok(false);
+    };
     Ok(provenance.actor == *actor
         && provenance.scope.account == call.scope.account
         && provenance.scope.generation == call.scope.generation)
@@ -970,34 +975,30 @@ fn settle(
         let Some(actor) = &payload.call.actor else {
             return Ok(());
         };
-        let mut agent = match AgentRepository::get(tx, &AgentId::from(actor.agent.as_str())) {
-            Ok(Some(agent)) => agent,
-            Ok(None)
-            | Err(
-                StoreError::InvalidStoredRecord { .. }
-                | StoreError::InvalidStoredObject { .. }
-                | StoreError::SchemaValidation(_)
-                | StoreError::RecordContract(_)
-                | StoreError::Json(_)
-                | StoreError::InvalidSyncObject { .. }
-                | StoreError::InvalidSyncObjectField { .. },
-            ) => return Ok(()),
-            Err(error) => return Err(error.into()),
-        };
-        let provenance = agent
-            .extra
-            .entry("threadProvenance".into())
-            .or_insert_with(|| json!({}));
-        let Some(map) = provenance.as_object_mut() else {
+        let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(actor.agent.as_str()))?
+        else {
             return Ok(());
         };
-        map.insert(
+        {
+            if !agent.thread_provenance.is_some() {
+                agent.thread_provenance =
+                    studio_runtime_schema::queue_command::Field::Value(Default::default());
+            }
+            match &mut agent.thread_provenance {
+                studio_runtime_schema::queue_command::Field::Value(values) => values,
+                studio_runtime_schema::queue_command::Field::Missing
+                | studio_runtime_schema::queue_command::Field::Null => {
+                    unreachable!("map initialized above")
+                }
+            }
+        }
+        .insert(
             thread.into(),
-            studio_runtime_store::projection_value(&ThreadProvenance {
+            ThreadProvenance {
                 scope: payload.call.scope.clone(),
                 actor: actor.clone(),
                 operation: payload.call.operation.clone(),
-            }),
+            },
         );
         AgentRepository::put(tx, &agent)?;
     }
@@ -1529,9 +1530,7 @@ mod replay_identity_tests {
 
     #[test]
     fn stored_thread_provenance_is_scoped_to_actor_and_generation() {
-        let mut db = rusqlite::Connection::open_in_memory().expect("database");
-        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT)")
-            .expect("table");
+        let mut db = studio_runtime_store::test_canvas();
         let tx = db.transaction().expect("transaction");
         let call = call();
         let provenance = ThreadProvenance {
@@ -1539,12 +1538,17 @@ mod replay_identity_tests {
             actor: call.actor.clone().expect("actor"),
             operation: call.operation.clone(),
         };
-        let raw = studio_json::to_string(&provenance).expect("provenance");
-        tx.execute(
-            "INSERT INTO runtime_agents VALUES('agent-1',?1)",
-            [format!(r#"{{"threadProvenance":{{"thread-1":{raw}}}}}"#)],
-        )
-        .expect("agent");
+        let mut agent = studio_runtime_store::AgentRecord::test_defaults();
+        agent.id = AgentId::from("agent-1");
+        agent.provider = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Codex,
+        );
+        agent.root_id = agent.id.clone();
+        agent.thread_provenance =
+            studio_runtime_schema::queue_command::Field::Value(std::collections::BTreeMap::from([
+                ("thread-1".to_owned(), provenance),
+            ]));
+        AgentRepository::put(&tx, &agent).expect("agent");
         assert!(thread_started_for_actor(&tx, &call, "thread-1").expect("matching provenance"));
         assert!(!thread_started_for_actor(&tx, &call, "missing").expect("missing provenance"));
         let mut other = call;

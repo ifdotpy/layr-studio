@@ -200,7 +200,6 @@ mod tests {
         assert!(matches!(stored.native_failure_hold.value(),
             Some(crate::NativeFailureHold::Unreadable(raw)) if raw.0.as_str() == r#"{"reason":"pending"}"#));
         assert!(stored.native_failure_held());
-        assert!(!stored.extra.contains_key("nativeFailureHold"));
     }
     #[test]
     fn terminal_provenance_remains_on_its_exact_execution_owner() {

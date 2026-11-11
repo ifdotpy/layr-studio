@@ -576,10 +576,7 @@ impl HttpState {
         self.orchestration_driver.clone()
     }
 
-    pub fn with_lifecycle_ports(
-        mut self,
-        lifecycle_ports: Arc<dyn studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts>,
-    ) -> Self {
+    pub fn with_orchestration_driver(mut self) -> Self {
         if let Some(store) = self.store.as_ref() {
             let accounts = self.account_policy.as_ref().map(|policy| policy.accounts());
             let default_account = accounts
@@ -600,12 +597,11 @@ impl HttpState {
                         ),
                     ),
                     Arc::new(
-                        studio_runtime_services::multi_server_orchestration::RuntimeOrchestrationEffects::with_project_accounts_and_lifecycle_ports(
+                        studio_runtime_services::multi_server_orchestration::RuntimeOrchestrationEffects::with_project_accounts(
                             Arc::clone(store),
                             Arc::new(studio_runtime_services::browser::BrowserCallbackReceiver::new(Arc::clone(store))),
                             default_account,
                             known_accounts,
-                            lifecycle_ports,
                         ).with_projects_changed(Arc::clone(&self.peer_projects_wake)),
                     ),
                 ),

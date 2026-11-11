@@ -15,8 +15,6 @@ use studio_runtime_services::{
     native_actions::{self, Admission, NativeError},
 };
 
-#[cfg(test)]
-use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
 pub(crate) fn routes() -> RouteGroup {
@@ -619,21 +617,13 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
 #[allow(clippy::disallowed_methods)]
 mod native_review_preflight_tests {
     use super::*;
-    use std::{
-        path::Path,
-        sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        },
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
     };
     use studio_json::json;
-    use studio_runtime_services::{
-        account_session_runtime::{
-            AccountSessionError, AccountSessionPort, ConnectionScope, ProviderRequest,
-            SessionReceipt,
-        },
-        account_worker::preparation::PreparationResources,
-        model_catalog::ModelCatalogService,
+    use studio_runtime_services::account_session_runtime::{
+        AccountSessionError, AccountSessionPort, ProviderRequest, SessionReceipt,
     };
     struct ProviderSpy(AtomicUsize);
     impl AccountSessionPort for ProviderSpy {
@@ -645,24 +635,6 @@ mod native_review_preflight_tests {
             Box::pin(async move {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Err(AccountSessionError::Requires("test/provider"))
-            })
-        }
-    }
-
-    struct RepairSpy(Arc<AtomicUsize>);
-    impl NativeContextRepairPort for RepairSpy {
-        fn repair_idle(
-            &self,
-            _store: Arc<RuntimeStore>,
-            _agent_id: String,
-            _provider_home: std::path::PathBuf,
-            _broker: Arc<dyn AccountSessionPort>,
-            _deadline: std::time::Instant,
-        ) -> futures_util::future::BoxFuture<'static, native_actions::Result<Value>> {
-            let calls = Arc::clone(&self.0);
-            Box::pin(async move {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Value::Null)
             })
         }
     }
@@ -891,114 +863,6 @@ mod native_review_preflight_tests {
             .unwrap_err();
             assert!(error.message().contains("provider-session/native-request"));
         }
-    }
-
-    #[tokio::test]
-    async fn remote_origin_review_preflight_uses_the_provider_home_owner() {
-        let directory = tempfile::tempdir().expect("isolated store directory");
-        let store = Arc::new(
-            RuntimeStore::open(Some(directory.path()))
-                .await
-                .expect("open store"),
-        );
-        let original = AgentRecord::from_value(json!({"compactions":0,
-            "id":"remote",
-            "rootId":"remote",
-            "epoch":7,
-            "status":"running",
-            "provider":"codex",
-            "remoteOrigin":true,
-            "threadId":"thread-1",
-            "accountKey":"default",
-            "startAttempt":{"submitted":true}
-        }))
-        .expect("valid agent record");
-        let original_for_write = original.clone();
-        store
-            .transaction(move |tx| AgentRepository::put(tx, &original_for_write))
-            .await
-            .expect("save agent");
-        let before_agent = {
-            let connection = store.test_reader().expect("read store");
-            AgentRepository::get(&connection, &original.id)
-                .expect("read agent")
-                .expect("agent exists")
-                .value()
-        };
-        let before_receipts: i64 = {
-            let connection = store.test_reader().expect("read store");
-            connection
-                .query_row(
-                    "SELECT COUNT(*) FROM runtime_outbox WHERE kind='native_action'",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("count receipts")
-        };
-
-        let root = CanonicalPath::existing(
-            Path::new(
-                &std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
-            )
-            .join("../../../.."),
-        )
-        .expect("repository root");
-        let resources = PreparationResources::bundled_at(
-            String::new(),
-            ModelCatalogService::new(),
-            root.clone().to_path_buf(),
-        )
-        .expect("preparation resources");
-        let provider = Arc::new(ProviderSpy(AtomicUsize::new(0)));
-        let repair = Arc::new(RepairSpy(Arc::new(AtomicUsize::new(0))));
-        let preparation = NativeActionPreparationRun {
-            store: store.clone(),
-            provider: provider.clone(),
-            account_driver: None,
-            repair: Some(repair.clone()),
-            preparation: Arc::new(resources),
-        };
-        let request = native_actions::Request {
-            request_id: "review-request".into(),
-            agent: "remote".into(),
-            action: native_actions::Action::Review,
-            context: Value::Null,
-        };
-        let scope = ConnectionScope {
-            account: "default".into(),
-            connection: "connection-1".into(),
-            generation: 3,
-        };
-        let result = native_actions::Preparation::before_reserve(
-            &preparation,
-            store.as_ref(),
-            provider.as_ref(),
-            &request,
-            &scope,
-        )
-        .await;
-
-        assert!(matches!(
-            result,
-            Err(NativeError::Unavailable("account-driver/provider-home"))
-        ));
-        assert_eq!(repair.0.load(Ordering::SeqCst), 0);
-        assert_eq!(provider.0.load(Ordering::SeqCst), 0);
-        let connection = store.test_reader().expect("read unchanged store");
-        let after_agent = AgentRepository::get(&connection, &original.id)
-            .expect("read unchanged agent")
-            .expect("agent remains")
-            .value();
-        let after_receipts: i64 = connection
-            .query_row(
-                "SELECT COUNT(*) FROM runtime_outbox WHERE kind='native_action'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count unchanged receipts");
-        assert_eq!(before_agent["remoteOrigin"], true);
-        assert_eq!(after_agent, before_agent);
-        assert_eq!(after_receipts, before_receipts);
     }
 
     #[test]

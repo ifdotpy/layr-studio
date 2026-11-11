@@ -419,39 +419,6 @@ async fn startup_rule_linked_monitor_stays_active_without_a_monitor_exit_event()
 }
 
 #[tokio::test]
-async fn startup_remote_owned_monitor_is_recovered_without_aborting() {
-    let root = fixtures::tempdir();
-    let cases = fixtures::corpus(root.path());
-    let mut case = running(&cases);
-    case["actor"]["remoteWorker"] = json!({"server":"remote-server","link":"remote-link"});
-    let id = case["before"]["id"]
-        .as_str()
-        .expect("monitor id")
-        .to_owned();
-    let store = fixtures::store(root.path(), "remote-monitor-startup").await;
-    fixtures::seed(&store, &case, fixtures::monitor(root.path())).await;
-
-    monitor_runtime::recover_on_startup(&store, 2000.0)
-        .await
-        .expect("recover remote monitor");
-
-    let connection = store.test_reader().expect("read recovered remote monitor");
-    assert_eq!(
-        MonitorsRepository::get(&connection, &id)
-            .expect("read remote monitor")
-            .expect("remote monitor exists")
-            .status
-            .as_str(),
-        "running"
-    );
-    assert!(
-        QueueEventRepository::get(&connection, &QueueEventId::from(format!("monitor:{id}")))
-            .expect("read remote monitor exit")
-            .is_none()
-    );
-}
-
-#[tokio::test]
 async fn malformed_monitor_row_is_skipped_while_other_rows_are_recovered() {
     let root = fixtures::tempdir();
     let cases = fixtures::corpus(root.path());

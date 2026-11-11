@@ -360,13 +360,24 @@ fn reservation_targets_the_authorized_repair_destination_and_keeps_request_ident
         "epoch":3
     });
     case["agent"]["threadId"] = json!("thread-repaired");
-    case["agent"]["contextRepair"] = json!({
-        "id":"repair-1",
-        "agent":"lead",
-        "phase":"completed",
-        "source":{"id":"lead","accountKey":"default","threadId":"thread","epoch":3},
-        "newThreadId":"thread-repaired"
-    });
+    case["agent"]["contextRepair"] = json!(studio_runtime_store::ContextRepair::test_fixture(
+        "completed"
+    ));
+    case["agent"]["contextRepair"]
+        .as_object_mut()
+        .unwrap()
+        .extend(
+            json!({
+                "id":"repair-1",
+                "agent":"lead",
+                "phase":"completed",
+                "source":{"id":"lead","accountKey":"default","threadId":"thread","epoch":3},
+                "newThreadId":"thread-repaired"
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
     let mut db = db(&case);
     reserve_case(&mut db, &case);
 
@@ -712,6 +723,11 @@ fn review_plan_record_boundary_preserves_optional_and_extension_fields() {
                 case["directory"].as_str().unwrap().into(),
             )
         };
+        if variant == 2 {
+            assert!(studio_runtime_store::AgentRecord::from_value(actor.clone()).is_err());
+            assert!(make(actor, case["root"].clone()).is_err());
+            continue;
+        }
         let actor_record = studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();
         let root_record =
             studio_runtime_store::AgentRecord::from_value(case["root"].clone()).unwrap();
@@ -1032,6 +1048,19 @@ fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
                 _ => {
                     record["futureReviewOption"] = json!({"nested": [null, 1]});
                 }
+            }
+            if variant == "unknown" {
+                assert!(
+                    ReviewPlan::from_records(
+                        actor,
+                        root,
+                        case["args"].clone(),
+                        "review-request".into(),
+                        case["directory"].as_str().unwrap().into()
+                    )
+                    .is_err()
+                );
+                continue;
             }
             let actor_record =
                 studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();

@@ -959,7 +959,7 @@ pub fn completed_proof(s: &Snapshot, account_key: &str, now: f64) -> Result<Deci
         record.update(U::DueAt(Some(now)));
         if s.current("usageResume") {
             let mut agent = crate::continuation::ProposedAgent::new(s);
-            agent.continuation("usageResume", record.value());
+            agent.continuation("usageResume", &record);
             decision.agent = Some(agent);
         }
         decision.record = Some(record);

@@ -350,7 +350,23 @@ pub(super) struct ManagedReplyAuthority {
     role: Option<String>,
     is_lead: bool,
     execution_mode: Option<String>,
-    moving: bool,
+    // Old captures wrote false; read that durable member without writing it again.
+    #[serde(
+        default,
+        rename = "moving",
+        skip_serializing,
+        deserialize_with = "legacy_not_moving"
+    )]
+    legacy_moving: (),
+}
+
+fn legacy_not_moving<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    if <bool as serde::Deserialize>::deserialize(deserializer)? {
+        return Err(serde::de::Error::custom(
+            "invalid stored ManagedReplyAuthority.moving: only false or absent is valid",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -358,7 +374,6 @@ impl ManagedReplyAuthority {
     pub(super) fn for_test(
         context: crate::provider_callbacks::CallbackContext,
         root: String,
-        moving: bool,
     ) -> Self {
         Self {
             context,
@@ -368,7 +383,7 @@ impl ManagedReplyAuthority {
             role: Some("implementer".into()),
             is_lead: true,
             execution_mode: None,
-            moving,
+            legacy_moving: (),
         }
     }
 
@@ -427,9 +442,7 @@ pub(super) fn managed_reply_authority_in(
         return Ok(None);
     };
     let value = actor.value();
-    if studio_runtime_store::truthy(value.get("executionMove"))
-        || crate::account_transfer::before_start(&actor).is_err()
-    {
+    if crate::account_transfer::before_start(&actor).is_err() {
         return Ok(None);
     }
     let snapshot =
@@ -450,7 +463,7 @@ pub(super) fn managed_reply_authority_in(
         role: text("role"),
         is_lead: value.get("isLead") == Some(&Value::Bool(true)),
         execution_mode: text("executionMode"),
-        moving: studio_runtime_store::truthy(value.get("executionMove")),
+        legacy_moving: (),
     }))
 }
 

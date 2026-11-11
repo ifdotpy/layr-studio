@@ -444,6 +444,7 @@ impl From<WorkerSettingsError> for Error {
 
 struct Draft {
     typed: AgentRecord,
+    creation: crate::host_worker_create::CreationDraft,
     record: AgentRecord,
     id: String,
     prompt: String,
@@ -880,7 +881,7 @@ pub(crate) async fn spawn_agents(
         let body = json!({"account_key":account_key,"name":name,"model":model,"effort":effort,
             "prompt":prompt,"workspace_explicit":spec.workspace.is_some(),
             "_workspaceInGit":in_git});
-        let mut draft = crate::host_worker_create::prepare_work_item(
+        let (draft, mut creation) = crate::host_worker_create::prepare_work_item(
             &body,
             Path::new(host_cwd),
             AgentId::from(id.as_str()),
@@ -903,13 +904,11 @@ pub(crate) async fn spawn_agents(
             daybreak,
         )
         .map_err(map_create_error)?;
-        draft.extra.insert(
-            "_p02ProjectLookupId".into(),
-            json!(
-                parent_project_id
-                    .and_then(Value::as_str)
-                    .unwrap_or(host_cwd)
-            ),
+        creation.project_lookup_id = Some(
+            parent_project_id
+                .and_then(Value::as_str)
+                .unwrap_or(host_cwd)
+                .to_owned(),
         );
         let mut record =
             crate::host_worker_create::persisted_record(&draft).map_err(map_create_error)?;
@@ -973,6 +972,7 @@ pub(crate) async fn spawn_agents(
         };
         drafts.push(Draft {
             typed: draft,
+            creation,
             record,
             id,
             prompt: prompt.trim().to_owned(),
@@ -1027,7 +1027,7 @@ pub(crate) async fn spawn_agents(
                         | crate::monitor_policy::MonitorError::Rules(_)
                         | crate::monitor_policy::MonitorError::Io(_)) => crate::managed_host_tools::Error::Refusal(error.to_string()),
                 })?;
-            crate::host_worker_create::recheck_worker(tx, &draft.typed, draft.epoch, &draft.account)
+            crate::host_worker_create::recheck_worker(tx, &draft.typed, &draft.creation, draft.epoch, &draft.account)
                 .map_err(map_recheck_error)?;
         }
         if !can_delegate(tx, &actor_record, &current_root)? {
@@ -1516,6 +1516,7 @@ fn map_recheck_error(
 
 struct ReviewDraft {
     typed: AgentRecord,
+    creation: crate::host_worker_create::CreationDraft,
     record: Value,
     epoch: i64,
     account: crate::host_worker_create::AccountIdentity,
@@ -1533,11 +1534,7 @@ pub(crate) async fn request_review(
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = Box::new(actor.record().clone());
     refuse_legacy_parent(&actor_record)?;
-    if actor_record
-        .extra
-        .get("nativeReview")
-        .is_some_and(|value| event_write::truthy(Some(value)))
-    {
+    if actor_record.native_review.is_some() {
         return Err(crate::managed_host_tools::Error::Invalid(
             "A native reviewer cannot create another review",
         )
@@ -1665,7 +1662,7 @@ pub(crate) async fn request_review(
             "effort":effort,"prompt":spec.prompt.as_deref().unwrap_or(""),
             "_workspaceInGit":parent_value.get("workspaceInGit").and_then(Value::as_bool).unwrap_or(false),
     });
-    let mut prepared = crate::host_worker_create::prepare_work_item(
+    let (prepared, mut creation) = crate::host_worker_create::prepare_work_item(
         &body,
         Path::new(&directory),
         AgentId::from(child_id.as_str()),
@@ -1688,14 +1685,12 @@ pub(crate) async fn request_review(
         false,
     )
     .map_err(map_create_error)?;
-    prepared.extra.insert(
-        "_p02ProjectLookupId".into(),
-        json!(
-            parent_value
-                .get("projectId")
-                .and_then(Value::as_str)
-                .unwrap_or(parent_cwd)
-        ),
+    creation.project_lookup_id = Some(
+        parent_value
+            .get("projectId")
+            .and_then(Value::as_str)
+            .unwrap_or(parent_cwd)
+            .to_owned(),
     );
     let mut record = crate::host_worker_create::persisted_record(&prepared)
         .map_err(map_create_error)?
@@ -1711,6 +1706,7 @@ pub(crate) async fn request_review(
     )?;
     let review = ReviewDraft {
         typed: prepared,
+        creation,
         record,
         epoch: actor_record.epoch,
         account,
@@ -1784,6 +1780,7 @@ impl crate::native_review::ReviewCreator for ReviewCreator<'_> {
         crate::host_worker_create::recheck_worker(
             tx,
             &self.draft.typed,
+            &self.draft.creation,
             self.draft.epoch,
             &self.draft.account,
         )

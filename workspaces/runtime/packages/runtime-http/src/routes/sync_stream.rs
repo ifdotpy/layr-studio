@@ -2886,14 +2886,17 @@ mod tests {
     async fn state_stream_rename_failure_carries_the_exact_receipt_without_entity_changes() {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
-        store.transaction_with(|tx| {
-            let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
-                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "name":"Original",
-                "provider":"codex", "model":"gpt-6", "prompt":"Title fixture", "cwd":"/fixture",
-                "accountKey":"default", "isLead":false, "needsTitle":true, "manualName":false, "autoWake":false
-            }))?;
-            studio_runtime_store::AgentRepository::put(tx, &agent)
-        }).await.expect("seed agent");
+        store
+            .transaction_with(|tx| {
+                let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
+                    "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "name":"Original",
+                    "provider":"codex", "model":"gpt-6", "prompt":"Title fixture", "cwd":"/fixture",
+                    "accountKey":"default", "isLead":false, "naming":"automatic", "autoWake":false
+                }))?;
+                studio_runtime_store::AgentRepository::put(tx, &agent)
+            })
+            .await
+            .expect("seed agent");
         let mut state = HttpState::new(
             "token".into(),
             "workspace".into(),
@@ -3740,14 +3743,17 @@ mod tests {
 
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
-        store.transaction_with(|tx| {
-            let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
-                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "name":"Original",
-                "provider":"codex", "model":"gpt-6", "prompt":"Title fixture", "cwd":"/fixture",
-                "accountKey":"default", "isLead":false, "needsTitle":true, "manualName":false, "autoWake":false
-            }))?;
-            studio_runtime_store::AgentRepository::put(tx, &agent)
-        }).await.expect("seed agent");
+        store
+            .transaction_with(|tx| {
+                let agent = studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,
+                    "id":"agent", "rootId":"agent", "epoch":1, "status":"idle", "name":"Original",
+                    "provider":"codex", "model":"gpt-6", "prompt":"Title fixture", "cwd":"/fixture",
+                    "accountKey":"default", "isLead":false, "naming":"automatic", "autoWake":false
+                }))?;
+                studio_runtime_store::AgentRepository::put(tx, &agent)
+            })
+            .await
+            .expect("seed agent");
         let state = HttpState::new(
             "token".into(),
             "workspace".into(),

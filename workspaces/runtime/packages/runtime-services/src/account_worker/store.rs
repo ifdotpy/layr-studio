@@ -4287,13 +4287,13 @@ mod pending_preparation_scan_tests {
                 "b",
                 "default",
                 true,
-                studio_json::json!({"lastWorkspaceWait":{"attemptId":"old"}}),
+                studio_json::json!({"lastWorkspaceWait":{"attemptId":"old","events":[],"blockers":[],"at":1.0}}),
             ),
             (
                 "c",
                 "default",
                 true,
-                studio_json::json!({"startAttempt":null,"lastWorkspaceWait":{"attemptId":"old"}}),
+                studio_json::json!({"startAttempt":null,"lastWorkspaceWait":{"attemptId":"old","events":[],"blockers":[],"at":1.0}}),
             ),
             (
                 "d",
@@ -4473,9 +4473,10 @@ fn pending_needs_record(
         && attempt.prepare_error.as_deref() == Some(reason)
         && (reason != preparation::WORKSPACE_PENDING_REASON
             || row
-                .extra
-                .get("lastWorkspaceWait")
-                .is_some_and(|wait| wait["attemptId"] == attempt_id));
+                .last_workspace_wait
+                .as_ref()
+                .map(std::ops::Deref::deref)
+                .is_some_and(|wait| wait.attempt_id == attempt_id));
     !recorded
         && row.epoch == epoch
         && attempt.id.as_deref() == Some(attempt_id)
@@ -4513,13 +4514,12 @@ async fn record_pending(
             if reason == preparation::WORKSPACE_PENDING_REASON {
                 // Python's WorkspaceWaitRecord uses these fields
                 // (codex_workspace_delivery.py:43-46).
-                row.extra.insert(
-                    "lastWorkspaceWait".into(),
-                    json!({
-                        "attemptId": attempt_id,
-                        "events": events,
-                        "blockers": [],
-                        "at": now(),
+                row.last_workspace_wait = studio_runtime_schema::queue_command::Field::Value(
+                    Box::new(studio_runtime_store::LastWorkspaceWait {
+                        attempt_id,
+                        events,
+                        blockers: [],
+                        at: now(),
                     }),
                 );
             }

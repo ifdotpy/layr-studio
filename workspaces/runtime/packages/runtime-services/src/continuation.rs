@@ -97,7 +97,10 @@ impl Snapshot {
             if key == "usageResume" {
                 snapshot.identity.set_usage_resume(value);
             } else {
-                snapshot.identity.extra.insert(key.to_owned(), value);
+                if let ContinuationRecord::Capacity(retry) = &record {
+                    snapshot.identity.capacity_retry =
+                        studio_runtime_schema::queue_command::Field::Value(Box::new(retry.clone()));
+                }
             }
         }
         let typed = &mut Arc::get_mut(&mut snapshot.typed)
@@ -614,18 +617,23 @@ impl ProposedAgent {
     pub(crate) fn checked(&self) -> Option<&AgentRecord> {
         self.identity.as_ref()
     }
-    fn set_extra(&mut self, key: &str, value: Value) {
+    pub(crate) fn continuation(&mut self, key: &str, record: &ProposedRecord) {
+        let value = record.value();
         self.evidence[key] = value.clone();
-        if let Some(agent) = &mut self.identity {
-            if key == "usageResume" {
-                agent.set_usage_resume(value);
-            } else {
-                agent.extra.insert(key.to_owned(), value);
+        if key == "capacityRetry" {
+            match record.checked() {
+                Some(ContinuationRecord::Capacity(retry)) => {
+                    if let Some(agent) = &mut self.identity {
+                        agent.capacity_retry =
+                            studio_runtime_schema::queue_command::Field::Value(Box::new(retry));
+                    }
+                }
+                // Drafts use the existing complete-snapshot validation at the writer.
+                _ => self.identity = None,
             }
+        } else if let Some(agent) = &mut self.identity {
+            agent.set_usage_resume(value);
         }
-    }
-    pub(crate) fn continuation(&mut self, key: &str, value: Value) {
-        self.set_extra(key, value);
     }
     pub(crate) fn auth_attempt(&mut self, value: u64) {
         self.evidence["authResumeAttempt"] = json!(value);
@@ -693,7 +701,7 @@ impl Decision {
             record.update(ContinuationUpdate::UpdatedAt(now));
         }
         let mut agent = ProposedAgent::new(s);
-        agent.continuation(key, record.value());
+        agent.continuation(key, &record);
         Self {
             agent: Some(agent),
             record: Some(record),
@@ -752,7 +760,7 @@ mod tests {
 
     #[test]
     fn agent_snapshot_preserves_known_status_and_nullable_evidence() {
-        let agent = json!({"compactions":0,"accountKey":"default","id":"a","rootId":"a","epoch":1,"status":"idle","provider":"codex","titleJob":null,"nativeRelease":null,"firedEvents":[],"opaque":{"n":1}});
+        let agent = json!({"compactions":0,"accountKey":"default","id":"a","rootId":"a","epoch":1,"status":"idle","provider":"codex","titleJob":null,"nativeRelease":null,"firedEvents":[],"projectFolderRevision":{"n":1}});
         let snapshot = Snapshot::from_records(json!({"agent":agent})).unwrap();
         assert_eq!(snapshot.agent, agent);
         assert_eq!(snapshot.identity.status.as_str(), "idle");
@@ -828,7 +836,18 @@ mod tests {
                     Some(record.clone())
                 );
             } else {
-                assert_eq!(snapshot.identity.extra.get(key), Some(&record));
+                let ContinuationRecord::Capacity(expected) = snapshot.checked_record().unwrap()
+                else {
+                    unreachable!("capacity record");
+                };
+                assert_eq!(
+                    snapshot
+                        .identity
+                        .capacity_retry
+                        .as_ref()
+                        .map(std::ops::Deref::deref),
+                    Some(expected)
+                );
             }
             assert_eq!(
                 match key {
@@ -863,7 +882,7 @@ mod tests {
                 .to_string(),
             expected
         );
-        raw["agent"]["extra"] = json!("x".repeat(MAX_RECORD_BYTES));
+        raw["agent"]["name"] = json!("x".repeat(MAX_RECORD_BYTES));
         let checked = ContinuationRecord::deserialize(record).unwrap();
         assert_eq!(
             Snapshot::from_records_with_checked_record(raw, checked)

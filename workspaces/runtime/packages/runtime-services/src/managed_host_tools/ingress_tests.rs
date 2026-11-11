@@ -54,7 +54,7 @@ fn template() -> &'static Template {
             record["threadId"] = json!(format!("thread-{index}"));
             record["turnId"] = json!(format!("turn-{index}"));
             record["created"] = json!(1_792_510_147.0 + index as f64);
-            record
+            studio_runtime_store::test_fixtures::historical_agent(&record).unwrap().value()
         };
         let value = json!({
             "agents": [
@@ -90,7 +90,7 @@ async fn fixture() -> (tempfile::TempDir, Arc<RuntimeStore>, CallbackContext) {
     store
         .transaction_with::<_, StoreError>(move |tx| {
             for agent in &agents {
-                let mut record = studio_runtime_store::AgentRecord::from_value(agent.clone())
+                let mut record = studio_runtime_store::test_fixtures::historical_agent(agent)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
                 record.cwd = cwd.as_str().map(str::to_owned);
                 record.host_project_path = studio_runtime_schema::queue_command::Field::Value(
@@ -1427,106 +1427,6 @@ async fn managed_monitor_create_persists_one_start_intent_and_replays_exactly() 
 }
 
 #[tokio::test]
-async fn send_remote_routing_refusals_write_nothing() {
-    let descendant = template().value["agents"][1]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    // Runtime.dynamic routes movedFrom actors to move_send before target
-    // resolution (codex_runtime.py:9048-9049); these ports attach no paired
-    // driver, so the forwarded call names the worker-call dependency. For
-    // other actors it resolves agent_id as a visible agent ID, so "user" is a
-    // too-short ID; remote and federated targets reach chat_message and use
-    // federation locally (codex_runtime.py:9858-9877).
-    let cases = [
-        (
-            "moved descendant",
-            descendant,
-            json!({"remoteOrigin":"source-server","movedFrom":true}),
-            "multi-server/worker-call",
-        ),
-        (
-            "remote to user",
-            "user".to_owned(),
-            json!({"remoteOrigin":"source-server"}),
-            "Too short agent ID; use at least 8 characters",
-        ),
-        (
-            "remote to remote target",
-            "remote:peer".to_owned(),
-            json!({"remoteOrigin":"source-server"}),
-            "federation/agent-message",
-        ),
-        (
-            "remote to federated target",
-            "federated:peer:room".to_owned(),
-            json!({"remoteOrigin":"source-server"}),
-            "federation/agent-message",
-        ),
-    ];
-    for (index, (label, target, flags, dependency)) in cases.into_iter().enumerate() {
-        let (_root, store, mut context) = fixture().await;
-        if label != "moved descendant" {
-            let worker = &template().value["agents"][1];
-            context.agent = worker["id"].as_str().unwrap().to_owned();
-            context.thread = worker["threadId"].as_str().unwrap().to_owned();
-            context.turn = worker["turnId"].as_str().unwrap().to_owned();
-        }
-        let actor_id = context.agent.clone();
-        let flags = flags.clone();
-        store
-            .transaction_with::<_, StoreError>(move |tx| {
-                let raw: String = tx.query_row(
-                    "SELECT record FROM runtime_agents WHERE id=?1",
-                    [&actor_id],
-                    |row| row.get(0),
-                )?;
-                let mut actor: Value = studio_json::from_str(&raw).unwrap();
-                for (key, value) in flags.as_object().unwrap() {
-                    actor[key] = value.clone();
-                }
-                tx.execute(
-                    "UPDATE runtime_agents SET record=?2 WHERE id=?1",
-                    params![actor_id, actor.to_string()],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let before = application_table_snapshot(&store);
-        let frame = call(
-            &context,
-            &format!("remote-send-{index}"),
-            "orchestration_send",
-            &json!({"agent_id":target,"text":"remote send"}),
-        );
-        let ports = shared_ports(
-            crate::provider_callbacks::managed_tool_ports(
-                &store,
-                &context,
-                &frame,
-                std::sync::Arc::new(tokio::sync::Notify::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let decision =
-            dispatch_with_managed_tools(Arc::clone(&store), &context, &frame, 20.0, ports.clone())
-                .await
-                .unwrap();
-        assert!(
-            format!("{decision:?}").contains(dependency),
-            "{label} did not name {dependency}: {decision:?}"
-        );
-        assert_eq!(
-            before,
-            application_table_snapshot(&store),
-            "{label} changed application state"
-        );
-    }
-}
-
-#[tokio::test]
 async fn deleted_team_root_refuses_complaint_without_writes() {
     let (_root, store, _) = fixture().await;
     let seed = &template().value;
@@ -1989,81 +1889,6 @@ async fn same_request_replays_saved_result_without_a_second_effect() {
     assert_eq!(first.body, replay.body);
     assert_eq!(ports.staged.load(Ordering::SeqCst), 1);
     assert_eq!(ports.released.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn remote_origin_search_and_monitor_context_stay_local() {
-    let (_root, store, context) = fixture().await;
-    let monitor_id = template().value["managedToolCases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|case| case["tool"] == "orchestration_context")
-        .unwrap()["arguments"]["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let monitor_id_for_tx = monitor_id.clone();
-    let monitor_id_for_json = monitor_id_for_tx.clone();
-    let agent_id = context.agent.clone();
-    let agent_id_for_json = agent_id.clone();
-    let epoch_for_json = context.epoch;
-    store
-        .transaction_with::<_, StoreError>(move |tx| {
-            tx.execute(
-                "UPDATE runtime_monitors SET record=?1 WHERE id=?2",
-                [crate::monitor_policy::complete_test_monitor(json!({"id":monitor_id_for_json,"agent":agent_id_for_json,"epoch":epoch_for_json,"command":"printf fixture","created":20.0,"status":"running"})).to_string(), monitor_id_for_tx],
-            )?;
-            let raw: String = tx.query_row(
-                "SELECT record FROM runtime_agents WHERE id=?1",
-                [&agent_id],
-                |row| row.get(0),
-            )?;
-            let mut actor: Value = studio_json::from_str(&raw).unwrap();
-            actor["remoteOrigin"] = json!(true);
-            tx.execute(
-                "UPDATE runtime_agents SET record=?2 WHERE id=?1",
-                params![agent_id, actor.to_string()],
-            )?;
-            Ok(())
-        }).await
-        .unwrap();
-    for (rpc, tool, args) in [
-        (
-            "remote-search",
-            "orchestration_search",
-            json!({"query":"fixture"}),
-        ),
-        (
-            "remote-monitor-context",
-            "orchestration_context",
-            json!({"topic":"monitor","id":monitor_id}),
-        ),
-    ] {
-        let frame = call(&context, rpc, tool, &args);
-        let ports = shared_ports(
-            crate::provider_callbacks::managed_tool_ports(
-                &store,
-                &context,
-                &frame,
-                std::sync::Arc::new(tokio::sync::Notify::new()),
-            )
-            .await
-            .unwrap(),
-        );
-        let CallbackDecision::Answer(reply) =
-            dispatch_with_managed_tools(Arc::clone(&store), &context, &frame, 20.0, ports.clone())
-                .await
-                .unwrap()
-        else {
-            panic!("remote-origin local read must answer: {tool}")
-        };
-        assert!(
-            matches!(reply.body, ResponseBody::Result(ref value) if value["success"] == true),
-            "{tool}: {:?}",
-            reply.body
-        );
-    }
 }
 
 #[tokio::test]
@@ -4647,7 +4472,10 @@ async fn ancestry_reads_only_the_checked_parent_chain() {
     use super::{AgentAncestry, agent_ancestry};
     let (_directory, store, context) = fixture().await;
     let sender = context.agent;
-    let base = template().value["agents"][1].clone();
+    let base =
+        studio_runtime_store::test_fixtures::historical_agent(&template().value["agents"][1])
+            .unwrap()
+            .value();
     let sender_for_setup = sender.clone();
     store
         .transaction_with::<_, StoreError>(move |tx| {

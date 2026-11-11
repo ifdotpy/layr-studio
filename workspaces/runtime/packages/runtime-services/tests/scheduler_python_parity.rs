@@ -35,6 +35,7 @@ async fn seeded<T: serde::de::DeserializeOwned>(
     store
         .transaction(move |tx| {
             tx.execute_batch(&statements)?;
+            studio_runtime_store::test_fixtures::normalize_agent(tx)?;
             Ok(())
         })
         .await

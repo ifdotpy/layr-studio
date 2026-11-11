@@ -21,7 +21,6 @@ struct AgentFence {
     path: Option<Value>,
     cwd: Option<Value>,
     deleted_at: Option<Value>,
-    archived_at: Option<Value>,
     archived: Option<Value>,
     // Archival changes membership; ordinary execution status does not.
     archived_status: bool,
@@ -150,13 +149,39 @@ fn agent_fences(agents: &[(String, Value)]) -> Vec<AgentFence> {
             path: row.get("path").cloned(),
             cwd: row.get("cwd").filter(|v| !v.is_null()).cloned(),
             deleted_at: row.get("deletedAt").filter(|v| !v.is_null()).cloned(),
-            archived_at: row.get("archivedAt").cloned(),
             archived: row.get("archived").cloned(),
             archived_status: row.get("status").and_then(Value::as_str) == Some("archived"),
         })
         .collect::<Vec<_>>();
     fences.sort_by(|left, right| left.id.cmp(&right.id));
     fences
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_fence_uses_admitted_archive_state() {
+        let mut row = studio_json::json!({"id":"agent","rootId":"agent","epoch":1,
+            "status":"idle","accountKey":"default","provider":"codex","cwd":"/project"});
+        let current = agent_fences(&[("agent".into(), row.clone())]);
+        row["archivedAt"] = studio_json::json!(2);
+        assert!(studio_runtime_store::AgentRecord::from_value(row.clone()).is_err());
+        assert_eq!(
+            agent_fences(&[("agent".into(), row.clone())]),
+            current,
+            "a key refused by current admission cannot fence project membership"
+        );
+        row.as_object_mut().expect("agent").remove("archivedAt");
+        row["archived"] = studio_json::json!(true);
+        assert!(studio_runtime_store::AgentRecord::from_value(row.clone()).is_ok());
+        assert_ne!(
+            agent_fences(&[("agent".into(), row)]),
+            current,
+            "the admitted archive flag still fences membership"
+        );
+    }
 }
 
 /// A checked local binding for P02's draft/commit transaction.

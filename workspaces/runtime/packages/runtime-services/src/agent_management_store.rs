@@ -2,7 +2,6 @@
 use crate::agent_management::{
     Action, ManagementError, ManagementSnapshot, Records, decide, decide_with_effects,
 };
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use studio_json::Value;
@@ -340,40 +339,6 @@ fn execute_decision(
     ports: Option<&dyn crate::agent_lifecycle_runtime::LifecyclePorts>,
 ) -> Result<Value, ManagementError> {
     let generation = crate::sync_policy::agent_record_generation(transaction)?;
-    if let Action::RemoteStop {
-        principal,
-        link,
-        target,
-        ..
-    } = action
-    {
-        let raw: Option<String> = transaction
-            .query_row(
-                // Raw SQL: legacy record admission needs a typed-read equivalence proof.
-                "SELECT record FROM runtime_server_links WHERE id=?1",
-                [link],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(studio_runtime_store::StoreError::from)?;
-        let link_record: Value = raw
-            .as_deref()
-            .and_then(|raw| studio_json::from_str(raw).ok())
-            .ok_or(ManagementError::Invalid(
-                "The remote-parent link is unavailable",
-            ))?;
-        if link_record.get("side").and_then(Value::as_str) != Some("remote")
-            || link_record.get("home").and_then(Value::as_str) != Some(principal)
-            || !link_record
-                .get("workers")
-                .and_then(Value::as_array)
-                .is_some_and(|workers| workers.iter().any(|worker| worker.as_str() == Some(target)))
-        {
-            return Err(ManagementError::Invalid(
-                "The remote-parent link is invalid",
-            ));
-        }
-    }
     // Every action decides from its target's descendant tree, the target's
     // ancestor chain and the acting agent. Reading every agent record held the
     // sole writer for about a second on a state with thousands of tombstones.
@@ -532,14 +497,7 @@ fn execute_decision(
             }
             let current =
                 studio_json::to_value(current).map_err(studio_runtime_store::StoreError::from)?;
-            for field in [
-                "epoch",
-                "autoWake",
-                "status",
-                "connectionId",
-                "connectionGeneration",
-                "provider",
-            ] {
+            for field in ["epoch", "autoWake", "status", "connectionId", "provider"] {
                 if current.get(field) != write.record.get(field) {
                     return Err(ManagementError::Invalid(
                         "Lifecycle adapter changed stop identity",

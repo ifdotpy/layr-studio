@@ -6,24 +6,12 @@ use studio_runtime_store::{
     AgentId, QueueEvent, QueueEventId, QueueEventRepository, RuntimeStore, StoreError,
 };
 
-#[tokio::test]
-async fn agent_repository_rejects_typed_extra_collision() {
-    let root = tempfile::tempdir().expect("state");
-    let store = RuntimeStore::open(Some(root.path())).await.expect("open");
-    let mut agent = studio_runtime_store::AgentRecord::from_value(json!({
-        "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
-        "accountKey":"default", "compactions":0
-    }))
-    .expect("agent");
-    agent.extra.insert("error".into(), Value::Null);
-    let error = store
-        .transaction_with(move |tx| studio_runtime_store::AgentRepository::put(tx, &agent))
-        .await
-        .expect_err("typed extra collision is rejected");
-    assert!(
-        matches!(error, StoreError::InvalidSyncObjectField { pointer, reason, .. }
-        if pointer == "/error" && reason.contains("extra_field_collision"))
-    );
+#[test]
+fn agent_reader_rejects_duplicate_owned_fields() {
+    let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","error":null,"error":42}"#;
+    let error = studio_json::from_str::<studio_runtime_store::AgentRecord>(raw).unwrap_err();
+    assert!(error.to_string().contains("duplicate field"));
+    assert!(error.to_string().contains("error"));
 }
 
 fn usage_rows(db: &Connection) -> Vec<Value> {

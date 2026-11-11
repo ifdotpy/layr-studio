@@ -20,7 +20,7 @@ async fn seeded(now: f64) -> (tempfile::TempDir, Arc<RuntimeStore>) {
                     "turnId":"claude-turn","created":now - 1000.0,"activity":{"at":now - 700.0}})),
                 ("session", json!({"status":"queued","startWait":{"reason":"provider_session","epoch":0}})),
                 ("resume", json!({"status":"waiting","usageResume":{"id":"resume"}})),
-                ("capacity", json!({"status":"waiting","capacityRetry":{"id":"capacity"}})),
+                ("capacity", json!({"status":"waiting","capacityRetry":{"id":"capacity","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":0,"maxAttempts":4,"settings":{},"threadId":"thread","turnId":"turn","status":"scheduled"}})),
                 ("transfer", json!({"accountTransferId":"transfer"})),
             ] {
                 let mut record = json!({"compactions":0,"id":id,"rootId":id,"epoch":0,"status":"completed",
@@ -155,17 +155,19 @@ async fn an_exact_manual_delivery_hold_keeps_stall_detection_without_waking_or_s
                 }))?;
                 SchedulerRepository::hold_recovered_delivery(&mut agent)?;
                 if id == "plain-pause" {
-                    agent.extra.remove("manualRecoveryDeliveryHold");
+                    agent.manual_recovery_delivery_hold = studio_runtime_schema::queue_command::Field::Missing;
                 }
                 if let Some(field) = changed_field {
-                    agent
-                        .extra
-                        .get_mut("manualRecoveryDeliveryHold")
-                        .expect("hold")[field] = if matches!(field, "epoch" | "generation") {
-                        json!(999)
-                    } else {
-                        json!("stale")
-                    };
+                    let studio_runtime_schema::queue_command::Field::Value(hold) = &mut agent.manual_recovery_delivery_hold else { panic!("hold") };
+                    match field {
+                        "epoch" => hold.epoch = 999,
+                        "generation" => hold.generation = Some(999),
+                        "attemptId" => hold.attempt_id = Some("stale".into()),
+                        "accountKey" => hold.account_key = "stale".into(),
+                        "threadId" => hold.thread_id = Some("stale".into()),
+                        "turnId" => hold.turn_id = "stale".into(),
+                        _ => unreachable!(),
+                    }
                 }
                 studio_runtime_store::ExecutionHistoryRepository::record_current(tx, &mut agent)?;
                 AgentRepository::put(tx, &agent)?;

@@ -164,7 +164,7 @@ async fn corpus() -> RadioCorpus {
                         .entry("compactions")
                         .or_insert(json!(0));
                     normalize_frozen_naming(&mut record);
-                    let record = studio_runtime_store::AgentRecord::from_value(record)
+                    let record = studio_runtime_store::test_fixtures::historical_agent(&record)
                         .expect("normalized agent fixture");
                     row.as_object_mut()
                         .expect("agent row")
@@ -727,7 +727,7 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
                 let drafts = [first, second].map(|value| {
                     let mut value = value.clone();
                     value["compactions"] = json!(0);
-                    AgentRecord::from_value(value).expect("checked Python agent draft")
+                    studio_runtime_store::test_fixtures::historical_agent(&value).expect("checked migrated Python agent draft")
                 });
                 radio_runtime::create_with(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid radio create"))?, Box::new(Creation(drafts))).await.map(|reply| studio_json::from_str(&studio_json::to_string(&reply).expect("reply encodes")).expect("reply decodes"))
             }

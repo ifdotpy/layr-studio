@@ -110,6 +110,7 @@ struct RadioCreationAdapter {
     model_lists: std::collections::BTreeMap<String, ModelCatalog>,
     rows: Vec<studio_runtime_services::account_policy::PublicAccount>,
     identities: Option<[AccountIdentity; 2]>,
+    creation: Option<[studio_runtime_services::host_worker_create::CreationDraft; 2]>,
 }
 
 impl CreationCatalog for RadioCreationAdapter {
@@ -212,7 +213,7 @@ impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdap
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .map_err(|_| ProjectsError::Invalid("participants"))?;
-        let drafts = studio_runtime_services::host_worker_create::prepare(
+        let (drafts, creation) = studio_runtime_services::host_worker_create::prepare(
             body,
             path,
             ids,
@@ -221,6 +222,7 @@ impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdap
         )
         .map_err(radio_create_error)?;
         self.identities = Some(identities);
+        self.creation = Some(creation);
         Ok(drafts)
     }
     fn recheck(
@@ -232,8 +234,15 @@ impl studio_runtime_services::radio_runtime::RadioCreation for RadioCreationAdap
             .identities
             .as_ref()
             .ok_or(ProjectsError::Invalid("radio participant creation failed"))?;
-        studio_runtime_services::host_worker_create::recheck(tx, drafts, accounts)
-            .map_err(radio_create_error)
+        studio_runtime_services::host_worker_create::recheck(
+            tx,
+            drafts,
+            self.creation
+                .as_ref()
+                .ok_or(ProjectsError::Invalid("radio participant creation failed"))?,
+            accounts,
+        )
+        .map_err(radio_create_error)
     }
 }
 
@@ -1375,6 +1384,7 @@ async fn peer_teams(
                 model_lists,
                 rows,
                 identities: None,
+                creation: None,
             };
             let value = studio_runtime_services::radio_runtime::create_with(
                 store,

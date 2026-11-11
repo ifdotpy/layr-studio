@@ -361,8 +361,11 @@ mod replay_tests {
         let state_dir = root.path().join("state");
         tokio::fs::create_dir(&state_dir).await.unwrap();
         let store = Arc::new(RuntimeStore::open(Some(&state_dir)).await.unwrap());
+        store
+            .set_local_server_id(Some("local".into()))
+            .expect("project registration uses the store identity owner");
         for id in ["select-in", "select-out", "move-in", "move-out"] {
-            let agent = AgentRecord::from_value(json!({"compactions":0,"id":id,"rootId":id,"epoch":1,"status":"idle","isLead":true,"accountKey":"source","provider":"codex","serverId":"local","model":"gpt-6-astra","cwd":root.path()})).unwrap();
+            let agent = AgentRecord::from_value(json!({"compactions":0,"id":id,"rootId":id,"epoch":1,"status":"idle","isLead":true,"accountKey":"source","provider":"codex","model":"gpt-6-astra","cwd":root.path()})).unwrap();
             store
                 .transaction(move |tx| AgentRepository::put(tx, &agent))
                 .await

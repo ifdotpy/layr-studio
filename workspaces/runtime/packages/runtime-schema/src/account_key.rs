@@ -35,3 +35,14 @@ impl TryFrom<String> for AccountKey {
         Ok(Self(value.try_into()?))
     }
 }
+
+impl PartialOrd for AccountKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for AccountKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}

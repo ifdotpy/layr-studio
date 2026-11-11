@@ -295,7 +295,7 @@ async fn automatic_http_child_warms_higher_priority_catalog_before_selection() {
     let lead = json!({"compactions":0,"id":LEAD,"rootId":LEAD,"epoch":0,"status":"idle","isLead":true,
         "name":"Lead","cwd":cwd,"hostProjectPath":cwd,"accountKey":"default","provider":"codex",
         "model":"gpt-6-luna","autoWake":true,"yoloMode":true,"workspaceMode":"shared",
-        "concurrency":4,"maxAgents":20,"workerDefaults":{"model":"gpt-6-luna"}});
+        "concurrency":4,"capacity":{"kind":"explicit","max":20},"workerDefaults":{"model":"gpt-6-luna"}});
     store
         .transaction(move |tx| AgentRepository::put(tx, &AgentRecord::from_value(lead).unwrap()))
         .await
@@ -334,7 +334,7 @@ async fn automatic_http_child_warms_higher_priority_catalog_before_selection() {
     let claude_lead = json!({"compactions":0,"id":claude_lead_id,"rootId":claude_lead_id,"epoch":0,"status":"idle","isLead":true,
         "name":"Claude lead","cwd":cwd,"hostProjectPath":cwd,"accountKey":"claude-parent","provider":"claude",
         "model":"claude-haiku-4-5","autoWake":true,"yoloMode":true,"workspaceMode":"shared",
-        "concurrency":4,"maxAgents":20,"workerDefaults":{}});
+        "concurrency":4,"capacity":{"kind":"explicit","max":20},"workerDefaults":{}});
     store.transaction(move |tx| {
         AgentRepository::put(tx, &AgentRecord::from_value(claude_lead).unwrap())?;
         tx.execute("INSERT INTO runtime_profiles(id,record) VALUES(?1,?2)", rusqlite::params!["codex-profile", json!({"id":"codex-profile","name":"Codex profile","role":"implementer","model":"gpt-6-luna","effort":null,"instructions":""}).to_string()])?;

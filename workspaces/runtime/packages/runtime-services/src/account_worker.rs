@@ -2159,9 +2159,7 @@ impl Worker {
             turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::DiskWait(epoch)) => {
                 self.wait_for_disk_recheck(agent_id.clone(), epoch);
             }
-            turn_preparation::Outcome::Unclaimed(
-                turn_preparation::Unclaimed::Nothing | turn_preparation::Unclaimed::NativeReview,
-            ) => {}
+            turn_preparation::Outcome::Unclaimed(turn_preparation::Unclaimed::Nothing) => {}
             turn_preparation::Outcome::Committed(committed) => {
                 // Its submitted commit may already bind a turn completion
                 // that arrives before `write` records the request as pending.

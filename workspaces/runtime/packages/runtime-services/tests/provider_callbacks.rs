@@ -1179,7 +1179,7 @@ async fn provider_callbacks_python_dynamic_read_and_title() {
         .unwrap();
     let lead: Value = studio_json::from_str(&lead).unwrap();
     assert_eq!(lead["name"], "Unicode 🦀 title");
-    assert_eq!(lead["needsTitle"], false);
+    assert_eq!(lead["naming"], "automatic");
 }
 
 #[tokio::test]

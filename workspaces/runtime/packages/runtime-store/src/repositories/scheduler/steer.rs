@@ -345,8 +345,6 @@ fn steer_turn(agent: &AgentRecord) -> Option<(String, String)> {
     let eligible = agent.status == AgentStatus::Running
         && agent.auto_wake == Some(true)
         && agent.in_flight == Some(true)
-        && !agent.extra.get("remoteWorker").is_some_and(truthy)
-        && !agent.extra.get("remoteAnchor").is_some_and(truthy)
         && agent.execution_mode != Some(crate::AgentExecutionMode::Vm)
         && continuation_allowed(agent)
         && agent

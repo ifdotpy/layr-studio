@@ -347,18 +347,18 @@ async fn seed_fixture_store_with_parent(
     });
     record.as_object_mut().unwrap().extend(json!({
         "executionSettingsAccountKey":"default","provider":"codex","permissionMode":"bypassPermissions",
-        "prompt":"temporary","role":"orchestrator","isLead":true,"needsTitle":false,
-        "parentId":null,"fastMode":false,"daybreakEnabled":false,"maxAgents":8,"tokenBudget":null,
+        "prompt":"temporary","role":"orchestrator","isLead":true,
+        "parentId":null,"fastMode":false,"daybreakEnabled":false,
         "turnId":null,"inFlight":false,"turnEpoch":0,"usageResumeEnabled":true,"tokensUsed":0,
-        "compactions":0,"compactionsObservedOnly":false,"contextUsage":null,"created":1.0,
+        "compactions":0,"contextUsage":null,"created":1.0,
         "error":null,"tail":"","executionMode":"native","hostProjectPath":root,"layrReady":false,
         "worktreeReady":false,"environment":"host"
     }).as_object().unwrap().clone());
     record.as_object_mut().unwrap().extend(json!({
-        "profileId":null,"profileInstructions":"","workspaceBackend":null,"workspaceModeExplicit":false,
+        "profileId":null,"profileInstructions":"","workspaceModeExplicit":false,
         "workspaceInGit":false,"worktreeWarning":null,
         "workerBaseRef":null,"workerBaseCommit":null,"workerBaseBehindMain":null,"workerBaseMainRef":null,
-        "cyberAccessProgram":null,"subagentConcurrencyVersion":2,"maxAgentsExplicit":false,"concurrency":1
+        "cyberAccessProgram":null,"subagentConcurrencyVersion":2,"concurrency":1
     }).as_object().unwrap().clone());
     if let Some(parent) = parent {
         record["rootId"] = json!(parent);
@@ -3414,7 +3414,9 @@ async fn committed_stop_survives_crash_before_interrupt_admission() {
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
     worker_barrier(&worker).await;
-    state.bridge.faults.arm(Some((0, true)));
+    // Preserve the log of any store operation already in flight at the barrier.
+    // Crash after the named stop commit rather than resetting its operation index.
+    *state.bridge.faults.named_target.lock().unwrap() = Some(("stop".into(), 0, None, true));
     worker
         .send(AccountCommand::Stop {
             agent_id: state.agent.clone(),
@@ -4439,7 +4441,8 @@ async fn scenario_new_thread_freezes_settings_and_accepts_context() {
                     let mut record =
                         AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
                     record.thread_id = None;
-                    record.extra.remove("nativeToolCatalog");
+                    record.native_tool_catalog =
+                        studio_runtime_schema::queue_command::Field::Missing;
                     record.pending_settings = studio_runtime_schema::queue_command::Field::Value(
                         studio_runtime_store::StoredTransferObject::Known(Box::new(
                             studio_runtime_store::transfer_record::TransferSettings {

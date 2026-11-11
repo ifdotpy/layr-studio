@@ -805,7 +805,6 @@ async fn held_claude_response_stop_refuses_foreign_or_ineligible_owners_without_
     for patch in [
         json!({"deleted":true}),
         json!({"accountTransferId":"transfer"}),
-        json!({"executionMove":{"id":"move"}}),
         json!({"executionMode":"vm"}),
         json!({"provider":"codex"}),
         json!({"status":"completed"}),

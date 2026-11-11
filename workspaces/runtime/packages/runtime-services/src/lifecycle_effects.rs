@@ -37,8 +37,7 @@ use crate::{
     event_write,
     monitor_lifecycle::MonitorLifecyclePorts,
     multi_server_transport::{
-        self, HttpsPairedTransport, OrchestrationDriver, PairedTransport,
-        RuntimeOrchestrationEffects,
+        HttpsPairedTransport, OrchestrationDriver, PairedTransport, RuntimeOrchestrationEffects,
     },
     sync_policy, work_write,
 };
@@ -688,7 +687,6 @@ impl LifecyclePorts for ProductionLifecyclePorts {
                 Ok(())
             }
             LifecycleEffectKind::VoiceStop => self.stage_voice_stop(tx, effect),
-            LifecycleEffectKind::RemoteStop => self.stage_remote_stop(tx, effect),
         }
     }
 
@@ -878,51 +876,6 @@ impl ProductionLifecyclePorts {
             .ok_or(ManagementError::Invalid("Invalid voice stop epoch"))?;
         crate::voice::provider::stage_voice_stop_sessions(tx, agent_id, epoch)
             .map_err(voice_effect_error)
-    }
-
-    fn stage_remote_stop(
-        &self,
-        tx: &Transaction<'_>,
-        effect: &LifecycleEffect,
-    ) -> Result<(), ManagementError> {
-        let agent_id = required_str(effect.before(), "id", "Invalid remote stop owner")?;
-        let remote = effect
-            .before()
-            .get("remoteWorker")
-            .filter(|remote| remote.is_object())
-            .ok_or(ManagementError::Invalid("Invalid remote worker route"))?;
-        let server = required_str(remote, "server", "Invalid remote worker server")?;
-        let link = required_str(remote, "link", "Invalid remote worker link")?;
-        let request_id = required_str(
-            effect.stopped(),
-            "remoteStopRequest",
-            "Invalid remote stop request identity",
-        )?;
-        let control_epoch = effect
-            .stopped()
-            .get("remoteControlEpoch")
-            .and_then(Value::as_i64)
-            .ok_or(ManagementError::Invalid("Invalid remote control epoch"))?;
-        let reason = effect
-            .stopped()
-            .get("error")
-            .and_then(Value::as_str)
-            .filter(|reason| !reason.is_empty())
-            .unwrap_or("Stopped by the parent");
-        let payload = crate::orchestration_worker::StopPayload {
-            link: link.to_owned(),
-            worker: agent_id.to_owned(),
-            control_epoch,
-            reason: studio_runtime_schema::queue_command::Field::Value(reason.to_owned()),
-        };
-        multi_server_transport::enqueue_in_transaction(
-            tx,
-            server,
-            crate::orchestration_wire::OrchestrationCommand::Stop(payload),
-            request_id,
-            effect.at().max(0.0) as i64,
-        )
-        .map_err(|_| ManagementError::Unavailable("cross-server/agent-management"))
     }
 }
 
@@ -1212,42 +1165,6 @@ fn notify_parent_with_id(
     event_id_override: Option<&str>,
 ) -> Result<(), ManagementError> {
     notify_parent_with_step(tx, effect, event_id_override, "send")
-}
-
-/// Python `child_stopped_event(db, a, "failed", reason, "start:" + attempt)`:
-/// a child whose native start failed before a turn existed tells its parent
-/// once. Python names the next step "recover" for a failed child.
-pub(crate) fn notify_parent_of_start_failure(
-    tx: &Transaction<'_>,
-    before: &Value,
-    failed: &Value,
-    attempt: &str,
-    at: f64,
-) -> studio_runtime_store::StoreResult<()> {
-    let id = format!(
-        "child-stop:{}:{}:start:{attempt}",
-        failed.get("id").and_then(Value::as_str).unwrap_or_default(),
-        failed
-            .get("epoch")
-            .and_then(Value::as_i64)
-            .unwrap_or_default()
-    );
-    let effect = LifecycleEffect::new(
-        LifecycleEffectKind::NotifyParent,
-        before.clone(),
-        failed.clone(),
-        at,
-    );
-    match notify_parent_with_step(tx, &effect, Some(&id), "recover") {
-        Ok(())
-        | Err(ManagementError::Unavailable(crate::monitor_runtime::REMOTE_EVENTS_DEPENDENCY)) => {
-            Ok(())
-        }
-        Err(ManagementError::Store(error)) => Err(error),
-        Err(other) => Err(studio_runtime_store::StoreError::SchemaMismatch(
-            other.to_string(),
-        )),
-    }
 }
 
 fn notify_parent_with_step(
@@ -1540,7 +1457,11 @@ pub(crate) fn notify_parent_of_failed_turn(
         || agent.last_completed_turn.value().map(String::as_str) != Some(turn_id)
         || agent.auto_wake != Some(true)
         || !reports_turns(&agent)
-        || retrying(agent.extra.get("capacityRetry"))
+        || agent.capacity_retry.as_ref().map(std::ops::Deref::deref).is_some_and(|retry| {
+            retry.turn_id.as_str() == turn_id && matches!(retry.status,
+                studio_runtime_schema::continuation_snapshot::CapacityContinuationStatus::Scheduled
+                | studio_runtime_schema::continuation_snapshot::CapacityContinuationStatus::Starting)
+        })
         || retrying(usage_resume.as_ref())
     {
         return Ok(());
@@ -1548,12 +1469,9 @@ pub(crate) fn notify_parent_of_failed_turn(
     enqueue_turn_result(tx, &agent, &agent.value(), turn_id, at)
 }
 
-/// A live child of the current turn epoch: not deleted, archived or moving.
+/// A live child of the current turn epoch, neither deleted nor archived.
 fn reports_turns(agent: &AgentRecord) -> bool {
-    !agent.is_deleted()
-        && agent.agent_archive.is_none()
-        && !studio_runtime_store::truthy(agent.extra.get("executionMove"))
-        && agent.turn_epoch == Some(agent.epoch)
+    !agent.is_deleted() && agent.agent_archive.is_none() && agent.turn_epoch == Some(agent.epoch)
 }
 
 /// Existing child-result fields plus the optional derived unsubmitted-assignment notice.
@@ -1787,7 +1705,7 @@ mod tests {
         }).await.unwrap();
         let child = json!({"compactions":0,"id":"child","rootId":"lead","parentId":"lead","epoch":1,"status":"failed","name":"Worker","error":"failed"});
         let before = json!({"id":"child","turnId":"turn"});
-        for mode in ["stop", "start", "hold"] {
+        for mode in ["stop", "hold"] {
             let child = child.clone();
             let before = before.clone();
             store
@@ -1805,9 +1723,6 @@ mod tests {
                                 notify_parent(tx, &effect).map_err(|e| {
                                     studio_runtime_store::StoreError::SchemaMismatch(e.to_string())
                                 })?;
-                            }
-                            "start" => {
-                                notify_parent_of_start_failure(tx, &before, &child, "attempt", 3.0)?
                             }
                             _ => notify_continuation_hold(
                                 tx,
@@ -1844,7 +1759,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 2);
         for (_, text) in events {
             let payload: Value = studio_json::from_str(&text).unwrap();
             assert_eq!(payload["tasks"][0]["task_id"], "second");

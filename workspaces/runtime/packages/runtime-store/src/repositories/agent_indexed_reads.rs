@@ -17,7 +17,6 @@ use crate::domain::{
 /// Deleted and invalid agents never occupy a slot, even if their chat retains
 /// an active status. This predicate owns the live condition for every slot query.
 const CAPACITY_LIVE: &str = "deleted_at IS NULL AND hold_status<>'invalid'";
-const REMOTE_WORKER_KEY: &str = "COALESCE(remote_worker,0)";
 /// Agents by team root, in rowid order within a root.
 pub const ROOT_INDEX: &str = "runtime_agent_root_v2";
 /// Live (not deleted) agents by team root.
@@ -235,7 +234,7 @@ impl AgentIndexedReads {
             "SELECT COUNT(*) FROM chats INDEXED BY {CAPACITY_STATUS_INDEX} \
              JOIN runtime_agents a ON a.id=chats.id \
              WHERE chats.id<>?1 AND chats.status IN {CHAT_CAPACITY_STATUSES} \
-             AND {CAPACITY_LIVE} AND {REMOTE_WORKER_KEY}=0"
+             AND {CAPACITY_LIVE}"
         )
     }
 
@@ -246,7 +245,7 @@ impl AgentIndexedReads {
              JOIN runtime_agents a ON a.id=chats.id \
              WHERE chats.id<>?1 AND chats.id<>?2 \
              AND a.root_id=?2 \
-             AND chats.status IN {CHAT_CAPACITY_STATUSES} AND {CAPACITY_LIVE} AND {REMOTE_WORKER_KEY}=0"
+             AND chats.status IN {CHAT_CAPACITY_STATUSES} AND {CAPACITY_LIVE}"
         )
     }
 
@@ -263,7 +262,7 @@ impl AgentIndexedReads {
              JOIN runtime_agents a ON a.id=chats.id \
              WHERE chats.status IN {CHAT_CAPACITY_STATUSES} \
              AND {CAPACITY_LIVE} AND chats.status<>'paused' \
-             AND {REMOTE_WORKER_KEY}=0 GROUP BY 1"
+             GROUP BY 1"
         )
     }
 
@@ -418,7 +417,6 @@ mod tests {
             json!({"id":"gone","provider":"codex","rootId":"lead","status":"running","deletedAt":5}),
             json!({"id":"tombstone","provider":"codex","rootId":"lead","status":"paused","deletedAt":6}),
             json!({"id":"no-status","provider":"codex","rootId":"lead"}),
-            json!({"id":"remote","provider":"codex","rootId":"lead","status":"running","remoteWorker":true}),
             json!({"id":"op","provider":"codex","rootId":"other","status":"running","cwd":"/x","workspaceOperation":"branch"}),
             json!({"id":"op-empty","provider":"codex","rootId":"other","status":"completed","cwd":"/y","workspaceOperation":""}),
             json!({"id":"other-idle","provider":"codex","rootId":"other","status":"paused","cwd":"/z"}),
@@ -498,14 +496,13 @@ mod tests {
                 "failed",
                 "gone",
                 "tombstone",
-                "no-status",
-                "remote"
+                "no-status"
             ]
         );
-        // lead, a, paused-wake, no-status, remote; tombstone and finished agents excluded.
+        // lead, a, paused-wake, no-status; tombstone and finished agents excluded.
         assert_eq!(
             AgentIndexedReads::active_team_members(&connection, "lead").expect("count"),
-            5
+            4
         );
         assert_eq!(
             AgentIndexedReads::active_team_members(&connection, "other").expect("count"),
@@ -527,7 +524,6 @@ mod tests {
                 "SELECT COUNT(*) FROM runtime_agents NOT INDEXED WHERE id<>'a' \
                  AND json_extract(record,'$.status') \
                  IN ('starting','running','waiting','paused','approval') \
-                 AND COALESCE(json_extract(record,'$.remoteWorker'),0)=0 \
                  AND json_extract(record,'$.deletedAt') IS NULL",
                 [],
                 |row| row.get(0),
@@ -598,7 +594,7 @@ mod tests {
             None,
         )
         .unwrap());
-        assert_eq!(broadcast.len(), 11);
+        assert_eq!(broadcast.len(), 10);
         assert_eq!(broadcast.last().map(String::as_str), Some("op"));
         let plan_description = plan(
             &connection,

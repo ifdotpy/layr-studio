@@ -2006,7 +2006,7 @@ async fn retained_worktree_entities_follow_cleanup_even_after_worker_deletion() 
     seed_chat(&store, chat(json!({}))).await;
     let worker = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"retained-worker","rootId":CHAT,"epoch":0,"status":"completed",
         "name":"Retained worker","accountKey":"default","deletedAt":1,
-        "workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":"/fixture/retained"}},"receipt":{"reason":"Modified files"},"requestId":"private"}});
+        "workspaceCleanupIntent":{"action":"archive","phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":"/fixture/retained"}},"receipt":{"reason":"Modified files"},"requestId":"private"}});
     write(
         &store,
         "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
@@ -2020,7 +2020,7 @@ async fn retained_worktree_entities_follow_cleanup_even_after_worker_deletion() 
     assert_eq!(value["cleanup"]["path"], "/fixture/retained");
     assert_eq!(value["cleanup"]["reason"], "Modified files");
     assert!(value.to_string().find("private").is_none());
-    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent.phase','confirmed') WHERE id=?1", vec!["retained-worker".into()]).await;
+    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent.phase','queued') WHERE id=?1", vec!["retained-worker".into()]).await;
     assert!(
         client_entity(&store, "retainedWorktree", "retained-worker")
             .expect("cleanup tombstone")
@@ -2096,7 +2096,7 @@ async fn question_history_entities_retain_answers_after_the_request_is_closed() 
 async fn hard_deleted_sources_leave_no_retained_folder() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
-    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent',json('{\"phase\":\"unknown\",\"effect\":{\"kind\":\"remove_worktree\",\"identity\":{\"cwd\":\"/fixture/kept\"}}}')) WHERE id=?1", vec![CHAT.into()]).await;
+    write(&store, "UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent',json('{\"action\":\"archive\",\"phase\":\"unknown\",\"effect\":{\"kind\":\"remove_worktree\",\"identity\":{\"cwd\":\"/fixture/kept\"}}}')) WHERE id=?1", vec![CHAT.into()]).await;
     assert!(
         !client_entity(&store, "retainedWorktree", CHAT)
             .expect("retained folder")
@@ -2333,7 +2333,7 @@ async fn studio_error_pending_input_keeps_conservative_rebuilds() {
 async fn studio_error_schedule_pointers_keep_conservative_rebuilds() {
     for extra in [
         json!({"usageResume":{"id":"resume"}}),
-        json!({"capacityRetry":{"id":"retry"}}),
+        json!({"capacityRetry":{"id":"retry","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":0,"maxAttempts":4,"settings":{},"threadId":"thread","turnId":"turn","status":"scheduled"}}),
     ] {
         assert_failed_agent_liveness_dependency_rebuilds(
             extra,
@@ -2595,8 +2595,8 @@ async fn work_detail_publishes_acceptance_gate_requirement() {
 #[tokio::test]
 async fn agent_projections_keep_detail_and_legacy_without_summary_validation() {
     for legacy in [
-        json!({"readState":{}}),
-        json!({"capacityRetry":{"status":"scheduled"}}),
+        json!({"readState":{"threadId":"thread","turnId":"turn","read":false,"revision":0}}),
+        json!({"capacityRetry":{"id":"retry","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":0,"maxAttempts":4,"settings":{},"threadId":"thread","turnId":"turn","status":"scheduled"}}),
     ] {
         let (_directory, store) = store().await;
         let mut record = chat(json!({"lastAnswer":"Kept detail"}));

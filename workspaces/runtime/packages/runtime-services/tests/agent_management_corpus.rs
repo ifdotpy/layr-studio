@@ -403,7 +403,7 @@ fn managed_interrupt_requires_current_sender_and_descendant_scope() {
 }
 
 #[test]
-fn missing_native_and_remote_effects_produce_no_decision() {
+fn missing_native_effects_produce_no_decision() {
     let base = seed();
     for (field, value, dependency) in [
         (
@@ -412,11 +412,6 @@ fn missing_native_and_remote_effects_produce_no_decision() {
             "account-worker/agent-interrupt",
         ),
         ("inFlight", json!(true), "account-worker/agent-interrupt"),
-        (
-            "remoteWorker",
-            json!({"id":"remote"}),
-            "cross-server/agent-management",
-        ),
     ] {
         let mut raw = base.clone();
         raw["tables"]["runtime_agents"][1][field] = value;

@@ -180,7 +180,7 @@ mod tests {
                 ("hard-worker", "lead", true), ("other-worker", "other-lead", true),
                 ("other-soft", "other-lead", true)] {
                 let mut value = json!({"id":id,"rootId":root,"accountKey":"default","provider":"codex","epoch":1,"status":"completed","compactions":0,
-                    "workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":"/fixture/retained"}},"receipt":{"reason":"Modified files"},"requestId":"private"}});
+                    "workspaceCleanupIntent":{"action":"archive","phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":"/fixture/retained"}},"receipt":{"reason":"Modified files"},"requestId":"private"}});
                 if deleted { value["deletedAt"] = json!(1); }
                 AgentRepository::put(tx, &AgentRecord::from_value(value)?)?;
             }
@@ -256,7 +256,7 @@ mod tests {
                 .any(|row| row["id"] == "hard-worker")
         );
         store.transaction_with(|tx| {
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent.phase','confirmed') WHERE id IN ('deleted-worker','other-soft')", [])?;
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent.phase','queued') WHERE id IN ('deleted-worker','other-soft')", [])?;
             Ok::<_, StoreError>(())
         }).await.unwrap();
         let change = initial_snapshot(state, resource, cursor).await.unwrap();

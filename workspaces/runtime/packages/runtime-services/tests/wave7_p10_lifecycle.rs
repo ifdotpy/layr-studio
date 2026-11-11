@@ -406,7 +406,7 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
         .expect("lead record");
     lead["usageResume"] =
         json!({"id":"resume-stop","status":"scheduled","dueAt":200.0,"waitingForAuth":null});
-    lead["capacityRetry"] = json!({"id":"retry-stop","status":"scheduled","dueAt":200.0});
+    lead["capacityRetry"] = json!({"id":"retry-stop","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":0,"maxAttempts":4,"settings":{},"threadId":"thread","turnId":"turn","status":"scheduled","dueAt":200.0});
 
     let root = tempfile::tempdir().expect("root");
 
@@ -427,7 +427,7 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
                 params![
                     "retry-stop",
                     "lead",
-                    json!({"id":"retry-stop","status":"scheduled","dueAt":200.0}).to_string()
+                    json!({"id":"retry-stop","accountKey":"default","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","epoch":0,"maxAttempts":4,"settings":{},"threadId":"thread","turnId":"turn","status":"scheduled","dueAt":200.0}).to_string()
                 ],
             )?;
             Ok(())
@@ -2271,13 +2271,17 @@ async fn successful_adapter_cannot_replace_attempt_or_provider_identity() {
             effect: &LifecycleEffect,
         ) -> Result<(), ManagementError> {
             let mut changed = effect.stopped().clone();
-            changed[self.0] = if self.0 == "startAttempt" {
-                json!({"id":"replacement"})
-            } else if self.0 == "provider" {
-                json!(studio_runtime_schema::ProviderKind::Claude)
+            if self.0 == "startAttempt.connectionGeneration" {
+                changed["startAttempt"]["connectionGeneration"] = json!(999);
             } else {
-                json!("replacement")
-            };
+                changed[self.0] = if self.0 == "startAttempt" {
+                    json!({"id":"replacement"})
+                } else if self.0 == "provider" {
+                    json!(studio_runtime_schema::ProviderKind::Claude)
+                } else {
+                    json!("replacement")
+                };
+            }
             agent_management::write(tx, "runtime_agents", &changed)?;
             Ok(())
         }
@@ -2286,7 +2290,13 @@ async fn successful_adapter_cannot_replace_attempt_or_provider_identity() {
         .into_iter()
         .find(|c| c["name"] == "unknown-True")
         .expect("case");
-    for field in ["startAttempt", "threadId", "accountKey", "provider"] {
+    for field in [
+        "startAttempt",
+        "startAttempt.connectionGeneration",
+        "threadId",
+        "accountKey",
+        "provider",
+    ] {
         let root = tempfile::tempdir().expect("root");
 
         let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));

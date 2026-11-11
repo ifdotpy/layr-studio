@@ -916,15 +916,11 @@ pub(crate) fn agent_entity_from_record(
     let start_wait = agent_start_wait_record(&record).ok()?;
     let can_send =
         native_block.is_none() && !record.moved_to_active() && !record.move_import_pending_active();
-    let mut extra = record.extra;
     let is_lead = record.is_lead == Some(true);
-    let server_id = extra
-        .get("remoteWorker")
-        .and_then(|v| v.pointer("/server"))
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .or(context.project_server_id.as_deref())
-        .map(|s| bound_sync_text(s, "serverId"));
+    let server_id = context
+        .project_server_id
+        .as_deref()
+        .map(|server| bound_sync_text(server, "serverId"));
     let native_thread_block =
         native_block.map(|v| Some(project_agent_property(&v, "nativeThreadBlock")));
     let mut transfer_progress = match &context.transfer {
@@ -975,9 +971,7 @@ pub(crate) fn agent_entity_from_record(
         let destinations = &context.account_destinations;
         Some(project_agent_legacy_field(&destinations, "accountDestinations").ok()?)
     } else {
-        extra
-            .remove("accountDestinations")
-            .map(|v| project_agent_property(&v, "accountDestinations"))
+        None
     };
     let account_change = if !is_lead {
         AccountChange::Unavailable {
@@ -1021,15 +1015,8 @@ pub(crate) fn agent_entity_from_record(
             .map(|v| project_agent_legacy_field(v, "teamCounts"))
             .transpose()
             .ok()?
-            .or_else(|| {
-                extra
-                    .remove("teamCounts")
-                    .map(|v| project_agent_property(&v, "teamCounts"))
-            })
     } else {
-        extra
-            .remove("teamCounts")
-            .map(|v| project_agent_property(&v, "teamCounts"))
+        None
     };
     let empty = if is_lead {
         Some(Some(project_agent_property(
@@ -1037,9 +1024,7 @@ pub(crate) fn agent_entity_from_record(
             "empty",
         )))
     } else {
-        extra
-            .remove("empty")
-            .map(|v| Some(project_agent_property(&v, "empty")))
+        None
     };
     let overview = if is_lead {
         None
@@ -1081,18 +1066,15 @@ pub(crate) fn agent_entity_from_record(
             },
         ))
     };
-    let workspace_cleanup_intent = match extra.remove("workspaceCleanupIntent") {
-        Some(value) if value.is_object() => {
-            let dto = cleanup_summary(&value, record.cwd.as_deref());
+    let workspace_cleanup_intent = match &record.workspace_cleanup_intent {
+        Field::Missing => None,
+        Field::Null => Some(None),
+        Field::Value(intent) => {
+            let dto = cleanup_summary(intent, record.cwd.as_deref());
             Some(Some(
                 project_agent_legacy_field(&dto, "workspaceCleanupIntent").ok()?,
             ))
         }
-        Some(value) => Some(Some(project_agent_property(
-            &value,
-            "workspaceCleanupIntent",
-        ))),
-        None => None,
     };
     Some(AgentEntityDto {
         account_change: Some(account_change),
@@ -1114,9 +1096,7 @@ pub(crate) fn agent_entity_from_record(
         auto_wake: record.auto_wake.map(Some),
         can_send: Some(Some(can_send)),
         capacity: Some(record.capacity.clone()),
-        capacity_retry: extra
-            .remove("capacityRetry")
-            .map(|v| Some(project_agent_property(&v, "capacityRetry"))),
+        capacity_retry: filtered_field(&record.capacity_retry, "capacityRetry").ok()?,
         command_progress: Some(command_progress),
         compactions: Some(record.compactions.map(|n| n as i64)),
         concurrency: record.concurrency.map(|n| Some(n.get())),
@@ -1161,9 +1141,7 @@ pub(crate) fn agent_entity_from_record(
         has_approval: context.has_approval.then_some(Some(true)),
         has_background_work: (!context.command_progress.is_empty()).then_some(true),
         has_question: context.has_question.then_some(Some(true)),
-        has_unread: extra
-            .remove("hasUnread")
-            .map(|v| Some(project_agent_property(&v, "hasUnread"))),
+        has_unread: None,
         host_project_path: bounded_field(&record.host_project_path, "hostProjectPath"),
         id: bound_sync_text(&record.id.0, "id"),
         in_flight: record.in_flight.map(Some),
@@ -1182,13 +1160,9 @@ pub(crate) fn agent_entity_from_record(
             .last_event
             .as_deref()
             .map(|s| Some(bound_sync_text(s, "lastEvent"))),
-        last_read_at: extra
-            .remove("lastReadAt")
-            .map(|v| Some(project_agent_property(&v, "lastReadAt"))),
+        last_read_at: None,
         launcher_alive: Some(Some(context.launcher_alive)),
-        layr_error: extra
-            .remove("layrError")
-            .map(|v| Some(project_agent_property(&v, "layrError"))),
+        layr_error: None,
         layr_line: match record.layr_line {
             Field::Missing => None,
             Field::Null => Some(Some(project_agent_property(&Value::Null, "layrLine"))),
@@ -1225,21 +1199,22 @@ pub(crate) fn agent_entity_from_record(
             .as_deref()
             .map(|s| Some(bound_sync_text(s, "name"))),
         naming: Some(record.naming),
-        native_error: extra
-            .remove("nativeError")
-            .map(|v| Some(project_agent_property(&v, "nativeError"))),
-        native_limit_error_at: extra
-            .remove("nativeLimitErrorAt")
-            .map(|v| Some(project_agent_property(&v, "nativeLimitErrorAt"))),
+        native_error: None,
+        native_limit_error_at: None,
         native_release: filtered_option(record.native_release.as_ref(), "nativeRelease").ok()?,
         native_safety_buffering: filtered_option(
             record.native_safety_buffering.as_ref(),
             "nativeSafetyBuffering",
         )
         .ok()?,
-        native_safety_retry: extra
-            .remove("nativeSafetyRetry")
-            .map(|v| Some(project_agent_property(&v, "nativeSafetyRetry"))),
+        native_safety_retry: filtered_option(
+            record
+                .native_safety_retry
+                .as_ref()
+                .map(std::ops::Deref::deref),
+            "nativeSafetyRetry",
+        )
+        .ok()?,
         native_status: filtered_option(record.native_status.as_ref(), "nativeStatus").ok()?,
         native_thread_block,
         native_turn_error: (!record.native_turn_error.is_missing()).then(|| {
@@ -1249,19 +1224,11 @@ pub(crate) fn agent_entity_from_record(
             ))
         }),
         next_turn_settings_supported: Some(Some(true)),
-        orchestrator_id: extra
-            .remove("orchestratorId")
-            .map(|v| Some(project_agent_property(&v, "orchestratorId"))),
-        orchestrator_name: extra
-            .remove("orchestratorName")
-            .map(|v| Some(project_agent_property(&v, "orchestratorName"))),
+        orchestrator_id: None,
+        orchestrator_name: None,
         overview,
-        panel_data_version: extra
-            .remove("panelDataVersion")
-            .map(|v| Some(project_agent_property(&v, "panelDataVersion"))),
-        panel_version: extra
-            .remove("panelVersion")
-            .map(|v| Some(project_agent_property(&v, "panelVersion"))),
+        panel_data_version: None,
+        panel_version: None,
         parent_id: record
             .parent_id
             .as_deref()
@@ -1303,30 +1270,22 @@ pub(crate) fn agent_entity_from_record(
             .as_deref()
             .map(|s| Some(bound_sync_text(s, "projectServerId"))),
         provider: nullable_field(record.provider.clone()),
-        queued_settings: extra
-            .remove("queuedSettings")
-            .map(|v| Some(project_agent_property(&v, "queuedSettings"))),
+        queued_settings: None,
         quick_create: record.quick_create.map(|value| {
             Some(Box::new(
                 studio_runtime_schema::generated::JsonValue::Boolean(value),
             ))
         }),
-        read_state: extra
-            .remove("readState")
-            .map(|v| Some(project_agent_property(&v, "readState"))),
+        read_state: filtered_option(
+            record.read_state.as_ref().map(std::ops::Deref::deref),
+            "readState",
+        )
+        .ok()?,
         read_state_supported: Some(Some(true)),
-        remote_anchor: extra
-            .remove("remoteAnchor")
-            .map(|v| Some(project_agent_property(&v, "remoteAnchor"))),
-        remote_origin: extra
-            .remove("remoteOrigin")
-            .map(|v| Some(project_agent_property(&v, "remoteOrigin"))),
-        remote_worker: extra
-            .remove("remoteWorker")
-            .map(|v| Some(project_agent_property(&v, "remoteWorker"))),
-        retry_at: extra
-            .remove("retryAt")
-            .map(|v| Some(project_agent_property(&v, "retryAt"))),
+        remote_anchor: None,
+        remote_origin: None,
+        remote_worker: None,
+        retry_at: None,
         review_defaults: record
             .review_defaults
             .as_deref()
@@ -1341,9 +1300,7 @@ pub(crate) fn agent_entity_from_record(
         start_attempt: filtered_option(record.start_attempt.as_ref(), "startAttempt").ok()?,
         start_wait: Some(start_wait),
         status: Some(Some(bound_sync_text(record.status.as_str(), "status"))),
-        status_detail: extra
-            .remove("statusDetail")
-            .map(|v| Some(project_agent_property(&v, "statusDetail"))),
+        status_detail: None,
         subagent_concurrency_version: record.subagent_concurrency_version.map(Some),
         tail: record
             .tail
@@ -1360,27 +1317,18 @@ pub(crate) fn agent_entity_from_record(
             .turn_id
             .as_deref()
             .map(|s| Some(bound_sync_text(s, "turnId"))),
-        turn_status: extra
-            .remove("turnStatus")
-            .map(|v| Some(project_agent_property(&v, "turnStatus"))),
-        unread_count: extra
-            .remove("unreadCount")
-            .map(|v| Some(project_agent_property(&v, "unreadCount"))),
-        updated: extra
-            .remove("updated")
-            .map(|v| Some(project_agent_property(&v, "updated"))),
+        turn_status: None,
+        unread_count: None,
+        updated: filtered_field(&record.updated, "updated").ok()?,
         usage_resume: filtered_field(&record.usage_resume, "usageResume").ok()?,
-        voice_state: extra
-            .remove("voiceState")
-            .map(|v| Some(project_agent_property(&v, "voiceState"))),
+        voice_state: None,
         worker_defaults: filtered_field(&record.worker_defaults, "workerDefaults").ok()?,
         workspace_cleanup_intent,
         workspace_mode: record.workspace_mode.map(Some),
         workspace_operation: bounded_field(&record.workspace_operation, "workspaceOperation"),
         worktree: record.worktree.map(|v| Some(AgentWorktree::Boolean(v))),
-        worktree_preparation: extra
-            .remove("worktreePreparation")
-            .map(|v| Some(project_agent_property(&v, "worktreePreparation"))),
+        worktree_preparation: filtered_field(&record.worktree_preparation, "worktreePreparation")
+            .ok()?,
     })
 }
 
@@ -1415,15 +1363,12 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
         "stall".to_owned(),
         serde::Serialize::serialize(&(&context.stall), studio_json::value::Serializer).ok()?,
     );
-    let remote_server = record
-        .pointer("/remoteWorker/server")
-        .and_then(Value::as_str)
-        .filter(|server| !server.is_empty());
     view.insert(
         "serverId".to_owned(),
-        remote_server
-            .or(context.project_server_id.as_deref())
-            .map_or(Value::Null, |value| Value::String(value.to_owned())),
+        context
+            .project_server_id
+            .as_ref()
+            .map_or(Value::Null, |server| Value::String(server.clone())),
     );
     view.insert("id".to_owned(), Value::String(id.to_owned()));
     view.insert("kind".to_owned(), Value::String("agent".to_owned()));
@@ -1708,45 +1653,48 @@ pub fn project_complaint_record(
 }
 
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RetainedWorktreeView<'a> {
-    #[serde(borrow)]
-    workspace_cleanup_intent:
-        Option<studio_runtime_schema::json_object::JsonObject<RetainedIntent<'a>>>,
-    remote_worker: Option<serde::de::IgnoredAny>,
-}
-
-#[derive(serde::Deserialize)]
-struct RetainedIntent<'a> {
-    phase: Option<&'a str>,
-    #[serde(borrow)]
-    effect: Option<studio_runtime_schema::json_object::JsonObject<RetainedEffect<'a>>>,
-}
-
-#[derive(serde::Deserialize)]
 struct RetainedEffect<'a> {
     kind: Option<&'a str>,
 }
 
 fn cleanup_summary(
-    value: &Value,
+    value: &studio_runtime_store::workspace_cleanup_intent::StoredCleanupIntent,
     cwd: Option<&str>,
 ) -> studio_runtime_schema::agent_entity_nested::WorkspaceCleanupSummaryDto {
-    let phase = value
-        .get("phase")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown")
-        .to_owned();
-    let reason = value
-        .pointer("/receipt/reason")
-        .or_else(|| value.get("reason"))
-        .and_then(Value::as_str)
-        .map(|s| bound_sync_text(s, "error"));
-    let path = match value
-        .pointer("/effect/identity/cwd")
-        .or_else(|| value.get("path"))
+    use studio_runtime_schema::raw_json::RawExtensions;
+    use studio_runtime_store::workspace_cleanup_intent::CleanupPhase;
+    let phase = match value.phase {
+        CleanupPhase::Queued => "queued",
+        CleanupPhase::Written => "written",
+        CleanupPhase::NotSent => "not_sent",
+        CleanupPhase::Pending => "pending",
+        CleanupPhase::Unknown => "unknown",
+    }
+    .to_owned();
+    let receipt = value
+        .receipt
+        .value()
+        .and_then(|raw| studio_json::from_str::<RawExtensions>(raw.as_str()).ok());
+    let reason = receipt
+        .as_ref()
+        .and_then(|receipt| receipt.get("reason"))
+        .or_else(|| value.extra.get("reason"))
+        .and_then(|raw| studio_json::from_str::<String>(raw.as_str()).ok())
+        .map(|reason| bound_sync_text(&reason, "error"));
+    let effect = value
+        .effect
+        .value()
+        .and_then(|raw| studio_json::from_str::<RawExtensions>(raw.as_str()).ok());
+    let identity = effect
+        .as_ref()
+        .and_then(|effect| effect.get("identity"))
+        .and_then(|raw| studio_json::from_str::<RawExtensions>(raw.as_str()).ok());
+    let path = match identity
+        .as_ref()
+        .and_then(|identity| identity.get("cwd"))
+        .or_else(|| value.extra.get("path"))
     {
-        Some(value) => value.as_str().map(str::to_owned),
+        Some(raw) => studio_json::from_str::<String>(raw.as_str()).ok(),
         None => cwd.map(str::to_owned),
     }
     .map(|path| bound_sync_text(&path, "path"));
@@ -1760,29 +1708,27 @@ fn cleanup_summary(
 pub(crate) fn retained_worktree_from_record(
     member: &studio_runtime_store::AgentRecord,
 ) -> Option<studio_runtime_schema::generated::RetainedWorktreeEntityDto> {
-    let intent = member.extra.get("workspaceCleanupIntent")?.as_object()?;
-    if member
-        .extra
-        .get("remoteWorker")
-        .is_some_and(|value| !value.is_null())
-        || !matches!(
-            intent.get("phase").and_then(Value::as_str),
-            Some("not_sent" | "unknown")
-        )
+    use studio_runtime_store::workspace_cleanup_intent::CleanupPhase;
+    if member.id.0.is_empty() {
+        return None;
+    }
+    let intent = member
+        .workspace_cleanup_intent
+        .as_ref()
+        .map(std::ops::Deref::deref)?;
+    if !matches!(intent.phase, CleanupPhase::NotSent | CleanupPhase::Unknown)
         || !intent
-            .get("effect")
-            .and_then(|value| value.get("kind"))
-            .and_then(Value::as_str)
+            .effect
+            .value()
+            .and_then(|raw| studio_json::from_str::<RetainedEffect<'_>>(raw.as_str()).ok())
+            .and_then(|effect| effect.kind)
             .is_some_and(|kind| {
                 crate::workspace_cleanup_runtime::RETAINED_WORKTREE_EFFECTS.contains(&kind)
             })
     {
         return None;
     }
-    let cleanup = cleanup_summary(
-        member.extra.get("workspaceCleanupIntent")?,
-        member.cwd.as_deref(),
-    );
+    let cleanup = cleanup_summary(intent, member.cwd.as_deref());
     Some(
         studio_runtime_schema::generated::RetainedWorktreeEntityDto {
             id: member.id.0.clone(),
@@ -1800,29 +1746,8 @@ pub(crate) fn retained_worktree_from_record(
 
 /// Public retained-folder entity. Cleanup operation identities never leave the server.
 pub fn retained_worktree_entity(member: &Value) -> Option<Value> {
-    use serde::Deserialize;
-    let view =
-        studio_runtime_schema::json_object::JsonObject::<RetainedWorktreeView<'_>>::deserialize(
-            member,
-        )
-        .ok()?
-        .0;
-    let intent = view.workspace_cleanup_intent?.0;
-    if !matches!(intent.phase, Some("not_sent" | "unknown"))
-        || !intent
-            .effect
-            .as_ref()
-            .and_then(|effect| effect.0.kind)
-            .is_some_and(|kind| {
-                crate::workspace_cleanup_runtime::RETAINED_WORKTREE_EFFECTS.contains(&kind)
-            })
-        || view.remote_worker.is_some()
-    {
-        return None;
-    }
-    let projected = project_persisted_record("agent", member)?;
-    Some(json!({"id":member["id"], "rootId":member["rootId"],
-        "name":projected.get("name"), "cleanup":projected["workspaceCleanupIntent"]}))
+    let record: studio_runtime_store::AgentRecord = serde::Deserialize::deserialize(member).ok()?;
+    retained_worktree_from_record(&record).map(|view| studio_runtime_store::projection_value(&view))
 }
 
 #[cfg(test)]
@@ -2024,14 +1949,14 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn agent_projection_bounds_nested_legacy_values() {
+    fn public_agent_projection_bounds_nested_legacy_values() {
         let mut deep = json!("leaf");
         for _ in 0..40 {
             deep = json!({"child": deep});
         }
         let opaque = json!({"items": (0..300).collect::<Vec<_>>(), "deep": deep,
             "unknownNested": "preserved"});
-        let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+        let mut record = json!({"id":"agent", "rootId":"agent", "epoch":1,
             "status":"idle", "turnStatus":"future-turn-state", "accountKey":"default", "isLead":true,
             "nativeStatus":{"message":"x".repeat(2500), "unknownNested":"removed"},
             "movedTo":{"server":"peer", "move":"id", "unknownNested":"removed"},
@@ -2048,28 +1973,10 @@ mod projection_plan_tests {
                 .collect(),
             ..Default::default()
         };
-        let full = super::agent_entity_view(&record, &context).unwrap();
+        record["accountDestinations"] = json!(context.account_destinations);
+        let full = super::project_persisted_record("agent", &record).unwrap();
         let summary = super::project_persisted_record("agentSummary", &full).unwrap();
         let detail = super::project_persisted_record("agentDetail", &full).unwrap();
-        for (view, expected) in [
-            (
-                &full,
-                "3e93b7dfddbbf0d71bdc6f1f96d5f7006e285e85c4ab4b8f16fb95d0c374e139",
-            ),
-            (
-                &summary,
-                "52d7905f1bb65f9805f1d5354fad6c9f8ef8b147b59e54dc90088b45429cedc9",
-            ),
-            (
-                &detail,
-                "35793af0b19edc03e1e9a06687c6b829f3ecb155c2897f3d165f65264c0d7062",
-            ),
-        ] {
-            assert_eq!(
-                studio_runtime_store::sha256_hex(studio_json::to_string(view).unwrap().as_bytes()),
-                expected
-            );
-        }
         assert_eq!(
             full["nativeStatus"]["message"].as_str().unwrap().len(),
             2000
@@ -2233,7 +2140,7 @@ mod projection_plan_tests {
         let long = "x".repeat(12001);
         let raw = json!({"id":"worker","rootId":"lead","epoch":1,"status":"completed",
             "accountKey":"default","lastCompletedTurn":long,"lastAnswer":"answer",
-            "workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":long}}}});
+            "workspaceCleanupIntent":{"action":"archive","phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":long}}}});
         let record = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
         let stored = record.value();
         let legacy = super::agent_entity_view(&stored, &Default::default()).unwrap();
@@ -2258,20 +2165,31 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn typed_retained_worktree_matches_legacy_projection() {
-        for intent in [
-            json!({"phase":"unknown","effect":{"kind":"remove_worktree"}}),
-            json!({"phase":"not_sent","path":"/fallback","reason":"reason",
-                "receipt":{"reason":null},"effect":{"kind":"save_worktree_ref","identity":{"cwd":"/path"}}}),
-            json!({"phase":"confirmed","effect":{"kind":"remove_worktree"}}),
+    fn typed_retained_worktree_preserves_public_wire_shape() {
+        for (intent, expected) in [
+            (
+                json!({"action":"archive","phase":"unknown","effect":{"kind":"remove_worktree"}}),
+                Some(
+                    json!({"id":"agent","rootId":"lead","name":"name","cleanup":{"phase":"unknown","reason":null,"path":null}}),
+                ),
+            ),
+            (
+                json!({"action":"archive","phase":"not_sent","path":"/fallback","reason":"reason", "receipt":{"reason":null},"effect":{"kind":"save_worktree_ref","identity":{"cwd":"/path"}}}),
+                Some(
+                    json!({"id":"agent","rootId":"lead","name":"name","cleanup":{"phase":"not_sent","reason":null,"path":"/path"}}),
+                ),
+            ),
+            (
+                json!({"action":"archive","phase":"queued","effect":{"kind":"remove_worktree"}}),
+                None,
+            ),
         ] {
-            let raw = json!({"id":"agent","rootId":"lead","epoch":1,"status":"idle",
-                "accountKey":"default","name":"name","workspaceCleanupIntent":intent});
-            let old = super::retained_worktree_entity(&raw);
+            let raw = json!({"id":"agent","rootId":"lead","epoch":1,"status":"idle", "accountKey":"default","name":"name","workspaceCleanupIntent":intent});
+            assert_eq!(super::retained_worktree_entity(&raw), expected);
             let record = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
             let typed = super::retained_worktree_from_record(&record)
                 .map(|v| serde::Serialize::serialize(&v, studio_json::value::Serializer).unwrap());
-            assert_eq!(typed, old);
+            assert_eq!(typed, expected);
         }
     }
 
@@ -2311,26 +2229,12 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn agent_projection_preserves_malformed_turn_status() {
-        let raw = json!({"id":"agent", "rootId":"agent", "epoch":1,
-            "status":"idle", "accountKey":"default", "turnStatus":{"future":true}});
-        let stored = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
-        let legacy = super::agent_entity_view(&stored.value(), &Default::default()).unwrap();
-        let mapped = super::agent_entity_from_record(stored, &Default::default()).unwrap();
-        assert_eq!(
-            mapped
-                .turn_status
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .0
-                .as_str(),
-            r#"{"future":true}"#
-        );
-        let serialized = studio_json::to_string(&mapped).unwrap();
-        let actual: Value = studio_json::from_str(&serialized).unwrap();
-        assert_eq!(actual, legacy);
+    fn stored_agent_refuses_retired_turn_status_before_projection() {
+        for value in [Value::Null, json!("future-state"), json!({"future":true})] {
+            let raw = json!({"id":"agent", "rootId":"agent", "epoch":1,
+                "status":"idle", "accountKey":"default", "turnStatus":value});
+            assert!(studio_runtime_store::AgentRecord::from_value(raw.clone()).is_err());
+        }
     }
 
     #[test]
@@ -2338,7 +2242,7 @@ mod projection_plan_tests {
         for raw in [
             json!({"id":"lead", "rootId":"lead", "epoch":2, "status":"queued",
                 "accountKey":"default", "isLead":true, "autoWake":true,
-                "workerExcludedAccountKeys":["blocked"], "turnStatus":null}),
+                "workerExcludedAccountKeys":["blocked"]}),
             json!({"id":"worker", "rootId":"lead", "epoch":2, "status":"completed",
                 "accountKey":"default", "isLead":false, "prompt":"task", "lastAnswer":"done",
                 "lastCompletedTurn":"turn", "activity":{"phase":"working", "tools":[{"name":"tool"}]}}),
@@ -2384,19 +2288,14 @@ mod projection_plan_tests {
 
     #[test]
     fn agent_projection_decoded_record_compatibility_baseline() {
-        let mut nested = json!("leaf");
-        for _ in 0..40 {
-            nested = json!({"next":nested});
-        }
         let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
             "status":"idle", "accountKey":"default", "compactions":0,
             "isLead":true, "cwd":"/fallback", "hostProjectPath":"x".repeat(12_001),
             "error":"e".repeat(2_500), "nativeStatus":{"phase":"safety", "message":"n".repeat(2_500)},
             "taskDefaultGate":{"command":"g".repeat(12_001), "timeout_ms":1000},
-            "voiceState":{"items":(0..300).collect::<Vec<_>>(), "deep":nested},
-            "workspaceCleanupIntent":{"phase":"unknown", "path":"/intent", "reason":"fallback",
+            "workspaceCleanupIntent":{"action":"archive","phase":"unknown", "path":"/intent", "reason":"fallback",
                 "effect":{"kind":"remove_worktree", "identity":{"cwd":null}}, "receipt":{"reason":false}},
-            "pendingSettings":[1,2], "futureField":"removed"});
+            "pendingSettings":[1,2]});
         let stored = studio_runtime_store::AgentRecord::from_value(record).unwrap();
         let source = stored.value();
         let full = super::agent_entity_view(&source, &Default::default()).unwrap();
@@ -2441,25 +2340,6 @@ mod projection_plan_tests {
                 expected["projectServerId"] = Value::Null;
             }
             assert_eq!(actual, expected);
-        }
-        for (view, expected) in [
-            (
-                &full,
-                "2b47b6922bf7e358b0ddd9244470d7fec2380a817de5476e42e4eed3abab964b",
-            ),
-            (
-                &summary,
-                "eb3f9ff27da0a945956b312ffc0b285a2f874bd852f0d4398ceb01eee9eccc75",
-            ),
-            (
-                &detail,
-                "859f594095fa74c1ba4c1d50de34fa80bda8d5dbfb3a8fac25e4f462c0e04ad9",
-            ),
-        ] {
-            assert_eq!(
-                studio_runtime_store::sha256_hex(studio_json::to_string(view).unwrap().as_bytes()),
-                expected
-            );
         }
         assert_eq!(full["workspaceCleanupIntent"]["reason"], Value::Null);
         assert_eq!(full["workspaceCleanupIntent"]["path"], Value::Null);
@@ -2759,39 +2639,31 @@ mod projection_plan_tests {
     fn retained_cleanup_admission_preserves_partial_legacy_fields() {
         for (raw, expected) in [
             (
-                r#"{"id":"a","workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
+                r#"{"id":"a","workspaceCleanupIntent":{"action":"archive","phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
                 true,
             ),
             (
-                r#"{"id":"a","remoteWorker":null,"workspaceCleanupIntent":{"phase":"not_sent","effect":{"kind":"save_worktree_ref"}}}"#,
+                r#"{"id":"a","workspaceCleanupIntent":{"action":"archive","phase":null,"effect":{"kind":"remove_worktree"}}}"#,
+                false,
+            ),
+            (
+                r#"{"id":"a","workspaceCleanupIntent":{"action":"archive","phase":"unknown","effect":[]}}"#,
+                false,
+            ),
+            (
+                r#"{"id":"a","workspaceCleanupIntent":{"action":"archive","phase":"confirmed","phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
                 true,
             ),
             (
-                r#"{"id":"a","remoteWorker":false,"workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
-                false,
-            ),
-            (
-                r#"{"id":"a","remoteWorker":0,"workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
-                false,
-            ),
-            (
-                r#"{"id":"a","workspaceCleanupIntent":{"phase":null,"effect":{"kind":"remove_worktree"}}}"#,
-                false,
-            ),
-            (
-                r#"{"id":"a","workspaceCleanupIntent":{"phase":"unknown","effect":[]}}"#,
-                false,
-            ),
-            (
-                r#"{"id":"a","workspaceCleanupIntent":{"phase":"confirmed","phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
-                true,
-            ),
-            (
-                r#"{"id":"","workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
+                r#"{"id":"","workspaceCleanupIntent":{"action":"archive","phase":"unknown","effect":{"kind":"remove_worktree"}}}"#,
                 false,
             ),
         ] {
-            let value: studio_json::Value = studio_json::from_str(raw).expect("fixture JSON");
+            let mut value: studio_json::Value = studio_json::from_str(raw).expect("fixture JSON");
+            value["rootId"] = json!("root");
+            value["epoch"] = json!(1);
+            value["status"] = json!("idle");
+            value["accountKey"] = json!("default");
             let result = super::retained_worktree_entity(&value);
             assert_eq!(result.is_some(), expected, "{raw}");
             if let Some(view) = result {
@@ -2802,8 +2674,8 @@ mod projection_plan_tests {
 
     #[test]
     fn retained_cleanup_prefers_present_nested_values_before_type_checks() {
-        let member = json!({"id":"worker","rootId":"root","cwd":"/fallback",
-            "workspaceCleanupIntent":{"phase":"unknown","path":"/intent", "reason":"fallback",
+        let member = json!({"id":"worker","rootId":"root","epoch":1,"status":"idle","accountKey":"default","cwd":"/fallback",
+            "workspaceCleanupIntent":{"action":"archive","phase":"unknown","path":"/intent", "reason":"fallback",
                 "effect":{"kind":"remove_worktree","identity":{"cwd":null,"private":"secret"}},
                 "receipt":{"reason":false,"private":"secret"},"requestId":"private"}});
         let view = super::retained_worktree_entity(&member).expect("retained");

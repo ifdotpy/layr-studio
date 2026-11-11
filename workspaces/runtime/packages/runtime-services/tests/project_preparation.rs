@@ -98,10 +98,8 @@ async fn project_write_survives_other_agents_execution_churn() {
 #[tokio::test]
 async fn project_write_refuses_changed_membership_paths_and_liveness() {
     for patch in [
-        json!({"path":"/changed"}),
         json!({"cwd":"/changed"}),
         json!({"deletedAt":1}),
-        json!({"archivedAt":1}),
         json!({"archived":true}),
     ] {
         let (_root, store) = fixture().await;

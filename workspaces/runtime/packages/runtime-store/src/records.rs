@@ -265,7 +265,13 @@ pub use studio_runtime_schema::agent_entity_nested::AgentNaming;
 
 pub use studio_runtime_schema::agent_limits::AgentCapacity;
 
+pub use crate::agent_columns::typed::context_repair::ContextRepair;
 pub use crate::agent_columns::typed::record::AgentRecord;
+pub use crate::agent_columns::typed::retained::{
+    CancelledPark, LastWorkspaceWait, LayrTurnSave, ManualRecoveryDeliveryHold,
+    NativeReviewAgentBrief, NativeReviewResponse, NativeReviewStatus, ParkReceipt,
+    StoredNativeReview,
+};
 
 pub use crate::agent_columns::typed::record::IdleCompactionEpisode;
 
@@ -728,7 +734,45 @@ impl AgentRecord {
             idle_cache: studio_runtime_schema::queue_command::Field::Missing,
             native_thread_block: studio_runtime_schema::queue_command::Field::Missing,
             native_turn_error: studio_runtime_schema::queue_command::Field::Missing,
-            extra: BTreeMap::new(),
+            auth_resume_proof_pending: studio_runtime_schema::queue_command::Field::Missing,
+            capacity_retry: studio_runtime_schema::queue_command::Field::Missing,
+            read_state: studio_runtime_schema::queue_command::Field::Missing,
+            thread_provenance: studio_runtime_schema::queue_command::Field::Missing,
+            workspace_cleanup_intent: studio_runtime_schema::queue_command::Field::Missing,
+            layr_turn_saves: studio_runtime_schema::queue_command::Field::Missing,
+            cancelled_park: studio_runtime_schema::queue_command::Field::Missing,
+            park_receipt: studio_runtime_schema::queue_command::Field::Missing,
+            manual_recovery_delivery_hold: studio_runtime_schema::queue_command::Field::Missing,
+            native_safety_retry: studio_runtime_schema::queue_command::Field::Missing,
+            shell_policy_last_reap_at: studio_runtime_schema::queue_command::Field::Missing,
+            native_review: studio_runtime_schema::queue_command::Field::Missing,
+            context_repair: studio_runtime_schema::queue_command::Field::Missing,
+            context_repair_history: studio_runtime_schema::queue_command::Field::Missing,
+            last_workspace_wait: studio_runtime_schema::queue_command::Field::Missing,
+            forked_from: studio_runtime_schema::queue_command::Field::Missing,
+            source_message: studio_runtime_schema::queue_command::Field::Missing,
+            restored_checkpoint: studio_runtime_schema::queue_command::Field::Missing,
+            branch: studio_runtime_schema::queue_command::Field::Missing,
+            layr_cache_warning: studio_runtime_schema::queue_command::Field::Missing,
+            layr_version_warning: studio_runtime_schema::queue_command::Field::Missing,
+            native_role_guidance: studio_runtime_schema::queue_command::Field::Missing,
+            native_teleport_tool: studio_runtime_schema::queue_command::Field::Missing,
+            native_tool_catalog: studio_runtime_schema::queue_command::Field::Missing,
+            native_tool_source: studio_runtime_schema::queue_command::Field::Missing,
+            park_sequence: studio_runtime_schema::queue_command::Field::Missing,
+            prepared_context: studio_runtime_schema::queue_command::Field::Missing,
+            profile: studio_runtime_schema::queue_command::Field::Missing,
+            review_archive_attempts: studio_runtime_schema::queue_command::Field::Missing,
+            review_archive_error: studio_runtime_schema::queue_command::Field::Missing,
+            review_archive_next_at: studio_runtime_schema::queue_command::Field::Missing,
+            review_archive_scheduled: studio_runtime_schema::queue_command::Field::Missing,
+            updated: studio_runtime_schema::queue_command::Field::Missing,
+            worktree_preparation: studio_runtime_schema::queue_command::Field::Missing,
+            legacy_workspace_execution: studio_runtime_schema::queue_command::Field::Missing,
+            legacy_workspace_finished: studio_runtime_schema::queue_command::Field::Missing,
+            legacy_workspace_settled: studio_runtime_schema::queue_command::Field::Missing,
+            image_workspace_repo: studio_runtime_schema::queue_command::Field::Missing,
+            image_workspace_mount: studio_runtime_schema::queue_command::Field::Missing,
         }
     }
 
@@ -830,17 +874,11 @@ impl AgentRecord {
         self.clone().into_value()
     }
 
-    /// Consume the typed record while moving its fields into a JSON object.
-    pub fn into_value(mut self) -> Value {
+    /// Consume the typed record into its serialized projection.
+    pub fn into_value(self) -> Value {
         #[cfg(any(test, feature = "test-support"))]
         crate::agent_volatile::publication_work::full_projection();
-        let extra = std::mem::take(&mut self.extra);
-        let mut value = crate::projection_value(&self);
-        value
-            .as_object_mut()
-            .expect("agent is an object")
-            .extend(extra);
-        value
+        crate::projection_value(&self)
     }
 
     pub fn set_status(&mut self, status: AgentStatus) {
@@ -858,16 +896,6 @@ impl JsonRecord for AgentRecord {
 
     fn record_key(&self) -> Option<&Self::Id> {
         Some(&self.id)
-    }
-
-    // Remove this override once the record is closed and typed.
-    fn encode_stored(&self, _: &Connection, row_id: &str) -> StoreResult<String> {
-        encode_open_record(self, row_id)
-    }
-
-    fn check_write_value(&self, value: &Value) -> StoreResult<()> {
-        self.check_extra_round_trip(&studio_json::to_string(value)?)?;
-        Ok(())
     }
 
     fn decode_list_row(
@@ -888,39 +916,6 @@ impl JsonRecord for AgentRecord {
         let mut agent = parse_agent_record(row_id, encoded)?;
         crate::agent_volatile::merge_agent(connection, row_id, &mut agent)?;
         Ok(agent)
-    }
-}
-
-impl AgentRecord {
-    fn check_extra_round_trip(&self, encoded: &str) -> StoreResult<()> {
-        let mut deserializer = studio_json::Deserializer::from_str(encoded);
-        let decoded: Self =
-            serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
-                let key = error.path().to_string();
-                if self.extra.contains_key(&key) {
-                    invalid_agent_field(
-                        &self.id.0,
-                        &format!("/{key}"),
-                        "extra_field_collision",
-                        None,
-                    )
-                } else {
-                    crate::StoreError::from(error.into_inner())
-                }
-            })?;
-        if let Some(key) = self
-            .extra
-            .keys()
-            .find(|key| !decoded.extra.contains_key(*key))
-        {
-            return Err(invalid_agent_field(
-                &self.id.0,
-                &format!("/{key}"),
-                "extra_field_collision",
-                None,
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -2785,7 +2780,6 @@ mod tests {
         assert!(
             matches!(&agent.shared_room_id, Field::Value(id) if id == "radio:62c8aafa-cdb4-55ba-81f1-152e7919f6e0")
         );
-        assert!(!agent.extra.contains_key("sharedRoomId"));
         let encoded = studio_json::to_string(&agent).unwrap();
         assert_eq!(encoded.matches("\"sharedRoomId\"").count(), 1);
         let decoded: super::AgentRecord = studio_json::from_str(&encoded).unwrap();
@@ -2799,7 +2793,6 @@ mod tests {
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"projectFolderRevision":{revision}}}"#
             );
             let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
-            assert!(!agent.extra.contains_key("projectFolderRevision"));
             let encoded = studio_json::to_string(&agent).unwrap();
             assert_eq!(encoded.matches("\"projectFolderRevision\"").count(), 1);
             let from_value =
@@ -2819,7 +2812,6 @@ mod tests {
         assert!(
             matches!(&agent.task_default_gate, Field::Value(gate) if gate.command == "upgrade-check" && gate.timeout_ms == 1234)
         );
-        assert!(!agent.extra.contains_key("taskDefaultGate"));
         let encoded = studio_json::to_string(&agent).unwrap();
         assert_eq!(encoded.matches("\"taskDefaultGate\"").count(), 1);
         let input: studio_json::Value = studio_json::from_str(raw).unwrap();
@@ -2838,7 +2830,6 @@ mod tests {
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"movedFrom":{value}}}"#
             );
             let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
-            assert!(!agent.extra.contains_key("movedFrom"));
             let encoded = studio_json::to_string(&agent).unwrap();
             assert_eq!(encoded.matches("\"movedFrom\"").count(), 1);
             let parsed: studio_json::Value = studio_json::from_str(&raw).unwrap();
@@ -2893,7 +2884,6 @@ mod tests {
                 r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"connectionCheck":{value}}}"#
             );
             let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
-            assert!(!agent.extra.contains_key("connectionCheck"));
             let encoded = studio_json::to_string(&agent).unwrap();
             assert_eq!(encoded.matches("\"connectionCheck\"").count(), 1);
             let parsed: studio_json::Value = studio_json::from_str(&raw).unwrap();
@@ -2901,52 +2891,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn agent_write_rejects_extra_keys_owned_by_named_fields() {
-        for (key, value) in [
-            ("error", studio_json::json!(null)),
-            ("error", studio_json::json!(42)),
-            ("capacity", studio_json::json!(null)),
-            ("naming", studio_json::json!(null)),
-            ("sharedRoomId", studio_json::json!(null)),
-            ("projectFolderRevision", studio_json::json!(null)),
-            ("taskDefaultGate", studio_json::json!(null)),
-            ("movedFrom", studio_json::json!(null)),
-            ("connectionCheck", studio_json::json!(null)),
-            ("id", studio_json::json!(null)),
-        ] {
-            let mut agent = super::AgentRecord::from_value(studio_json::json!({
-                "id":"agent", "rootId":"agent", "epoch":1, "status":"idle",
-                "accountKey":"default", "compactions":0
-            }))
-            .unwrap();
-            agent.extra.insert(key.into(), value);
-            assert!(
-                matches!(super::checked_value(&agent, "agent"), Err(crate::StoreError::InvalidSyncObjectField { pointer, reason, .. }) if pointer == format!("/{key}") && reason.contains("extra_field_collision")),
-                "{key}"
-            );
-        }
-    }
-
-    #[test]
-    #[ignore = "manual timing on a disposable copied record"]
-    fn copied_agent_extra_guard_timing() {
-        use super::JsonRecord;
-        let raw =
-            std::fs::read_to_string(std::env::var("STUDIO_AGENT_TIMING_RECORD").unwrap()).unwrap();
-        let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        let encoded = agent.encode_stored(&db, &agent.id.0).unwrap();
-        let start = std::time::Instant::now();
-        for _ in 0..30 {
-            agent.check_extra_round_trip(&encoded).unwrap();
-        }
-        println!(
-            "bytes={} guard_mean_ms={:.3}",
-            encoded.len(),
-            start.elapsed().as_secs_f64() * 1000.0 / 30.0
-        );
-    }
     #[test]
     fn agent_record_requires_materialized_account() {
         let old = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle"}"#;
@@ -3333,36 +3277,6 @@ mod tests {
     }
 
     #[test]
-    fn consuming_agent_projection_moves_extra_json() {
-        let record = agent(json!({"compactions":0,"accountKey":"default",
-            "id":"agent-1", "provider":"codex", "rootId":"root-1", "epoch":3, "status":"running",
-            "futureField":[{"nested":"retained"}]
-        }));
-        let source_ptr = record.extra["futureField"]
-            .as_array()
-            .expect("extra field is an array")
-            .as_ptr();
-        let projected = record.into_value();
-
-        assert_eq!(
-            projected,
-            json!({"compactions":0,
-                "id":"agent-1", "provider":"codex", "rootId":"root-1", "epoch":3, "status":"running", "accountKey":"default",
-                "capacity":{"kind":"automatic","max":64},"naming":"automatic",
-                "futureField":[{"nested":"retained"}]
-            })
-        );
-        assert_eq!(
-            projected["futureField"]
-                .as_array()
-                .expect("projected extra field is an array")
-                .as_ptr(),
-            source_ptr,
-            "the consuming projection must move, not clone, the nested JSON tree"
-        );
-    }
-
-    #[test]
     fn transcript_record_preserves_opaque_extension_bytes() {
         let raw = r#"{"id":"item-1","role":"user","text":"body","nested":[ { "retained":true } ],"inputs":[{"text":"input","blob":[ {"v":1} ]}]}"#;
         let record: TranscriptItemRecord = studio_json::from_str(raw).expect("record");
@@ -3397,7 +3311,7 @@ mod tests {
             "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
             "capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "inFlight":true, "autoWake":false, "executionMode":"native", "turnEpoch":2,
-            "accountKey":"account", "threadId":"thread", "turnId":"turn", "future":42
+            "accountKey":"account", "threadId":"thread", "turnId":"turn", "activeExecution":{"runId":"run","attemptId":"attempt","future":42}
         });
         connection
             .execute(
@@ -3455,21 +3369,6 @@ mod tests {
             "workerBaseMainRef":"main","quickCreateRequest":"signature",
             "reviewDefaults":{"model":null,"effort":"high"}}),
         );
-        for key in [
-            "worktree",
-            "workerBaseRef",
-            "workspaceModeExplicit",
-            "workspaceInGit",
-            "quickCreate",
-            "reviewDefaults",
-            "worktreeWarning",
-            "workerBaseCommit",
-            "workerBaseBehindMain",
-            "workerBaseMainRef",
-            "quickCreateRequest",
-        ] {
-            assert!(!record.extra.contains_key(key), "{key}");
-        }
         let encoded = record.value();
         assert_eq!(encoded["workerBaseRef"], "main");
         assert_eq!(encoded["workerBaseBehindMain"], 3);
@@ -3489,17 +3388,6 @@ mod tests {
             "agentModeRevision":1,"subagentConcurrencyVersion":2,"layrStoreRoot":"/store",
             "projectId":"project","projectServerId":"server"}),
         );
-        for key in [
-            "concurrency",
-            "agentMode",
-            "agentModeRevision",
-            "subagentConcurrencyVersion",
-            "layrStoreRoot",
-            "projectId",
-            "projectServerId",
-        ] {
-            assert!(!record.extra.contains_key(key), "{key}");
-        }
         assert_eq!(record.concurrency.map(|value| value.get()), Some(32));
         assert_eq!(record.project_id.as_deref(), Some("project"));
         assert_eq!(record.value()["agentMode"], "multi");
@@ -3511,21 +3399,20 @@ mod tests {
             "id":"agent", "rootId":"agent", "epoch":2, "status":"idle",
             "accountKey":"default", "nativeFailureHold":true
         }));
-        assert!(!record.extra.contains_key("nativeFailureHold"));
+        assert!(record.native_failure_held());
     }
 
     #[test]
     fn prepare_attempt_is_not_an_extension() {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":"attempt"}));
-        assert!(!record.extra.contains_key("prepareAttempt"));
+        assert!(record.prepare_attempt.value().is_some());
     }
 
     #[test]
     fn yolo_mode_is_not_an_extension() {
         let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
             "epoch":2,"status":"idle","accountKey":"default","yoloMode":true}));
-        assert!(!record.extra.contains_key("yoloMode"));
         assert!(matches!(
             record.yolo_mode.value(),
             Some(super::StoredTransferValue::Known(true))
@@ -3544,7 +3431,6 @@ mod tests {
         let record = agent(
             json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"default","updatedAt":1.0}),
         );
-        assert!(!record.extra.contains_key("updatedAt"));
         assert!(
             matches!(record.updated_at, studio_runtime_schema::queue_command::Field::Value(super::StoredTransferValue::Known(value)) if value == 1.0)
         );
@@ -3561,8 +3447,6 @@ mod tests {
         let record = agent(json!({"compactions":0,"id":"agent","rootId":"agent",
             "epoch":2,"status":"idle","accountKey":"default",
             "pendingSettings":{"model":"m"},"pendingSettingsAccountKey":"default"}));
-        assert!(!record.extra.contains_key("pendingSettings"));
-        assert!(!record.extra.contains_key("pendingSettingsAccountKey"));
         assert!(matches!(
             &record.pending_settings,
             studio_runtime_schema::queue_command::Field::Value(super::StoredTransferObject::Known(settings))
@@ -3613,7 +3497,6 @@ mod tests {
             "epoch":2,"status":"idle","accountKey":"default","usageResume":{
                 "id":"resume","accountKey":"default","threadId":"thread","turnId":"turn",
                 "epoch":2,"failedAt":1,"status":"scheduled"}}));
-        assert!(!record.extra.contains_key("usageResume"));
         assert!(matches!(
             record.usage_resume.value(),
             Some(super::StoredTransferObject::Known(_))
@@ -3639,7 +3522,6 @@ mod tests {
                 "version":1,"path":"archive","sha256":"hash","bytes":1,"counts":{},
                 "source":{"agentId":"agent","accountKey":"default","epoch":2,"threadId":"thread"},
                 "transferId":"transfer"}}));
-        assert!(!record.extra.contains_key("portableHistory"));
         assert!(matches!(
             record.portable_history.value(),
             Some(super::StoredTransferObject::Known(_))
@@ -3710,7 +3592,6 @@ mod tests {
         "epoch":2, "status":"idle", "accountKey":"default", "accountHistory":[{
             "accountKey":"source","threadId":"thread","provider":"codex","at":1.0
         }]}));
-        assert!(!record.extra.contains_key("accountHistory"));
         assert!(matches!(
             record.account_history.value(),
             Some(super::StoredTransferValue::Known(_))
@@ -3740,12 +3621,6 @@ mod tests {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "cyberAccessProgram":"standard",
             "claudeOptions":{"configDir":"profile"}}));
-        for key in ["cyberAccessProgram", "claudeOptions"] {
-            assert!(
-                !record.extra.contains_key(key),
-                "{key} remains an extension"
-            );
-        }
         assert!(
             matches!(record.cyber_access_program.value(), Some(super::StoredTransferValue::Known(value)) if value == "standard")
         );
@@ -3775,7 +3650,7 @@ mod tests {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default",
             "workerDefaults":{"model":"m","effort":null,"fastMode":false}}));
-        assert!(!record.extra.contains_key("workerDefaults"));
+        assert!(record.worker_defaults.value().is_some());
     }
 
     #[test]
@@ -3961,18 +3836,29 @@ mod tests {
     }
 
     #[test]
-    fn agent_round_trip_keeps_unknown_json_fields_and_number_kinds() {
+    fn agent_error_round_trip_keeps_extension_fields_and_number_kinds() {
         let value = json!({"compactions":0,
             "id":"agent-1", "provider":"codex", "rootId":"agent-1", "epoch":2, "status":"idle", "accountKey":"default",
             "capacity":{"kind":"automatic","max":64},"naming":"automatic",
-            "futureObject":{"number":1.5,"flag":true}, "futureInteger":9007199254740993_i64
+            "error":{"message":"retained", "futureObject":{"number":1.5,"flag":true}, "futureInteger":9007199254740993_i64}
         });
         let record = agent(value.clone());
         let rewritten = record.into_value();
-        assert_eq!(rewritten["futureObject"]["number"].as_f64(), Some(1.5));
-        assert_eq!(rewritten["futureObject"]["flag"].as_bool(), Some(true));
-        assert_eq!(rewritten["futureInteger"].as_i64(), Some(9007199254740993));
-        assert_eq!(rewritten, value);
+        assert_eq!(
+            rewritten["error"]["futureObject"]["number"].as_f64(),
+            Some(1.5)
+        );
+        assert_eq!(
+            rewritten["error"]["futureObject"]["flag"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            rewritten["error"]["futureInteger"].as_i64(),
+            Some(9007199254740993)
+        );
+        let mut expected = value;
+        expected["error"]["studioRawEvidence"] = expected["error"].clone();
+        assert_eq!(rewritten, expected);
     }
 
     #[test]
@@ -4097,7 +3983,7 @@ mod tests {
     #[test]
     fn unknown_agent_status_is_refused_and_known_extensions_survive() {
         let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic",
-            "status":"future-agent-state","future":{"enabled":true,"count":9007199254740993_i64}});
+            "status":"future-agent-state","error":{"message":"retained","future":{"enabled":true,"count":9007199254740993_i64}}});
         assert!(
             super::parse_agent_record("agent-1", &studio_json::to_string(&value).unwrap()).is_err()
         );
@@ -4105,6 +3991,7 @@ mod tests {
         value["status"] = json!("running");
         let record = agent(value.clone());
         assert_eq!(record.status, AgentStatus::Running);
+        value["error"]["studioRawEvidence"] = value["error"].clone();
         assert_eq!(record.into_value(), value);
     }
 
@@ -4707,7 +4594,7 @@ mod agent_projection_tests {
         db.execute_batch(crate::agent_volatile::agent_volatile_table_sql())
             .unwrap();
         let raw = json!({"id":"a","rootId":"r","epoch":1,"status":"idle", "accountKey":"default", "compactions":0,
-            "events":1,"agentArchive":{"at":1.5,"epoch":1},"future":{"x":[1,null]},
+            "events":1,"agentArchive":{"at":1.5,"epoch":1},"name":"retained",
             "titleJob":{"legacy":true},"startOutcomeHold":{"stage":"held","reason":"pending"},"firedEvents":["one"]});
         db.execute(
             "INSERT INTO runtime_agents(id,record) VALUES('a',?1)",
@@ -4733,9 +4620,9 @@ mod agent_projection_tests {
             .unwrap();
         for fields in [
             json!({}),
-            json!({"idleCompactionEpisode":{"id":"episode","future":1},"idleSummaryPrepared":"episode","idleCache":{"ttl":"1h","requestId":"r"},"nativeThreadBlock":{"threadId":"t","error":{"future":true}},"nativeTurnError":{"turnId":"u","error":"legacy"},"workspaceCleanupIntent":{"phase":"queued","future":1}}),
-            json!({"idleCompactionEpisode":null,"idleSummaryPrepared":null,"idleCache":null,"nativeThreadBlock":null,"nativeTurnError":null,"workspaceCleanupIntent":null}),
-            json!({"idleCompactionEpisode":false,"idleSummaryPrepared":42,"idleCache":[1],"nativeThreadBlock":"legacy","nativeTurnError":{"turnId":null,"extra":true},"workspaceCleanupIntent":false}),
+            json!({"idleCompactionEpisode":{"id":"episode","future":1},"idleSummaryPrepared":"episode","idleCache":{"ttl":"1h","requestId":"r"},"nativeThreadBlock":{"threadId":"t","error":{"future":true}},"nativeTurnError":{"turnId":"u","error":"legacy"}}),
+            json!({"idleCompactionEpisode":null,"idleSummaryPrepared":null,"idleCache":null,"nativeThreadBlock":null,"nativeTurnError":null}),
+            json!({"idleCompactionEpisode":false,"idleSummaryPrepared":42,"idleCache":[1],"nativeThreadBlock":"legacy","nativeTurnError":{"turnId":null,"extra":true}}),
         ] {
             let mut raw = json!({"id":"a","rootId":"r","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic"});
             raw.as_object_mut()

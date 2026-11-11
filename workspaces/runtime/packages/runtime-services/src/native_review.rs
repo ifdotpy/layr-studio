@@ -4,64 +4,13 @@ use crate::native_actions::{NativeError, Result, bounded, checked_agent, decode}
 use rusqlite::Transaction;
 use studio_json::{Value, json};
 use studio_runtime_schema::creation_intent::EffortSelection;
-use studio_runtime_schema::review::{
-    GitCommit, GitRef, LayrStateId, ReviewAssignment, ReviewTarget,
-};
+use studio_runtime_schema::review::{GitRef, ReviewAssignment, ReviewTarget};
 use studio_runtime_store::{AgentRecord, AgentRepository, ContextRepairRepository};
 
 const MAX_PROMPT: usize = 32_000;
 const DELIVERY: &str = "The review result wakes you automatically. Finish your turn while waiting.";
 /// Refusal shared by service and HTTP review-model validation.
 pub const REVIEW_MODEL_REQUIRED: &str = "Select a review model in chat settings";
-
-#[cfg(test)]
-mod explicit_review_model_tests {
-    use super::*;
-
-    #[test]
-    fn missing_review_model_refuses_instead_of_using_the_caller() {
-        let mut actor = AgentRecord::test_defaults();
-        actor.model = Some("gpt-6-luna".into());
-        actor.review_defaults = None;
-        let result = execution_settings(
-            &actor,
-            &actor,
-            &studio_runtime_schema::queue_command::Field::Missing,
-            &EffortSelection::Inherit,
-        );
-        assert_eq!(
-            result,
-            Err(
-                crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
-                    REVIEW_MODEL_REQUIRED
-                )
-            )
-        );
-    }
-
-    #[test]
-    fn requested_review_model_precedes_the_stored_chat_choice() {
-        use studio_runtime_schema::queue_command::Field;
-        let mut actor = AgentRecord::test_defaults();
-        actor.model = Some("gpt-6-luna".into());
-        let mut root = actor.clone();
-        root.review_defaults = Some(Box::new(
-            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                model: Some("gpt-6-astra".into()),
-                effort: None,
-                fast_mode: None,
-            },
-        ));
-        for (requested, expected) in [
-            (Field::Missing, "gpt-6-astra"),
-            (Field::Value("gpt-6.1-sol".into()), "gpt-6.1-sol"),
-        ] {
-            let resolved =
-                execution_settings(&actor, &root, &requested, &EffortSelection::Inherit).unwrap();
-            assert_eq!(resolved.0, expected);
-        }
-    }
-}
 
 /// Validate and normalize the complete typed review target.
 pub fn target(args: &Value) -> Result<Value> {
@@ -158,12 +107,7 @@ pub(crate) fn execution_settings(
     ))
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
-pub enum ResolvedBase {
-    Layr(LayrStateId),
-    Git(GitCommit),
-}
+pub use studio_runtime_schema::review::ResolvedBase;
 
 pub fn pin_assignment(
     assignment: &ReviewAssignment,
@@ -197,7 +141,7 @@ pub struct ReviewPlan {
     actor: Value,
     root: Value,
     key: String,
-    target: Value,
+    target: ReviewTarget,
     assignment: ReviewAssignment,
     resolved_base: Option<ResolvedBase>,
     args: studio_runtime_schema::creation_intent::CreationIntent,
@@ -236,10 +180,10 @@ impl ReviewPlan {
         if checked.root_id != checked_root.id {
             return Err(NativeError::Changed);
         }
-        if crate::event_write::truthy(actor.get("nativeReview")) {
+        if checked.native_review.is_some() {
             return Err(NativeError::Invalid("review.actor"));
         }
-        if actor["executionMode"] == "vm" || crate::event_write::truthy(actor.get("remoteOrigin")) {
+        if actor["executionMode"] == "vm" {
             return Err(NativeError::Unavailable("native-review/remote-worker"));
         }
         if key.is_empty() || key.len() > 200 || directory.is_empty() {
@@ -247,7 +191,7 @@ impl ReviewPlan {
         }
         let typed_target = typed_target(&args)?;
         let options: studio_runtime_schema::review::ReviewRequest = decode(args, "review")?;
-        let target = json!(&typed_target);
+        let target = typed_target.clone();
         let assignment = ReviewAssignment::new(
             checked
                 .workspace_mode
@@ -317,64 +261,29 @@ impl ReviewPlan {
         self.args.account_key.as_deref()
     }
     pub fn existing(&self, child: &Value) -> Result<Value> {
-        checked_agent(child)?;
-        let review = &child["nativeReview"];
-        let same_args = if let Some(saved) = review.get("args").filter(|v| !v.is_null()) {
-            saved == &json!(self.args)
-        } else {
-            fn matches(
-                field: &studio_runtime_schema::queue_command::Field<String>,
-                value: Option<&Value>,
-            ) -> bool {
-                use studio_runtime_schema::queue_command::Field;
-                match field {
-                    Field::Missing => true,
-                    Field::Null => value.is_some_and(Value::is_null),
-                    Field::Value(expected) => {
-                        value.and_then(Value::as_str) == Some(expected.as_str())
-                    }
-                }
-            }
-            self.args.prompt.is_none()
-                && self.args.account_key.is_none()
-                && matches(&self.args.model, child.get("model"))
-                && match &self.args.effort {
-                    EffortSelection::Inherit => true,
-                    EffortSelection::Clear => child.get("effort").is_some_and(Value::is_null),
-                    EffortSelection::Set(expected) => {
-                        child.get("effort").and_then(Value::as_str) == Some(expected.as_str())
-                    }
-                }
-        };
-        if child.get("id").and_then(Value::as_str) != self.spec.id.value().map(String::as_str)
-            || review["requestId"] != self.key
-            || review["actorId"] != self.actor["id"]
-            || review["target"] != self.target
-            || review
-                .get("sourceCwd")
-                .and_then(Value::as_str)
-                .or_else(|| child.get("cwd").and_then(Value::as_str))
-                != self.spec.cwd.as_deref()
-            || !same_args
+        let checked = checked_agent(child)?;
+        let review = checked
+            .native_review
+            .as_ref()
+            .map(std::ops::Deref::deref)
+            .ok_or(NativeError::Invalid("review.nativeReview"))?;
+        if Some(checked.id.0.as_str()) != self.spec.id.value().map(String::as_str)
+            || review.request_id != self.key
+            || Some(review.actor_id.as_str()) != self.actor["id"].as_str()
+            || review.target != self.target
+            || Some(review.source_cwd.as_str()) != self.spec.cwd.as_deref()
+            || review.args != self.args
         {
             return Err(NativeError::Conflict);
         }
-        let response = &review["response"];
-        if response["requestId"] != self.key
-            || response.get("agentId").and_then(Value::as_str)
-                != self.spec.id.value().map(String::as_str)
-            || response["status"] != "queued"
-            || !response["reviewModel"].is_string()
-            || !response["agents"].is_array()
-            || !response["delivery"].is_string()
+        let response = &review.response;
+        if response.request_id != self.key
+            || Some(response.agent_id.as_str()) != self.spec.id.value().map(String::as_str)
+            || response.status != studio_runtime_store::AgentStatus::Queued
         {
             return Err(NativeError::Invalid("review.response"));
         }
-        review
-            .get("response")
-            .filter(|v| v.is_object())
-            .cloned()
-            .ok_or(NativeError::Invalid("review.response"))
+        Ok(studio_runtime_store::projection_value(response))
     }
 }
 
@@ -499,4 +408,53 @@ pub fn reserve(
     }
     creator.receipt(tx, &plan.key, &response)?;
     Ok(response)
+}
+
+#[cfg(test)]
+mod explicit_review_model_tests {
+    use super::*;
+
+    #[test]
+    fn missing_review_model_refuses_instead_of_using_the_caller() {
+        let mut actor = AgentRecord::test_defaults();
+        actor.model = Some("gpt-6-luna".into());
+        actor.review_defaults = None;
+        let result = execution_settings(
+            &actor,
+            &actor,
+            &studio_runtime_schema::queue_command::Field::Missing,
+            &EffortSelection::Inherit,
+        );
+        assert_eq!(
+            result,
+            Err(
+                crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
+                    REVIEW_MODEL_REQUIRED
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn requested_review_model_precedes_the_stored_chat_choice() {
+        use studio_runtime_schema::queue_command::Field;
+        let mut actor = AgentRecord::test_defaults();
+        actor.model = Some("gpt-6-luna".into());
+        let mut root = actor.clone();
+        root.review_defaults = Some(Box::new(
+            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+                model: Some("gpt-6-astra".into()),
+                effort: None,
+                fast_mode: None,
+            },
+        ));
+        for (requested, expected) in [
+            (Field::Missing, "gpt-6-astra"),
+            (Field::Value("gpt-6.1-sol".into()), "gpt-6.1-sol"),
+        ] {
+            let resolved =
+                execution_settings(&actor, &root, &requested, &EffortSelection::Inherit).unwrap();
+            assert_eq!(resolved.0, expected);
+        }
+    }
 }

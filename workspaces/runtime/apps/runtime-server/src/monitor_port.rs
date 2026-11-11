@@ -2100,10 +2100,9 @@ fn apply_turn_permissions(
         return Err("Thread sandbox is unknown; refusing liveness command".into());
     }
     if let Some(profile) = actor
-        .extra
-        .get("profile")
-        .and_then(|profile| profile.get("id"))
-        .and_then(Value::as_str)
+        .profile
+        .value()
+        .map(|profile| profile.id.as_str())
         .filter(|id| !id.is_empty())
     {
         params["permissionProfile"] = json!(profile);

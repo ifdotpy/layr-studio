@@ -367,10 +367,6 @@ pub(crate) struct LatePorts {
     pub(crate) sign_in: std::sync::Arc<std::sync::OnceLock<crate::sign_in::SignInSources>>,
 }
 
-/// The dependency that a remote worker's forwarded tool names until the host
-/// attaches the paired-server driver.
-pub(crate) const WORKER_CALL_DEPENDENCY: &str = "multi-server/worker-call";
-
 /// The dependency that `orchestration_servers` names until the host attaches
 /// the paired-server driver.
 pub(crate) const SERVERS_DEPENDENCY: &str = "multi-server/tool-coordinator";
@@ -408,57 +404,8 @@ pub(super) async fn dispatch(
     let store_ref = store.as_ref();
     let actor_id = actor.record().id.0.as_str();
     let actor_epoch = actor.record().epoch;
-    let execution_move = studio_runtime_store::truthy(actor.record().extra.get("executionMove"));
-    // Python `dynamic`: a remote worker's send to its parent, its lead or any
-    // agent that is not its descendant goes through `chat_message`, which the
-    // home server answers as the `message` worker call.
-    let remote_send = if tool == "orchestration_send"
-        && studio_runtime_store::truthy(actor.record().extra.get("remoteOrigin"))
-        && !actor.record().moved_from_active()
-        && let Some(target) = args.get("agent_id").and_then(Value::as_str)
-        && !(target == "user" || target.starts_with("remote:") || target.starts_with("federated:"))
-    {
-        if matches!(target, "parent" | "lead" | "broadcast" | "all") {
-            Some(target.to_owned())
-        } else {
-            match super::services::resolve_send_target(store_ref, context, target).await {
-                Ok((resolved, false)) => Some(resolved),
-                Ok((_, true)) => None,
-                Err(error) => return refused_before_write(error),
-            }
-        }
-    } else {
-        None
-    };
-    let route = match remote_send {
-        Some(target) => Some(crate::multi_server_tools::worker_message(&target, args)),
-        None => crate::multi_server_tools::worker_route(tool, args, actor.record()),
-    };
-    if let Some(route) = route {
-        if execution_move {
-            return Ok(Some(not_sent(Error::Invalid(
-                "The move is accepted. Finish this turn before the next task",
-            ))));
-        }
-        let (action, call_args) = match route {
-            Ok(route) => route,
-            Err(message) => return Ok(Some(not_sent(Error::Invalid(message)))),
-        };
-        let Some(port) = ports.late.multi_server.get() else {
-            return Ok(Some(not_sent(Error::Unavailable(WORKER_CALL_DEPENDENCY))));
-        };
-        return Ok(Some(
-            port.worker_call(actor, action, &call_args, request_id)
-                .await?,
-        ));
-    }
     let dispatched = match tool {
         "orchestration_speak" => {
-            if execution_move {
-                return Ok(Some(not_sent(Error::Invalid(
-                    "The move is accepted. Finish this turn before the next task",
-                ))));
-            }
             speak(
                 std::sync::Arc::clone(&store),
                 actor,
@@ -469,11 +416,6 @@ pub(super) async fn dispatch(
             .await
         }
         crate::sign_in::TOOL => {
-            if execution_move {
-                return Ok(Some(not_sent(Error::Invalid(
-                    "The move is accepted. Finish this turn before the next task",
-                ))));
-            }
             let Some(sources) = ports.late.sign_in.get() else {
                 return Ok(Some(not_sent(Error::Unavailable(SIGN_IN_DEPENDENCY))));
             };
@@ -493,11 +435,6 @@ pub(super) async fn dispatch(
             }
         }
         "orchestration_servers" => {
-            if execution_move {
-                return Ok(Some(not_sent(Error::Invalid(
-                    "The move is accepted. Finish this turn before the next task",
-                ))));
-            }
             let Some(port) = ports.late.multi_server.get() else {
                 return Ok(Some(not_sent(Error::Unavailable(SERVERS_DEPENDENCY))));
             };
@@ -638,16 +575,6 @@ pub(super) async fn dispatch(
         }
         "orchestration_task" if work_action_tool(tool, args) => {
             // The same refusals as the in-transaction tool service.
-            if studio_runtime_store::truthy(actor.record().extra.get("executionMove")) {
-                return Ok(Some(not_sent(Error::Invalid(
-                    "The move is accepted. Finish this turn before the next task",
-                ))));
-            }
-            if studio_runtime_store::truthy(actor.record().extra.get("remoteOrigin")) {
-                return Ok(Some(not_sent(Error::Unavailable(
-                    "multi-server/worker-call",
-                ))));
-            }
             let Some(port) = ports.work_action.as_ref() else {
                 return Ok(Some(not_sent(Error::Unavailable(
                     "work-board/assignment-and-result-driver",
@@ -674,16 +601,6 @@ pub(super) async fn dispatch(
             crate::layr_read::run_native(&store, actor, assignment, args, request_id).await
         }
         "orchestration_agent_manage" if args["action"] == "maintenance_report" => {
-            if execution_move {
-                return Ok(Some(not_sent(Error::Invalid(
-                    "The move is accepted. Finish this turn before the next task",
-                ))));
-            }
-            if studio_runtime_store::truthy(actor.record().extra.get("remoteOrigin")) {
-                return Ok(Some(not_sent(Error::Unavailable(
-                    "multi-server/worker-call",
-                ))));
-            }
             if let Err(error) = super::services::manage::checked_action(args) {
                 return Ok(Some(not_sent(callback_refusal(error))));
             }
@@ -778,14 +695,6 @@ async fn lifecycle_management(
     now: f64,
 ) -> Result<DispatchedOperation, Error> {
     // The same refusals as the in-transaction tool service.
-    if studio_runtime_store::truthy(actor.record().extra.get("executionMove")) {
-        return Ok(not_sent(Error::Invalid(
-            "The move is accepted. Finish this turn before the next task",
-        )));
-    }
-    if studio_runtime_store::truthy(actor.record().extra.get("remoteOrigin")) {
-        return Ok(not_sent(Error::Unavailable("multi-server/worker-call")));
-    }
     let actor_value = actor.record().value();
     let actor_id = actor.record().id.0.clone();
     let epoch = actor.record().epoch;

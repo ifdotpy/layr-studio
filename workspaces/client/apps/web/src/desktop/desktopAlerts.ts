@@ -122,7 +122,6 @@ export function desktopAlerts(
     if (
       !agent.isLead ||
       agent.inFlight ||
-      ("remoteAnchor" in agent && agent.remoteAnchor) ||
       agent.movedTo ||
       agent.moveImportPending
     )

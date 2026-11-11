@@ -180,13 +180,23 @@ mod tests {
             studio_json::json!({"restartRecovery":{"epoch":1,"stage":"pending","autoWake":true,"threadId":null}}),
             studio_json::json!({"threadId":"thread","archived":null,"nativeFailureHold":true,
                 "approvalPolicy":"never","sandbox":{"type":"dangerFullAccess"},
-                "profile":{"name":"profile"},"role":"implementer",
+                "profile":{"id":"profile"},"role":"implementer",
                 "disconnectRecovery":{"epoch":1,"stage":"pending","autoWake":true,"accountKey":"default","threadId":"thread"}}),
         ] {
             let mut raw = studio_json::json!({"id":"owner","rootId":"owner","epoch":1,"status":"idle","compactions":0,"accountKey":"default","provider":"codex","autoWake":true,"unrelatedHistory":{"text":"large transcript"}});
             raw.as_object_mut()
                 .unwrap()
                 .extend(fields.as_object().unwrap().clone());
+            assert!(
+                crate::AgentRecord::from_value(raw.clone()).is_err(),
+                "unknown root keys are refused"
+            );
+            let retained = raw
+                .as_object_mut()
+                .unwrap()
+                .remove("unrelatedHistory")
+                .unwrap();
+            raw["error"] = retained;
             let agent = crate::AgentRecord::from_value(raw).unwrap();
             crate::AgentRepository::put(&db, &agent).unwrap();
             let full = RulesRepository::agent(&db, "owner")
@@ -203,7 +213,7 @@ mod tests {
                 0
             );
             drop(scope);
-            assert!(owner.get("unrelatedHistory").is_none());
+            assert!(owner.get("error").is_none());
             for field in RulesRepository::OWNER_FIELDS {
                 assert_eq!(owner.get(field), full.get(field), "{field}");
             }

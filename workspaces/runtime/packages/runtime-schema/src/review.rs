@@ -63,6 +63,14 @@ identifier!(
     |v: &str| !v.is_empty(),
     schemars::json_schema!({"type":"string","minLength":1})
 );
+/// Pinned base shared by native review creation and its retained marker.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
+pub enum ResolvedBase {
+    Layr(LayrStateId),
+    Git(GitCommit),
+}
+
 /// Maximum reviewer instructions, measured in Unicode characters.
 pub const MAX_REVIEW_INSTRUCTIONS_CHARS: usize = 8000;
 /// Maximum review account key, measured in Unicode characters.

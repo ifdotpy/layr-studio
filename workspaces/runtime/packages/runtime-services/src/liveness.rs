@@ -468,11 +468,7 @@ fn waiting_inputs(
         let Some(record) = merged_agent(tx, &agent)? else {
             continue;
         };
-        if studio_runtime_store::truthy(record.get("remoteWorker"))
-            || studio_runtime_store::truthy(record.get("remoteAnchor"))
-        {
-            continue;
-        }
+
         let hold = input_hold(&record);
         let waiting = if count > 1 {
             format!("{count} messages wait. ")

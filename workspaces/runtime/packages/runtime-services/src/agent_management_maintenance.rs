@@ -68,7 +68,7 @@ async fn report_with(
     .map_err(|_| ManagementError::Invalid("Workspace maintenance report is unavailable"))
 }
 
-fn collect(lead: &Value, team: &[Value], state_dir: &Path, sources: &dyn Sources) -> Value {
+fn collect(_lead: &Value, team: &[Value], state_dir: &Path, sources: &dyn Sources) -> Value {
     let mut worktrees = Vec::new();
     for agent in team {
         if let Some(row) = crate::workspace_cleanup_runtime::maintenance_worktree(agent, state_dir)
@@ -81,14 +81,11 @@ fn collect(lead: &Value, team: &[Value], state_dir: &Path, sources: &dyn Sources
         .iter()
         .filter_map(|agent| agent["id"].as_str().map(|id| (id, agent)))
         .collect::<BTreeMap<_, _>>();
-    let mut repos = team
+    let repos = team
         .iter()
         .filter(|agent| agent["environment"] != "linux" && agent["executionMode"] != "vm")
         .filter_map(|agent| agent["imageWorkspaceRepo"].as_str())
         .collect::<BTreeSet<_>>();
-    if let Some(repo) = lead["imageWorkspaceBaseRepo"].as_str() {
-        repos.insert(repo);
-    }
     if !repos.is_empty() || team.iter().any(crate::legacy_image_workspace::is_legacy) {
         match sources.workspaces() {
             Ok(rows) => {
@@ -157,7 +154,7 @@ mod tests {
     #[test]
     fn maintenance_report_filters_image_rows_without_changes() {
         let root = tempfile::tempdir().expect("state directory");
-        let lead = json!({"id":"lead","imageWorkspaceBaseRepo":"/base"});
+        let lead = json!({"id":"lead"});
         let team = vec![
             json!({"id":"archived","deletedAt":1,"imageWorkspaceReady":false,"imageWorkspaceRepo":"/repo"}),
             json!({"id":"active","imageWorkspaceReady":true,"imageWorkspaceRepo":"/repo"}),
@@ -169,11 +166,11 @@ mod tests {
             report["workspaces"],
             json!([{"id":"archived","state":"archived","path":"/owned","reason":"archived or stale"}])
         );
-        assert_eq!(report["bases"].as_array().expect("bases").len(), 2);
+        assert_eq!(report["bases"].as_array().expect("bases").len(), 1);
         assert_eq!(team, before);
         assert_eq!(
             *sources.calls.lock().expect("calls"),
-            vec!["workspaces", "/base", "/repo"]
+            vec!["workspaces", "/repo"]
         );
     }
 
@@ -185,8 +182,8 @@ mod tests {
             ..Default::default()
         };
         let report = collect(
-            &json!({"imageWorkspaceBaseRepo":"/base"}),
-            &[],
+            &json!({}),
+            &[json!({"id":"legacy-worker","imageWorkspaceRepo":"/base"})],
             root.path(),
             &sources,
         );
@@ -202,7 +199,7 @@ mod tests {
             for record in [
                 json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","epoch":1,"status":"running","autoWake":true,"isLead":true}),
                 json!({"compactions":0,"accountKey":"default","provider":"codex","id":"worker","rootId":"lead","parentId":"lead","epoch":1,"status":"completed","autoWake":true,"isLead":false}),
-                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"other-lead","rootId":"other-lead","epoch":1,"status":"running","autoWake":true,"isLead":true,"imageWorkspaceBaseRepo":"/private"}),
+                json!({"compactions":0,"accountKey":"default","provider":"codex","id":"other-lead","rootId":"other-lead","epoch":1,"status":"running","autoWake":true,"isLead":true}),
             ] {
                 AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(record)?)?;
             }

@@ -244,7 +244,6 @@ pub fn ui_summary(
         if agent["source"] == "managed"
             && truthy(agent.get("isLead"))
             && !truthy(agent.get("sharedRoomId"))
-            && !truthy(agent.get("remoteAnchor"))
         {
             let path = fallback(agent, "hostProjectPath", fallback(agent, "cwd", ""));
             if !projects.iter().any(|p| {
@@ -410,9 +409,6 @@ fn alert(
     body: &str,
     item: Option<&str>,
 ) {
-    if truthy(agent.get("remoteAnchor")) {
-        return;
-    }
     alerts.push(json!({"id":id,"title":format!("{}: {title}",fallback(agent,"name","Chat")).chars().take(160).collect::<String>(),"body":body.chars().take(2000).collect::<String>(),"target":{"agentId":agent["id"],"itemId":item}}));
 }
 

@@ -86,8 +86,6 @@ pub(crate) struct Actor {
     root_id: String,
     parent_id: Option<String>,
     is_lead: bool,
-    remote_origin: bool,
-    execution_move: bool,
 }
 
 impl Actor {
@@ -110,8 +108,6 @@ impl Actor {
             root_id: record.root_id.0.clone(),
             parent_id: record.parent_id.as_deref().map(str::to_owned),
             is_lead: record.is_lead == Some(true),
-            remote_origin: truthy(record.extra.get("remoteOrigin")),
-            execution_move: truthy(record.extra.get("executionMove")),
             record,
         })
     }
@@ -657,14 +653,6 @@ pub(crate) fn execute(
     if !now.is_finite() || now < 0.0 {
         return Err(Error::Invalid("Invalid callback clock"));
     }
-    if let Some(dependency) = remote_dependency(tx, actor, &call)? {
-        return Err(Error::Unavailable(dependency));
-    }
-    if actor.execution_move {
-        return Err(Error::Invalid(
-            "The move is accepted. Finish this turn before the next task",
-        ));
-    }
     let result = match call.tool {
         ManagedHostTool::Spawn => spawn(tx, actor, &call, now, ports)?,
         ManagedHostTool::Send => ports.send(tx, actor, &call.args, &call.request_id, now)?,
@@ -717,7 +705,7 @@ pub(crate) fn execute(
         ManagedHostTool::Watch => ports.watch(tx, actor, &call.args, &call.request_id, now)?,
         ManagedHostTool::Monitor => ports.monitor(tx, actor, &call.args, &call.request_id, now)?,
         ManagedHostTool::Review => {
-            if truthy(actor.record.extra.get("nativeReview")) {
+            if actor.record.native_review.is_some() {
                 return Err(Error::Invalid(
                     "A native reviewer cannot create another review",
                 ));
@@ -726,58 +714,6 @@ pub(crate) fn execute(
         }
     };
     Ok(result.into())
-}
-
-/// Match Runtime.dynamic's remote-origin branches. Search, monitor Context,
-/// watches, monitors, reviews and ordinary interrupts remain local. Calls whose
-/// Python branch delegates to multi_server.worker_call retain a named refusal
-/// until that adapter is available.
-fn remote_dependency(
-    tx: &Transaction<'_>,
-    actor: &Actor,
-    call: &Call,
-) -> Result<Option<&'static str>, Error> {
-    if !actor.remote_origin {
-        return Ok(None);
-    }
-    let moved_from = actor.record.moved_from_active();
-    let dependency = match call.tool {
-        ManagedHostTool::Send => {
-            // Python routes every moved remote-origin send through move_send
-            // before resolving the target, including a local descendant.
-            if moved_from {
-                return Ok(Some("multi-server-runtime/move-send"));
-            }
-            let target = required_text(&call.args, "agent_id")?;
-            // chat_message owns user messages and approved federation targets
-            // locally. Let its adapter return those dependencies instead of
-            // misrouting them through the remote message transport.
-            if target == "user" || target.starts_with("remote:") || target.starts_with("federated:")
-            {
-                None
-            } else {
-                (!permits(tx, actor, CommandClass::ChatControl, target)?)
-                    .then_some("multi-server-runtime/message")
-            }
-        }
-        ManagedHostTool::Status => Some("multi-server-runtime/directory"),
-        ManagedHostTool::Complaint => Some("multi-server-runtime/complaint"),
-        ManagedHostTool::Context
-            if matches!(call.args["topic"].as_str(), Some("plan" | "complaints")) =>
-        {
-            Some("multi-server-runtime/context")
-        }
-        ManagedHostTool::Spawn if moved_from => Some("multi-server-runtime/spawn"),
-        ManagedHostTool::Interrupt if moved_from => Some("multi-server-runtime/interrupt"),
-        ManagedHostTool::Spawn
-        | ManagedHostTool::Interrupt
-        | ManagedHostTool::Search
-        | ManagedHostTool::Context
-        | ManagedHostTool::Watch
-        | ManagedHostTool::Monitor
-        | ManagedHostTool::Review => None,
-    };
-    Ok(dependency)
 }
 
 fn spawn(
@@ -1144,31 +1080,6 @@ mod tests {
         assert!(projected.get("apiKey").is_none());
         assert!(projected.get("prompt").is_none());
         assert!(projected.get("rootId").is_none());
-    }
-
-    #[test]
-    fn remote_local_reads_are_allowed_and_cross_server_calls_name_the_dependency() {
-        let actor = Actor::from_record(
-            &json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","epoch":5,"status":"running","remoteOrigin":true}),
-            "worker",
-            5,
-        )
-        .unwrap();
-        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
-        let transaction = connection.transaction().unwrap();
-        let remote_status = execute(
-            &transaction,
-            &actor,
-            "orchestration_status",
-            &json!({}),
-            "thread:status-1",
-            1.0,
-            &UnavailablePorts,
-        );
-        assert!(matches!(
-            remote_status,
-            Err(Error::Unavailable("multi-server-runtime/directory"))
-        ));
     }
 
     #[test]

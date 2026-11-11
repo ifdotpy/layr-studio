@@ -2925,8 +2925,10 @@ mod retained_executor_tests {
             store
                 .transaction_with_error(|tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.unwrap();
-                    row.extra
-                        .insert("contextRepair".into(), json!({"phase":"preparing"}));
+                    row.context_repair =
+                        studio_runtime_schema::queue_command::Field::Value(Box::new(
+                            studio_runtime_store::ContextRepair::test_fixture("preparing"),
+                        ));
                     AgentRepository::put(tx, &row)
                 })
                 .await
@@ -2946,7 +2948,7 @@ mod retained_executor_tests {
             store
                 .transaction_with_error(|tx| {
                     let mut row = AgentRepository::get(tx, &AgentId::from("lead"))?.unwrap();
-                    row.extra.remove("contextRepair");
+                    row.context_repair = studio_runtime_schema::queue_command::Field::Missing;
                     AgentRepository::put(tx, &row)
                 })
                 .await

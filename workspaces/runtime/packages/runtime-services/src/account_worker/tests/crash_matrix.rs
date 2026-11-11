@@ -770,13 +770,13 @@ async fn scenario_matrix(index: usize) -> (usize, f64, f64) {
                 };
                 scenario_seconds += started.elapsed().as_secs_f64();
                 let started = std::time::Instant::now();
-                tokio::time::timeout(
+                Box::pin(tokio::time::timeout(
                     std::time::Duration::from_secs(300),
                     restart(
                         &context,
                         &format!("scenario={index} operation={name} occurrence={occurrence} identity={identity:?} after={after}"),
                     ),
-                )
+                ))
                 .await
                 .expect("restart watchdog");
                 restart_seconds += started.elapsed().as_secs_f64();

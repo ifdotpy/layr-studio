@@ -610,7 +610,7 @@ async fn catalog_failure_settles_only_unsent_and_invalid_titles_complete() {
 #[tokio::test]
 async fn late_name_epoch_or_deletion_changes_discard_without_renaming() {
     for change in [
-        json!({"name":"Manual title","manualName":true}),
+        json!({"name":"Manual title","naming":"manual"}),
         json!({"name":"Tool title"}),
         json!({"epoch":2}),
         json!({"deletedAt":1}),

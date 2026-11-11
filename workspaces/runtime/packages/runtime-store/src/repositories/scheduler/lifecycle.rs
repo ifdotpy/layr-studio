@@ -196,10 +196,17 @@ impl SchedulerRepository {
         if active {
             let attempt = stored_attempt(agent).ok_or_else(|| invalid_agent(&agent.id.0))?;
             let turn = bound_turn(agent, attempt).ok_or_else(|| invalid_agent(&agent.id.0))?;
-            let hold = json!({"epoch":agent.epoch,"attemptId":attempt.id,"accountKey":agent.account_key,"threadId":agent.thread_id.as_deref(),"turnId":turn,"generation":attempt.connection_generation});
-            agent
-                .extra
-                .insert("manualRecoveryDeliveryHold".into(), hold);
+            agent.manual_recovery_delivery_hold =
+                studio_runtime_schema::queue_command::Field::Value(Box::new(
+                    crate::records::ManualRecoveryDeliveryHold {
+                        epoch: agent.epoch,
+                        attempt_id: attempt.id.clone(),
+                        account_key: agent.account_key.clone(),
+                        thread_id: agent.thread_id.clone(),
+                        turn_id: turn.to_owned(),
+                        generation: attempt.connection_generation,
+                    },
+                ));
         }
         agent.auto_wake = Some(false);
         if agent.status == AgentStatus::Queued || active {
@@ -626,12 +633,9 @@ impl SchedulerRepository {
                 .as_ref()
                 .is_some_and(|tools| !tools.is_empty())
             || agent.native_safety_buffering.is_some()
-            || agent
-                .extra
-                .get("manualRecoveryDeliveryHold")
-                .is_some_and(truthy)
+            || agent.manual_recovery_delivery_hold.is_some()
             || crate::schema::raw_truthy(agent.auth_wait.value().map(|raw| &raw.0))
-            || agent.extra.get("capacityRetry").is_some_and(truthy)
+            || agent.capacity_retry.is_some()
             || agent.usage_resume_truthy()
             || agent.start_outcome_hold.is_some()
             || agent
@@ -687,7 +691,7 @@ impl SchedulerRepository {
             ]
             .contains(&Some(turn));
         let active_review = turn.is_empty()
-            && agent.extra.get("nativeReview").is_some_and(truthy)
+            && agent.native_review.is_some()
             && agent.in_flight == Some(true)
             && attempt.action == Some(crate::StartAttemptAction::Review)
             && attempt.submitted == Some(true)
@@ -788,9 +792,12 @@ impl SchedulerRepository {
         agent.error = studio_runtime_schema::queue_command::Field::Value(
             studio_runtime_schema::provider_errors::AgentError::Message((reason).to_string()),
         );
-        if let Some(mut park) = agent.extra.remove("parkReceipt") {
-            park["cancelledAtEpoch"] = json!(agent.epoch);
-            agent.extra.insert("cancelledPark".into(), park);
+        if let studio_runtime_schema::queue_command::Field::Value(park) =
+            std::mem::take(&mut agent.park_receipt)
+        {
+            agent.cancelled_park = studio_runtime_schema::queue_command::Field::Value(Box::new(
+                park.cancelled(agent.epoch),
+            ));
         }
         agent.parked_event = None;
         agent.park_after_turn = Default::default();
@@ -982,8 +989,6 @@ impl SchedulerRepository {
             || agent.is_deleted()
             || agent.in_flight == Some(true)
             || agent.native_failure_held()
-            || agent.extra.get("remoteWorker").is_some_and(truthy)
-            || agent.extra.get("remoteAnchor").is_some_and(truthy)
             || agent.auto_wake != Some(true)
             || agent.thread_id.as_deref() != Some(thread_id)
             || agent.account_key != account_key
@@ -1217,7 +1222,7 @@ impl SchedulerRepository {
     /// Restore Python-shaped scoped receipts; the account worker will reattach without replay.
     pub fn recover_submitted(transaction: &Transaction<'_>) -> StoreResult<usize> {
         let query = format!(
-            "SELECT id,record FROM runtime_agents WHERE COALESCE(json_extract(record,'$.remoteWorker'),0)=0 AND COALESCE(json_extract(record,'$.remoteAnchor'),0)=0 AND ((json_extract(record,'$.startAttempt.submitted')=1 AND COALESCE(json_extract(record,'$.startAttempt.executionOutcome'),'unknown')='unknown') OR (json_extract(record,'$.startAttempt') IS NULL AND (json_extract(record,'$.inFlight')=1 OR json_extract(record,'$.status') IN ('running','starting','approval')))) AND NOT ({COMPLETED_START_SQL}) AND NOT ({SETTLED_IDLE_TURN_SQL})"
+            "SELECT id,record FROM runtime_agents WHERE ((json_extract(record,'$.startAttempt.submitted')=1 AND COALESCE(json_extract(record,'$.startAttempt.executionOutcome'),'unknown')='unknown') OR (json_extract(record,'$.startAttempt') IS NULL AND (json_extract(record,'$.inFlight')=1 OR json_extract(record,'$.status') IN ('running','starting','approval')))) AND NOT ({COMPLETED_START_SQL}) AND NOT ({SETTLED_IDLE_TURN_SQL})"
         );
         let mut statement = transaction.prepare_cached(&query)?;
         let rows = statement
@@ -2915,11 +2920,8 @@ pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
         && agent.account_transfer_id.value().is_none()
         && !agent.context_repair_wait_active()
         && !matches!(
-            agent
-                .extra
-                .get("contextRepair")
-                .and_then(|v| v["phase"].as_str()),
-            Some("preparing" | "submitted" | "unknown" | "ready")
+            agent.context_repair.as_ref().map(std::ops::Deref::deref),
+            Some(crate::ContextRepair::Preparing(_) | crate::ContextRepair::Submitted(_) | crate::ContextRepair::Unknown(_))
         )
         && !agent.native_thread_block.value().is_some_and(|block| {
             matches!(block, crate::records::StoredTransferObject::Known(block)
@@ -2971,10 +2973,18 @@ fn manual_delivery_hold_tracks(
         && attempt
             .connection_generation
             .is_some_and(|generation| generation > 0)
-        && agent.extra.get("manualRecoveryDeliveryHold")
-            == Some(
-                &json!({"epoch":identity.epoch,"attemptId":identity.attempt_id,"accountKey":agent.account_key,"threadId":agent.thread_id.as_deref(),"turnId":turn,"generation":attempt.connection_generation}),
-            )
+        && agent
+            .manual_recovery_delivery_hold
+            .as_ref()
+            .map(std::ops::Deref::deref)
+            .is_some_and(|hold| {
+                hold.epoch == identity.epoch
+                    && hold.attempt_id.as_deref() == Some(identity.attempt_id.as_str())
+                    && hold.account_key == agent.account_key
+                    && hold.thread_id == agent.thread_id
+                    && hold.turn_id == turn
+                    && hold.generation == attempt.connection_generation
+            })
 }
 pub(super) fn stopped_attempt(agent: &AgentRecord, epoch: i64) -> bool {
     agent.status == AgentStatus::Paused

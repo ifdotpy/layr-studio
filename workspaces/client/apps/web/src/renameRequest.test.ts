@@ -168,7 +168,6 @@ it("manual HTTP success, lost reply replay and definitive rejection follow the r
           isLead: true,
           autoWake: true,
           cwd: "/project",
-          serverId: "server",
         },
       }),
     });

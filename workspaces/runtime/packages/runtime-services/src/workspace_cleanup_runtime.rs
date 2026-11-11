@@ -22,7 +22,6 @@ mod submodules;
 
 /// Archive metadata retained for cleanup after final deletion revokes restoration.
 pub(crate) const DELETED_ARCHIVE_FIELD: &str = "deletedArchive";
-const INTENT_FIELD: &str = "workspaceCleanupIntent";
 
 /// Lifecycle writers persist this before calling the cleanup service. No
 /// external effect has started while an operation remains `queued`.
@@ -295,14 +294,12 @@ pub async fn cleanup_agent_workspace_with_ports(
             continue;
         }
         let current = read_agent(&store, agent_id.clone()).await?;
-        let stored = StoredCleanupIntent::deserialize(
-            current
-                .extra
-                .get(INTENT_FIELD)
-                .cloned()
-                .ok_or(WorkspaceCleanupError::Held)?,
-        )
-        .map_err(|_| WorkspaceCleanupError::Held)?;
+        let stored = current
+            .workspace_cleanup_intent
+            .as_ref()
+            .map(std::ops::Deref::deref)
+            .cloned()
+            .ok_or(WorkspaceCleanupError::Held)?;
         let intent = CleanupIntent::from_raw(stored).map_err(|_| WorkspaceCleanupError::Held)?;
         if lifecycle_identity(&current)?.identity != lifecycle.identity {
             return Err(WorkspaceCleanupError::Held);
@@ -386,11 +383,11 @@ async fn complete_without_effect(
                     .ok_or(WorkspaceCleanupError::InvalidRecord)?;
             let current_identity = lifecycle_identity(&current)?.identity;
             if current_identity != expected_identity
-                || current.extra.get(INTENT_FIELD) != expected_agent.extra.get(INTENT_FIELD)
+                || current.workspace_cleanup_intent != expected_agent.workspace_cleanup_intent
             {
                 return Err(WorkspaceCleanupError::Held);
             }
-            if let Field::Value(stored) = take_intent(&mut current)? {
+            if let Field::Value(stored) = take_intent(&mut current) {
                 let decoded = CleanupIntent::from_raw(stored)?;
                 if decoded.action != action
                     || !matches!(
@@ -456,7 +453,7 @@ async fn finalize_cleanup(
             let mut agent =
                 AgentRepository::get(tx, &studio_runtime_store::AgentId::from(agent_id.as_str()))?
                     .ok_or(WorkspaceCleanupError::InvalidRecord)?;
-            let Field::Value(intent) = take_intent(&mut agent)? else {
+            let Field::Value(intent) = take_intent(&mut agent) else {
                 return Err(WorkspaceCleanupError::InvalidRecord);
             };
             let intent =
@@ -736,14 +733,12 @@ fn plan(
     action: CleanupAction,
     state_dir: &std::path::Path,
 ) -> Result<Vec<CleanupEffect>, WorkspaceCleanupError> {
-    if let Some(intent) = owner
-        .extra
-        .get(INTENT_FIELD)
-        .filter(|intent| !intent.is_null())
+    if let Some(stored) = owner
+        .workspace_cleanup_intent
+        .as_ref()
+        .map(std::ops::Deref::deref)
     {
-        let stored = StoredCleanupIntent::deserialize(intent.clone())
-            .map_err(|_| WorkspaceCleanupError::InvalidRecord)?;
-        let intent = CleanupIntent::from_raw(stored)?;
+        let intent = CleanupIntent::from_raw(stored.clone())?;
         if intent.action != action {
             return Err(WorkspaceCleanupError::Held);
         }
@@ -766,10 +761,12 @@ fn plan(
         effects.push(CleanupEffect::SaveNativeTurn);
         effects.push(CleanupEffect::ReleaseNativeLine);
     } else if vm_dispose {
-        if let Some(turns) = turn_saves(owner) {
+        if let Some(turns) = owner.layr_turn_saves.value() {
             for (turn, state) in turns {
-                if !turn_is_saved(&state) {
-                    effects.push(CleanupEffect::SaveVmTurn { turn_id: turn });
+                if !matches!(state, studio_runtime_store::LayrTurnSave::Saved { .. }) {
+                    effects.push(CleanupEffect::SaveVmTurn {
+                        turn_id: turn.clone(),
+                    });
                 }
             }
         }
@@ -790,29 +787,6 @@ fn plan(
         effects.push(CleanupEffect::RemoveWorktree { identity });
     }
     Ok(effects)
-}
-
-fn turn_saves(agent: &AgentRecord) -> Option<std::collections::BTreeMap<String, OwnedRawJson>> {
-    agent.extra.get("layrTurnSaves").cloned().and_then(|value| {
-        std::collections::BTreeMap::<String, OwnedRawJson>::deserialize(value).ok()
-    })
-}
-
-fn turn_is_saved(value: &OwnedRawJson) -> bool {
-    #[derive(Deserialize)]
-    struct Status {
-        status: Option<String>,
-    }
-    studio_json::from_str::<Status>(value.as_str())
-        .ok()
-        .is_some_and(|status| status.status.as_deref() == Some("saved"))
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SavedTurn<'a> {
-    status: &'static str,
-    state_id: &'a str,
 }
 
 /// The batch archive preflight uses the same original-link, clean-tree and
@@ -976,7 +950,6 @@ impl<'a> WorktreeInput<'a> {
     }
 }
 
-// AgentRecord.extra and ManagementSnapshot carry this field until their typed owners land.
 fn worktree_common_dir(value: Option<&Value>) -> Result<Option<PathBuf>, WorkspaceCleanupError> {
     value
         .cloned()
@@ -1132,24 +1105,20 @@ async fn read_agent(
         .await
 }
 
-fn take_intent(
-    agent: &mut AgentRecord,
-) -> Result<Field<StoredCleanupIntent>, WorkspaceCleanupError> {
-    agent
-        .extra
-        .remove(INTENT_FIELD)
-        .map_or(Ok(Field::Missing), |value| {
-            Field::<StoredCleanupIntent>::deserialize(value)
-                .map_err(|_| WorkspaceCleanupError::InvalidRecord)
-        })
+fn take_intent(agent: &mut AgentRecord) -> Field<StoredCleanupIntent> {
+    std::mem::take(&mut agent.workspace_cleanup_intent).map(|intent| *intent)
 }
 
 fn set_intent(agent: &mut AgentRecord, intent: &Field<StoredCleanupIntent>) {
-    if !intent.is_missing() {
-        agent.extra.insert(
-            INTENT_FIELD.to_owned(),
-            studio_runtime_store::projection_value(intent),
-        );
+    match intent {
+        Field::Missing => {}
+        Field::Null => {
+            agent.workspace_cleanup_intent = studio_runtime_schema::queue_command::Field::Null
+        }
+        Field::Value(intent) => {
+            agent.workspace_cleanup_intent =
+                studio_runtime_schema::queue_command::Field::Value(Box::new(intent.clone()))
+        }
     }
 }
 
@@ -1178,7 +1147,7 @@ async fn begin_effect(
             if lifecycle_identity(&agent)?.identity != identity {
                 return Err(WorkspaceCleanupError::Held);
             }
-            let attempt = if let Field::Value(stored) = take_intent(&mut agent)? {
+            let attempt = if let Field::Value(stored) = take_intent(&mut agent) {
                 let decoded = CleanupIntent::from_raw(stored)?;
                 match &decoded.identity {
                     Field::Missing => {}
@@ -1308,7 +1277,7 @@ async fn complete_effect(
             let mut agent =
                 AgentRepository::get(tx, &studio_runtime_store::AgentId::from(agent_id.as_str()))?
                     .ok_or(WorkspaceCleanupError::InvalidRecord)?;
-            let Field::Value(mut intent) = take_intent(&mut agent)? else {
+            let Field::Value(mut intent) = take_intent(&mut agent) else {
                 return Err(WorkspaceCleanupError::InvalidRecord);
             };
             let decoded =
@@ -1366,7 +1335,7 @@ async fn finalize_effect(
             let mut agent =
                 AgentRepository::get(tx, &studio_runtime_store::AgentId::from(agent_id.as_str()))?
                     .ok_or(WorkspaceCleanupError::InvalidRecord)?;
-            let Field::Value(intent) = take_intent(&mut agent)? else {
+            let Field::Value(intent) = take_intent(&mut agent) else {
                 return Err(WorkspaceCleanupError::InvalidRecord);
             };
             let decoded = CleanupIntent::from_raw(intent.clone())?;
@@ -1438,44 +1407,36 @@ fn apply_effect_result(
             agent.layr_state_id = studio_runtime_schema::queue_command::Field::Value(
                 studio_runtime_store::StoredTransferValue::Known(state_id.clone()),
             );
-            if let Some(mut turns) = turn_saves(agent) {
+            if let Field::Value(turns) = &mut agent.layr_turn_saves {
                 for save in turns.values_mut() {
-                    if !turn_is_saved(save) {
-                        *save = receipt_json(&SavedTurn {
-                            status: "saved",
-                            state_id,
-                        });
+                    if !matches!(save, studio_runtime_store::LayrTurnSave::Saved { .. }) {
+                        *save = studio_runtime_store::LayrTurnSave::Saved {
+                            state_id: state_id.clone(),
+                        };
                     }
                 }
-                agent.extra.insert(
-                    "layrTurnSaves".into(),
-                    studio_runtime_store::projection_value(&turns),
-                );
             }
         }
         CompletedEffect::SaveWorktreeRef => {}
         CompletedEffect::SaveVmTurn { turn_id, state_id } => {
-            let mut turns = match turn_saves(agent) {
-                Some(turns) => turns,
-                None if agent
-                    .extra
-                    .get("layrTurnSaves")
-                    .is_none_or(|value| value.is_null()) =>
-                {
-                    Default::default()
+            {
+                if !agent.layr_turn_saves.is_some() {
+                    agent.layr_turn_saves =
+                        studio_runtime_schema::queue_command::Field::Value(Default::default());
                 }
-                None => return Err(WorkspaceCleanupError::InvalidRecord),
-            };
-            turns.insert(
+                match &mut agent.layr_turn_saves {
+                    studio_runtime_schema::queue_command::Field::Value(values) => values,
+                    studio_runtime_schema::queue_command::Field::Missing
+                    | studio_runtime_schema::queue_command::Field::Null => {
+                        unreachable!("map initialized above")
+                    }
+                }
+            }
+            .insert(
                 turn_id.clone(),
-                receipt_json(&SavedTurn {
-                    status: "saved",
-                    state_id,
-                }),
-            );
-            agent.extra.insert(
-                "layrTurnSaves".into(),
-                studio_runtime_store::projection_value(&turns),
+                studio_runtime_store::LayrTurnSave::Saved {
+                    state_id: state_id.clone(),
+                },
             );
             agent.layr_state_id = studio_runtime_schema::queue_command::Field::Value(
                 studio_runtime_store::StoredTransferValue::Known(state_id.clone()),
@@ -1499,7 +1460,7 @@ async fn mark_effect(
             let mut agent =
                 AgentRepository::get(tx, &studio_runtime_store::AgentId::from(agent_id.as_str()))?
                     .ok_or(WorkspaceCleanupError::InvalidRecord)?;
-            let Field::Value(mut intent) = take_intent(&mut agent)? else {
+            let Field::Value(mut intent) = take_intent(&mut agent) else {
                 return Err(WorkspaceCleanupError::InvalidRecord);
             };
             let decoded =

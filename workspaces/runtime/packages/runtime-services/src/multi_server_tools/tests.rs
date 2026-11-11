@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::remote_transport::canonical_json;
+use crate::server_git::ExportRequest;
 
 #[test]
 fn exec_environment_limit_counts_utf8_json_bytes() {
@@ -37,7 +38,6 @@ use crate::provider_callbacks::{
     CallbackContext, CallbackDecision, ManagedToolPortsConfig, ManagedToolRuntimePorts,
     dispatch_with_managed_tools,
 };
-use std::process::Command;
 use std::sync::Mutex;
 use studio_runtime_providers::{Frame, Method, RequestFrame, RequestId, ResponseBody};
 
@@ -49,9 +49,6 @@ const PEER: &str = "peer-server";
 const IDENTITY: &str = "{\"label\":\"Studio server\",\"privateKey\":\"-----BEGIN PRIVATE KEY-----\\nMC4CAQAwBQYDK2VwBCIEIEABs3CR9YO/2snXAA7CZxSJcf+AXY62nmdKhdyv14QS\\n-----END PRIVATE KEY-----\\n\",\"publicKey\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAElmQYRu24EVfx1oxPVvQb30C+R3RQaB0QboX7Xsi6OQ=\\n-----END PUBLIC KEY-----\\n\",\"serverId\":\"628c18136e1542fa9f45b899f3b75503\"}";
 const LEAD: &str = "738cc392-d597-4954-80be-9f64ec57723e";
 const WORKER: &str = "c4426480-f59c-4b32-832c-3ba4f43c1683";
-const REMOTE: &str = "97118dce-786a-4bf7-b652-d545a80ffd0c";
-const MOVED: &str = "a313b5da-674e-43d0-86b8-c4204bc46ed8";
-const LINK: &str = "fixture-remote-link";
 
 /// Bind the immutable actor shape to this test's live project directory.
 fn seed(directory: &std::path::Path) -> Value {
@@ -59,7 +56,7 @@ fn seed(directory: &std::path::Path) -> Value {
     std::fs::create_dir(&project).unwrap();
     let cwd = project.to_string_lossy().into_owned();
     let base: Value =
-            studio_json::from_str(&"{\"accountKey\": \"default\", \"executionSettingsAccountKey\": \"default\", \"provider\": \"codex\", \"yoloMode\": true, \"prompt\": \"fixture\", \"cwd\": \"@cwd\", \"role\": \"orchestrator\", \"needsTitle\": false, \"subagentConcurrencyVersion\": 2, \"maxAgentsExplicit\": false, \"model\": \"gpt-6-astra\", \"effort\": \"medium\", \"fastMode\": false, \"daybreakEnabled\": false, \"cyberAccessProgram\": \"standard\", \"concurrency\": 32, \"maxAgents\": 64, \"tokenBudget\": null, \"status\": \"running\", \"autoWake\": true, \"epoch\": 3, \"inFlight\": false, \"turnEpoch\": 3, \"usageResumeEnabled\": true, \"tokensUsed\": 0, \"compactions\": 0, \"compactionsObservedOnly\": false, \"contextUsage\": null, \"events\": 0, \"error\": null, \"profileId\": null, \"profileInstructions\": \"\", \"tail\": \"\", \"worktree\": false, \"workspaceMode\": \"worktree\", \"executionMode\": \"native\", \"hostProjectPath\": \"@cwd\", \"layrReady\": false, \"workspaceBackend\": null, \"workspaceModeExplicit\": false, \"workspaceInGit\": false, \"worktreeReady\": false, \"environment\": \"host\", \"worktreeWarning\": null, \"workerBaseRef\": null, \"workerBaseCommit\": null, \"workerBaseBehindMain\": null, \"workerBaseMainRef\": null, \"workerDefaults\": {\"model\": \"gpt-6-luna\", \"effort\": \"high\", \"fastMode\": false, \"daybreakEnabled\": false, \"delegationDepth\": 1}, \"reviewDefaults\": {\"model\": null, \"effort\": null}, \"agentMode\": \"multi\", \"agentModeRevision\": 0, \"agentModeSupported\": true}".replace("@cwd", &cwd)).unwrap();
+            studio_json::from_str(&"{\"accountKey\":\"default\",\"executionSettingsAccountKey\":\"default\",\"provider\":\"codex\",\"yoloMode\":true,\"prompt\":\"fixture\",\"cwd\":\"@cwd\",\"role\":\"orchestrator\",\"subagentConcurrencyVersion\":2,\"model\":\"gpt-6-astra\",\"effort\":\"medium\",\"fastMode\":false,\"daybreakEnabled\":false,\"cyberAccessProgram\":\"standard\",\"concurrency\":32,\"status\":\"running\",\"autoWake\":true,\"epoch\":3,\"inFlight\":false,\"turnEpoch\":3,\"usageResumeEnabled\":true,\"tokensUsed\":0,\"compactions\":0,\"contextUsage\":null,\"events\":0,\"error\":null,\"profileId\":null,\"profileInstructions\":\"\",\"tail\":\"\",\"worktree\":false,\"workspaceMode\":\"worktree\",\"executionMode\":\"native\",\"hostProjectPath\":\"@cwd\",\"layrReady\":false,\"workspaceModeExplicit\":false,\"workspaceInGit\":false,\"worktreeReady\":false,\"environment\":\"host\",\"worktreeWarning\":null,\"workerBaseRef\":null,\"workerBaseCommit\":null,\"workerBaseBehindMain\":null,\"workerBaseMainRef\":null,\"workerDefaults\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\",\"fastMode\":false,\"daybreakEnabled\":false,\"delegationDepth\":1},\"reviewDefaults\":{\"model\":null,\"effort\":null},\"agentMode\":\"multi\",\"agentModeRevision\":0,\"agentModeSupported\":true,\"capacity\":{\"kind\":\"automatic\",\"max\":64},\"naming\":\"automatic\"}".replace("@cwd", &cwd)).unwrap();
     let actor = |index: usize, id: &str, name: &str, parent: Option<&str>, lead: bool| {
         let mut record = base.clone();
         record["id"] = json!(id);
@@ -73,16 +70,9 @@ fn seed(directory: &std::path::Path) -> Value {
         record["projectId"] = json!(cwd);
         record
     };
-    let mut remote = actor(2, REMOTE, "Remote worker", None, false);
-    remote["remoteOrigin"] = json!({"home": PEER, "link": LINK});
-    let mut moved = actor(3, MOVED, "Moved worker", None, false);
-    moved["remoteOrigin"] = json!({"home": PEER, "link": LINK});
-    moved["movedFrom"] = json!(PEER);
     json!({
         "lead": actor(0, LEAD, "Servers lead", None, true),
         "worker": actor(1, WORKER, "Servers worker", Some(LEAD), false),
-        "remote": remote,
-        "moved": moved,
         "projectId": project.to_string_lossy(),
     })
 }
@@ -162,113 +152,6 @@ struct RecordingTransport {
     sent: Mutex<Vec<Value>>,
 }
 
-#[derive(Default)]
-struct LostExportReply {
-    sent: Mutex<Vec<crate::orchestration_wire::OrchestrationRequest>>,
-}
-impl PairedTransport for LostExportReply {
-    fn exchange<'a>(
-        &'a self,
-        _: &'a str,
-        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
-        _: std::time::Duration,
-    ) -> BoxFuture<'a, Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>>
-    {
-        Box::pin(async move {
-            self.sent.lock().unwrap().push(envelope.clone());
-            Ok(ExchangeOutcome::Unknown.to_reply(&envelope.request_id))
-        })
-    }
-}
-
-struct ResumeFetching {
-    store: Arc<RuntimeStore>,
-    tools: ServerTools,
-    input: Option<ExportRequest>,
-}
-impl MultiServerToolPort for ResumeFetching {
-    fn servers<'a>(
-        &'a self,
-        actor: &'a Actor,
-        args: &'a Value,
-        key: &'a str,
-        _: f64,
-    ) -> BoxFuture<'a, Result<DispatchedOperation, Error>> {
-        Box::pin(async move {
-            let key_owned = key.to_owned();
-            let actor_id = actor.record().id.0.clone();
-            let signature = request_signature(
-                &json!({"worker":args["agent_id"],"branch":args["branch"],"destination":super::resolve(field(args,"destination"))}),
-            );
-            let input = self.input.clone();
-            self.store
-                .transaction_with(move |tx| -> Result<(), Step> {
-                    let token = task_admission(tx, &key_owned, &actor_id)?.derive_result(
-                        "server-fetch",
-                        &[],
-                        &signature,
-                    );
-                    RemoteOutbox::put(
-                        tx,
-                        RemoteEffect::ServerFetch,
-                        PEER,
-                        &key_owned,
-                        &signature,
-                        OutboxStatus::Submitted,
-                        None,
-                        FetchEntry {
-                            state: ServerFetchState::Fetching,
-                            export: input
-                                .as_ref()
-                                .map(studio_json::to_string)
-                                .transpose()
-                                .map_err(StoreError::from)?,
-                            admission: token,
-                        },
-                        0,
-                    )
-                    .map_err(StoreError::from)?;
-                    Ok(())
-                })
-                .await
-                .map_err(|error| match error {
-                    Step::Store(error) => Error::Store(error),
-                    Step::Refused(message) | Step::Failed(message) => Error::StoredAt(message),
-                })?;
-            let first = Box::pin(self.tools.fetch(actor, args, key, PEER)).await;
-            if self.input.is_none() {
-                return settle(first);
-            }
-            assert_eq!(first.unwrap()["outcome"], "unknown");
-            let destination = Path::new(field(args, "destination"));
-            std::fs::write(destination.join("later.txt"), "new local reference").unwrap();
-            run_git(destination, &["add", "later.txt"]);
-            run_git(destination, &["commit", "-q", "-m", "change local refs"]);
-            assert_ne!(
-                run_git(destination, &["rev-parse", "HEAD"]),
-                self.input.as_ref().unwrap().known.value().unwrap()[0]
-            );
-            self.store
-                .transaction(|tx| {
-                    tx.execute("UPDATE runtime_outbox SET next_at=0 WHERE kind='remote_delivery' AND status='pending'", [])?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            settle(Box::pin(self.tools.fetch(actor, args, key, PEER)).await)
-        })
-    }
-    fn worker_call<'a>(
-        &'a self,
-        actor: &'a Actor,
-        action: &'a str,
-        args: &'a Value,
-        key: &'a str,
-    ) -> BoxFuture<'a, Result<DispatchedOperation, Error>> {
-        self.tools.worker_call(actor, action, args, key)
-    }
-}
-
 impl PairedTransport for RecordingTransport {
     fn exchange<'a>(
         &'a self,
@@ -312,12 +195,10 @@ async fn seeded_store_with_identity(
     let local = store.local_server_id().unwrap().unwrap();
     let seed = seed(directory.path());
     let project = seed["projectId"].as_str().unwrap().to_owned();
-    let agents: Vec<_> = ["lead", "worker", "remote", "moved"]
+    let agents: Vec<_> = ["lead", "worker"]
         .into_iter()
         .map(|role| studio_runtime_store::AgentRecord::from_value(seed[role].clone()).unwrap())
         .collect();
-    let link = json!({"id": LINK, "side": "remote", "server": PEER, "parent": "home-parent",
-        "parentEpoch": 4, "workers": [REMOTE, MOVED]});
     let project_record = json!({"id": project, "path": project, "name": "Fixture project",
         "created": 1_792_510_147.0, "accountKey": "default", "accountRevision": 1, "peerTeams": [],
         "homeServerId": local, "locations": [{"serverId": local, "path": project, "projectId": project, "gitOrigin": "https://example.invalid/fixture.git"}],
@@ -331,10 +212,6 @@ async fn seeded_store_with_identity(
             for record in &agents {
                 AgentRepository::put(tx, record)?;
             }
-            tx.execute(
-                "INSERT INTO runtime_server_links(id,record) VALUES(?1,?2)",
-                rusqlite::params![LINK, link.to_string()],
-            )?;
             ProjectsRepository::put_project(tx, &project_record)?;
             tx.execute(
                 "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
@@ -521,7 +398,7 @@ fn cases() -> Vec<Case> {
             args: json!({"action": "nope", "server": "peer-server"}),
             success: false,
             sent: &[],
-            expect: json!("Select list, projects, folders, git, fetch, or receipt"),
+            expect: json!("Choose list, projects, folders, git, or receipt"),
         },
         Case {
             name: "unpaired-server",
@@ -657,132 +534,6 @@ fn cases() -> Vec<Case> {
             success: true,
             sent: &["remove_location"],
             expect: json!({"outcome": "applied", "value": {"removed": true, "serverId": "peer-server"}}),
-        },
-        Case {
-            name: "remote-task",
-            actor: "remote",
-            tool: "orchestration_task",
-            args: json!({"action": "list"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "remote-message",
-            actor: "remote",
-            tool: "orchestration_message",
-            args: json!({"target": "lead", "text": "  progress  ", "importance": "progress", "progress_key": "build", "progress_version": 2, "delivery": studio_runtime_schema::DeliveryMoment::CurrentTurn}),
-            success: true,
-            sent: &["message"],
-            expect: json!({"stored": true, "target": "lead"}),
-        },
-        Case {
-            name: "remote-message-bad-importance",
-            actor: "remote",
-            tool: "orchestration_message",
-            args: json!({"target": "lead", "text": "x", "importance": "loud"}),
-            success: false,
-            sent: &[],
-            expect: json!("Unknown message importance"),
-        },
-        Case {
-            name: "remote-send-parent",
-            actor: "remote",
-            tool: "orchestration_send",
-            args: json!({"agent_id": "parent", "text": "done", "delivery": studio_runtime_schema::DeliveryMoment::NextTurn}),
-            success: true,
-            sent: &["message"],
-            expect: json!({"stored": true, "target": "parent"}),
-        },
-        Case {
-            name: "remote-status",
-            actor: "remote",
-            tool: "orchestration_status",
-            args: json!({}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "remote-peers",
-            actor: "remote",
-            tool: "orchestration_peers",
-            args: json!({"scope": "team"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "remote-chat-read",
-            actor: "remote",
-            tool: "orchestration_chat_read",
-            args: json!({"room_id": "home-room"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "remote-context-plan",
-            actor: "remote",
-            tool: "orchestration_context",
-            args: json!({"topic": "plan"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "remote-context-unknown",
-            actor: "remote",
-            tool: "orchestration_context",
-            args: json!({"topic": "complaints"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "remote-complaint-refused",
-            actor: "remote",
-            tool: "orchestration_complaint",
-            args: json!({"action": "submit", "text": "help"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "moved-send",
-            actor: "moved",
-            tool: "orchestration_send",
-            args: json!({"agent_id": "parent", "text": "moved hello"}),
-            success: true,
-            sent: &["move_send"],
-            expect: json!({"forwarded": "move_send"}),
-        },
-        Case {
-            name: "moved-spawn",
-            actor: "moved",
-            tool: "orchestration_spawn",
-            args: json!({"agents": [{"name": "Child", "prompt": "work"}]}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "moved-interrupt",
-            actor: "moved",
-            tool: "orchestration_interrupt",
-            args: json!({"agent_id": "some-child"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
-        },
-        Case {
-            name: "moved-manage",
-            actor: "moved",
-            tool: "orchestration_agent_manage",
-            args: json!({"action": "rename", "agent_id": "some-child", "name": "New"}),
-            success: false,
-            sent: &[],
-            expect: json!("The home server does not support this action"),
         },
         Case {
             name: "speak-saved",
@@ -947,7 +698,7 @@ async fn managed_location_recovery_normalizes_original_arguments() {
 #[tokio::test]
 async fn servers_tool_sends_envelopes_keeps_receipts_and_project_locations() {
     let (_directory, store, seed) = seeded_store().await;
-    for role in ["lead", "worker", "remote", "moved"] {
+    for role in ["lead", "worker"] {
         for field in ["cwd", "hostProjectPath", "projectId"] {
             assert!(std::path::Path::new(seed[role][field].as_str().unwrap()).is_dir());
         }
@@ -1131,370 +882,6 @@ async fn a_lost_reply_is_unknown_and_an_exact_retry_does_not_send_again_in_fligh
 
 /// A paired peer that answers with a real Rust receiver over the same store
 /// contract that a Python peer uses.
-struct LoopbackPeer {
-    principal: String,
-    driver: OrchestrationDriver,
-    sent: Mutex<Vec<String>>,
-}
-
-impl PairedTransport for LoopbackPeer {
-    fn exchange<'a>(
-        &'a self,
-        server: &'a str,
-        envelope: &'a crate::orchestration_wire::OrchestrationRequest,
-        _timeout: std::time::Duration,
-    ) -> BoxFuture<'a, Result<studio_runtime_store::multi_server_delivery::RemoteReply, AccessError>>
-    {
-        Box::pin(async move {
-            assert_eq!(server, PEER);
-            self.sent
-                .lock()
-                .unwrap()
-                .push(envelope.command.kind().as_str().to_owned());
-            let key = envelope.request_id.clone();
-            let now = crate::event_write::unix_time().unwrap() as i64;
-            let outcome = self.driver.receive(&self.principal, envelope, now).await?;
-            Ok(outcome.to_reply(&key))
-        })
-    }
-}
-
-#[allow(clippy::disallowed_methods)]
-fn run_git(directory: &std::path::Path, arguments: &[&str]) -> String {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(directory)
-        .args(arguments)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_AUTHOR_NAME", "Test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "Test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {arguments:?}: {output:?}");
-    String::from_utf8(output.stdout).unwrap().trim().to_owned()
-}
-
-async fn peer_store(home: &str) -> (tempfile::TempDir, Arc<RuntimeStore>) {
-    let (directory, store, _) =
-        seeded_store_with_identity(&json!({"serverId": PEER}).to_string()).await;
-    let record = json!({"id": home, "clientId": home, "serverId": home, "label": "Home",
-        "kind": "server", "origin": "https://home.fixture.ts.net", "publicKey": "fixture-public-key",
-        "tailscaleUser": "owner@example.test", "status": "paired", "created": 10,
-        "lastAccess": null, "revoked": null});
-    let home = home.to_owned();
-    store
-        .transaction_with(move |tx| -> Result<(), StoreError> {
-            tx.execute(
-                "INSERT OR REPLACE INTO runtime_access_clients(id,record) VALUES(?1,?2)",
-                [&home, &record.to_string()],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    (directory, store)
-}
-
-#[tokio::test]
-async fn fetch_uses_only_valid_locally_present_declared_worker_base() {
-    let (_directory, home, seed) = seeded_store().await;
-    let destination = PathBuf::from(seed["projectId"].as_str().unwrap());
-    run_git(&destination, &["init", "-q", "-b", "main"]);
-    std::fs::write(destination.join("base.txt"), "base").unwrap();
-    run_git(&destination, &["add", "base.txt"]);
-    run_git(&destination, &["commit", "-q", "-m", "base"]);
-    let base = run_git(&destination, &["rev-parse", "HEAD"]);
-    std::fs::write(destination.join("head.txt"), "head").unwrap();
-    run_git(&destination, &["add", "head.txt"]);
-    run_git(&destination, &["commit", "-q", "-m", "head"]);
-    let head = run_git(&destination, &["rev-parse", "HEAD"]);
-    let transport = Arc::new(LostExportReply::default());
-    let driver = Arc::new(OrchestrationDriver::new(
-        home.clone(),
-        transport.clone(),
-        Arc::new(RuntimeOrchestrationEffects::new(home.clone())),
-    ));
-    let tools: Arc<dyn MultiServerToolPort> =
-        Arc::new(ServerTools::new(home.clone(), driver, false));
-    for (index, declared) in [
-        None,
-        Some("invalid".to_owned()),
-        Some("a".repeat(40)),
-        Some(base.clone()),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mut worker = seed["worker"].clone();
-        worker["remoteWorker"] = json!({"server":PEER});
-        if let Some(declared) = &declared {
-            worker["workerBaseCommit"] = json!(declared);
-        }
-        let worker_id = worker["id"].as_str().unwrap().to_owned();
-        let expected_base = declared.clone();
-        home.transaction_with(move |tx| -> Result<(), StoreError> {
-            let record = studio_runtime_store::AgentRecord::from_value(worker).unwrap();
-            AgentRepository::put(tx, &record)?;
-            let decoded = AgentRepository::get(tx, &AgentId::from(worker_id))
-                .unwrap()
-                .unwrap();
-            assert_eq!(decoded.worker_base_commit, expected_base);
-            assert!(!decoded.extra.contains_key("workerBaseCommit"));
-            Ok(())
-        })
-        .await
-        .unwrap();
-        transport.sent.lock().unwrap().clear();
-        let key = format!("declared-base-{index}");
-        let args = json!({"action":"fetch","server":PEER,"agent_id":seed["worker"]["id"],"branch":"worker","destination":destination});
-        let result = call_tool(&home, &seed["lead"], &key, &key, &args, Some(tools.clone())).await;
-        assert_eq!(parsed(&result)["outcome"], "unknown", "{result}");
-        let sent = transport.sent.lock().unwrap();
-        assert!(!sent.is_empty());
-        for envelope in sent.iter() {
-            let crate::orchestration_wire::OrchestrationCommand::Export(payload) =
-                &envelope.command
-            else {
-                panic!("export");
-            };
-            let mut expected = vec![head.clone()];
-            if declared.as_ref() == Some(&base) {
-                expected.push(base.clone());
-            }
-            expected.sort();
-            assert_eq!(
-                payload.known.value(),
-                Some(&expected),
-                "declared {declared:?}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn fetch_future_stays_below_clippy_limit() {
-    let (_directory, home, seed) = seeded_store().await;
-    let transport = Arc::new(LostExportReply::default());
-    let driver = Arc::new(OrchestrationDriver::new(
-        home.clone(),
-        transport,
-        Arc::new(RuntimeOrchestrationEffects::new(home.clone())),
-    ));
-    let tools = ServerTools::new(home, driver, false);
-    let actor = Actor::from_record(&seed["lead"], LEAD, 3).unwrap();
-    let args = json!({});
-    let future = tools.fetch(&actor, &args, "request", PEER);
-    let limit: usize = include_str!("../../../../clippy.toml")
-        .lines()
-        .find_map(|line| line.strip_prefix("future-size-threshold = "))
-        .unwrap()
-        .parse()
-        .unwrap();
-    let size = std::mem::size_of_val(&future);
-    assert!(size <= limit, "fetch future is {size} bytes");
-}
-
-#[tokio::test]
-#[allow(clippy::disallowed_methods)]
-async fn fetching_reuses_original_export_inputs_and_missing_inputs_never_send() {
-    let (_directory, home, seed) = seeded_store().await;
-    let destination = PathBuf::from(seed["projectId"].as_str().unwrap());
-    run_git(&destination, &["init", "-q", "-b", "main"]);
-    std::fs::write(destination.join("base.txt"), "base").unwrap();
-    run_git(&destination, &["add", "base.txt"]);
-    run_git(&destination, &["commit", "-q", "-m", "base"]);
-    let original = ExportRequest {
-        cwd: studio_runtime_schema::queue_command::Field::Value("/remote/original".into()),
-        branch: "worker".into(),
-        known: studio_runtime_schema::queue_command::Field::Value(vec![run_git(
-            &destination,
-            &["rev-parse", "HEAD"],
-        )]),
-    };
-    let mut worker = seed["worker"].clone();
-    worker["remoteWorker"] = json!({"server":PEER});
-    worker["cwd"] = json!("/remote/changed");
-    let worker_id = worker["id"].clone();
-    home.transaction(move |tx| {
-        AgentRepository::put(
-            tx,
-            &studio_runtime_store::AgentRecord::from_value(worker).unwrap(),
-        )
-    })
-    .await
-    .unwrap();
-    let transport = Arc::new(LostExportReply::default());
-    let driver = Arc::new(OrchestrationDriver::new(
-        home.clone(),
-        transport.clone(),
-        Arc::new(RuntimeOrchestrationEffects::new(home.clone())),
-    ));
-    let args = json!({"action":"fetch","server":PEER,"agent_id":worker_id,"branch":"worker","destination":destination});
-    for (name, input) in [
-        ("fetch-resume", Some(original.clone())),
-        ("fetch-missing", None),
-    ] {
-        let tools: Arc<dyn MultiServerToolPort> = Arc::new(ResumeFetching {
-            store: home.clone(),
-            tools: ServerTools::new(home.clone(), driver.clone(), false),
-            input,
-        });
-        let result = call_tool(&home, &seed["lead"], name, name, &args, Some(tools)).await;
-        assert_eq!(parsed(&result)["outcome"], "unknown", "{result}");
-    }
-    let sent = transport.sent.lock().unwrap();
-    assert_eq!(sent.len(), 2, "missing persisted inputs never send");
-    for envelope in sent.iter() {
-        let crate::orchestration_wire::OrchestrationCommand::Export(payload) = &envelope.command
-        else {
-            panic!("export")
-        };
-        assert_eq!(payload.clone(), original);
-    }
-    assert_eq!(
-        sent[0].request_id, sent[1].request_id,
-        "lost-response retry keeps the root"
-    );
-}
-
-#[tokio::test]
-#[allow(clippy::disallowed_methods)]
-async fn fetch_copies_a_remote_worker_branch_through_a_verified_bundle_once() {
-    let (_home_directory, home, seed) = seeded_store().await;
-    let home_id = home.local_server_id().unwrap().unwrap();
-    let (peer_directory, peer) = peer_store(&home_id).await;
-    let repositories = tempfile::tempdir().unwrap();
-    let remote = repositories.path().join("remote");
-    std::fs::create_dir(&remote).unwrap();
-    run_git(&remote, &["init", "-q", "-b", "main"]);
-    std::fs::write(remote.join("a.txt"), "a\n").unwrap();
-    run_git(&remote, &["add", "a.txt"]);
-    run_git(&remote, &["commit", "-q", "-m", "base"]);
-    let destination = repositories.path().join("local");
-    let output = Command::new("git")
-        .current_dir(repositories.path())
-        .args(["clone", "-q"])
-        .arg(&remote)
-        .arg(&destination)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    run_git(&remote, &["checkout", "-q", "-b", "worker"]);
-    std::fs::write(remote.join("b.txt"), "b\n").unwrap();
-    run_git(&remote, &["add", "b.txt"]);
-    run_git(&remote, &["commit", "-q", "-m", "worker change"]);
-    let tip = run_git(&remote, &["rev-parse", "HEAD"]);
-    // The lead's remote worker proxy names the peer and its folder.
-    let lead = seed["lead"].clone();
-    let mut worker = seed["worker"].clone();
-    worker["id"] = json!("0b5c2f2e-1f3b-4f7a-9a51-2f3c4d5e6f70");
-    worker["remoteWorker"] = json!({"server": PEER});
-    worker["cwd"] = json!(remote);
-    let worker_id = worker["id"].as_str().unwrap().to_owned();
-    let record = studio_runtime_store::AgentRecord::from_value(worker).unwrap();
-    home.transaction_with(move |tx| -> Result<(), StoreError> {
-        AgentRepository::put(tx, &record)?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let transport = Arc::new(LoopbackPeer {
-        principal: home_id.clone(),
-        driver: OrchestrationDriver::new(
-            Arc::clone(&peer),
-            Arc::new(RecordingTransport::default()),
-            Arc::new(RuntimeOrchestrationEffects::new(Arc::clone(&peer))),
-        ),
-        sent: Mutex::new(Vec::new()),
-    });
-    let driver = Arc::new(OrchestrationDriver::new(
-        Arc::clone(&home),
-        Arc::clone(&transport) as Arc<dyn PairedTransport>,
-        Arc::new(RuntimeOrchestrationEffects::new(Arc::clone(&home))),
-    ));
-    let tools: Arc<dyn MultiServerToolPort> =
-        Arc::new(ServerTools::new(Arc::clone(&home), driver, false));
-    let args = json!({"action": "fetch", "server": PEER, "agent_id": worker_id,
-        "branch": "worker", "destination": destination});
-    let result = call_tool(
-        &home,
-        &lead,
-        "fetch",
-        "call-fetch",
-        &args,
-        Some(Arc::clone(&tools)),
-    )
-    .await;
-    assert_eq!(result["success"], true, "{result}");
-    let value = parsed(&result);
-    assert_eq!(value["commit"], tip, "{value}");
-    assert_eq!(value["branch"], "worker");
-    assert!(value["bytes"].as_u64().unwrap() > 0);
-    assert_eq!(run_git(&destination, &["rev-parse", "FETCH_HEAD"]), tip);
-    assert_eq!(
-        *transport.sent.lock().unwrap(),
-        ["export", "chunk", "release"],
-        "one export, one chunk, one release"
-    );
-    // The exact chunk reply survives release in the result cache, with no inbox row.
-    let chunk_result: String = peer
-        .test_read_transaction(|tx| {
-            Ok(tx.query_row(
-                "SELECT result FROM request_results WHERE json_extract(result,'$.reply.response.value.offset')=0 AND json_extract(result,'$.reply.response.value.sha256') IS NOT NULL",
-                [],
-                |row| row.get(0),
-            )?)
-        })
-        .unwrap();
-    assert!(chunk_result.contains("\"data\""), "{chunk_result}");
-    assert_eq!(
-        peer.test_reader()
-            .unwrap()
-            .query_row("SELECT count(*) FROM runtime_server_inbox", [], |row| row
-                .get::<_, i64>(
-                0
-            ))
-            .unwrap(),
-        0
-    );
-    let exports = std::fs::read_dir(peer_directory.path().join(server_git::EXPORT_FOLDER))
-        .unwrap()
-        .count();
-    assert_eq!(exports, 0, "the release removed the bundle");
-    // An exact replay answers from the saved tool result without a transport call.
-    let replay = call_tool(
-        &home,
-        &lead,
-        "fetch",
-        "call-fetch",
-        &args,
-        Some(Arc::clone(&tools)),
-    )
-    .await;
-    assert_eq!(parsed(&replay), value);
-    assert_eq!(transport.sent.lock().unwrap().len(), 3);
-    // A new request for a branch the destination already has sends no bundle.
-    let again = call_tool(
-        &home,
-        &lead,
-        "fetch-again",
-        "call-fetch-again",
-        &args,
-        Some(tools),
-    )
-    .await;
-    assert_eq!(again["success"], true, "{again}");
-    assert_eq!(parsed(&again)["commit"], tip);
-    assert_eq!(parsed(&again)["bytes"], 0);
-    assert_eq!(transport.sent.lock().unwrap().len(), 4, "one export only");
-}
-
-/// A provider session that accepts every speech request.
 #[derive(Default)]
 struct RecordingVoice {
     requests: Mutex<Vec<(String, Value)>>,
@@ -1754,52 +1141,6 @@ async fn speak_refuses_before_saving_when_a_ready_session_has_no_provider() {
         })
         .unwrap();
     assert_eq!(records, 0);
-}
-
-#[tokio::test]
-async fn a_remote_worker_keeps_its_local_tools_and_names_the_driver_for_forwarded_ones() {
-    let (_directory, store, seed) = seeded_store().await;
-    let remote = &seed["remote"];
-    // Python runs a remote worker's request reads on its own server.
-    let local = call_named_tool(
-        &store,
-        remote,
-        "orchestration_request",
-        "remote-request",
-        "call-remote-request",
-        &json!({"action": "list"}),
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(local["success"], true, "{local}");
-    // The home server has no task receiver, so refuse without writing an outbox row.
-    let forwarded = call_named_tool(
-        &store,
-        remote,
-        "orchestration_task",
-        "remote-task-unattached",
-        "call-remote-task-unattached",
-        &json!({"action": "list"}),
-        None,
-        None,
-    )
-    .await;
-    assert_eq!(forwarded["success"], false, "{forwarded}");
-    assert_eq!(
-        parsed(&forwarded),
-        "The home server does not support this action"
-    );
-    let outbox: i64 = store
-        .test_read_transaction(|tx| {
-            Ok(tx.query_row(
-                "SELECT count(*) FROM runtime_outbox WHERE kind='remote_delivery' AND json_extract(json_extract(payload,'$.record.body'),'$.action')='task'",
-                [],
-                |row| row.get(0),
-            )?)
-        })
-        .unwrap();
-    assert_eq!(outbox, 0);
 }
 
 fn local_tools(store: &Arc<RuntimeStore>) -> Arc<dyn MultiServerToolPort> {
@@ -2179,11 +1520,4 @@ async fn a_command_without_a_final_record_after_a_restart_stays_unknown() {
         "Command outcome unknown; inspect the target server. The command was not run again."
     );
     assert!(saved["finishedAt"].is_number());
-}
-
-#[test]
-fn forwarded_message_rejects_invalid_delivery_before_transport() {
-    for delivery in [json!("later"), json!(7), json!({})] {
-        assert!(worker_message("lead", &json!({"text":"hello", "delivery":delivery})).is_err());
-    }
 }

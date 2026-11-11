@@ -14,7 +14,9 @@
         "autoWake": true,
         "inFlight": true,
         "turnId": "turn-2",
-        "created": 1.0
+        "created": 1.0,
+        "accountKey": "default",
+        "provider": "codex"
       }
     }
   ],
@@ -34,7 +36,9 @@
         "autoWake": true,
         "inFlight": true,
         "turnId": "turn-2",
-        "created": 1.0
+        "created": 1.0,
+        "accountKey": "default",
+        "provider": "codex"
       },
       "stopped": {
         "id": "chat",
@@ -49,7 +53,9 @@
         "inFlight": true,
         "turnId": "turn-2",
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       "at": 1234567.5
     }

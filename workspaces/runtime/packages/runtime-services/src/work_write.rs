@@ -217,32 +217,25 @@ struct ChildResultIdentity {
 }
 
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReviewerArchiveView {
-    #[serde(default, deserialize_with = "optional_string")]
-    review_archive_scheduled: Option<String>,
-    #[serde(default, deserialize_with = "optional_string")]
-    parent_id: Option<String>,
-    #[serde(default, deserialize_with = "optional_string")]
-    root_id: Option<String>,
-    #[serde(default, deserialize_with = "optional_string")]
-    role: Option<String>,
-    #[serde(default, deserialize_with = "optional_string")]
-    status: Option<String>,
-    agent_archive: Option<RawJson>,
-    review_archive_error: Option<RawJson>,
-}
-
-#[derive(serde::Deserialize)]
 struct ReviewerArchiveOutcome {
     #[serde(default, deserialize_with = "optional_string")]
     status: Option<String>,
     blockers: Option<RawJson>,
 }
 
-fn raw_truthy(raw: Option<&RawJson>) -> bool {
-    let value = raw.and_then(|raw| studio_json::from_str::<Value>(raw.0.as_str()).ok());
-    event_write::truthy(value.as_ref())
+fn stored_reviewer_agent(
+    id: &str,
+    encoded: &str,
+) -> studio_runtime_store::StoreResult<AgentRecord> {
+    let invalid = || studio_runtime_store::StoreError::InvalidStoredObject {
+        table: "runtime_agents",
+        id: id.to_owned(),
+    };
+    let agent: AgentRecord = studio_json::from_str(encoded).map_err(|_| invalid())?;
+    if agent.id.as_ref() != id {
+        return Err(invalid());
+    }
+    Ok(agent)
 }
 
 fn result_identity(work: &WorkItemRecord) -> Option<ResultIdentity> {
@@ -779,18 +772,22 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
         .transaction_with_error(move |tx| -> Result<(), WorkWriteError> {
             let candidates = ReviewerArchiveRepository::candidates(tx)?;
             for (child_id, encoded) in candidates {
-                let record: ReviewerArchiveView = studio_json::from_str(&encoded)
-                    .map_err(studio_runtime_store::StoreError::from)?;
-                if raw_truthy(record.agent_archive.as_ref())
-                    || raw_truthy(record.review_archive_error.as_ref())
-                    || record
+                let mut child = stored_reviewer_agent(&child_id, &encoded)?;
+                if child.agent_archive.is_some()
+                    || child
+                        .review_archive_error
+                        .as_ref()
+                        .map(std::ops::Deref::deref)
+                        .is_some_and(|error| !error.is_empty())
+                    || child
                         .review_archive_scheduled
-                        .as_deref()
+                        .as_ref()
+                        .map(std::ops::Deref::deref)
                         .is_some_and(|value| !value.is_empty())
                 {
                     continue;
                 }
-                let Some(parent_id) = record.parent_id.as_deref() else {
+                let Some(parent_id) = child.parent_id.as_deref() else {
                     continue;
                 };
                 let event_id =
@@ -798,15 +795,8 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                 let Some(event_id) = event_id else {
                     continue;
                 };
-                let mut child: AgentRecord = studio_json::from_str(&encoded).map_err(|_| {
-                    studio_runtime_store::StoreError::InvalidStoredObject {
-                        table: "runtime_agents",
-                        id: child_id.to_owned(),
-                    }
-                })?;
-                child
-                    .extra
-                    .insert("reviewArchiveScheduled".into(), json!(event_id));
+                child.review_archive_scheduled =
+                    studio_runtime_schema::queue_command::Field::Value(event_id);
                 AgentRepository::put(tx, &child)?;
             }
             Ok(())
@@ -820,23 +810,25 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
         .await?;
 
     for (child_id, encoded) in due {
-        let record: ReviewerArchiveView =
-            studio_json::from_str(&encoded).map_err(studio_runtime_store::StoreError::from)?;
-        let Some(event_id) = record.review_archive_scheduled.as_deref() else {
-            continue;
+        let (event_id, parent_id, root_id) = {
+            let record = stored_reviewer_agent(&child_id, &encoded)?;
+            if record.role.value()
+                != Some(&studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+                || record.status != studio_runtime_store::AgentStatus::Completed
+                || record.agent_archive.is_some()
+            {
+                continue;
+            }
+            let studio_runtime_schema::queue_command::Field::Value(event_id) =
+                record.review_archive_scheduled
+            else {
+                continue;
+            };
+            let Some(parent_id) = record.parent_id else {
+                continue;
+            };
+            (event_id, parent_id, record.root_id.0)
         };
-        let Some(parent_id) = record.parent_id.as_deref() else {
-            continue;
-        };
-        let Some(root_id) = record.root_id.as_deref() else {
-            continue;
-        };
-        if record.role.as_deref() != Some("reviewer")
-            || record.status.as_deref() != Some("completed")
-            || raw_truthy(record.agent_archive.as_ref())
-        {
-            continue;
-        }
         let event_id_for_read = event_id.to_owned();
         let parent_id_for_read = parent_id.to_owned();
         let child_id_for_read = child_id.clone();
@@ -865,7 +857,7 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
             continue;
         }
 
-        let epoch_root = AgentId::from(root_id);
+        let epoch_root = AgentId::from(root_id.as_str());
         let actor_epoch = store
             .read_async("runtime-services/work_write", move |connection| {
                 AgentRepository::get(connection, &epoch_root)
@@ -926,22 +918,21 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                     return Ok(());
                 };
                 if child
-                    .extra
-                    .get("reviewArchiveScheduled")
-                    .and_then(Value::as_str)
+                    .review_archive_scheduled
+                    .as_ref()
+                    .map(std::ops::Deref::deref)
                     != Some(event_for_settlement.as_str())
                 {
                     return Ok(());
                 }
-                child.extra.insert(
-                    "reviewArchiveError".into(),
-                    json!(error.chars().take(180).collect::<String>()),
+                child.review_archive_error = studio_runtime_schema::queue_command::Field::Value(
+                    error.chars().take(180).collect(),
                 );
                 if retryable {
                     let attempts = child
-                        .extra
-                        .get("reviewArchiveAttempts")
-                        .and_then(Value::as_u64)
+                        .review_archive_attempts
+                        .as_ref()
+                        .map(|count| count.as_i64() as u64)
                         .unwrap_or_default()
                         .saturating_add(1);
                     let exponent = attempts
@@ -949,14 +940,28 @@ async fn reviewer_archive_tick(store: Arc<RuntimeStore>, now: f64) -> Result<(),
                         .min(u64::from(REVIEW_ARCHIVE_MAX_BACKOFF_EXPONENT));
                     let delay = (REVIEW_ARCHIVE_BASE_DELAY_SECONDS * 2_f64.powi(exponent as i32))
                         .min(REVIEW_ARCHIVE_MAX_DELAY_SECONDS);
-                    child
-                        .extra
-                        .insert("reviewArchiveAttempts".into(), json!(attempts));
-                    child
-                        .extra
-                        .insert("reviewArchiveNextAt".into(), json!(now + delay));
+                    child.review_archive_attempts =
+                        studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_schema::AgentCounter::from_i64(
+                                i64::try_from(attempts).map_err(|_| {
+                                    studio_runtime_store::StoreError::InvalidStoredObject {
+                                        table: "runtime_agents",
+                                        id: child.id.0.clone(),
+                                    }
+                                })?,
+                            )
+                            .ok_or(
+                                studio_runtime_store::StoreError::InvalidStoredObject {
+                                    table: "runtime_agents",
+                                    id: child.id.0.clone(),
+                                },
+                            )?,
+                        );
+                    child.review_archive_next_at =
+                        studio_runtime_schema::queue_command::Field::Value(now + delay);
                 } else {
-                    child.extra.remove("reviewArchiveScheduled");
+                    child.review_archive_scheduled =
+                        studio_runtime_schema::queue_command::Field::Missing;
                 }
                 AgentRepository::put(tx, &child)?;
                 Ok(())
@@ -1013,25 +1018,16 @@ async fn retry_refused_reviewer_archives(store: &Arc<RuntimeStore>) -> Result<()
                 .map_err(studio_runtime_store::StoreError::from)?;
             drop(statement);
             for (id, raw) in rows {
-                let record: ReviewerArchiveView =
-                    studio_json::from_str(&raw).map_err(studio_runtime_store::StoreError::from)?;
-                if raw_truthy(record.agent_archive.as_ref()) {
+                let mut agent = stored_reviewer_agent(&id, &raw)?;
+                if agent.agent_archive.is_some() {
                     continue;
                 }
-                let mut agent: AgentRecord = studio_json::from_str(&raw).map_err(|_| {
-                    studio_runtime_store::StoreError::InvalidStoredObject {
-                        table: "runtime_agents",
-                        id: id.clone(),
-                    }
-                })?;
-                for key in [
-                    "reviewArchiveError",
-                    "reviewArchiveScheduled",
-                    "reviewArchiveAttempts",
-                    "reviewArchiveNextAt",
-                ] {
-                    agent.extra.remove(key);
-                }
+                agent.review_archive_error = studio_runtime_schema::queue_command::Field::Missing;
+                agent.review_archive_scheduled =
+                    studio_runtime_schema::queue_command::Field::Missing;
+                agent.review_archive_attempts =
+                    studio_runtime_schema::queue_command::Field::Missing;
+                agent.review_archive_next_at = studio_runtime_schema::queue_command::Field::Missing;
                 AgentRepository::put(tx, &agent)?;
             }
             Ok(())
@@ -1132,15 +1128,6 @@ fn accepted_archive_preflight(
     let Some(owner) = AgentRepository::get(connection, &AgentId::from(owner_id))? else {
         return Ok(Some(kept("The accepted task owner changed")));
     };
-    let owner_value = owner.value();
-    if owner_value
-        .get("remoteWorker")
-        .is_some_and(|value| event_write::truthy(Some(value)))
-    {
-        return Ok(Some(kept(
-            "The remote worker workspace requires review on its own server",
-        )));
-    }
     let Some(result) = result else {
         return Ok(Some(kept("The accepted task result is missing")));
     };
@@ -1677,9 +1664,8 @@ pub async fn prepare_layr_accept(
                 if dependent.blocked_by(&dependent_statuses).is_empty()
                     && let Some(dependent_owner) = dependent.owner()
                 {
-                    let recipient = AgentRepository::get(tx, &AgentId::from(dependent_owner))?
+                    AgentRepository::get(tx, &AgentId::from(dependent_owner))?
                         .ok_or_else(|| invalid("runtime_agents", dependent_owner))?;
-                    event_write::refuse_remote(&recipient)?;
                 }
             }
             if lead.layr_project_id != owner.layr_project_id {
@@ -2661,13 +2647,28 @@ fn continuation_work_pending(agent: &AgentRecord) -> bool {
             && last_turn.is_some_and(|turn| !turn.is_empty())
     };
 
-    let capacity = agent.extra.get("capacityRetry").unwrap_or(&Value::Null);
+    let capacity_pending = agent
+        .capacity_retry
+        .as_ref()
+        .map(std::ops::Deref::deref)
+        .is_some_and(|retry| {
+            use studio_runtime_schema::continuation_snapshot::CapacityContinuationStatus;
+            matches!(
+                retry.status,
+                CapacityContinuationStatus::Scheduled
+                    | CapacityContinuationStatus::Starting
+                    | CapacityContinuationStatus::Unknown
+            ) && retry.account_key.as_str() == agent.account_key
+                && Some(retry.thread_id.as_str()) == thread
+                && retry.epoch.number().as_i64() == Some(epoch)
+                && Some(retry.turn_id.as_str()) == last_turn
+        });
     let Ok(usage_value) = agent.usage_resume_value() else {
         return true;
     };
     let usage = usage_value.as_ref().unwrap_or(&Value::Null);
     let restart = agent.restart_recovery.as_deref();
-    matches(capacity, &["scheduled", "starting", "unknown"], "turnId")
+    capacity_pending
         || matches(usage, &["scheduled", "started", "unknown"], "turnId")
         || (restart.and_then(|v| v.stage.as_deref()) == Some("pending")
             && restart.and_then(|v| v.auto_wake) == Some(true)
@@ -3404,7 +3405,6 @@ fn submit(
             );
         }
     }
-    event_write::refuse_remote(&submitter)?;
     let statuses = dependency_statuses(tx, &work)?;
     let identity = WorkItemsRepository::submission_identity(tx, &submitter)?;
     let result_id = new_id()?;
@@ -3751,7 +3751,6 @@ fn accept(
         };
         let recipient = AgentRepository::get(tx, &AgentId::from(owner_id))?
             .ok_or_else(|| invalid("runtime_agents", owner_id))?;
-        event_write::refuse_remote(&recipient)?;
         ready_dependents.push((recipient, dependent));
     }
     WorkItemsRepository::close_review_event(tx, &agent.root_id.0, &result_id)?;
@@ -4340,14 +4339,13 @@ mod actor_tests {
     fn reviewer_schedule_preserves_record_bytes() {
         let seed = json!({"compactions":0,"accountKey":"default","provider":"codex",
             "id":"child","rootId":"lead","parentId":"lead","epoch":2,"status":"completed",
-            "role":"reviewer","extraLegacy":{"malformed":[false,3]}});
+            "role":"reviewer","name":"retained"});
         let mut updated = AgentRecord::from_value(seed).expect("agent");
         let mut record = updated.value();
         record["reviewArchiveScheduled"] = json!("child:result-1");
         let expected = record.to_string();
-        updated
-            .extra
-            .insert("reviewArchiveScheduled".into(), json!("child:result-1"));
+        updated.review_archive_scheduled =
+            studio_runtime_schema::queue_command::Field::Value("child:result-1".into());
         assert_eq!(updated.value().to_string(), expected);
     }
 
@@ -4355,22 +4353,19 @@ mod actor_tests {
     fn reviewer_retry_preserves_record_bytes() {
         let seed = json!({"compactions":0,"accountKey":"default","provider":"codex",
             "id":"child","rootId":"lead","parentId":"lead","epoch":2,"status":"completed",
-            "role":"reviewer","reviewArchiveScheduled":"child:result-1","extraLegacy":{"x":false}});
+            "role":"reviewer","reviewArchiveScheduled":"child:result-1","name":"retained"});
         let mut updated = AgentRecord::from_value(seed).expect("agent");
         let mut record = updated.value();
         record["reviewArchiveError"] = json!("blocked");
         record["reviewArchiveAttempts"] = json!(1);
         record["reviewArchiveNextAt"] = json!(12.0);
         let expected = record.to_string();
-        updated
-            .extra
-            .insert("reviewArchiveError".into(), json!("blocked"));
-        updated
-            .extra
-            .insert("reviewArchiveAttempts".into(), json!(1));
-        updated
-            .extra
-            .insert("reviewArchiveNextAt".into(), json!(12.0));
+        updated.review_archive_error =
+            studio_runtime_schema::queue_command::Field::Value("blocked".into());
+        updated.review_archive_attempts = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::AgentCounter::from_i64(1).unwrap(),
+        );
+        updated.review_archive_next_at = studio_runtime_schema::queue_command::Field::Value(12.0);
         assert_eq!(updated.value().to_string(), expected);
     }
 
@@ -4380,7 +4375,7 @@ mod actor_tests {
             "id":"child","rootId":"lead","parentId":"lead","epoch":2,"status":"completed",
             "role":"reviewer","reviewArchiveScheduled":"child:result-1",
             "reviewArchiveError":"blocked","reviewArchiveAttempts":1,"reviewArchiveNextAt":12.0,
-            "extraLegacy":{"x":false}});
+            "name":"retained"});
         let mut updated = AgentRecord::from_value(seed).expect("agent");
         let mut record = updated.value();
         for key in [
@@ -4392,14 +4387,10 @@ mod actor_tests {
             record.as_object_mut().expect("object").remove(key);
         }
         let expected = record.to_string();
-        for key in [
-            "reviewArchiveError",
-            "reviewArchiveScheduled",
-            "reviewArchiveAttempts",
-            "reviewArchiveNextAt",
-        ] {
-            updated.extra.remove(key);
-        }
+        updated.review_archive_error = studio_runtime_schema::queue_command::Field::Missing;
+        updated.review_archive_scheduled = studio_runtime_schema::queue_command::Field::Missing;
+        updated.review_archive_attempts = studio_runtime_schema::queue_command::Field::Missing;
+        updated.review_archive_next_at = studio_runtime_schema::queue_command::Field::Missing;
         assert_eq!(updated.value().to_string(), expected);
     }
 
@@ -5122,85 +5113,6 @@ mod actor_tests {
     }
 
     #[tokio::test]
-    async fn accepted_archive_tick_persists_terminal_kept_outcome_for_remote_worker() {
-        let root = tempfile::tempdir().expect("state directory");
-        let store = Arc::new(
-            RuntimeStore::open(Some(root.path()))
-                .await
-                .expect("runtime store"),
-        );
-        store
-            .transaction(|tx| {
-                for agent in [
-                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","epoch":1,"status":"running"}),
-                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","epoch":2,"status":"paused",
-                        "remoteWorker":{"server":"remote","link":"worker-link"}}),
-                ] {
-                    AgentRepository::put(tx, &AgentRecord::from_value(agent)?)?;
-                }
-                let work = json!({
-                    "id":"accepted-task","rootId":"lead","owner":"worker",
-                    "status":"accepted","version":3,"title":"Accepted result",
-                    "description":"","dependencies":[],"results":[{"id":"result-1",
-                        "text":"verified","revision":"abc1234"}],"decisions":[],
-                    "archiveIntent":{"id":"accepted-task:result-1","owner":"worker",
-                        "status":"pending","attempts":0,"created":10.0}
-                });
-                tx.execute(
-                    "INSERT INTO runtime_work(id,record) VALUES (?1,?2)",
-                    rusqlite::params!["accepted-task", work.to_string()],
-                )?;
-                tx.execute(
-                    "UPDATE runtime_work SET record=json_set(record,'$.archiveIntent',json(?3)) WHERE id=json_extract(?3,'$.taskId')",
-                    rusqlite::params![
-                        "work-archive:accepted-task:result-1",
-                        "accepted-archive-v1",
-                        json!({"taskId":"accepted-task","intentId":"accepted-task:result-1",
-                            "actor":"lead","actorEpoch":1,"target":"worker","attempts":0,
-                            "created":10.0,"status":"pending","nextAttemptAt":100.0})
-                        .to_string(),
-                    ],
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("archive intent state commits");
-
-        assert_eq!(
-            accepted_archive_tick(Arc::clone(&store), 100.0)
-                .await
-                .expect("tick succeeds"),
-            1
-        );
-
-        let connection = store.test_reader().expect("read tick result");
-        let encoded_receipt: String = connection
-            .query_row(
-                "SELECT json_extract(record,'$.archiveIntent') FROM runtime_work WHERE id='accepted-task' AND ?1 IS NOT NULL",
-                ["work-archive:accepted-task:result-1"],
-                |row| row.get(0),
-            )
-            .expect("archive outcome receipt");
-        let receipt: Value = studio_json::from_str(&encoded_receipt).expect("receipt JSON");
-        assert_eq!(receipt["status"], "terminal");
-        assert_eq!(receipt["outcome"]["status"], "kept");
-        assert_eq!(
-            receipt["outcome"]["reason"],
-            "The remote worker workspace requires review on its own server"
-        );
-        let encoded_work: String = connection
-            .query_row(
-                "SELECT record FROM runtime_work WHERE id=?1",
-                ["accepted-task"],
-                |row| row.get(0),
-            )
-            .expect("accepted work record");
-        let work: Value = studio_json::from_str(&encoded_work).expect("work JSON");
-        assert_eq!(work["archive"]["status"], "kept");
-        assert_eq!(work["archiveIntent"]["status"], "terminal");
-    }
-
-    #[tokio::test]
     async fn accepted_archive_tick_preserves_zero_epoch_on_retry() {
         let root = tempfile::tempdir().expect("state directory");
         let store = Arc::new(
@@ -5212,8 +5124,7 @@ mod actor_tests {
             .transaction(|tx| {
                 for agent in [
                     json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","epoch":1,"status":"running"}),
-                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","epoch":2,"status":"paused",
-                        "remoteWorker":{"server":"remote","link":"worker-link"}}),
+                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","epoch":2,"status":"paused"}),
                 ] {
                     AgentRepository::put(tx, &AgentRecord::from_value(agent)?)?;
                 }
@@ -6532,7 +6443,7 @@ mod release_tests {
             "id":"worker","rootId":"lead","epoch":7,"status":"failed",
             "autoWake":true,"accountKey":"acct","threadId":"thread",
             "lastCompletedTurn":"turn-3",
-            "capacityRetry":{"status":"starting","accountKey":"acct","threadId":"thread","epoch":7,"turnId":"turn-3"}
+            "capacityRetry":{"id":"retry","attempt":1,"cause":"serverOverloaded","cwd":"/fixture","maxAttempts":4,"settings":{},"status":"starting","accountKey":"acct","threadId":"thread","epoch":7,"turnId":"turn-3"}
         }))
         .expect("worker record parses");
         assert!(continuation_work_pending(&agent));

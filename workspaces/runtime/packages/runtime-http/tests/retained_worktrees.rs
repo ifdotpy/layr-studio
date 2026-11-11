@@ -12,7 +12,7 @@ use std::sync::{
 use studio_json::{Value, json};
 use studio_runtime_http::{HttpState, router};
 use studio_runtime_services::sync_views;
-use studio_runtime_store::{AgentRecord, AgentRepository, RuntimeStore};
+use studio_runtime_store::{AgentRepository, RuntimeStore};
 use tower::ServiceExt;
 
 async fn call(
@@ -55,7 +55,7 @@ async fn call(
 #[test]
 fn the_cleanup_projection_keeps_the_folder_and_reason_without_private_receipts() {
     let record = json!({"provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","parentId":"lead","status":"completed",
-        "cwd":"/old/path","workspaceCleanupIntent":{"phase":"not_sent","requestId":"private-id",
+        "cwd":"/old/path","workspaceCleanupIntent":{"action":"archive","phase":"not_sent","requestId":"private-id",
         "effect":{"identity":{"cwd":"/retained/path","private":"secret"}},"receipt":{"reason":"Submodule vendor has changes","private":"secret"}}});
     let projected = sync_views::agent_entity_view(&record, &Default::default()).unwrap();
     assert_eq!(
@@ -97,8 +97,8 @@ async fn retained_worktrees_http_lists_deleted_members_without_private_receipts(
         for value in [
             json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"lead","rootId":"lead","isLead":true,"epoch":1,"status":"completed","autoWake":true,"cwd":"/work","tokensUsed":10,"tokenBudget":100}),
             json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","parentId":"lead","epoch":1,"status":"completed","autoWake":false,"cwd":"/work","tokensUsed":20}),
-            json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"deleted","rootId":"lead","parentId":"lead","epoch":1,"status":"completed","autoWake":false,"cwd":"/work","tokensUsed":30,"deletedAt":1,"name":"Deleted worker","workspaceCleanupIntent":{"phase":"not_sent","effect":{"kind":"remove_worktree","identity":{"cwd":"/kept/worktree"}},"receipt":{"reason":"Submodule vendor has changes","secret":"private"}}}),
-        ] { AgentRepository::put(tx, &AgentRecord::from_value(value).unwrap())?; }
+            json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"deleted","rootId":"lead","parentId":"lead","epoch":1,"status":"completed","autoWake":false,"cwd":"/work","tokensUsed":30,"deletedAt":1,"name":"Deleted worker","workspaceCleanupIntent":{"action":"archive","phase":"not_sent","effect":{"kind":"remove_worktree","identity":{"cwd":"/kept/worktree"}},"receipt":{"reason":"Submodule vendor has changes","secret":"private"}}}),
+        ] { AgentRepository::put(tx, &studio_runtime_store::test_fixtures::historical_agent(&value)?)?; }
         Ok(())
     }).await.unwrap();
     let app = router(HttpState::new(

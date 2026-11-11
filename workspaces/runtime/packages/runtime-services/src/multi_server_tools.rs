@@ -7,15 +7,12 @@
 //! that write is a not-applied tool result; the receipt of a sent envelope is
 //! the tool result, whatever its outcome.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use studio_runtime_store::path_identity::CanonicalPath;
 
-use base64::Engine;
 use futures_util::future::BoxFuture;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use studio_json::{Map, Value, json};
 use studio_runtime_schema::persistence::{OutboxStatus, ServerDeliveryState, ServerFetchState};
 use studio_runtime_store::multi_server_delivery::{SavedRemoteReply, remote_operation_key};
@@ -25,19 +22,10 @@ use studio_runtime_store::{
     AgentId, AgentRepository, ProjectsRepository, RuntimeStore, StoreError,
 };
 
-use crate::event_write::request_signature;
 use crate::managed_host_tools::{Actor, DispatchedOperation, Error, OperationResult};
 use crate::multi_server_auth::AccessError;
 use crate::multi_server_orchestration::{ExchangeOutcome, OrchestrationDriver};
 use crate::multi_server_transport_limits::MAX_REQUEST_BYTES;
-use crate::server_git::{
-    self, CHUNK, ExportRequest, MAX_BUNDLE, commit_hash, git_command, git_read, git_run,
-};
-
-/// Seconds that `git bundle verify` may run (Python `_fetch`).
-const BUNDLE_VERIFY_SECONDS: u64 = 30;
-/// Seconds that the local `git fetch` of a bundle may run (Python `_fetch`).
-const BUNDLE_FETCH_SECONDS: u64 = 60;
 /// Command actions that the executing server owns (Python `_exec_tool`).
 const EXEC_ACTIONS: &[&str] = &["exec", "exec_read", "exec_input", "exec_cancel"];
 /// Payload fields of a command request (Python `_exec_tool`).
@@ -63,16 +51,6 @@ pub(crate) trait MultiServerToolPort: Send + Sync {
         key: &'a str,
         now: f64,
     ) -> BoxFuture<'a, Result<DispatchedOperation, Error>>;
-
-    /// Python `worker_call`: a remote worker's tool call answered by its home
-    /// server through the remote-parent link.
-    fn worker_call<'a>(
-        &'a self,
-        actor: &'a Actor,
-        action: &'a str,
-        args: &'a Value,
-        key: &'a str,
-    ) -> BoxFuture<'a, Result<DispatchedOperation, Error>>;
 }
 
 /// Production adapter over the paired-server outbox driver.
@@ -83,35 +61,6 @@ pub(crate) struct ServerTools {
 }
 
 impl ServerTools {
-    async fn deliver_operation(
-        &self,
-        server: &str,
-        operation: &[String],
-        command: crate::orchestration_wire::OrchestrationCommand,
-        key: &str,
-    ) -> Result<ExchangeOutcome, Step> {
-        let now = crate::event_write::unix_time()
-            .map_err(|_| Step::Refused("The system clock is unavailable".into()))?
-            as i64;
-        self.driver
-            .exchange_operation(
-                server,
-                &crate::orchestration_wire::OrchestrationRequest {
-                    request_id: key.to_owned(),
-                    operation: operation.to_vec(),
-                    command,
-                },
-                now,
-            )
-            .await
-            .map_err(|error| match error {
-                AccessError::Store(error) => Step::Store(error),
-                AccessError::Sqlite(error) => Step::Store(error.into()),
-                other @ AccessError::Refused { .. } | other @ AccessError::Stored { .. } => {
-                    Step::Refused(other.to_string())
-                }
-            })
-    }
     pub(crate) fn new(
         store: Arc<RuntimeStore>,
         driver: Arc<OrchestrationDriver>,
@@ -130,7 +79,6 @@ impl ServerTools {
 #[derive(Debug)]
 enum Step {
     Refused(String),
-    Failed(String),
     Store(StoreError),
 }
 impl From<StoreError> for Step {
@@ -190,31 +138,6 @@ fn fetch_state(entry: &RemoteEntry<FetchEntry>) -> ServerFetchState {
         ServerFetchState::Fetching
     } else {
         entry.record.state
-    }
-}
-
-enum FetchPayload {
-    Preparing(ExportRequest),
-    Fetching(ExportRequest),
-}
-impl FetchPayload {
-    fn decode(state: ServerFetchState, raw: Option<&str>) -> Result<Option<Self>, Step> {
-        let Some(raw) = raw else {
-            return Ok(None);
-        };
-        let request: ExportRequest = studio_json::from_str(raw).map_err(StoreError::from)?;
-        match state {
-            ServerFetchState::Preparing => Ok(Some(Self::Preparing(request))),
-            ServerFetchState::Fetching => Ok(Some(Self::Fetching(request))),
-            ServerFetchState::Complete => Err(Step::Refused(
-                "A completed fetch must have a saved request result".into(),
-            )),
-        }
-    }
-    fn export(&self) -> &ExportRequest {
-        match self {
-            Self::Preparing(request) | Self::Fetching(request) => request,
-        }
     }
 }
 
@@ -325,15 +248,8 @@ fn settle(step: Result<Value, Step>) -> Result<DispatchedOperation, Error> {
     match step {
         Ok(value) => Ok(written(&value)),
         Err(Step::Refused(message)) => Ok(not_sent(&message)),
-        Err(Step::Failed(message)) => Ok(DispatchedOperation::Unknown(OperationResult::reply(
-            &message,
-        ))),
         Err(Step::Store(error)) => Err(Error::Store(error)),
     }
-}
-
-fn io(error: std::io::Error) -> Step {
-    Step::Failed(error.to_string())
 }
 
 /// Python `text_field`: a stripped text of 1 to `maximum` characters.
@@ -476,11 +392,9 @@ impl ServerTools {
         if !paired.iter().any(|id| id == server) && !(action == "receipt" && server == local) {
             return refuse("Select a paired server");
         }
-        if action == "fetch" {
-            return Box::pin(self.fetch(actor, args, key, server)).await;
-        }
+
         if !matches!(action, "projects" | "folders" | "git" | "receipt") {
-            return refuse("Select list, projects, folders, git, fetch, or receipt");
+            return refuse("Choose list, projects, folders, git, or receipt");
         }
         if action == "receipt" {
             return self.receipt(actor, args, server).await;
@@ -967,392 +881,6 @@ impl ServerTools {
             .await?;
         self.deliver(&server, command, &key).await
     }
-
-    /// Python `_fetch`: copy a remote worker branch into FETCH_HEAD of a local
-    /// repository through a verified Git bundle.
-    async fn fetch(
-        &self,
-        actor: &Actor,
-        args: &Value,
-        key: &str,
-        server: &str,
-    ) -> Result<Value, Step> {
-        let worker_id = field(args, "agent_id").to_owned();
-        let worker = self
-            .read(move |tx| {
-                Ok(AgentRepository::get(tx, &AgentId::from(worker_id.as_str()))?.map(Box::new))
-            })
-            .await?;
-        let Some(worker) = worker else {
-            return refuse("Select a remote worker in this team");
-        };
-        let remote = worker.extra.get("remoteWorker");
-        if worker.root_id != actor.record().root_id
-            || !studio_runtime_store::truthy(remote)
-            || remote
-                .and_then(|remote| remote.get("server"))
-                .and_then(Value::as_str)
-                != Some(server)
-        {
-            return refuse("Select a remote worker in this team");
-        }
-        let branch = match args.get("branch").and_then(Value::as_str) {
-            Some(branch) if !branch.is_empty() && !branch.starts_with('-') => branch.to_owned(),
-            _ => return refuse("Supply a worker branch"),
-        };
-        let destination = args
-            .get("destination")
-            .and_then(Value::as_str)
-            .or_else(|| actor.record().cwd.as_deref())
-            .unwrap_or_default()
-            .to_owned();
-        let branch_for_checks = branch.clone();
-        let base = worker.worker_base_commit.clone();
-        let (destination, known) = blocking(move || -> Result<(String, Vec<String>), Step> {
-            let destination = resolve(&destination);
-            let path = Path::new(&destination);
-            if git(path, &["check-ref-format", "--branch", &branch_for_checks])?.1 != 0 {
-                return refuse("Invalid worker branch");
-            }
-            if git(path, &["rev-parse", "--git-dir"])?.1 != 0 {
-                return refuse("Supply an existing local Git repository");
-            }
-            let mut known = Vec::new();
-            for reference in ["HEAD", "origin/main", "FETCH_HEAD"] {
-                let object = format!("{reference}^{{commit}}");
-                let (output, code) = git(path, &["rev-parse", "--verify", &object])?;
-                let commit = String::from_utf8_lossy(&output).trim().to_owned();
-                if code == 0 && commit_hash(&commit) {
-                    known.push(commit);
-                }
-            }
-            if let Some(base) = base.filter(|base| commit_hash(base)) {
-                let object = format!("{base}^{{commit}}");
-                if git(path, &["cat-file", "-e", &object])?.1 == 0 {
-                    known.push(base);
-                }
-            }
-            Ok((destination, known))
-        })
-        .await?;
-        let signature = request_signature(&json!({
-            "worker": worker.id.0,
-            "branch": branch,
-            "destination": destination,
-        }));
-        let export_key = key.to_owned();
-        let key_owned = key.to_owned();
-        let server_owned = server.to_owned();
-        let signature_for_claim = signature.clone();
-        let worker_cwd = worker.cwd.as_deref().map(str::to_owned);
-        let mut known_sorted = known;
-        known_sorted.sort();
-        known_sorted.dedup();
-        let branch_for_claim = branch.clone();
-        let actor_for_fetch = actor.record().id.0.clone();
-        let claim = self
-            .store
-            .transaction_with(move |tx| -> Result<Result<FetchPayload, Value>, Step> {
-                let parent=task_admission(tx,&key_owned,&actor_for_fetch)?;
-                let admitted=parent.derive_result("server-fetch",&[],&signature_for_claim);
-                let now=(crate::event_write::unix_time().map_err(|_|Step::Refused("The system clock is unavailable".into()))?*1000.0) as i64;
-                if let Some(saved)=crate::event_write::replay_request::<studio_json::OwnedRawJson>(tx,&key_owned,&signature_for_claim,now)?.or(crate::event_write::replay_request::<studio_json::OwnedRawJson>(tx,admitted.id(),&signature_for_claim,now)?) {
-                    let _: FetchReply = studio_json::from_str(saved.reply.as_str()).map_err(StoreError::from)?;
-                    return Ok(Err(studio_json::from_str(saved.reply.as_str()).map_err(StoreError::from)?));
-                }
-                if let Some(prior)=RemoteOutbox::find::<FetchEntry>(tx,RemoteEffect::ServerFetch,&key_owned).map_err(StoreError::from)? {
-                    if prior.signature!=signature_for_claim {return refuse("This request id has different content");}
-                    let state=fetch_state(&prior);
-                    return Ok(match FetchPayload::decode(state,prior.record.export.as_deref())? {
-                        Some(saved)=>Ok(saved),
-                        None=>Err(json!({"requestId":key_owned,"outcome":"unknown","detail":"The original fetch inputs are unavailable. The operation will not be sent again."})),
-                    });
-                }
-                let export=ExportRequest{cwd:worker_cwd.map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value),branch:branch_for_claim,known:studio_runtime_schema::queue_command::Field::Value(known_sorted)};
-                RemoteOutbox::put(tx,RemoteEffect::ServerFetch,&server_owned,&key_owned,&signature_for_claim,OutboxStatus::Pending,None,FetchEntry{state:ServerFetchState::Preparing,export:Some(studio_json::to_string(&export).map_err(StoreError::from)?),admission:admitted},now).map_err(StoreError::from)?;
-                Ok(Ok(FetchPayload::Preparing(export)))
-            })
-            .await?;
-        let preparation = match claim {
-            Err(previous) => return Ok(previous),
-            Ok(preparation) => preparation,
-        };
-        let export = preparation.export().clone();
-        let outcome = self
-            .deliver_exchange(
-                server,
-                crate::orchestration_wire::OrchestrationCommand::Export(export),
-                &export_key,
-            )
-            .await?;
-        if matches!(preparation, FetchPayload::Fetching(_)) {
-            return Ok(
-                json!({"requestId":key,"outcome":"unknown","detail":"The local Git fetch has no final receipt. Inspect FETCH_HEAD; do not repeat it."}),
-            );
-        }
-        let ExchangeOutcome::Applied(reply) = outcome else {
-            return Ok(receipt(&outcome, key));
-        };
-        let metadata: crate::server_git::ExportReply = studio_json::from_str(reply.value.as_str())
-            .map_err(|_| Step::Refused("Invalid remote bundle metadata".into()))?;
-        if metadata.branch != branch {
-            return refuse("Invalid remote bundle branch");
-        }
-        let already = metadata
-            .already_have
-            .clone()
-            .filter(|value| !value.is_empty());
-        if let Some(already) = &already {
-            let destination = destination.clone();
-            let already = already.clone();
-            let present = blocking(move || {
-                Ok(commit_hash(&already)
-                    && git(
-                        Path::new(&destination),
-                        &["cat-file", "-e", &format!("{already}^{{commit}}")],
-                    )?
-                    .1 == 0)
-            })
-            .await?;
-            if !present {
-                return refuse("The advertised commit is absent from the local repository");
-            }
-        }
-        let bytes = match metadata.bytes {
-            0 if already.is_some() => 0,
-            bytes if bytes > 0 && bytes <= MAX_BUNDLE => bytes,
-            _ => return refuse("Invalid remote bundle size"),
-        };
-        let folder = tempfile::Builder::new()
-            .prefix("studio-server-fetch-")
-            .tempdir()
-            .map_err(io)?;
-        let bundle = folder.path().join("worker.bundle");
-        if crate::disk_space::free_bytes(folder.path())
-            .is_some_and(|free| free < bytes.saturating_mul(2))
-        {
-            return Err(Step::Failed(
-                "Insufficient disk space for the remote Git bundle".into(),
-            ));
-        }
-        let mut digest = Sha256::new();
-        let mut data_file = std::fs::File::create(&bundle).map_err(io)?;
-        let mut offset: u64 = 0;
-        while offset < bytes {
-            let chunk_key = key.to_owned();
-            let chunk_receipt = self
-                .deliver_operation(
-                    server,
-                    &[offset.to_string()],
-                    crate::orchestration_wire::OrchestrationCommand::Chunk(
-                        crate::server_git::ChunkRequest {
-                            export: metadata
-                                .export
-                                .as_deref()
-                                .ok_or_else(|| {
-                                    Step::Refused("Invalid remote bundle export".into())
-                                })?
-                                .to_owned(),
-                            offset,
-                        },
-                    ),
-                    &chunk_key,
-                )
-                .await?;
-            let ExchangeOutcome::Applied(reply) = chunk_receipt else {
-                return Ok(receipt(&chunk_receipt, &chunk_key));
-            };
-            let chunk: crate::server_git::ChunkReply = studio_json::from_str(reply.value.as_str())
-                .map_err(|_| Step::Refused("Invalid remote bundle chunk".into()))?;
-            let data = base64::engine::general_purpose::STANDARD
-                .decode(&chunk.data)
-                .ok()
-                .unwrap_or_default();
-            let length = data.len() as u64;
-            if data.is_empty()
-                || data.len() > CHUNK
-                || chunk.offset != offset
-                || chunk.next_offset != offset + length
-                || offset + length > bytes
-                || data_encoding::HEXLOWER.encode(&Sha256::digest(&data)) != chunk.sha256
-            {
-                return refuse("Invalid remote bundle chunk");
-            }
-            use std::io::Write;
-            data_file.write_all(&data).map_err(io)?;
-            digest.update(&data);
-            offset += length;
-        }
-        data_file.sync_all().map_err(io)?;
-        drop(data_file);
-        if already.is_none()
-            && Some(data_encoding::HEXLOWER.encode(&digest.finalize()).as_str())
-                != metadata.sha256.as_deref()
-        {
-            return refuse("The remote bundle checksum differs");
-        }
-        if already.is_none() {
-            let destination = destination.clone();
-            let bundle = bundle.clone();
-            blocking(move || {
-                let command = git_command(
-                    Path::new(&destination),
-                    &["bundle", "verify", &bundle.to_string_lossy()],
-                    false,
-                )
-                .map_err(git_step)?;
-                git_run(&command, BUNDLE_VERIFY_SECONDS).map_err(git_step)
-            })
-            .await?;
-        }
-        let key_owned = key.to_owned();
-        let claimed = self
-            .store
-            .transaction_with(move |tx| -> Result<usize, Step> {
-                let Some(entry) =
-                    RemoteOutbox::find::<FetchEntry>(tx, RemoteEffect::ServerFetch, &key_owned)
-                        .map_err(StoreError::from)?
-                        .filter(|entry| {
-                            entry.status == OutboxStatus::Pending
-                                && entry.record.state == ServerFetchState::Preparing
-                        })
-                else {
-                    return Ok(0);
-                };
-                let record = FetchEntry {
-                    state: ServerFetchState::Fetching,
-                    ..entry.record
-                };
-                let changed = RemoteOutbox::update(
-                    tx,
-                    RemoteEffect::ServerFetch,
-                    &entry.target,
-                    &key_owned,
-                    &entry.signature,
-                    OutboxStatus::Submitted,
-                    None,
-                    record,
-                )
-                .map_err(StoreError::from)?;
-                Ok(usize::from(changed))
-            })
-            .await?;
-        if claimed == 0 {
-            return Ok(json!({
-                "requestId": key,
-                "outcome": "unknown",
-                "detail": "The original local Git fetch is already reserved.",
-            }));
-        }
-        let source = match &already {
-            Some(_) => destination.clone(),
-            None => CanonicalPath::existing(&bundle)
-                .map(CanonicalPath::into_path_buf)
-                .unwrap_or(bundle.clone())
-                .to_string_lossy()
-                .into_owned(),
-        };
-        let reference = already
-            .clone()
-            .unwrap_or_else(|| format!("refs/heads/{branch}"));
-        let destination_for_fetch = destination.clone();
-        let commit = blocking(move || {
-            let path = Path::new(&destination_for_fetch);
-            let command = git_command(path, &["fetch", "--no-tags", &source, &reference], true)
-                .map_err(git_step)?;
-            git_run(&command, BUNDLE_FETCH_SECONDS).map_err(git_step)?;
-            let (output, code) = git(path, &["rev-parse", "FETCH_HEAD"])?;
-            let commit = String::from_utf8_lossy(&output).trim().to_owned();
-            if code != 0 || !commit_hash(&commit) {
-                return Err(Step::Failed(
-                    "Git did not return a final fetch commit".into(),
-                ));
-            }
-            Ok(commit)
-        })
-        .await?;
-        drop(folder);
-        let value = json!({
-            "requestId": key,
-            "server": server,
-            "branch": branch,
-            "commit": commit,
-            "bytes": bytes,
-            "destination": destination,
-        });
-        let reply = FetchReply {
-            request_id: key.to_owned(),
-            server: server.to_owned(),
-            branch,
-            commit,
-            bytes,
-            destination,
-        };
-        let release_key = key.to_owned();
-        let key_owned = key.to_owned();
-        let server_owned = server.to_owned();
-        let release = if already.is_none() {
-            Some(crate::server_git::ReleaseRequest {
-                export: metadata
-                    .export
-                    .as_deref()
-                    .ok_or_else(|| Step::Refused("Invalid remote bundle export".into()))?
-                    .to_owned(),
-            })
-        } else {
-            None
-        };
-        let release_for_write = release.clone();
-        let release_key_for_write = release_key.clone();
-        let now = crate::event_write::unix_time().unwrap_or_default() as i64;
-        self.store
-            .transaction_with(move |tx| -> Result<(), Step> {
-                let entry =
-                    RemoteOutbox::find::<FetchEntry>(tx, RemoteEffect::ServerFetch, &key_owned)
-                        .map_err(StoreError::from)?
-                        .ok_or_else(|| Step::Refused("The fetch reservation is missing".into()))?;
-                crate::event_write::settle_request(tx, &entry.record.admission, None, &reply)?;
-                RemoteOutbox::delete(
-                    tx,
-                    RemoteEffect::ServerFetch,
-                    &entry.target,
-                    &key_owned,
-                    &entry.signature,
-                )
-                .map_err(StoreError::from)?;
-                if let Some(release) = &release_for_write {
-                    crate::multi_server_orchestration::enqueue_in_transaction(
-                        tx,
-                        &server_owned,
-                        crate::orchestration_wire::OrchestrationCommand::Release(release.clone()),
-                        &release_key_for_write,
-                        now,
-                    )
-                    .map_err(|error| match error {
-                        AccessError::Store(error) => Step::Store(error),
-                        AccessError::Sqlite(error) => Step::Store(error.into()),
-                        other @ AccessError::Refused { .. }
-                        | other @ AccessError::Stored { .. } => Step::Refused(other.to_string()),
-                    })?;
-                }
-                Ok(())
-            })
-            .await?;
-        if let Some(release) = release {
-            // The receipt above is final. A failed release stays queued in the
-            // outbox, and the peer removes an unreleased export after a day.
-            if self
-                .deliver(
-                    server,
-                    crate::orchestration_wire::OrchestrationCommand::Release(release),
-                    &release_key,
-                )
-                .await
-                .is_err()
-            {}
-        }
-        Ok(value)
-    }
 }
 
 impl MultiServerToolPort for ServerTools {
@@ -1365,209 +893,6 @@ impl MultiServerToolPort for ServerTools {
     ) -> BoxFuture<'a, Result<DispatchedOperation, Error>> {
         Box::pin(async move { settle(Box::pin(self.run(actor, args, key)).await) })
     }
-
-    fn worker_call<'a>(
-        &'a self,
-        actor: &'a Actor,
-        action: &'a str,
-        args: &'a Value,
-        key: &'a str,
-    ) -> BoxFuture<'a, Result<DispatchedOperation, Error>> {
-        Box::pin(async move { settle(self.worker(actor, action, args, key).await) })
-    }
-}
-
-impl ServerTools {
-    /// Python `worker_call`. The home server answers with a receipt: a refusal
-    /// is the tool's refusal, an unknown outcome stays unknown and saved.
-    async fn worker(
-        &self,
-        actor: &Actor,
-        action: &str,
-        args: &Value,
-        key: &str,
-    ) -> Result<Value, Step> {
-        let origin = actor.record().extra.get("remoteOrigin");
-        let home = origin
-            .and_then(|origin| origin.get("home"))
-            .and_then(Value::as_str);
-        let link = origin
-            .and_then(|origin| origin.get("link"))
-            .and_then(Value::as_str);
-        let (Some(home), Some(link)) = (home.map(str::to_owned), link.map(str::to_owned)) else {
-            return refuse("Unknown remote-parent link");
-        };
-        let key = key.to_owned();
-        let actor_id = actor.record().id.0.clone();
-        let epoch = actor.record().epoch;
-        let link_for_read = link.clone();
-        let parent_epoch = self
-            .read(move |tx| {
-                let current = checked_actor(tx, &actor_id)?;
-                if current.epoch != epoch {
-                    return refuse("The worker was stopped");
-                }
-                let raw: Option<String> = tx
-                    .query_row(
-                        "SELECT record FROM runtime_server_links WHERE id=?1",
-                        [&link_for_read],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let Some(raw) = raw else {
-                    return refuse("Unknown remote-parent link");
-                };
-                let record: Value = studio_json::from_str(&raw)
-                    .map_err(|_| Step::Refused("The remote-parent link is invalid".into()))?;
-                record
-                    .get("parentEpoch")
-                    .and_then(Value::as_i64)
-                    .ok_or_else(|| Step::Refused("The remote-parent link is invalid".into()))
-            })
-            .await?;
-        use crate::orchestration_wire::OrchestrationCommand;
-        use crate::orchestration_worker::{MoveSend, WorkerCall, WorkerMessage};
-        let command = match action {
-            "message" => OrchestrationCommand::Message(WorkerCall {
-                link,
-                worker: actor.record().id.0.clone(),
-                epoch,
-                parent_epoch,
-                args: <WorkerMessage as serde::Deserialize>::deserialize(args)
-                    .map_err(|_| Step::Refused("Invalid message arguments".into()))?,
-            }),
-            "move_send" => OrchestrationCommand::MoveSend(WorkerCall {
-                link,
-                worker: actor.record().id.0.clone(),
-                epoch,
-                parent_epoch,
-                args: <MoveSend as serde::Deserialize>::deserialize(args)
-                    .map_err(|_| Step::Refused("Invalid move-send request".into()))?,
-            }),
-            _ => {
-                let kind = action
-                    .parse()
-                    .map_err(|_| Step::Refused("Invalid cross-server action".into()))?;
-                OrchestrationCommand::remaining(kind, json!({"link":link,"worker":actor.record().id.0,"epoch":epoch,"parentEpoch":parent_epoch,"args":args}))
-                    .ok_or_else(|| Step::Refused("Invalid cross-server action".into()))?
-            }
-        };
-        let mut receipt = self.deliver(&home, command, &key).await?;
-        match receipt["outcome"].as_str() {
-            Some("not_applied") => refuse(field(&receipt, "error")),
-            Some("applied") => Ok(receipt["value"].take()),
-            _ => {
-                receipt["detail"] = json!("The request is saved. Do not submit another identity.");
-                Ok(receipt)
-            }
-        }
-    }
-}
-
-/// Python `Runtime.dynamic` and `chat_message`: the tool calls of a remote
-/// worker (`remoteOrigin`) that its home server answers, as (worker-call
-/// action, call arguments). `None` runs the tool on this server. `Err` is a
-/// refusal before any write. Arguments are never resolved on this server.
-pub(crate) fn worker_route(
-    tool: &str,
-    args: &Value,
-    actor: &studio_runtime_store::AgentRecord,
-) -> Option<Result<(&'static str, Value), &'static str>> {
-    if !studio_runtime_store::truthy(actor.extra.get("remoteOrigin")) {
-        return None;
-    }
-    let moved = actor.moved_from_active();
-    match tool {
-        "orchestration_agent_manage" if moved && args.get("action") != Some(&json!("park")) => {
-            Some(Err("The home server does not support this action"))
-        }
-        "orchestration_context"
-            if matches!(
-                args.get("topic").and_then(Value::as_str),
-                Some("plan" | "complaints")
-            ) =>
-        {
-            Some(Err("The home server does not support this action"))
-        }
-        "orchestration_task" | "orchestration_complaint" => {
-            Some(Err("The home server does not support this action"))
-        }
-        "orchestration_interrupt" | "orchestration_spawn" if moved => {
-            Some(Err("The home server does not support this action"))
-        }
-        "orchestration_send" if moved => Some(Ok(("move_send", args.clone()))),
-        "orchestration_status" | "orchestration_peers" => {
-            Some(Err("The home server does not support this action"))
-        }
-        "orchestration_chat_read" => {
-            let room = args
-                .get("room_id")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            (!room.starts_with("remote:") && !room.starts_with("federated:"))
-                .then_some(Err("The home server does not support this action"))
-        }
-        "orchestration_message" => {
-            let target = args.get("target").and_then(Value::as_str)?;
-            if target == "user" || target.starts_with("federated:") || target.starts_with("remote:")
-            {
-                return None;
-            }
-            Some(worker_message(target, args))
-        }
-        _ => None,
-    }
-}
-
-/// Python `chat_message` checks before its `worker_call('message', ...)`.
-pub(crate) fn worker_message(
-    target: &str,
-    args: &Value,
-) -> Result<(&'static str, Value), &'static str> {
-    let importance = match args.get("importance") {
-        None => "message",
-        Some(value) => value.as_str().unwrap_or_default(),
-    };
-    if !matches!(
-        importance,
-        "message" | "progress" | "question" | "blocker" | "result"
-    ) {
-        return Err("Unknown message importance");
-    }
-    let delivery = studio_runtime_schema::DeliveryMoment::for_message(args)
-        .map_err(|_| "Invalid delivery moment")?;
-    let progress_key = args.get("progress_key").filter(|value| !value.is_null());
-    let progress_version = args
-        .get("progress_version")
-        .filter(|value| !value.is_null());
-    if (progress_key.is_some() || progress_version.is_some())
-        && (importance != "progress"
-            || !progress_key
-                .and_then(Value::as_str)
-                .is_some_and(|key| (1..=200).contains(&key.chars().count()))
-            || !progress_version.is_some_and(|version| version.is_u64()))
-    {
-        return Err(
-            "Versioned progress requires a progress_key and nonnegative integer progress_version",
-        );
-    }
-    let text = args
-        .get("text")
-        .and_then(Value::as_str)
-        .map(crate::event_write::python_strip)
-        .filter(|text| (1..=12_000).contains(&text.chars().count()))
-        .ok_or("Message must have 1 to 12000 characters")?;
-    Ok((
-        "message",
-        json!({
-            "target": target,
-            "text": text,
-            "importance": importance,
-            "progress_key": progress_key,
-            "progress_version": progress_version,
-            "delivery": delivery,
-        }),
-    ))
 }
 
 /// Python `checked_actor(db, actor, actor)`.
@@ -1585,52 +910,6 @@ fn checked_actor(
         return refuse("The caller is stopped");
     }
     Ok(agent)
-}
-
-/// Python `expired_receipt`.
-fn resolve(path: &str) -> String {
-    let expanded = match path.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join(rest.trim_start_matches('/')))
-            .unwrap_or_else(|| PathBuf::from(path)),
-        _ => PathBuf::from(path),
-    };
-    let absolute = if expanded.is_absolute() {
-        expanded
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(&expanded))
-            .unwrap_or(expanded)
-    };
-    studio_runtime_store::path_identity::CanonicalPath::ancestor_nonstrict(&absolute)
-        .map(CanonicalPath::into_path_buf)
-        .unwrap_or(absolute)
-        .to_string_lossy()
-        .into_owned()
-}
-
-/// A Git failure after the fetch claim leaves its outcome unknown.
-fn git_step(error: server_git::GitError) -> Step {
-    match error {
-        server_git::GitError::Refused(message) => Step::Refused(message),
-        server_git::GitError::Failed(message) => Step::Failed(message),
-    }
-}
-
-/// A Git read before the fetch claim: any failure proves nothing was fetched.
-fn git(path: &Path, arguments: &[&str]) -> Result<(Vec<u8>, i32), Step> {
-    git_read(path, arguments).map_err(|error| Step::Refused(error.to_string()))
-}
-
-async fn blocking<T: Send + 'static>(
-    operation: impl FnOnce() -> Result<T, Step> + Send + 'static,
-) -> Result<T, Step> {
-    studio_runtime_process::blocking_pool::spawn_blocking(
-        "runtime-services/multi_server_tools",
-        operation,
-    )
-    .await
-    .map_err(|_| Step::Store(StoreError::WriterPoisoned))?
 }
 
 /// Python `codex_server_exec.validate`.

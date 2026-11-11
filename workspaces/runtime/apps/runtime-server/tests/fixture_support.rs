@@ -38,9 +38,33 @@ pub(crate) async fn seed(store: &RuntimeStore, root: &Path, kind: FixtureKind) -
         FixtureKind::Dispatch => include_str!("fixtures/dispatch.json"),
         FixtureKind::Recovery => include_str!("fixtures/recovery.json"),
     };
-    let fixture: StateFixture =
+    let mut fixture: StateFixture =
         studio_json::from_str(&data.replace(STATE_PLACEHOLDER, &root.to_string_lossy()))
             .expect("frozen state fixture");
+    // Frozen expectations describe stored source rows; admit them through the same dated transform.
+    let expected = if let Some(stored) = fixture.agents.get_mut("stored") {
+        stored
+            .as_object_mut()
+            .expect("frozen stored agents")
+            .values_mut()
+            .collect::<Vec<_>>()
+    } else {
+        fixture
+            .agents
+            .as_array_mut()
+            .expect("frozen dispatch agents")
+            .iter_mut()
+            .collect::<Vec<_>>()
+    };
+    for agent in expected {
+        let raw = studio_json::to_string(agent).expect("frozen agent JSON");
+        let current = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+            agent["id"].as_str().expect("frozen agent id"),
+            &raw,
+        )
+        .expect("dated frozen agent transform");
+        *agent = studio_json::from_str(&current).expect("migrated frozen agent");
+    }
     store
         .transaction(move |tx| {
             for row in fixture.tables.runtime_projects {
@@ -52,7 +76,11 @@ pub(crate) async fn seed(store: &RuntimeStore, root: &Path, kind: FixtureKind) -
             // The frozen records predate the project record kind.
             studio_runtime_store::test_fixtures::project_record_kind(tx)?;
             for row in fixture.tables.runtime_agents {
-                let record: Value = studio_json::from_str(&row.record)?;
+                let current = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+                    &row.id,
+                    &row.record,
+                )?;
+                let record: Value = studio_json::from_str(&current)?;
                 studio_runtime_store::agent_volatile::put(tx, &row.id, &record, true)?;
             }
             Ok(())

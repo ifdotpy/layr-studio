@@ -28,21 +28,7 @@ use studio_runtime_store::sha256_hex;
 
 pub use studio_runtime_schema::creation_intent::AgentRole as Role;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionTool {
-    #[serde(rename = "orchestration_move")]
-    Move,
-    #[serde(rename = "orchestration_teleport")]
-    Teleport,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CatalogSource {
-    Current,
-    Legacy,
-}
+pub use studio_runtime_schema::native_thread_record::{CatalogSource, SessionTool};
 
 /// Preserve absent versus explicit null in Python's saved preparation settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,7 +1,7 @@
 //! Idempotent startup cleanup for retired review assignments.
 //!
 //! Remove
-//! `reviewSchedules` and `reviewTargets`, and cancel only pending `chat_review`
+//! `reviewTargets`, and cancel only pending `chat_review`
 //! events.
 //! Payload retention remains an optional manual operation; Rust reads every
 //! coherent `payload-v1:tasks` phase. Rust provider stderr is drained to a sink
@@ -10,18 +10,15 @@
 //! excludes these retired keys; rebuilding a current projection is a no-op,
 //! while a stale projection is repaired through the sequenced entity writer.
 
-use rusqlite::{Connection, OptionalExtension, Transaction};
+use rusqlite::{OptionalExtension, Transaction};
 use serde::Serialize;
 use studio_json::Value;
 use studio_runtime_schema::room_record::RoomRecord;
-use studio_runtime_store::{
-    AgentRecord, AgentRepository, RuntimeStore, StoreResult, SyncDocumentsRepository,
-};
+use studio_runtime_store::{RuntimeStore, StoreResult, SyncDocumentsRepository};
 
 /// Counts rows changed by the retired-review cleanup.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct ReviewCleanupCounts {
-    pub agents: u64,
     pub rooms: u64,
     pub pending: u64,
 }
@@ -37,19 +34,6 @@ fn remove_review_assignments_in_transaction(
     transaction: &Transaction<'_>,
 ) -> StoreResult<ReviewCleanupCounts> {
     let mut counts = ReviewCleanupCounts::default();
-    if table_exists(transaction, "runtime_agents")? {
-        let rows = records_with_field(transaction, "runtime_agents", "reviewSchedules")?;
-        for (_, mut value) in rows {
-            value
-                .as_object_mut()
-                .expect("stored agent records are JSON objects")
-                .remove("reviewSchedules");
-            let record = AgentRecord::from_value(value)?;
-            AgentRepository::put(transaction, &record)?;
-            remove_projection_field(transaction, "agent", &record.id.0, "reviewSchedules")?;
-            counts.agents += 1;
-        }
-    }
     if table_exists(transaction, "runtime_rooms")? {
         let mut statement = transaction.prepare(
             "SELECT id,json_remove(record,'$.reviewTargets') FROM runtime_rooms WHERE CASE WHEN json_valid(record) THEN json_type(record,'$.reviewTargets') IS NOT NULL ELSE 0 END ORDER BY id",
@@ -124,31 +108,6 @@ fn remove_projection_field(
         )?;
     }
     Ok(())
-}
-
-fn records_with_field(
-    connection: &Connection,
-    table: &'static str,
-    field: &'static str,
-) -> StoreResult<Vec<(String, Value)>> {
-    let mut statement = connection.prepare(&format!(
-        "SELECT id,record FROM {table} WHERE json_type(record,'$.{field}') IS NOT NULL ORDER BY id"
-    ))?;
-    statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .map(|row| {
-            let (id, raw) = row?;
-            let value: Value = studio_json::from_str(&raw).map_err(|_| {
-                studio_runtime_store::StoreError::InvalidStoredRecord {
-                    object: table,
-                    id: id.clone(),
-                }
-            })?;
-            Ok((id, value))
-        })
-        .collect()
 }
 
 fn table_exists(transaction: &Transaction<'_>, table: &str) -> StoreResult<bool> {
@@ -274,10 +233,10 @@ mod tests {
                 "INSERT INTO runtime_agents(id,record) VALUES (?1,?2), (?3,?4)",
                 (
                     "agent-a",
-                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent-a","rootId":"agent-a","epoch":0,"status":"idle","reviewSchedules":[{"id":"retired"}],"extra":1})
+                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent-a","rootId":"agent-a","epoch":0,"status":"idle","reviewSchedules":[{"id":"retired"}],"name":"preserved-a"})
                         .to_string(),
                     "agent-b",
-                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent-b","rootId":"agent-b","epoch":0,"status":"idle","extra":2}).to_string(),
+                    json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"agent-b","rootId":"agent-b","epoch":0,"status":"idle","name":"preserved-b"}).to_string(),
                 ),
             )
             .expect("Python-shaped agent records insert");
@@ -299,6 +258,14 @@ mod tests {
                  ('other','agent-a','followup','other body','pending',4,0,NULL,NULL);",
             )
             .expect("fixture events insert");
+        let tx = connection.unchecked_transaction().unwrap();
+        studio_runtime_store::test_fixtures::retire_agent_keys(&tx).unwrap();
+        tx.commit().unwrap();
+        assert!(
+            snapshot(connection)["agents"][0]["record"]
+                .get("reviewSchedules")
+                .is_none()
+        );
     }
 
     fn snapshot(connection: &Connection) -> Value {
@@ -402,18 +369,13 @@ mod tests {
         assert_eq!(
             counts,
             ReviewCleanupCounts {
-                agents: 1,
                 rooms: 1,
                 pending: 1,
             }
         );
         assert_eq!(
-            after["agent_generation"],
-            before["agent_generation"]
-                .as_i64()
-                .expect("agent generation should be an integer")
-                + 1,
-            "the store record writer advances the persistent agent generation trigger"
+            after["agent_generation"], before["agent_generation"],
+            "room cleanup does not rewrite agent rows after retirement"
         );
         assert_eq!(after["sync_documents"], before["sync_documents"]);
         let event = |snapshot: &Value, id: &str| {
@@ -432,15 +394,7 @@ mod tests {
         cancelled["status"] = json!("cancelled");
         cancelled["error"] = json!("Scheduled chat reviews have been removed");
         assert_eq!(event(&after, "pending"), cancelled);
-        let mut expected_agents = before["agents"].clone();
-        expected_agents[0]["record"]["accountKey"] = json!("default");
-        expected_agents[0]["record"]["capacity"] = json!({"kind":"automatic","max":64});
-        expected_agents[0]["record"]["naming"] = json!("automatic");
-        expected_agents[0]["record"]
-            .as_object_mut()
-            .expect("agent record object")
-            .remove("reviewSchedules");
-        assert_eq!(after["agents"], expected_agents);
+        assert_eq!(after["agents"], before["agents"]);
         let mut expected_rooms = before["rooms"].clone();
         expected_rooms[0]["record"]
             .as_object_mut()
@@ -492,7 +446,6 @@ mod tests {
             transaction.commit().expect("replay commits");
             counts
         };
-        assert_eq!(first.agents, 1);
         assert_eq!(first.rooms, 1);
         assert_eq!(first.pending, 1);
         assert_eq!(second, ReviewCleanupCounts::default());

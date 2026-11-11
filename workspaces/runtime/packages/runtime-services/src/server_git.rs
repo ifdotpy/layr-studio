@@ -66,25 +66,6 @@ pub struct ReleaseRequest {
     pub export: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ExportReply {
-    pub already_have: Option<String>,
-    pub export: Option<String>,
-    pub bytes: u64,
-    pub sha256: Option<String>,
-    pub branch: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ChunkReply {
-    pub offset: u64,
-    pub next_offset: u64,
-    pub data: String,
-    pub sha256: String,
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum GitReply {

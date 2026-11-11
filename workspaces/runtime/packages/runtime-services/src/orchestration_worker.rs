@@ -103,18 +103,3 @@ pub struct MoveSend {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub request_id: Field<String>,
 }
-
-#[derive(Clone, Debug)]
-pub enum WorkerAction {
-    Message(WorkerCall<WorkerMessage>),
-    MoveSend(WorkerCall<MoveSend>),
-}
-
-impl WorkerAction {
-    pub fn identity(&self) -> (&str, &str, i64, i64) {
-        match self {
-            Self::Message(call) => (&call.link, &call.worker, call.epoch, call.parent_epoch),
-            Self::MoveSend(call) => (&call.link, &call.worker, call.epoch, call.parent_epoch),
-        }
-    }
-}

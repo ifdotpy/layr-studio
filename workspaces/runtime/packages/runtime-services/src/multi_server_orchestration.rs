@@ -706,7 +706,6 @@ pub struct RuntimeOrchestrationEffects {
     browser_callback: Arc<dyn BrowserCallbackEffect>,
     default_account: String,
     known_accounts: Vec<crate::account_policy::PublicAccount>,
-    lifecycle_ports: Option<Arc<dyn crate::agent_lifecycle_runtime::LifecyclePorts>>,
     /// The installed app that this server offers to paired servers (docs/peer-updates.md).
     update_offer: Arc<crate::peer_updates::Offer>,
     /// Where a paired server's `projects.changed` notice goes; no hook, no refresh.
@@ -723,25 +722,6 @@ impl RuntimeOrchestrationEffects {
             browser_callback,
             default_account: "default".to_owned(),
             known_accounts: Vec::new(),
-            lifecycle_ports: None,
-            update_offer: Arc::new(crate::peer_updates::Offer::installed()),
-            projects_changed: None,
-        }
-    }
-
-    pub fn with_lifecycle_ports(
-        store: Arc<RuntimeStore>,
-        lifecycle_ports: Arc<dyn crate::agent_lifecycle_runtime::LifecyclePorts>,
-    ) -> Self {
-        let browser_callback = Arc::new(crate::browser::BrowserCallbackReceiver::new(Arc::clone(
-            &store,
-        )));
-        Self {
-            default_account: "default".to_owned(),
-            known_accounts: Vec::new(),
-            store,
-            browser_callback,
-            lifecycle_ports: Some(lifecycle_ports),
             update_offer: Arc::new(crate::peer_updates::Offer::installed()),
             projects_changed: None,
         }
@@ -758,25 +738,6 @@ impl RuntimeOrchestrationEffects {
             browser_callback,
             default_account,
             known_accounts,
-            lifecycle_ports: None,
-            update_offer: Arc::new(crate::peer_updates::Offer::installed()),
-            projects_changed: None,
-        }
-    }
-
-    pub fn with_project_accounts_and_lifecycle_ports(
-        store: Arc<RuntimeStore>,
-        browser_callback: Arc<dyn BrowserCallbackEffect>,
-        default_account: String,
-        known_accounts: Vec<crate::account_policy::PublicAccount>,
-        lifecycle_ports: Arc<dyn crate::agent_lifecycle_runtime::LifecyclePorts>,
-    ) -> Self {
-        Self {
-            store,
-            browser_callback,
-            default_account,
-            known_accounts,
-            lifecycle_ports: Some(lifecycle_ports),
             update_offer: Arc::new(crate::peer_updates::Offer::installed()),
             projects_changed: None,
         }
@@ -854,80 +815,6 @@ impl RuntimeOrchestrationEffects {
                 "The backup write could not run",
             )),
         }
-    }
-
-    async fn stop_worker(
-        &self,
-        principal: &str,
-        request_id: &str,
-        payload: &crate::orchestration_worker::StopPayload,
-    ) -> Result<ExchangeOutcome, AccessError> {
-        let Some(ports) = self.lifecycle_ports.as_ref() else {
-            return Err(refused(
-                501,
-                "orchestration_effect",
-                "The remote stop lifecycle is unavailable",
-            ));
-        };
-        let link = payload.link.as_str();
-        let worker = payload.worker.as_str();
-        let control_epoch = payload.control_epoch;
-        let reason = payload
-            .reason
-            .value()
-            .map(String::as_str)
-            .unwrap_or("Stopped by the parent")
-            .to_owned();
-        if request_id.is_empty() || link.is_empty() || worker.is_empty() {
-            return Err(refused(
-                400,
-                "invalid_request",
-                "Invalid remote stop request",
-            ));
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| refused(503, "clock_unavailable", "The system clock is unavailable"))?
-            .as_secs_f64();
-        let action = crate::agent_management::Action::RemoteStop {
-            principal: principal.to_owned(),
-            link: link.to_owned(),
-            target: worker.to_owned(),
-            request_id: request_id.to_owned(),
-            control_epoch,
-            reason,
-        };
-        let value = crate::agent_lifecycle_runtime::execute(
-            Arc::clone(&self.store),
-            &action,
-            now,
-            Arc::clone(ports),
-        )
-        .await
-        .map_err(|error| match error {
-            crate::agent_management::ManagementError::Expired => {
-                refused(410, "request_expired", "The request ID expired")
-            }
-            crate::agent_management::ManagementError::Unavailable(name) => {
-                refused(501, "orchestration_dependency", name)
-            }
-            crate::agent_management::ManagementError::Invalid(message) => {
-                refused(409, "stop_refused", message)
-            }
-            crate::agent_management::ManagementError::Stored { .. }
-            | crate::agent_management::ManagementError::Store(_) => refused(
-                503,
-                "stop_unavailable",
-                "The remote stop could not be committed",
-            ),
-        })?;
-        let result = applied(&value)?;
-        let target = worker.to_owned();
-        self.store
-            .read_async("runtime-services/remote-stop-outcome", move |db| {
-                refresh_remote_stop(db, &target, result)
-            })
-            .await
     }
 
     async fn project_location(
@@ -1116,197 +1003,6 @@ impl RuntimeOrchestrationEffects {
             request_id: None,
             removed: Some(true),
         })
-    }
-
-    async fn worker_call(
-        &self,
-        principal: &str,
-        key: &str,
-        call: crate::orchestration_worker::WorkerAction,
-    ) -> Result<ExchangeOutcome, AccessError> {
-        let (link_id, worker_id, epoch, parent_epoch) = call.identity();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| refused(503, "clock_unavailable", "The system clock is unavailable"))?
-            .as_secs_f64();
-        let move_admission = if let crate::orchestration_worker::WorkerAction::MoveSend(call) =
-            &call
-        {
-            let target_id = Some(call.args.agent_id.as_str())
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| refused(400, "invalid_request", "Invalid move-send request"))?;
-            let target_id = target_id.to_owned();
-            Some(
-                self.store
-                    .read_async(
-                        "runtime-services/multi_server_orchestration",
-                        move |connection| {
-                            crate::message_admission::MessageIngressAdmission::read(
-                                connection, &target_id,
-                            )
-                            .map_err(|_| {
-                                refused(503, "send_admission", "The message could not be admitted")
-                            })
-                        },
-                    )
-                    .await?
-                    .prepare()
-                    .await
-                    .map_err(|_| {
-                        refused(503, "send_admission", "The message could not be admitted")
-                    })?,
-            )
-        } else {
-            None
-        };
-        let link_id = link_id.to_owned();
-        let principal = principal.to_owned();
-        let worker_id = worker_id.to_owned();
-        let key = key.to_owned();
-        self.store
-            .transaction_with(move |tx| {
-                let link_raw: Option<String> = tx
-                    .query_row(
-                        "SELECT record FROM runtime_server_links WHERE id=?1",
-                        [&link_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let link: Value = studio_json::from_str(link_raw.as_deref().ok_or_else(|| {
-                    refused(
-                        404,
-                        "link_unavailable",
-                        "The remote-parent link is unavailable",
-                    )
-                })?)
-                .map_err(|_| refused(503, "invalid_record", "The remote-parent link is invalid"))?;
-                if link["side"] != "home"
-                    || link["server"] != principal
-                    || link["parentEpoch"].as_i64() != Some(parent_epoch)
-                    || !link["workers"].as_array().is_some_and(|workers| {
-                        workers
-                            .iter()
-                            .any(|worker| worker.as_str() == Some(worker_id.as_str()))
-                    })
-                {
-                    return Err(refused(
-                        403,
-                        "link_owner",
-                        "The remote-parent link is invalid",
-                    ));
-                }
-                let parent_id = link.get("parent").and_then(Value::as_str).ok_or_else(|| {
-                    refused(503, "invalid_record", "The remote-parent link is invalid")
-                })?;
-                let parent = studio_runtime_store::AgentRepository::get(
-                    tx,
-                    &studio_runtime_store::AgentId::from(parent_id),
-                )?
-                .ok_or_else(|| {
-                    refused(404, "parent_unavailable", "The parent agent is unavailable")
-                })?;
-                if parent.epoch as i64 != parent_epoch
-                    || parent.auto_wake != Some(true)
-                    || parent.is_deleted()
-                {
-                    return Err(refused(409, "parent_stopped", "The home team was stopped"));
-                }
-                let worker = studio_runtime_store::AgentRepository::get(
-                    tx,
-                    &studio_runtime_store::AgentId::from(worker_id.as_str()),
-                )?
-                .ok_or_else(|| {
-                    refused(
-                        404,
-                        "worker_unavailable",
-                        "The remote worker is unavailable",
-                    )
-                })?;
-                let expected_remote = json!({"server":principal,"link":link_id});
-                if worker.epoch != epoch
-                    || worker.extra.get("remoteWorker") != Some(&expected_remote)
-                    || !worker.moved_to_active()
-                    || worker.auto_wake != Some(true)
-                    || worker.is_deleted()
-                {
-                    return Err(refused(409, "worker_stopped", "The worker was stopped"));
-                }
-                match call {
-                    crate::orchestration_worker::WorkerAction::Message(call) => {
-                        crate::provider_callbacks::tools::services::messages::send_remote_worker(
-                            tx, &worker_id, &call.args, &key, now,
-                        )
-                        .map(|value| ExchangeOutcome::Applied(AppliedReply::new(value)))
-                        .map_err(callback_error)
-                    }
-                    crate::orchestration_worker::WorkerAction::MoveSend(call) => {
-                        let args = call.args;
-                        let target_id = Some(args.agent_id.as_str())
-                            .filter(|id| !id.is_empty())
-                            .ok_or_else(|| {
-                                refused(400, "invalid_request", "Invalid move-send request")
-                            })?;
-                        let message = Some(crate::event_write::python_strip(&args.text))
-                            .filter(|text| {
-                                !text.is_empty()
-                                    && crate::coordination::message_text_within_limit(text)
-                            })
-                            .ok_or_else(|| {
-                                refused(400, "invalid_request", "Invalid move-send request")
-                            })?;
-                        let delivery = DeliveryMoment::for_event_parts(
-                            "",
-                            &args.text,
-                            args.delivery.value().map(String::as_str),
-                        )
-                        .map_err(|_| refused(400, "invalid_request", "Invalid delivery moment"))?;
-                        let target =
-                            crate::event_write::checked_agent(tx, target_id).map_err(|_| {
-                                refused(
-                                    404,
-                                    "target_unavailable",
-                                    "The target agent is unavailable",
-                                )
-                            })?;
-                        if target.root_id != worker.root_id
-                            || target.id == worker.id
-                            || !crate::managed_host_tools::is_descendant(tx, &worker_id, target_id)
-                                .map_err(|_| {
-                                    refused(
-                                        503,
-                                        "invalid_record",
-                                        "A stored agent record is invalid",
-                                    )
-                                })?
-                            || target.auto_wake != Some(true)
-                        {
-                            return Err(refused(
-                                403,
-                                "target_forbidden",
-                                "The worker cannot message this agent",
-                            ));
-                        }
-                        crate::coordination::send_followup(
-                            tx,
-                            crate::coordination::AgentFollowup {
-                                sender_id: &worker_id,
-                                sender_epoch: epoch,
-                                recipient_id: target_id,
-                                id: &key,
-                                text: message,
-                                delivery,
-                                now,
-                            },
-                            move_admission.as_ref().ok_or_else(|| {
-                                refused(503, "send_admission", "The message could not be admitted")
-                            })?,
-                        )
-                        .map_err(|_| refused(403, "send_refused", "The message was refused"))
-                        .and_then(|result| applied(&result.receipt))
-                    }
-                }
-            })
-            .await
     }
 }
 
@@ -1775,36 +1471,11 @@ async fn receive_remote_input(
     Ok(ExchangeOutcome::Applied(AppliedReply::new(result)))
 }
 
-fn callback_error(error: crate::provider_callbacks::CallbackError) -> AccessError {
-    use crate::provider_callbacks::CallbackError as Callback;
-    match error {
-        Callback::Expired => refused(410, "request_expired", "The request ID expired"),
-        Callback::Store(error) => AccessError::Store(error),
-        Callback::InvalidResultSchema(_) => {
-            refused(400, "invalid_result_schema", "Invalid result_schema")
-        }
-        Callback::Invalid(message) => refused(400, "message_refused", message),
-        Callback::Dependency(message) => refused(501, "orchestration_dependency", message),
-        Callback::Conflict => refused(
-            409,
-            "request_conflict",
-            "This request conflicts with a saved message",
-        ),
-        Callback::Stale | Callback::Refusal(_) => {
-            refused(409, "worker_stopped", "The worker was stopped")
-        }
-        Callback::Unknown => refused(503, "message_unknown", "The message outcome is unknown"),
-        Callback::Stored(_) => refused(503, "invalid_record", "A stored message record is invalid"),
-    }
-}
-
 impl OrchestrationEffects for RuntimeOrchestrationEffects {
     fn supports(&self, action: &str) -> bool {
         matches!(
             action,
             "event"
-                | "message"
-                | "move_send"
                 | "input"
                 | "browser_callback"
                 | "folders"
@@ -1820,7 +1491,6 @@ impl OrchestrationEffects for RuntimeOrchestrationEffects {
             || action == crate::device_trust::ACTION
             || crate::peer_updates::ACTIONS.contains(&action)
             || action == crate::peer_backup::ACTION
-            || (action == "stop" && self.lifecycle_ports.is_some())
     }
 
     fn execute<'a>(
@@ -1866,26 +1536,13 @@ impl OrchestrationEffects for RuntimeOrchestrationEffects {
                     )
                     .await
                 }
-                OrchestrationCommand::Stop(payload) => {
-                    self.stop_worker(principal, &envelope.request_id, payload)
-                        .await
-                }
-                OrchestrationCommand::Message(payload) => {
-                    self.worker_call(
-                        principal,
-                        &envelope.request_id,
-                        crate::orchestration_worker::WorkerAction::Message(payload.clone()),
-                    )
-                    .await
-                }
-                OrchestrationCommand::MoveSend(payload) => {
-                    self.worker_call(
-                        principal,
-                        &envelope.request_id,
-                        crate::orchestration_worker::WorkerAction::MoveSend(payload.clone()),
-                    )
-                    .await
-                }
+                OrchestrationCommand::Stop(_)
+                | OrchestrationCommand::Message(_)
+                | OrchestrationCommand::MoveSend(_) => Err(refused(
+                    501,
+                    "orchestration_effect",
+                    "The remote worker route is unavailable",
+                )),
                 OrchestrationCommand::Folders(payload) => {
                     let path = payload.cwd.value().cloned();
                     let result = studio_runtime_process::blocking_pool::spawn_blocking(

@@ -16,6 +16,7 @@ use studio_runtime_store::{
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Seed {
+    #[serde(deserialize_with = "historical_agents")]
     agents: Vec<AgentRecord>,
     event_metadata: Vec<Metadata>,
     events: Vec<Event>,
@@ -31,6 +32,21 @@ struct Seed {
     metadata: Vec<String>,
     #[serde(rename = "analytics.sqlite3")]
     analytics: Vec<String>,
+}
+fn historical_agents<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> Result<Vec<AgentRecord>, D::Error> {
+    Vec::<studio_json::OwnedRawJson>::deserialize(de)?
+        .into_iter()
+        .map(|raw| {
+            let current = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+                "callback-seed",
+                raw.as_str(),
+            )
+            .map_err(serde::de::Error::custom)?;
+            studio_json::from_str(&current).map_err(serde::de::Error::custom)
+        })
+        .collect()
 }
 #[derive(Deserialize)]
 struct SeedTool {
@@ -211,6 +227,16 @@ pub(crate) async fn state() -> (tempfile::TempDir, RuntimeStore, Value) {
                 format!("{}:{id}", effect["kind"].as_str().expect("effect kind")),
             );
         }
+    }
+    // Expected agent inputs are historical specimens too; use startup's exact
+    // retirement transform before passing them back through current writers.
+    for agent in oracle["agents"]
+        .as_array_mut()
+        .expect("oracle agent inputs")
+    {
+        *agent = studio_runtime_store::test_fixtures::historical_agent(agent)
+            .expect("historical oracle agent")
+            .value();
     }
     replace_ids(&mut oracle, &ids);
     for task in &mut seed.tool_requests {

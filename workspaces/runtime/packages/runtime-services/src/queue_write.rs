@@ -51,7 +51,14 @@ mod receipt_tests {
             AgentRecord, AgentRepository, agent_volatile::publication_work,
         };
         let mut db = studio_runtime_store::test_canvas();
-        let agent = AgentRecord::from_value(studio_json::json!({"id":"agent","rootId":"agent","epoch":1,"compactions":0,"provider":"codex","accountKey":"default","status":"idle","future":{"retained":"x".repeat(65536)}})).unwrap();
+        let mut raw = studio_json::json!({"id":"agent","rootId":"agent","epoch":1,"compactions":0,"provider":"codex","accountKey":"default","status":"idle","future":{"retained":"x".repeat(65536)}});
+        assert!(
+            AgentRecord::from_value(raw.clone()).is_err(),
+            "unknown root keys are refused"
+        );
+        let retained = raw.as_object_mut().unwrap().remove("future").unwrap();
+        raw["error"] = retained;
+        let agent = AgentRecord::from_value(raw).unwrap();
         AgentRepository::put(&db, &agent).unwrap();
         let _scope = publication_work::scope();
         let tx = db.transaction().unwrap();
@@ -102,11 +109,6 @@ pub fn action(
     }
     if agent.is_deleted() {
         return Err(QueueWriteError::InvalidRequest("This agent was deleted"));
-    }
-    if event_write::truthy(agent.extra.get("remoteWorker"))
-        || event_write::truthy(agent.extra.get("remoteAnchor"))
-    {
-        return Err(QueueWriteError::RemoteEventsUnavailable);
     }
 
     let request_id = body

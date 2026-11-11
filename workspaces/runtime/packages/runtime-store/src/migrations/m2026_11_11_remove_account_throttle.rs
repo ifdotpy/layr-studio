@@ -143,7 +143,10 @@ mod tests {
         // Force the preceding catalog so this resembles a pre-upgrade database.
         let db = rusqlite::Connection::open(root.join("canvas.sqlite3")).unwrap();
         let previous = super::super::catalog_fingerprint(
-            &super::super::CATALOG[..super::super::CATALOG.len() - 1],
+            &super::super::CATALOG[..super::super::CATALOG
+                .iter()
+                .position(|step| step.definition().id == "2026-11-11-remove-account-throttle")
+                .unwrap()],
             studio_runtime_schema::studio_errors::MigrationTarget::Canvas,
         );
         let marker = super::super::catalog_marker(&db, &previous).unwrap();

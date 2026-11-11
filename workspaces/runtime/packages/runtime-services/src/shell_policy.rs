@@ -46,8 +46,6 @@ struct ShellPolicyAgent {
     thread_id: Option<Value>,
     deleted_at: Option<Value>,
     account_transfer_id: Option<Value>,
-    remote_worker: Option<Value>,
-    remote_anchor: Option<Value>,
 }
 
 fn string_or_missing<'de, D: Deserializer<'de>>(
@@ -91,8 +89,6 @@ fn eligible_view(db: &Connection, agent: &ShellPolicyAgent) -> Result<bool, Stor
         )
         || studio_runtime_store::truthy(agent.deleted_at.as_ref())
         || studio_runtime_store::truthy(agent.account_transfer_id.as_ref())
-        || studio_runtime_store::truthy(agent.remote_worker.as_ref())
-        || studio_runtime_store::truthy(agent.remote_anchor.as_ref())
         || agent.execution_mode.as_deref() == Some("vm")
     {
         return Ok(false);
@@ -169,7 +165,10 @@ pub fn maintain_monitor(
     let quiet_ms = (now - activity).max(0.0) * 1000.0;
     let session_idle_ms =
         (now - agent["shellPolicyLastActiveAt"].as_f64().unwrap_or(now)).max(0.0) * 1000.0;
-    let last_reap = agent["shellPolicyLastReapAt"].as_f64();
+    let last_reap = actor
+        .shell_policy_last_reap_at
+        .as_ref()
+        .and_then(studio_json::Number::as_f64);
     let restart_guard = last_reap.is_some_and(|last| {
         last > agent["shellPolicyLastActiveAt"].as_f64().unwrap_or(now)
             && monitor.created.seconds() > last
@@ -242,9 +241,11 @@ pub fn maintain_monitor(
             at: now,
             generation,
         });
-        actor
-            .extra
-            .insert("shellPolicyLastReapAt".into(), json!(now));
+        actor.shell_policy_last_reap_at = studio_json::Number::from_f64(now).map_or(
+            studio_runtime_schema::queue_command::Field::Null,
+            studio_runtime_schema::queue_command::Field::Value,
+        );
+
         AgentRepository::put(tx, actor)?;
     }
     Ok(())
@@ -699,7 +700,6 @@ mod receipt_tests {
         for (field, value) in [
             ("inFlight", json!(true)),
             ("deletedAt", json!([1])),
-            ("remoteWorker", json!("x")),
             ("executionMode", json!("vm")),
             ("turnId", json!("turn")),
         ] {
@@ -720,7 +720,7 @@ mod receipt_tests {
 
     #[test]
     fn shell_projection_agrees_with_persisted_agent_owner_on_valid_fields() {
-        let value = json!({"compactions":0,"id":"a","rootId":"r","epoch":3,"status":"idle","accountKey":"default","threadId":"t","turnId":"","autoWake":true,"inFlight":false,"executionMode":"host","deletedAt":null,"accountTransferId":"transfer","remoteWorker":false,"remoteAnchor":null});
+        let value = json!({"compactions":0,"id":"a","rootId":"r","epoch":3,"status":"idle","accountKey":"default","threadId":"t","turnId":"","autoWake":true,"inFlight":false,"executionMode":"host","deletedAt":null,"accountTransferId":"transfer"});
         let owner = studio_runtime_store::AgentRecord::from_value(value.clone()).unwrap();
         let partial = ShellPolicyAgent::deserialize(value).unwrap();
         assert_eq!(partial.id.as_deref(), Some(owner.id.0.as_str()));
@@ -750,14 +750,8 @@ mod receipt_tests {
                 .value()
                 .map(|id| json!(id.as_str()))
         );
-        assert_eq!(
-            partial.remote_worker,
-            owner.extra.get("remoteWorker").cloned()
-        );
-        assert!(partial.remote_anchor.is_none());
         assert!(partial.deleted_at.is_none());
         assert!(owner.deleted_at.is_none());
-        assert_eq!(owner.extra.get("remoteAnchor"), Some(&Value::Null));
     }
 
     #[tokio::test]

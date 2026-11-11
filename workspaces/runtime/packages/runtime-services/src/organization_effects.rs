@@ -5,7 +5,7 @@
 //! failure (or a default revision).
 
 use rusqlite::OptionalExtension;
-use studio_json::{Map, Value, json};
+use studio_json::{self, Value};
 use studio_runtime_schema::{
     bounded_integer::BoundedInteger, bounded_text::BoundedText, http_ingress::Object,
     queue_command::Field,
@@ -218,15 +218,11 @@ fn apply_read_state(
             "The completed result changed. Reload the chat",
         ));
     }
-    let previous = match agent.extra.get("readState") {
-        None => json!({}),
-        Some(Value::Object(_)) => agent.extra["readState"].clone(),
-        Some(_) => return Err(invalid_agent(&agent)),
-    };
-    let current = stored_revision(previous.get("revision"), &agent.id.0)?;
-    let same = previous.get("threadId").and_then(Value::as_str) == Some(thread)
-        && previous.get("turnId").and_then(Value::as_str) == Some(turn)
-        && previous.get("read").and_then(Value::as_bool) == Some(read_value);
+    let previous = agent.read_state.as_ref().map(std::ops::Deref::deref);
+    let current = previous.map_or(0, |state| state.revision.as_i64());
+    let same = previous.is_some_and(|state| {
+        state.thread_id == thread && state.turn_id == turn && state.read == read_value
+    });
     if same && (revision == current || current.checked_sub(1) == Some(revision)) {
         // A replay writes nothing, but the client that sends it may hold a view that a
         // build without this publication left behind; publish the stored state again.
@@ -237,15 +233,18 @@ fn apply_read_state(
             "The read state changed. Reload the chat",
         ));
     }
-    let mut state = Map::new();
-    state.insert("threadId".into(), json!(thread));
-    state.insert("turnId".into(), json!(turn));
-    state.insert("read".into(), json!(read_value));
-    let next = current
+    let revision = current
         .checked_add(1)
+        .and_then(studio_runtime_schema::AgentCounter::from_i64)
         .ok_or_else(|| invalid_agent(&agent))?;
-    state.insert("revision".into(), json!(next));
-    agent.extra.insert("readState".into(), Value::Object(state));
+    agent.read_state = studio_runtime_schema::queue_command::Field::Value(Box::new(
+        studio_runtime_schema::agent_entity_nested_extra::ReadStateDto {
+            thread_id: thread.to_owned(),
+            turn_id: turn.to_owned(),
+            read: read_value,
+            revision,
+        },
+    ));
     AgentRepository::put(tx, &agent)?;
     publish(tx, agent)
 }
@@ -267,19 +266,6 @@ fn stored_folder_revision(
             object: "runtime_agents",
             id: id.to_owned(),
         }),
-    }
-}
-
-fn stored_revision(value: Option<&Value>, id: &str) -> Result<i64, EventWriteError> {
-    match value {
-        None => Ok(0),
-        Some(value) => value
-            .as_i64()
-            .filter(|revision| *revision >= 0)
-            .ok_or_else(|| EventWriteError::InvalidStoredObject {
-                object: "runtime_agents",
-                id: id.to_owned(),
-            }),
     }
 }
 

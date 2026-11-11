@@ -93,9 +93,26 @@ async fn pressure_requires_thirty_idle_minutes_and_preserves_active_turns() {
                 "turn" => { actor.in_flight = Some(true); }
                 "recent_input" => { actor.shell_policy_last_active_at = serde::Deserialize::deserialize(json!(1.0))?; }
                 "input" => { tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('user','agent','user','hi','pending',0,2)", [])?; }
-                "delegate" => { let mut child = actor.clone(); child.id = "child".into(); child.status = studio_runtime_store::AgentStatus::Running; child.in_flight = Some(true); AgentRepository::put(tx, &child)?; }
+                "delegate" => {
+                    let mut child = studio_runtime_store::AgentRecord::new(
+                        AgentId::from("child"), actor.root_id.clone(), actor.epoch,
+                        studio_runtime_store::AgentStatus::Running, actor.account_key.clone(),
+                    );
+                    child.provider = actor.provider.clone();
+                    child.parent_id = Some(actor.id.0.clone());
+                    child.in_flight = Some(true);
+                    AgentRepository::put(tx, &child)?;
+                    let parent = AgentRepository::get(tx, &actor.id)?.expect("separate parent");
+                    assert_eq!(parent.id.0, "agent");
+                    assert_eq!(parent.status, studio_runtime_store::AgentStatus::Idle);
+                    assert_ne!(parent.in_flight, Some(true));
+                    let stored_child = AgentRepository::get(tx, &child.id)?.expect("delegated child");
+                    assert_eq!(stored_child.parent_id.as_deref(), Some("agent"));
+                    assert_eq!(stored_child.status, studio_runtime_store::AgentStatus::Running);
+                    assert_eq!(stored_child.in_flight, Some(true));
+                }
                 "output" => { tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.activityAt',1) WHERE id=?1", [&selected])?; }
-                "restart" => { actor.extra.insert("shellPolicyLastReapAt".into(), json!(1.0)); tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.created',2) WHERE id=?1", [&selected])?; }
+                "restart" => { actor.shell_policy_last_reap_at = studio_runtime_schema::queue_command::Field::Value(studio_json::Number::from_f64(1.0).unwrap()); tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.created',2) WHERE id=?1", [&selected])?; }
                 _ => {}
             }
             AgentRepository::put(tx, &actor)

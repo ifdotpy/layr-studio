@@ -984,23 +984,8 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
 
 #[tokio::test]
 #[allow(clippy::disallowed_methods)]
-async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() {
-    use studio_runtime_services::agent_lifecycle_runtime::{LifecycleEffect, LifecyclePorts};
-    use studio_runtime_services::agent_management::ManagementError;
-    use studio_runtime_store::{ProjectsRepository, Transaction};
-
-    struct NoopLifecycle;
-    impl LifecyclePorts for NoopLifecycle {
-        fn stage(&self, _: &Transaction<'_>, _: &LifecycleEffect) -> Result<(), ManagementError> {
-            Ok(())
-        }
-
-        fn committed(
-            &self,
-        ) -> studio_runtime_services::agent_lifecycle_runtime::LifecycleCommitFuture<'_> {
-            Box::pin(async { Ok(()) })
-        }
-    }
+async fn orchestration_driver_preserves_configured_accounts_for_inbound_project_add() {
+    use studio_runtime_store::ProjectsRepository;
 
     let caller_root = tempfile::tempdir().expect("caller state root");
     let caller_store = Arc::new(
@@ -1084,7 +1069,7 @@ async fn lifecycle_ports_preserve_configured_accounts_for_inbound_project_add() 
     .with_tailscale_whoami(Arc::new(|| {
         Box::pin(async { Some(studio_json::json!({"user":"owner@example.test"})) })
     }))
-    .with_lifecycle_ports(Arc::new(NoopLifecycle));
+    .with_orchestration_driver();
     let app = router(state).expect("receiver router");
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

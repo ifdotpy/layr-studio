@@ -7,7 +7,6 @@ use crate::records::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use studio_json::Value;
 use studio_runtime_schema::raw_json::RawJson;
 
 studio_runtime_schema::raw_json_payload! { flat
@@ -22,7 +21,7 @@ pub struct AgentDraft {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentRecord {
     pub id: AgentId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -656,10 +655,284 @@ pub struct AgentRecord {
             crate::json_record_codec::ExactJson<crate::account_state::StreamFields>,
         >,
     >,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub capacity_retry: studio_runtime_schema::queue_command::Field<
+        Box<studio_runtime_schema::continuation_snapshot::CapacityContinuation>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub read_state: studio_runtime_schema::queue_command::Field<
+        Box<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub thread_provenance: studio_runtime_schema::queue_command::Field<
+        BTreeMap<String, studio_runtime_schema::provider_call_contract::ThreadProvenance>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub workspace_cleanup_intent: studio_runtime_schema::queue_command::Field<
+        Box<crate::workspace_cleanup_intent::StoredCleanupIntent>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub layr_turn_saves: studio_runtime_schema::queue_command::Field<
+        BTreeMap<String, super::retained::LayrTurnSave>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub cancelled_park:
+        studio_runtime_schema::queue_command::Field<Box<super::retained::CancelledPark>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub park_receipt:
+        studio_runtime_schema::queue_command::Field<Box<super::retained::ParkReceipt>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub manual_recovery_delivery_hold: studio_runtime_schema::queue_command::Field<
+        Box<super::retained::ManualRecoveryDeliveryHold>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_safety_retry: studio_runtime_schema::queue_command::Field<
+        Box<studio_runtime_schema::agent_entity_native::NativeSafetyRetryDto>,
+    >,
+    /// Last reap timestamp in seconds, distinct from last-active time.
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub shell_policy_last_reap_at: studio_runtime_schema::queue_command::Field<studio_json::Number>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_review:
+        studio_runtime_schema::queue_command::Field<Box<super::retained::StoredNativeReview>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub branch: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub layr_cache_warning: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub layr_version_warning: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_role_guidance: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_teleport_tool: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::native_thread_record::SessionTool,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_tool_catalog: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::native_thread_record::NativeToolCatalog,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_tool_source: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::native_thread_record::CatalogSource,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub park_sequence:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::AgentCounter>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub prepared_context: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::native_thread_record::PreparedContext,
+    >,
+    /// Provider active-permission profile; distinct from the creation profile ID.
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub profile: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::CodexActivePermissionProfile,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub review_archive_attempts:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::AgentCounter>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub review_archive_error: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub review_archive_next_at: studio_runtime_schema::queue_command::Field<f64>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub review_archive_scheduled: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub context_repair:
+        studio_runtime_schema::queue_command::Field<Box<super::context_repair::ContextRepair>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub context_repair_history:
+        studio_runtime_schema::queue_command::Field<Vec<super::context_repair::ContextRepair>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub last_workspace_wait:
+        studio_runtime_schema::queue_command::Field<Box<super::retained::LastWorkspaceWait>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub forked_from: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub source_message: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub restored_checkpoint: studio_runtime_schema::queue_command::Field<String>,
+    /// Historical activity timestamp in Unix seconds, distinct from settings updatedAt.
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub updated: studio_runtime_schema::queue_command::Field<studio_json::Number>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub worktree_preparation: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub legacy_workspace_execution:
+        studio_runtime_schema::queue_command::Field<Box<LegacyWorkspaceExecution>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub legacy_workspace_finished: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub legacy_workspace_settled: studio_runtime_schema::queue_command::Field<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub image_workspace_repo: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub image_workspace_mount: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub auth_resume_proof_pending: studio_runtime_schema::queue_command::Field<
+        BTreeMap<
+            studio_runtime_schema::account_key::AccountKey,
+            super::retained::AuthResumeProofCursor,
+        >,
+    >,
 }
 
+/// Receipts retained when the removed image executor is settled; never replayed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LegacyWorkspaceExecution {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub turn_id: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub start_attempt: studio_runtime_schema::queue_command::Field<Box<StartAttemptView>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub restart_recovery: studio_runtime_schema::queue_command::Field<
+        Box<studio_runtime_schema::recovery_record::RecoveryFields>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub disconnect_recovery: studio_runtime_schema::queue_command::Field<
+        Box<studio_runtime_schema::recovery_record::RecoveryFields>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub connection_recovery: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<
+            crate::json_record_codec::ExactJson<
+                studio_runtime_schema::recovery_record::ConnectionRecoveryFields,
+            >,
+        >,
+    >,
+}
 studio_runtime_schema::raw_json_payload! { flat
 /// The episode identity is read by the runtime; other fields retain their wire representation.
 #[derive(Clone, Debug, PartialEq)]
@@ -941,9 +1214,15 @@ studio_runtime_schema::raw_json_payload! { flat
 #[derive(Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveExecutionView {
-    #[serde(default, skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub run_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(default, skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing")]
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
     pub attempt_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
     @extensions pub extra,
 }

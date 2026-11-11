@@ -138,35 +138,33 @@ pub fn cancel_capacity_retry(
         )
         .optional()?
         .ok_or(UsageRepositoryError::UnknownContinuation)?;
-    let mut retry: Value =
+    let mut retry: studio_runtime_schema::continuation_snapshot::CapacityContinuation =
         studio_json::from_str(&raw).map_err(|_| invalid("runtime_capacity_retries", retry_id))?;
-    if !validate_retry(&retry, retry_id) {
+    if retry.id.as_str() != retry_id {
         return Err(invalid("runtime_capacity_retries", retry_id));
     }
     let is_current = agent
-        .extra
-        .get("capacityRetry")
-        .and_then(|value| value.get("id"))
-        .and_then(Value::as_str)
+        .capacity_retry
+        .as_ref()
+        .map(std::ops::Deref::deref)
+        .map(|retry| retry.id.as_str())
         == Some(retry_id);
     let changes_state = is_current
-        && retry.get("status").and_then(Value::as_str) == Some("scheduled")
-        && retry.get("claimedAt").is_none_or(Value::is_null);
+        && retry.status
+            == studio_runtime_schema::continuation_snapshot::CapacityContinuationStatus::Scheduled
+        && retry.claimed_at.value().is_none();
     if changes_state {
-        let embedded = agent
-            .extra
-            .get("capacityRetry")
-            .ok_or_else(|| invalid("runtime_agents", agent_id))?;
-        if !validate_retry(embedded, retry_id) {
-            return Err(invalid("runtime_agents", agent_id));
-        }
         if agent.is_lead != Some(true) && agent.parent_id.as_deref().is_some() {
             return Err(UsageRepositoryError::EventDriverRequired);
         }
-        retry["status"] = Value::String("cancelled".to_owned());
-        retry["dueAt"] = Value::Null;
-        retry["reason"] = Value::Null;
-        retry["updatedAt"] = json!(now);
+        retry.status =
+            studio_runtime_schema::continuation_snapshot::CapacityContinuationStatus::Cancelled;
+        retry.due_at = Field::Null;
+        retry.reason = Field::Null;
+        retry.updated_at = Field::Value(
+            studio_runtime_schema::continuation_snapshot::BoundedNumber::from_f64(now)
+                .ok_or_else(|| invalid("runtime_capacity_retries", retry_id))?,
+        );
         transaction.execute(
             "UPDATE runtime_capacity_retries SET record=?1 WHERE id=?2 AND agent=?3",
             params![
@@ -176,12 +174,11 @@ pub fn cancel_capacity_retry(
                 agent_id
             ],
         )?;
-        agent
-            .extra
-            .insert("capacityRetry".to_owned(), retry.clone());
+        agent.capacity_retry =
+            studio_runtime_schema::queue_command::Field::Value(Box::new(retry.clone()));
         AgentRepository::put(transaction, &agent)?;
     }
-    Ok(retry)
+    Ok(crate::projection_value(&retry))
 }
 
 pub fn disable_usage_resume(
@@ -324,12 +321,6 @@ fn invalid(table: &'static str, id: &str) -> UsageRepositoryError {
         table,
         id: id.to_owned(),
     }
-}
-
-fn validate_retry(value: &Value, expected_id: &str) -> bool {
-    value.get("id").and_then(Value::as_str) == Some(expected_id)
-        && studio_runtime_schema::validate("continuation/CapacityContinuation", value)
-            .unwrap_or(false)
 }
 
 fn decode_resume(value: Value, expected_id: &str) -> Option<CancellableResume> {

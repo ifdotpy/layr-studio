@@ -178,7 +178,6 @@ async fn production_lifecycle_bundle_interrupts_active_turn_through_http_route()
                     "cwd":"/fixture", "autoWake":true, "inFlight":true,
                     "turnId":"active-turn", "threadId":"fixture-thread",
                     "accountKey":"fixture-account", "connectionId":"fixture-connection",
-                    "connectionGeneration":7,
                     "startAttempt":{
                         "id":"attempt", "submitted":true,
                         "epoch":4, "events":["input-event"],
@@ -336,7 +335,6 @@ async fn production_delete_route_interrupts_and_settles_active_turn() {
                     "cwd":"/fixture", "autoWake":true, "inFlight":true,
                     "turnId":"active-turn", "threadId":"fixture-thread",
                     "accountKey":"fixture-account", "connectionId":"fixture-connection",
-                    "connectionGeneration":7,
                     "startAttempt":{
                         "id":"attempt", "submitted":true,
                         "epoch":4, "events":["input-event"],

@@ -423,7 +423,6 @@ pub async fn answer_approval(
                 },
             )?;
             let (snapshot, actor) = snapshot(tx, monitor_id)?;
-            event_write::refuse_remote(&actor)?;
             if request.agent.as_str() != snapshot.agent() {
                 return Err(MonitorError::Refused("Monitor approval identity changed"));
             }
@@ -889,7 +888,6 @@ pub fn apply_with_rule(
     now: f64,
     rules: &impl RuleFinish,
 ) -> Result<(), MonitorError> {
-    event_write::refuse_remote(actor)?;
     // Validate before any write, including all optional fields preserved from Python.
     let after = MonitorSnapshot::checked_stored(
         &decision.record,
@@ -1552,7 +1550,6 @@ pub fn create_in_transaction(
         log_root,
     } = *admission;
     let actor = event_write::checked_agent(tx, actor_id)?;
-    event_write::refuse_remote(&actor)?;
     let actor_value =
         studio_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
     let record = policy::create_record(&actor_value, request, request_id, log_root, now)?;

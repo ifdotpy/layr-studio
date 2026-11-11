@@ -608,28 +608,8 @@ fn membership(
                 other: p.to_owned(),
             });
         }
-        if agent.moved_to_active()
-            || [
-                "remoteWorker",
-                "remoteParent",
-                "remoteOrigin",
-                "relocation",
-                "teleportPending",
-            ]
-            .iter()
-            .any(|key| studio_runtime_store::truthy(agent.extra.get(*key)))
-        {
+        if agent.moved_to_active() {
             return Err(Error::Remote);
-        }
-        for field in ["serverId", "localServerId"] {
-            if agent
-                .extra
-                .get(field)
-                .filter(|v| !v.is_null())
-                .is_some_and(|v| v.as_str() != Some(server))
-            {
-                return Err(Error::Remote);
-            }
         }
         let mut chain = BTreeSet::new();
         let mut current = id.as_str();

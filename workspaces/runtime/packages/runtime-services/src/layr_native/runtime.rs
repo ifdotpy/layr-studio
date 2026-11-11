@@ -1337,17 +1337,29 @@ pub(crate) fn stage_turn_save(
     {
         return Ok(());
     }
-    let saves = agent
-        .extra
-        .entry("layrTurnSaves".into())
-        .or_insert_with(|| json!({}));
-    if !saves.is_object() {
-        *saves = json!({});
-    }
-    if saves[turn_id]["status"] == "saved" {
+    let saves = {
+        if !agent.layr_turn_saves.is_some() {
+            agent.layr_turn_saves =
+                studio_runtime_schema::queue_command::Field::Value(Default::default());
+        }
+        match &mut agent.layr_turn_saves {
+            studio_runtime_schema::queue_command::Field::Value(values) => values,
+            studio_runtime_schema::queue_command::Field::Missing
+            | studio_runtime_schema::queue_command::Field::Null => {
+                unreachable!("map initialized above")
+            }
+        }
+    };
+    if matches!(
+        saves.get(turn_id),
+        Some(studio_runtime_store::LayrTurnSave::Saved { .. })
+    ) {
         return Ok(());
     }
-    saves[turn_id] = json!({"status":"pending"});
+    saves.insert(
+        turn_id.to_owned(),
+        studio_runtime_store::LayrTurnSave::Pending,
+    );
     AgentRepository::put(tx, &agent)?;
     Ok(())
 }

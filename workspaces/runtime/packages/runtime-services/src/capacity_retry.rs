@@ -319,7 +319,7 @@ pub fn transition(
                 agent.clear_hold();
                 agent.queued();
                 r.update(U::UpdatedAt(now));
-                agent.continuation("capacityRetry", r.value());
+                agent.continuation("capacityRetry", &r);
                 let id = format!("{CAPACITY_FOLLOWUP_PREFIX}{}", s.record_id().unwrap_or(""));
                 return Ok(Decision {
                     agent: Some(agent),
@@ -333,7 +333,7 @@ pub fn transition(
         }
     }
     r.update(U::UpdatedAt(now));
-    agent.continuation("capacityRetry", r.value());
+    agent.continuation("capacityRetry", &r);
     let mut d = Decision {
         agent: Some(agent),
         record: Some(r),

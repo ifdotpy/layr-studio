@@ -927,7 +927,7 @@ async fn run(
     {
         eprintln!("lifecycle startup reconciliation remains pending: {error}");
     }
-    state = state.with_lifecycle_ports(Arc::clone(&lifecycle_ports));
+    state = state.with_orchestration_driver();
     // The paired-server driver exists only now; agent tools that use it
     // (`orchestration_servers`) refuse with a named dependency until here.
     if let Some(driver) = state.orchestration_driver_handle() {

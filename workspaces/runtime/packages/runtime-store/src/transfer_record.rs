@@ -1362,8 +1362,6 @@ mod tests {
         let raw = studio_json::json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle","accountKey":"source","compactions":0,
             "accountTransferId":"move", "lazyAccountTransfer":{"id":"move","sourceAccountKey":"source","sourceThreadId":null,"sourceState":{},"sourceStateExact":true}});
         let agent = crate::AgentRecord::from_value(raw.clone()).unwrap();
-        assert!(!agent.extra.contains_key("accountTransferId"));
-        assert!(!agent.extra.contains_key("lazyAccountTransfer"));
         assert_eq!(agent.value()["accountTransferId"], raw["accountTransferId"]);
         assert_eq!(
             agent.value()["lazyAccountTransfer"],

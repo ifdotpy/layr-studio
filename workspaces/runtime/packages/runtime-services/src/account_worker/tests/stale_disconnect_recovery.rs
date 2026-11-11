@@ -180,9 +180,12 @@ async fn native_review_attempt_without_a_turn(shape: Shape) {
             ),
             (
                 "nativeReview",
-                json!({"target":{"type":"custom","instructions":"Check"},
+                json!({"target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
                     "requestId":"lead:review:r1","actorId":"lead","args":{},
-                    "status":"started","response":{}}),
+                    "sourceCwd":"/fixture","status":"ordinaryTurn",
+                    "response":{"requestId":"lead:review:r1","agentId":"child",
+                        "status":"starting","reviewModel":"review-model","agents":[],
+                        "delivery":"not_sent"}}),
             ),
         ] {
             match key {
@@ -195,9 +198,11 @@ async fn native_review_attempt_without_a_turn(shape: Shape) {
                     row.disconnect_recovery =
                         Some(Box::new(serde::Deserialize::deserialize(value).unwrap()))
                 }
-                _ => {
-                    row.extra.insert(key.into(), value);
+                "nativeReview" => {
+                    row.native_review =
+                        studio_runtime_schema::queue_command::Field::Value(Box::new(serde::Deserialize::deserialize(value).unwrap()));
                 }
+                _ => unreachable!(),
             }
         }
     })

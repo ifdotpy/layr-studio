@@ -738,50 +738,6 @@ pub(super) async fn resolve_interrupt_target(
         .await
 }
 
-/// Python `dynamic` for `orchestration_send`: the visible target ID and
-/// whether it is a descendant of the caller.
-pub(super) async fn resolve_send_target(
-    store: &studio_runtime_store::RuntimeStore,
-    context: &CallbackContext,
-    supplied: &str,
-) -> Result<(String, bool), crate::managed_host_tools::Error> {
-    let context = context.clone();
-    let supplied = supplied.to_owned();
-    store
-        .transaction_with(move |tx| {
-            let snapshot = super::super::storage::snapshot(tx, &context)
-                .map_err(|_| crate::managed_host_tools::Error::Stale)?;
-            let target =
-                messages::resolve_target(tx, &snapshot, &supplied).map_err(
-                    |error| match error {
-                        CallbackError::Expired => crate::managed_host_tools::Error::Expired,
-                        CallbackError::Store(error) => {
-                            crate::managed_host_tools::Error::Store(error)
-                        }
-                        CallbackError::Stored(location) => {
-                            crate::managed_host_tools::Error::StoredAt(location)
-                        }
-                        CallbackError::Refusal(message) => {
-                            crate::managed_host_tools::Error::Refusal(message)
-                        }
-                        CallbackError::Invalid(message) => {
-                            crate::managed_host_tools::Error::Invalid(message)
-                        }
-                        CallbackError::InvalidResultSchema(_)
-                        | CallbackError::Dependency(_)
-                        | CallbackError::Stale
-                        | CallbackError::Conflict
-                        | CallbackError::Unknown => {
-                            crate::managed_host_tools::Error::Invalid("Unknown managed agent")
-                        }
-                    },
-                )?;
-            let descendant = is_descendant(tx, &context.agent, &target)?;
-            Ok((target, descendant))
-        })
-        .await
-}
-
 impl From<event_write::EventWriteError> for CallbackError {
     fn from(error: event_write::EventWriteError) -> Self {
         use event_write::EventWriteError as E;
@@ -870,28 +826,6 @@ pub(super) fn execute(
     ports: &(impl crate::managed_host_tools::Ports<Prepared = ()> + ?Sized),
 ) -> Result<crate::managed_host_tools::Staged, CallbackError> {
     let actor = snapshot.actor();
-    if studio_runtime_store::truthy(actor.get("executionMove"))
-        && !matches!(
-            name,
-            "orchestration_move" | "orchestration_teleport" | "orchestration_request"
-        )
-    {
-        return Err(CallbackError::Invalid(
-            "The move is accepted. Finish this turn before the next task",
-        ));
-    }
-    // The managed-tool dispatcher sends a remote worker's home-server calls
-    // first. Any such call that still arrives here had no dispatcher; the
-    // worker's other tools run on this server, as in Python.
-    if studio_runtime_store::truthy(actor.get("remoteOrigin")) {
-        let record = studio_runtime_store::AgentRecord::from_value(actor.clone())
-            .map_err(|_| CallbackError::Stale)?;
-        if crate::multi_server_tools::worker_route(name, args, &record).is_some() {
-            return Err(CallbackError::Dependency(
-                super::runtime_dispatch::WORKER_CALL_DEPENDENCY,
-            ));
-        }
-    }
     let mut resolved_args = args.clone();
     let field = match kind {
         ToolKind::Task => args["owner"]

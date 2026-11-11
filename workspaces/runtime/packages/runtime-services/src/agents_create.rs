@@ -1,11 +1,7 @@
 //! Persisted agent creation and management.
 //!
-//! Project creation uses the local server identity supplied by its caller and
-//! falls back to the persisted agent `serverId` when that identity is absent.
-//! If neither exists, creation fails before writing the project. This path does
-//! not create identity files: it depends on the runtime's existing identity
-//! source. The store-held identity from `origin/fix/rust-reads-no-writer` will
-//! provide the authoritative value once that change is merged.
+//! Project creation requires the runtime's process-local server identity before
+//! writing a project. Retired agent root metadata does not supply that identity.
 mod operations;
 pub(crate) use operations::DEFAULT_LEAD_MODEL;
 pub use operations::*;
@@ -417,7 +413,6 @@ pub(crate) fn ensure_project(
     let local_server_id = RuntimeStore::transaction_local_server_id(transaction)?;
     let server = local_server_id
         .as_deref()
-        .or_else(|| agent.get("serverId").and_then(Value::as_str))
         .filter(|server| !server.is_empty())
         .ok_or_else(|| StoreError::SchemaMismatch("new lead has no server identity".to_owned()))?;
     let name = std::path::Path::new(path)
@@ -782,7 +777,8 @@ mod tests {
     }
     use super::{create_agent, ensure_project, replay_agent};
     use rusqlite::Connection;
-    use studio_json::{Value, json};
+    use studio_json::json;
+    use studio_runtime_store::RuntimeStore;
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("memory database opens");
@@ -873,14 +869,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn old_rename_signature_is_refused_without_reexecution() {
-        let mut connection = database();
+    #[tokio::test]
+    async fn old_rename_signature_is_refused_without_reexecution() {
+        let root = tempfile::tempdir().expect("isolated server state");
+        let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+        store
+            .set_local_server_id(Some("server-a".into()))
+            .expect("local identity");
+        let mut connection =
+            Connection::open(root.path().join("canvas.sqlite3")).expect("fixture writer");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt schema");
-        connection.execute_batch("CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);").expect("settings and sync metadata");
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sync_entity_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);").expect("settings and sync metadata");
         let tx = connection.transaction().expect("transaction");
-        let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle","name":"Before","isLead":true,"autoWake":true,"cwd":"/project","serverId":"server"});
+        let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle","name":"Before","isLead":true,"autoWake":true,"cwd":"/project"});
         super::save_agent(&tx, &record, &|_, _| true).expect("agent");
         let request = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let old_signature = "53bbc5c020499da23063082195d71442534d8185f130191aaef5286830dafa44";
@@ -915,14 +917,20 @@ mod tests {
         assert_eq!(record["name"], "Later");
     }
 
-    #[test]
-    fn rename_request_results_replay_original_after_later_mutation() {
-        let mut connection = database();
+    #[tokio::test]
+    async fn rename_request_results_replay_original_after_later_mutation() {
+        let root = tempfile::tempdir().expect("isolated server state");
+        let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+        store
+            .set_local_server_id(Some("server-a".into()))
+            .expect("local identity");
+        let mut connection =
+            Connection::open(root.path().join("canvas.sqlite3")).expect("fixture writer");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt schema");
-        connection.execute_batch("CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);").expect("settings and sync metadata");
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS sync_entity_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);").expect("settings and sync metadata");
         let tx = connection.transaction().expect("transaction");
-        let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle","name":"Before","isLead":true,"autoWake":true,"cwd":"/project","serverId":"server"});
+        let record = json!({"compactions":0,"accountKey":"default","provider":"codex","id":"agent","rootId":"agent","epoch":0,"status":"idle","name":"Before","isLead":true,"autoWake":true,"cwd":"/project"});
         super::save_agent(&tx, &record, &|_, _| true).expect("agent");
         let request = studio_runtime_schema::persistence::RequestIdentity::issue_root();
         let first = super::rename(
@@ -1055,19 +1063,30 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn agent_creation_is_atomic_replayable_and_publishes_sync_projection() {
-        let mut connection = database();
-        let tx = connection.transaction().expect("transaction starts");
-        let record = studio_json::from_str(r#"{"compactions":0,"provider":"codex",
+    #[tokio::test]
+    async fn agent_creation_is_atomic_replayable_and_publishes_sync_projection() {
+        let root = tempfile::tempdir().expect("isolated server state");
+        let store = RuntimeStore::open(Some(root.path())).await.expect("store");
+        store
+            .set_local_server_id(Some("server-a".into()))
+            .expect("local identity");
+        let mut connection =
+            Connection::open(root.path().join("canvas.sqlite3")).expect("fixture writer");
+        let record = studio_json::from_str(
+            r#"{"compactions":0,"provider":"codex",
             "id":"agent-a", "rootId":"agent-a", "epoch":0, "status":"queued",
             "name":"Agent A", "prompt":"Start the task", "cwd":"/project",
-            "accountKey":"default", "serverId":"server-a", "isLead":true, "needsTitle":false, "autoWake":true,
-            "creationIntent":{"name":"Agent A","prompt":"Start the task"}}"#).expect("agent fixture");
-        let created = create_agent(&tx, "agent-a", "Start the task", record, 10.0, |_, _| true)
+            "accountKey":"default", "isLead":true, "autoWake":true,
+            "creationIntent":{"name":"Agent A","prompt":"Start the task"}}"#,
+        )
+        .expect("agent fixture");
+        let created = store
+            .transaction_with::<_, super::CreateError>(move |tx| {
+                create_agent(tx, "agent-a", "Start the task", record, 10.0, |_, _| true)
+            })
+            .await
             .expect("record and initial event persist");
         assert_eq!(created["id"], "agent-a");
-        tx.commit().expect("transaction commits");
 
         let stored = studio_runtime_store::ProjectsRepository::get_record(&connection, "/project")
             .expect("created project is a valid stored record")
@@ -1154,45 +1173,16 @@ mod tests {
     }
 
     #[test]
-    fn project_creation_uses_persisted_agent_server_id_without_local_identity() {
+    fn project_creation_refuses_retired_agent_server_id_without_local_identity() {
         let mut connection = database();
         let transaction = connection.transaction().expect("transaction starts");
-        let agent = json!({
-            "id":"agent-a",
-            "cwd":"/project",
-            "accountKey":"default",
-            "serverId":"persisted-server"
-        });
-
-        ensure_project(&transaction, &agent)
-            .expect("persisted agent identity supplies project location");
-
-        let stored = studio_runtime_store::ProjectsRepository::get_record(&transaction, "/project")
-            .expect("created project is a valid stored record")
-            .expect("created project exists");
-        assert_eq!(stored.path, "/project");
-        ensure_project(&transaction, &agent).expect("another agent can reuse the project");
-
-        let payload: String = transaction
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='project' AND id='/project'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("project sync projection exists");
-        let project =
-            studio_json::from_str::<Value>(&payload).expect("project projection JSON")["value"]
-                .clone();
-        assert_eq!(project["homeServerId"], "persisted-server");
-        assert_eq!(
-            project["locations"],
-            json!([{
-                "serverId":"persisted-server",
-                "path":"/project",
-                "projectId":"/project"
-            }])
+        let agent = json!({"id":"agent-a","cwd":"/project","accountKey":"default","serverId":"retired-server"});
+        assert!(ensure_project(&transaction, &agent).is_err());
+        assert!(
+            studio_runtime_store::ProjectsRepository::get_record(&transaction, "/project")
+                .expect("read project")
+                .is_none()
         );
-        assert_eq!(project["locationsRevision"], 0);
     }
 
     #[test]
@@ -1224,7 +1214,7 @@ mod tests {
                 "id":"agent-failpoint", "rootId":"parent", "parentId":"parent", "epoch":0,
                 "status":"queued", "name":"Agent", "prompt":"Task", "cwd":"/project",
                 "accountKey":"default", "isLead":false, "role":"implementer",
-                "needsTitle":false, "autoWake":true,
+                "autoWake":true,
                 "creationIntent":{"name":"Agent","prompt":"Task"}}"#,
             )
             .expect("agent fixture");

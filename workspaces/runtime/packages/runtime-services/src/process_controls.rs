@@ -197,9 +197,7 @@ pub fn held_response_candidate(owner: &ProcessOwner) -> bool {
         && owner.deleted != Some(true)
         && !owner.deleted_at.is_some_and(|at| at != 0.0)
         && owner.archived != Some(true)
-        && !owner.archived_at.is_some_and(|at| at != 0.0)
         && owner.account_transfer_id.is_none()
-        && owner.execution_move.is_none()
         && owner
             .epoch
             .as_ref()

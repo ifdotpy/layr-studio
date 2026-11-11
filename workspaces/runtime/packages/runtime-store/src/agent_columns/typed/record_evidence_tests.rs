@@ -1,6 +1,42 @@
 use super::record::NativeFailureHold;
 
 #[test]
+fn strict_retained_keys_refuse_nonconforming_records_before_repository_write() {
+    let db = crate::fresh_state::test_canvas();
+    let mut admitted = Vec::new();
+    for (key, invalid) in [
+        ("capacityRetry", "{}"),
+        (
+            "readState",
+            r#"{"threadId":"thread","turnId":"turn","read":false,"revision":-1}"#,
+        ),
+        ("threadProvenance", r#"{"thread":{"scope":false}}"#),
+        ("workspaceCleanupIntent", r#"{"action":false}"#),
+        ("layrTurnSaves", r#"{"turn":{"status":"other"}}"#),
+        ("cancelledPark", "{}"),
+        ("parkReceipt", "3"),
+        ("manualRecoveryDeliveryHold", "{}"),
+        ("nativeSafetyRetry", "false"),
+        ("shellPolicyLastReapAt", r#""not-time""#),
+        ("nativeReview", r#"{"status":"started"}"#),
+    ] {
+        let raw = format!(
+            r#"{{"id":"invalid-{key}","rootId":"invalid-{key}","epoch":1,"status":"paused","accountKey":"default","provider":"codex","{key}":{invalid}}}"#
+        );
+        let result = studio_json::from_str::<crate::AgentRecord>(&raw)
+            .map_err(crate::StoreError::from)
+            .and_then(|agent| crate::AgentRepository::put(&db, &agent));
+        if result.is_ok() {
+            admitted.push(key);
+        }
+    }
+    assert!(
+        admitted.is_empty(),
+        "repository admitted nonconforming retained keys: {admitted:?}"
+    );
+}
+
+#[test]
 fn unreadable_native_hold_preserves_exact_future_tokens_and_duplicate_members() {
     let raw = r#"{ "reason":"pending", "future":1.00e+3, "unknown":1, "unknown":2 }"#;
     let hold: NativeFailureHold = studio_json::from_str(raw).expect("accepted legacy hold");
@@ -381,3 +417,200 @@ fn canonical_agent_error_preserves_provider_extension_tokens() {
     let owner: super::record::AgentRecord = studio_json::from_str(&raw).unwrap();
     assert!(studio_json::to_string(&owner).unwrap().contains(future));
 }
+
+#[test]
+fn closed_agent_reader_refuses_unknown_and_draft_root_members_with_identity() {
+    let db = crate::fresh_state::test_canvas();
+    let control = r#"{"id":"closed-agent","rootId":"closed-agent","epoch":1,"status":"paused","accountKey":"default","provider":"codex"}"#;
+    let agent = crate::records::parse_agent_record("closed-agent", control).unwrap();
+    crate::AgentRepository::put(&db, &agent).unwrap();
+    for key in [
+        "future",
+        "remoteWorker",
+        "executionMove",
+        "_p02CreationIdentity",
+        "_p02ParentCwd",
+        "_p02ParentProjectPath",
+        "_p02ParentAccountKey",
+        "_p02ParentProjectId",
+        "_p02ParentProjectServerId",
+        "_p02ProjectBinding",
+        "_p02ProjectLookupId",
+    ] {
+        let raw = format!("{},\"{key}\":true}}", &control[..control.len() - 1]);
+        let result = crate::records::parse_agent_record("closed-agent", &raw);
+        assert!(
+            matches!(result, Err(crate::StoreError::InvalidSyncObjectField { ref scope, ref id, .. }) if scope=="runtime_agents" && id=="closed-agent"),
+            "unclosed root key {key}"
+        );
+    }
+}
+
+#[test]
+fn closed_agent_reader_refuses_nonconforming_remaining_retained_keys() {
+    let mut admitted = Vec::new();
+    for (key, value) in [
+        ("branch", "false"),
+        ("forkedFrom", "false"),
+        ("sourceMessage", "7"),
+        ("restoredCheckpoint", "{}"),
+        ("contextRepairHistory", r#"[{"phase":"ready"}]"#),
+        (
+            "lastWorkspaceWait",
+            r#"{"attemptId":"attempt","events":false,"blockers":[],"at":1}"#,
+        ),
+        ("layrCacheWarning", "false"),
+        ("layrVersionWarning", "false"),
+        ("nativeRoleGuidance", "false"),
+        ("nativeTeleportTool", r#""other""#),
+        ("nativeToolSource", r#""other""#),
+        ("nativeToolCatalog", r#"{"threadId":"t","digest":false}"#),
+        ("parkSequence", "-1"),
+        ("preparedContext", r#"{"epoch":false,"versions":{}}"#),
+        ("profile", "7"),
+        ("reviewArchiveAttempts", "-1"),
+        ("reviewArchiveError", "false"),
+        ("reviewArchiveNextAt", r#""not-seconds""#),
+        ("reviewArchiveScheduled", "7"),
+        ("contextRepair", r#"{"phase":"other"}"#),
+    ] {
+        let id = format!("invalid-{key}");
+        let raw = format!(
+            r#"{{"id":"{id}","rootId":"{id}","epoch":1,"status":"paused","accountKey":"default","provider":"codex","{key}":{value}}}"#
+        );
+        match crate::records::parse_agent_record(&id, &raw) {
+            Err(crate::StoreError::InvalidSyncObjectField {
+                scope,
+                id: refused_id,
+                ..
+            }) => {
+                assert_eq!(scope, "runtime_agents");
+                assert_eq!(refused_id, id);
+            }
+            _ => admitted.push(key),
+        }
+    }
+    assert!(
+        admitted.is_empty(),
+        "remaining retained keys admitted: {admitted:?}"
+    );
+}
+
+#[test]
+fn closed_agent_reader_keeps_current_writers_and_distinct_permission_profiles() {
+    let db = crate::fresh_state::test_canvas();
+    let raw = studio_json::json!({
+        "id":"retained-agent","rootId":"retained-agent","epoch":1,"status":"idle",
+        "accountKey":"default","provider":"codex","branch":"work",
+        "layrCacheWarning":"cache","layrVersionWarning":"version",
+        "nativeRoleGuidance":"guidance","nativeTeleportTool":"orchestration_move",
+        "nativeToolSource":"current","nativeToolCatalog":{"threadId":"thread","digest":"digest"},
+        "parkSequence":1,"preparedContext":{"epoch":["thread",0],"versions":{"role":"v1"}},
+        "updated":123,"profile":{"id":"provider-permission","extends":null},"profileId":"creation-profile",
+        "reviewArchiveAttempts":2,"reviewArchiveError":"blocked","reviewArchiveNextAt":3.5,
+        "reviewArchiveScheduled":"result","forkedFrom":"source","sourceMessage":"message",
+        "restoredCheckpoint":"checkpoint",
+        "worktreePreparation":"preparing","imageWorkspaceRepo":"/legacy/source",
+        "imageWorkspaceMount":"/legacy/mount","legacyWorkspaceFinished":true,"legacyWorkspaceSettled":true,
+        "legacyWorkspaceExecution":{"turnId":"prior","restartRecovery":{"stage":"pending","turnId":"old-turn"}},
+        "lastWorkspaceWait":{"attemptId":"attempt","events":["event"],"blockers":[],"at":4.5},
+        "contextRepair":super::context_repair::ContextRepair::test_fixture("preparing"),
+        "contextRepairHistory":[super::context_repair::ContextRepair::test_fixture("completed")]
+    });
+    let agent = crate::records::parse_agent_record("retained-agent", &raw.to_string()).unwrap();
+    crate::AgentRepository::put(&db, &agent).unwrap();
+    let read = crate::AgentRepository::get(&db, &agent.id)
+        .unwrap()
+        .unwrap();
+    let encoded = read.value();
+    for (key, expected) in raw.as_object().unwrap() {
+        assert_eq!(&encoded[key], expected, "{key}");
+    }
+    assert_eq!(
+        read.profile.value().map(|profile| profile.id.as_str()),
+        Some("provider-permission")
+    );
+    assert_eq!(
+        read.profile_id.value().map(String::as_str),
+        Some("creation-profile")
+    );
+}
+
+#[test]
+fn promoted_root_fields_preserve_explicit_null_and_equality() {
+    let db = crate::fresh_state::test_canvas();
+    let base = studio_json::json!({"id":"nullable-agent","rootId":"nullable-agent","epoch":0,
+        "status":"idle","accountKey":"default","provider":"codex","compactions":0});
+    let absent = crate::AgentRecord::from_value(base.clone()).unwrap();
+    for key in PROMOTED_NULLABLE_FIELDS {
+        let mut raw = base.clone();
+        raw[*key] = studio_json::json!(null);
+        let explicit = crate::AgentRecord::from_value(raw).unwrap();
+        crate::AgentRepository::put(&db, &explicit).unwrap();
+        let mut unrelated = crate::AgentRepository::get(&db, &explicit.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unrelated, explicit);
+        unrelated.name = Some("unrelated edit".into());
+        crate::AgentRepository::put(&db, &unrelated).unwrap();
+        let stored = crate::AgentRepository::get(&db, &explicit.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.value().get(*key),
+            Some(&studio_json::json!(null)),
+            "{key}"
+        );
+        assert!(
+            absent != explicit,
+            "{key}: missing and null compare differently"
+        );
+        assert_eq!(
+            explicit.value().get(*key),
+            Some(&studio_json::json!(null)),
+            "{key}"
+        );
+        assert!(absent.value().get(*key).is_none(), "{key}");
+    }
+}
+
+const PROMOTED_NULLABLE_FIELDS: &[&str] = &[
+    "capacityRetry",
+    "readState",
+    "threadProvenance",
+    "workspaceCleanupIntent",
+    "layrTurnSaves",
+    "cancelledPark",
+    "parkReceipt",
+    "manualRecoveryDeliveryHold",
+    "nativeSafetyRetry",
+    "shellPolicyLastReapAt",
+    "nativeReview",
+    "branch",
+    "layrCacheWarning",
+    "layrVersionWarning",
+    "nativeRoleGuidance",
+    "nativeTeleportTool",
+    "nativeToolCatalog",
+    "nativeToolSource",
+    "parkSequence",
+    "preparedContext",
+    "profile",
+    "reviewArchiveAttempts",
+    "reviewArchiveError",
+    "reviewArchiveNextAt",
+    "reviewArchiveScheduled",
+    "contextRepair",
+    "contextRepairHistory",
+    "lastWorkspaceWait",
+    "forkedFrom",
+    "sourceMessage",
+    "restoredCheckpoint",
+    "worktreePreparation",
+    "updated",
+    "legacyWorkspaceExecution",
+    "legacyWorkspaceFinished",
+    "legacyWorkspaceSettled",
+    "imageWorkspaceRepo",
+    "imageWorkspaceMount",
+];

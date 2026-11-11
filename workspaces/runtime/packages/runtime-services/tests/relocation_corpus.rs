@@ -38,10 +38,15 @@ impl Fixture {
                 if let Some(agent) = case.pointer_mut(pointer).and_then(Value::as_object_mut) {
                     agent.insert("provider".into(), json!("codex"));
                     agent.entry("compactions").or_insert(json!(0));
+                    agent.remove("executionMove");
                 }
             }
         }
         for case in data["cases"].as_array_mut().expect("cases") {
+            if case["family"] == "expire" {
+                // Expiry now owns only the operation; the retired marker never changes an agent.
+                case["expected"]["agent"] = case["agent"].clone();
+            }
             if case["family"] == "location" {
                 for pointer in ["/project", "/expected/project"] {
                     if let Some(project) = case.pointer_mut(pointer).and_then(Value::as_object_mut)
@@ -1094,15 +1099,7 @@ async fn move_expiry_and_cache_failpoints_reopen_without_partial_effects() {
             .iter()
             .find(|c| c["name"] == name)
             .expect("case");
-        let boundaries = if name == "expire-importing" {
-            vec![
-                ("runtime_agent_moves", "UPDATE"),
-                ("runtime_agents", "UPDATE"),
-                ("sync_entities", "INSERT"),
-            ]
-        } else {
-            vec![("runtime_agent_moves", "UPDATE")]
-        };
+        let boundaries = vec![("runtime_agent_moves", "UPDATE")];
         for (index, (table, verb)) in boundaries.into_iter().enumerate() {
             if !full() && index != 0 {
                 continue;
@@ -1158,30 +1155,6 @@ async fn move_expiry_and_cache_failpoints_reopen_without_partial_effects() {
                 );
                 assert_eq!(snapshot(&store), committed);
             }
-        }
-        if name == "expire-importing" {
-            let (_, store) = fixture.store("stale-move-epoch").await;
-            fixture.seed(&store, case).await;
-            let mut changed_agent = case["agent"].clone();
-            changed_agent["compactions"] = json!(0);
-            changed_agent["epoch"] = json!(2);
-            store
-                .transaction(move |tx| {
-                    AgentRepository::put(
-                        tx,
-                        &AgentRecord::from_value(changed_agent).expect("agent"),
-                    )?;
-                    Ok(())
-                })
-                .await
-                .expect("advance epoch");
-            let before = snapshot(&store);
-            assert!(
-                agent_move::expire(&store, text(&case["operation"], "id"), now)
-                    .await
-                    .is_err()
-            );
-            assert_eq!(snapshot(&store), before);
         }
     }
 }

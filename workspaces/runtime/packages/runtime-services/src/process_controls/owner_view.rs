@@ -25,9 +25,7 @@ pub struct ProcessOwner {
     pub deleted: Option<bool>,
     pub deleted_at: Option<f64>,
     pub archived: Option<bool>,
-    pub archived_at: Option<f64>,
     pub account_transfer_id: Option<serde::de::IgnoredAny>,
-    pub execution_move: Option<serde::de::IgnoredAny>,
     pub native_response_turn: Option<String>,
     pub restart_recovery: Option<ProcessRecovery>,
     pub disconnect_recovery: Option<ProcessRecovery>,
@@ -88,6 +86,33 @@ impl ProcessOwner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn held_response_uses_admitted_archive_state() {
+        let mut raw = studio_json::json!({"id":"owner","rootId":"owner","epoch":1,"provider":"claude",
+            "status":"interrupted","inFlight":false,"autoWake":false,"accountKey":"default",
+            "threadId":"thread","turnId":"turn","nativeResponseTurn":"turn",
+            "restartRecovery":{"stage":"held","epoch":1,"accountKey":"default","threadId":"thread"},
+            "disconnectRecovery":{"source":"restart","epoch":1,"accountKey":"default","threadId":"thread"}});
+        fn decode(raw: &impl serde::Serialize) -> ProcessOwner {
+            ProcessOwner::decode(studio_json::to_string(raw).expect("owner JSON"))
+                .expect("owner projection")
+        }
+        assert!(super::super::held_response_candidate(&decode(&raw)));
+        raw["archivedAt"] = studio_json::json!(2);
+        assert!(studio_runtime_store::AgentRecord::from_value(raw.clone()).is_err());
+        assert!(
+            super::super::held_response_candidate(&decode(&raw)),
+            "a key refused by agent admission is not a process permission field"
+        );
+        raw.as_object_mut().expect("owner").remove("archivedAt");
+        raw["archived"] = studio_json::json!(true);
+        assert!(studio_runtime_store::AgentRecord::from_value(raw.clone()).is_ok());
+        assert!(
+            !super::super::held_response_candidate(&decode(&raw)),
+            "an admitted archived owner is never a held-response Stop candidate"
+        );
+    }
 
     #[test]
     fn held_proof_preserves_whole_owner_equality() {

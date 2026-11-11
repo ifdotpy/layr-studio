@@ -39,6 +39,7 @@ async fn fixture() -> (tempfile::TempDir, RuntimeStore, PreparedStart) {
     case["before"]["turnId"] = json!("created-turn");
     case["actor"]["status"] = json!("running");
     case["actor"]["threadId"] = json!("thread");
+    case["actor"]["profile"] = json!({"id":"strict","extends":null});
     case["actor"]["turnId"] = json!("turn");
     let store = fixtures::store(root.path(), "start").await;
     let mut monitor = fixtures::monitor(root.path());
@@ -84,9 +85,9 @@ async fn monitor_start_survives_actor_progress_and_submits_once() {
     change_actor(
         &store,
         json!({
-            "updated":2001.0,"status":"waiting","inFlight":true,"turnId":null,
-            "startAttempt":{"id":"new-progress","epoch":2},"timing":{"fastTokens":10},
-            "profile":{"label":"Renamed profile"},
+            "updatedAt":2001.0,"status":"waiting","inFlight":true,"turnId":null,
+            "startAttempt":{"id":"new-progress","epoch":2},"tokensUsed":10,
+            "profile":{"id":"strict","extends":"renamed-parent"},
         }),
     )
     .await;
@@ -149,15 +150,13 @@ async fn monitor_start_refuses_changed_ownership_permissions_or_monitor() {
         json!({"permissionMode":"bypassPermissions"}),
         json!({"approvalPolicy":"never"}),
         json!({"sandbox":{"type":"dangerFullAccess"}}),
-        json!({"profile":{"id":"other"}}),
+        json!({"profile":{"id":"other","extends":null}}),
         json!({"role":"reviewer"}),
         json!({"isLead":true}),
         json!({"imageWorkspace":true}),
         json!({"workspaceMode":"image"}),
         json!({"layrScratch":"/other"}),
         json!({"provider":"claude"}),
-        json!({"remoteWorker":true}),
-        json!({"remoteAnchor":true}),
     ] {
         fixtures::seed(&store, &baseline, baseline_monitor.clone()).await;
         assert_eq!(

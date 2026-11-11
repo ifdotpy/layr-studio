@@ -1487,7 +1487,7 @@ async fn create_child(
     let prepare_root_agent = root_agent.to_owned();
     let prepare_parent_id = parent_id.to_owned();
     let prepare_identity = identity.clone();
-    let (draft, mut record) = studio_runtime_process::blocking_pool::spawn_blocking(
+    let (draft, creation, mut record) = studio_runtime_process::blocking_pool::spawn_blocking(
         "runtime-services/agents_create/child_prepare",
         move || {
             let (base_ref, base_commit) = if worktree {
@@ -1495,7 +1495,7 @@ async fn create_child(
             } else {
                 (String::new(), String::new())
             };
-            let draft = crate::host_worker_create::prepare_work_item(
+            let (draft, creation) = crate::host_worker_create::prepare_work_item(
                 &body,
                 PathBuf::from(&prepare_host_cwd).as_path(),
                 studio_runtime_store::AgentId::from(prepare_id),
@@ -1518,7 +1518,7 @@ async fn create_child(
                 daybreak,
             )?;
             let checked = crate::host_worker_create::persisted_record(&draft)?;
-            Ok::<_, CreateError>((draft, Box::new(checked)))
+            Ok::<_, CreateError>((draft, creation, Box::new(checked)))
         },
     )
     .await
@@ -1551,7 +1551,7 @@ async fn create_child(
     let validate = std::sync::Arc::clone(&validate);
     let result = mutate(context, move |tx| {
         let validate = |schema: &str, value: &Value| validate(schema, value);
-        crate::host_worker_create::recheck_worker(tx, &draft, epoch, &identity)?;
+        crate::host_worker_create::recheck_worker(tx, &draft, &creation, epoch, &identity)?;
         let current_parent = AgentRepository::get(tx, &AgentId::from(parent_id.as_str()))?
             .ok_or(MutationError::UnknownAgent)?;
         let current_root =
@@ -3760,36 +3760,51 @@ mod tests {
             non_defaults: false,
         };
         let settings_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let first = conversation(&context, request(&settings_id, Some("first"), None))
-            .await
-            .expect("first settings");
+        let first = Box::pin(conversation(
+            &context,
+            request(&settings_id, Some("first"), None),
+        ))
+        .await
+        .expect("first settings");
         let later = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        conversation(&context, request(&later, Some("later"), None))
+        Box::pin(conversation(&context, request(&later, Some("later"), None)))
             .await
             .expect("later settings");
         assert_eq!(
-            conversation(&retry_context, request(&settings_id, Some("first"), None))
-                .await
-                .expect("replay without dependencies"),
+            Box::pin(conversation(
+                &retry_context,
+                request(&settings_id, Some("first"), None)
+            ))
+            .await
+            .expect("replay without dependencies"),
             first
         );
         assert!(
-            conversation(&retry_context, request(&settings_id, Some("later"), None))
-                .await
-                .is_err()
+            Box::pin(conversation(
+                &retry_context,
+                request(&settings_id, Some("later"), None)
+            ))
+            .await
+            .is_err()
         );
         let permissions_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let first = conversation(&context, request(&permissions_id, None, Some(false)))
-            .await
-            .expect("first permissions");
+        let first = Box::pin(conversation(
+            &context,
+            request(&permissions_id, None, Some(false)),
+        ))
+        .await
+        .expect("first permissions");
         let later = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        conversation(&context, request(&later, None, Some(true)))
+        Box::pin(conversation(&context, request(&later, None, Some(true))))
             .await
             .expect("later permissions");
         assert_eq!(
-            conversation(&retry_context, request(&permissions_id, None, Some(false)))
-                .await
-                .expect("replay permissions"),
+            Box::pin(conversation(
+                &retry_context,
+                request(&permissions_id, None, Some(false))
+            ))
+            .await
+            .expect("replay permissions"),
             first
         );
         let live = AgentRepository::get(&store.test_reader().expect("reader"), &"lead".into())
@@ -3864,7 +3879,7 @@ mod tests {
                     &AgentRecord::from_value(json!({"compactions":0,"accountKey":"default",
                         "provider":"codex", "id":"lead", "rootId":"lead", "epoch":0,
                         "status":"idle", "autoWake":true, "isLead":true, "concurrency":1,
-                        "maxAgents":8, "subagentConcurrencyVersion":2, "agentModeRevision":0
+                        "capacity":{"kind":"explicit","max":8}, "subagentConcurrencyVersion":2, "agentModeRevision":0
                     }))
                     .expect("record"),
                 )?;

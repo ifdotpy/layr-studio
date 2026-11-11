@@ -239,7 +239,7 @@ async fn count_message_agent_rows(unrelated: usize) -> usize {
                 agent["rootId"] = agent["id"].clone();
                 studio_runtime_store::AgentRepository::put(
                     tx,
-                    &studio_runtime_store::AgentRecord::from_value(agent)?,
+                    &studio_runtime_store::test_fixtures::historical_agent(&agent)?,
                 )?;
             }
             Ok(())
@@ -508,7 +508,7 @@ async fn try_send_args_with(
             for record in extra_agents {
                 studio_runtime_store::AgentRepository::put(
                     tx,
-                    &studio_runtime_store::AgentRecord::from_value(record)?,
+                    &studio_runtime_store::test_fixtures::historical_agent(&record)?,
                 )?;
             }
             Ok(())

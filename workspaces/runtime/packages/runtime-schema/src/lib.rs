@@ -41,6 +41,7 @@ pub mod claude_login;
 pub mod claude_options;
 mod codex_generated;
 pub use studio_codex_protocol as codex_protocol_generated;
+pub use studio_codex_protocol::ActivePermissionProfile as CodexActivePermissionProfile;
 pub mod command;
 pub mod complaint_record;
 pub mod complaints;
@@ -1697,3 +1698,5 @@ mod generated_agent_view_tests {
         assert_eq!(detail.get("startWait"), Some(&json!(null)));
     }
 }
+
+pub mod native_thread_record;

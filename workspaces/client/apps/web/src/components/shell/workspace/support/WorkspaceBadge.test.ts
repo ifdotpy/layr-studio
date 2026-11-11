@@ -23,33 +23,9 @@ test.each([
   expect(info).toEqual({ label, title: `${name} · /projects/example` });
 });
 
-test("hides the badge for leads and unknown remote workspaces", () => {
+test("hides the badge for leads without a workspace mode", () => {
   expect(workspaceBadgeInfo(agent({ isLead: true }))).toBeNull();
-  expect(
-    workspaceBadgeInfo(
-      agent({ remoteWorker: { server: "remote", link: "link" } }),
-    ),
-  ).toBeNull();
 });
-
-test.each([
-  ["layr-native", "Layr", "Native Layr workspace"],
-  ["worktree", "WT", "Git worktree"],
-] as const)(
-  "shows remote %s mode even when local workspace flags are false",
-  (workspaceMode, label, name) => {
-    expect(
-      workspaceBadgeInfo(
-        agent({
-          cwd: "/remote/repo",
-          remoteWorker: { server: "remote", link: "link" },
-          workspaceMode,
-          worktree: false,
-        }),
-      ),
-    ).toEqual({ label, title: `${name} · /remote/repo` });
-  },
-);
 
 test.each([
   ["layr-native", "Layr"],
@@ -59,9 +35,8 @@ test.each([
   expect(workspaceBadgeInfo(current)?.label).toBe(label);
 });
 
-test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
+test("shows the legacy layr worker badge", () => {
   const current = agent({
-    ...(remote ? { remoteWorker: { server: "remote", link: "link" } } : {}),
     legacyVmWorkspace: true,
   });
   expect(workspaceBadgeInfo(current)).toEqual({
@@ -70,7 +45,7 @@ test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
   });
 });
 
-test("missing modes retain lead and remote badge visibility", () => {
+test("missing modes retain lead badge visibility", () => {
   expect(workspaceBadgeInfo()).toBeNull();
   for (const workspaceMode of [undefined, null]) {
     expect(workspaceBadgeInfo(agent({ workspaceMode }))).toBeNull();
@@ -79,27 +54,10 @@ test("missing modes retain lead and remote badge visibility", () => {
         agent({ isLead: true, workspaceMode, worktree: true }),
       ),
     ).toBeNull();
-    expect(
-      workspaceBadgeInfo(
-        agent({
-          workspaceMode,
-          remoteWorker: { server: "remote", link: "link" },
-        }),
-      ),
-    ).toBeNull();
   }
   expect(
     workspaceBadgeInfo(
       agent({ isLead: true, workspaceMode: GeneratedApiWorkspaceMode.shared }),
-    ),
-  ).toBeNull();
-  expect(
-    workspaceBadgeInfo(
-      agent({
-        cwd: null,
-        workspaceMode: GeneratedApiWorkspaceMode.worktree,
-        remoteWorker: { server: "remote", link: "link" },
-      }),
     ),
   ).toBeNull();
 });

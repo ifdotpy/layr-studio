@@ -40,7 +40,34 @@ pub(crate) fn materialize_agent_defaults(value: &mut Value) {
 }
 
 pub(crate) fn normalize_legacy_agent(value: &mut Value) {
+    // Published DTOs and stored roots have different contracts. Historical
+    // storage retirement must not erase fields owned by the generated DTO.
+    // Other historical normalization (including nested shapes) still applies.
+    let published = if value["kind"] == "agent" {
+        let schemas =
+            &studio_runtime_services::sync_policy::openapi_document()["components"]["schemas"];
+        let properties = schemas["AgentEntityDto"]["properties"]
+            .as_object()
+            .expect("generated agent DTO properties");
+        value
+            .as_object()
+            .expect("published agent DTO")
+            .iter()
+            .filter(|(key, _)| {
+                properties.contains_key(*key)
+                    && studio_runtime_store::test_fixtures::retired_agent_root_keys()
+                        .contains(&key.as_str())
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     normalize_agent(value, studio_runtime_store::test_fixtures::normalize_agent);
+    value
+        .as_object_mut()
+        .expect("normalized agent")
+        .extend(published);
 }
 
 #[allow(dead_code)]

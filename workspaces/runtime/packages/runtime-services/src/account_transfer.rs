@@ -2791,7 +2791,6 @@ mod provider_receipt_tests {
             let value = json!({"compactions":0,"provider":"codex","id":"agent","rootId":"agent",
                 "epoch":7,"status":"idle","accountKey":"source","environment":environment});
             let agent = studio_runtime_store::AgentRecord::from_value(value.clone()).unwrap();
-            assert!(!agent.extra.contains_key("environment"));
             assert_eq!(agent.value()["environment"], value["environment"]);
         }
     }
@@ -2929,10 +2928,6 @@ mod provider_receipt_tests {
     #[test]
     fn enrollment_reads_typed_pending_settings_and_captures_source() {
         let mut agent: studio_runtime_store::AgentRecord = studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"pendingSettings":{"model":"typed","updatedAt":12.0},"pendingSettingsAccountKey":"source"}"#).unwrap();
-        agent.extra.insert(
-            "pendingSettings".into(),
-            studio_json::json!({"model":"stale"}),
-        );
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
         let member = super::typed_enroll(
@@ -3048,11 +3043,6 @@ mod provider_receipt_tests {
         let mut agent: studio_runtime_store::AgentRecord =
             studio_json::from_str(r#"{"id":"agent","rootId":"agent","provider":"codex","accountKey":"source","epoch":0,"status":"idle","compactions":0,"workerDefaults":{"model":"typed","effort":null,"fastMode":false}}"#)
             .unwrap();
-        // A stale extension must not replace the typed owner during enrollment.
-        agent.extra.insert(
-            "workerDefaults".into(),
-            studio_json::json!({"model":"stale"}),
-        );
         let id = "move".to_owned().try_into().unwrap();
         let target = "target".to_owned().try_into().unwrap();
         super::typed_enroll(
@@ -3092,10 +3082,6 @@ mod provider_receipt_tests {
         assert!(
             matches!(agent.cyber_access_program.value(), Some(studio_runtime_store::StoredTransferValue::Known(value)) if value == "standard")
         );
-        assert!(!agent.extra.contains_key("cyberAccessProgram"));
-        assert!(!agent.extra.contains_key("claudeOptions"));
-        assert!(!agent.extra.contains_key("nativeEffort"));
-        assert!(!agent.extra.contains_key("daybreakEnabled"));
     }
 
     #[test]

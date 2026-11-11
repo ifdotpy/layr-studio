@@ -84,14 +84,14 @@ fn prefix_inputs(agent: &Value) -> Value {
         agent["model"],
         agent["effort"],
         agent["fastMode"],
-        agent["claude"],
-        agent["claudeSettings"],
+        Value::Null,
+        Value::Null,
         agent["profileInstructions"],
-        agent["developerInstructions"],
+        Value::Null,
         agent["permissionMode"],
         agent["pendingSettings"],
-        agent["capabilityProfile"],
-        agent["dynamicTools"]
+        Value::Null,
+        Value::Null
     ])
 }
 
@@ -165,14 +165,14 @@ pub fn observe(
             agent.model,
             agent.effort,
             agent.fast_mode,
-            agent.extra.get("claude"),
-            agent.extra.get("claudeSettings"),
+            Value::Null,
+            Value::Null,
             agent.profile_instructions,
-            agent.extra.get("developerInstructions"),
+            Value::Null,
             agent.permission_mode,
             agent.pending_settings,
-            agent.extra.get("capabilityProfile"),
-            agent.extra.get("dynamicTools")
+            Value::Null,
+            Value::Null
         ]),
         attempt: json!(
             agent
@@ -916,20 +916,19 @@ mod tests {
         let db = studio_runtime_store::test_canvas();
         let (settings, episode, mut source, _) = fixture();
         source["rootId"] = json!("agent");
-        source["claude"] = json!({"vendor":[null,1,"kept"]});
         source["pendingSettings"] = json!({"future":{"kept":true}});
         source["profileInstructions"] = json!("instructions");
-        source["future"] = json!("untouched".repeat(1024));
+        source["name"] = json!("untouched".repeat(1024));
         let expected_identity = identity(&source);
         let expected_prefix = prefix_inputs(&source);
         let mut agent = AgentRecord::from_value(source).unwrap();
-        let untouched = agent.extra["future"].as_str().unwrap().as_ptr();
+        let untouched = agent.name.as_ref().unwrap().as_ptr();
         OrchestrationSettingsRepository::set_idle_compaction(&db, &settings).unwrap();
         observe(&db, &mut agent, &json!(episode.cache)).unwrap();
         let current = episode_view(&agent).unwrap().unwrap();
         assert_eq!(current.identity, expected_identity);
         assert_eq!(current.prefix_inputs, expected_prefix);
-        assert_eq!(agent.extra["future"].as_str().unwrap().as_ptr(), untouched);
+        assert_eq!(agent.name.as_ref().unwrap().as_ptr(), untouched);
     }
 
     #[test]
@@ -987,7 +986,7 @@ mod tests {
                     episode.unload_at = previous;
                     agent["rootId"] = json!("agent");
                     agent["idleCompactionEpisode"] = json!(episode);
-                    agent["unrelated"] = json!({"retained":[null,1,"opaque"]});
+                    agent["projectFolderRevision"] = json!({"retained":[null,1,"opaque"]});
                     AgentRepository::put(&db, &AgentRecord::from_value(agent.clone()).unwrap())
                         .unwrap();
                     // A receipt can live on a different account with the same episode id.
@@ -1012,7 +1011,10 @@ mod tests {
                             .unwrap()
                             .unwrap()
                             .value();
-                        assert_eq!(saved["unrelated"], agent["unrelated"]);
+                        assert_eq!(
+                            saved["projectFolderRevision"],
+                            agent["projectFolderRevision"]
+                        );
                         let actual: Episode =
                             Episode::deserialize(&saved["idleCompactionEpisode"]).unwrap();
                         let cache_fire = fire_at(

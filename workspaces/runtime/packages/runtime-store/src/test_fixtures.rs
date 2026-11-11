@@ -1008,7 +1008,8 @@ pub fn normalize_agent(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()>
     agent_batch::apply(tx)?;
     agent_capacity::apply(tx)?;
     agent_naming::apply(tx)?;
-    agent_creation::apply(tx)
+    agent_creation::apply(tx)?;
+    crate::migrations::retire_agent_fixture_keys(tx)
 }
 pub fn normalize_creation(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
     agent_creation::apply(tx)
@@ -1165,4 +1166,26 @@ pub fn agent_with_boolean_deletion(
     crate::peer_update_settings::canvas_tx(tx)
         .named(&BooleanDeletion::QUERY, &BooleanDeletion { id })?;
     Ok(())
+}
+
+/// The dated retirement ledger, shared with published-fixture normalization.
+pub fn retired_agent_root_keys() -> &'static [&'static str] {
+    crate::migrations::retired_agent_root_keys()
+}
+
+/// Apply the dated retired-key transform to a frozen agent specimen before current admission.
+pub fn normalize_retired_agent_record(id: &str, raw: &str) -> crate::StoreResult<String> {
+    crate::migrations::normalize_retired_agent_record(id, raw)
+}
+
+/// Frozen historical specimens use the same dated root-key retirement as startup.
+pub fn historical_agent(value: &impl serde::Serialize) -> crate::StoreResult<crate::AgentRecord> {
+    let raw = studio_json::to_string(value)?;
+    let current = normalize_retired_agent_record("frozen-fixture", &raw)?;
+    Ok(studio_json::from_str(&current)?)
+}
+
+/// Execute the dated strip migration for frozen source tables, before current readers.
+pub fn retire_agent_keys(tx: &rusqlite::Transaction<'_>) -> crate::StoreResult<()> {
+    crate::migrations::retire_agent_fixture_keys(tx)
 }

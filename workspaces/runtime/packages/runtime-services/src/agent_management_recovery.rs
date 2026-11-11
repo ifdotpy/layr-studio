@@ -131,8 +131,6 @@ fn authorize(tx: &Transaction<'_>, actor: &Value, target: &str) -> Result<(Value
         || lead["autoWake"] != true
         || truthy(lead.get("deletedAt"))
         || truthy(lead.get("deleted"))
-        || truthy(lead.get("remoteOrigin"))
-        || truthy(lead.get("executionMove"))
     {
         return Err(Error::Stale);
     }
@@ -145,10 +143,7 @@ fn authorize(tx: &Transaction<'_>, actor: &Value, target: &str) -> Result<(Value
         || agent_ancestry(tx, lead_id, target)? != AgentAncestry::Descendant
         || truthy(worker.get("deletedAt"))
         || truthy(worker.get("deleted"))
-        || truthy(worker.get("archivedAt"))
         || truthy(worker.get("archived"))
-        || truthy(worker.get("remoteOrigin"))
-        || truthy(worker.get("executionMove"))
     {
         return Err(Error::Invalid("Manage only a local live descendant worker"));
     }
@@ -1228,6 +1223,37 @@ mod tests {
     }
     fn args() -> Value {
         json!({"action":"reset_tools","agent_id":"worker-00000000","reason":"Release stale tool memory"})
+    }
+
+    #[tokio::test]
+    async fn manual_recovery_refuses_admitted_archived_worker_before_native_io() {
+        let (_directory, store, actor, session) = fixture().await;
+        store
+            .transaction(|tx| {
+                let mut worker =
+                    AgentRepository::get(tx, &AgentId::from("worker-00000000"))?.expect("worker");
+                worker.archived = studio_runtime_schema::queue_command::Field::Value(true);
+                AgentRepository::put(tx, &worker)
+            })
+            .await
+            .expect("admitted archive flag");
+        let session = Arc::new(session);
+        assert!(matches!(
+            execute(
+                Arc::clone(&store),
+                session.clone(),
+                &actor,
+                &args(),
+                "archived-worker",
+                10.0
+            )
+            .await,
+            Err(Error::Invalid("Manage only a local live descendant worker"))
+        ));
+        assert!(
+            session.calls.lock().expect("calls").is_empty(),
+            "archived workers cannot reach native inspection or effects"
+        );
     }
     async fn worker(store: &RuntimeStore) -> Value {
         store

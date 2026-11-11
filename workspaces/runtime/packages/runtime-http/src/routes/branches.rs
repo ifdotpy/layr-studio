@@ -1005,9 +1005,9 @@ async fn copy_branch_history(
         child.permission_mode = current.permission_mode;
         child.sandbox = provider.get("sandbox").map(Option::<studio_runtime_store::AgentSandbox>::deserialize).transpose()?.unwrap_or_else(|| current.sandbox.clone());
         child.approval_policy = provider.get("approvalPolicy").map(Option::<String>::deserialize).transpose()?.unwrap_or_else(|| current.approval_policy.clone());
-        child.profile_id = provider.get("activePermissionProfile").map(studio_runtime_schema::queue_command::Field::<String>::deserialize).transpose()?.unwrap_or_else(|| if current.profile_id.is_missing() { studio_runtime_schema::queue_command::Field::Null } else { current.profile_id.clone() });
+        child.profile = provider.get("activePermissionProfile").map(studio_runtime_schema::queue_command::Field::<studio_runtime_schema::CodexActivePermissionProfile>::deserialize).transpose()?.unwrap_or_else(|| current.profile.clone());
         child.thread_id = match &provider["thread"]["id"] { Value::Null => None, Value::String(id) => Some(id.clone()), Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => return Err(studio_runtime_store::StoreError::SchemaMismatch("invalid branch thread".into())) };
-        child.extra.insert("forkedFrom".into(),json!(source)); child.extra.insert("sourceMessage".into(),json!(selected.id));
+        child.forked_from = studio_runtime_schema::queue_command::Field::Value(source.clone()); child.source_message = studio_runtime_schema::queue_command::Field::Value(selected.id.clone());
         child.set_status(studio_runtime_store::AgentStatus::Idle); child.auto_wake = Some(true); child.naming.set_needs_title(Some(false));
         child.quick_create = None; child.quick_create_request = None;
         let mut stmt=tx.prepare_cached("SELECT id,record,created FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL ORDER BY created,id")?;

@@ -383,7 +383,7 @@ mod tests {
             "threadId":"thread", "turnId":"turn", "inFlight":false, "events":0,
             "model":"model", "effort":null, "fastMode":false, "daybreakEnabled":true,
             "cyberAccessProgram":{"legacy":true}, "cwd":"/work", "deletedAt":1.5,
-            "unrelatedTranscript":"not projected"
+            "projectFolderRevision":"not projected"
         }))
         .unwrap();
         let projection = SharedJson::agent_projection(&NotificationAgent::from(&agent));
@@ -400,7 +400,7 @@ mod tests {
             "accountHistory":[], "provider":"codex", "threadId":"thread", "epoch":4,
             "turnId":"turn", "inFlight":false, "model":"model", "effort":"high",
             "fastMode":false, "daybreakEnabled":false, "cyberAccessProgram":false,
-            "cwd":"/workspace", "deletedAt":null, "unrelatedTranscript": "x".repeat(64 * 1024)
+            "cwd":"/workspace", "deletedAt":null, "projectFolderRevision": "x".repeat(64 * 1024)
         })).unwrap();
         let frame = studio_json::json!({
             "method":"turn/completed",
@@ -449,7 +449,7 @@ mod tests {
             !analytics_agent
                 .as_object()
                 .expect("analytics agent is an object")
-                .contains_key("unrelatedTranscript")
+                .contains_key("projectFolderRevision")
         );
         assert!(
             studio_json::to_value(&effects[0])

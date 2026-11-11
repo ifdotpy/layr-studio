@@ -7,8 +7,7 @@ use serde::Deserialize;
 use studio_json::{Value, json};
 use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_store::{
-    AgentId, AgentMoveRepository as Repository, AgentRecord, AgentRepository, RuntimeStore,
-    Transaction,
+    AgentId, AgentMoveRepository as Repository, AgentRepository, RuntimeStore, Transaction,
 };
 
 pub const NATIVE_MOVE_DEPENDENCY: &str = "agent-move/exact-native-history-and-paired-driver";
@@ -55,7 +54,6 @@ pub struct MoveSnapshot {
 }
 pub struct MoveDecision {
     operation: Value,
-    agent: Option<Value>,
 }
 
 impl MoveSnapshot {
@@ -106,11 +104,7 @@ impl MoveSnapshot {
         )
     }
     /// Expiry never resumes execution, repeats native import, or invents a remote receipt.
-    pub fn expire(
-        &self,
-        agent: Option<&Value>,
-        now: f64,
-    ) -> Result<Option<MoveDecision>, MoveError> {
+    pub fn expire(&self, now: f64) -> Result<Option<MoveDecision>, MoveError> {
         timestamp(now)?;
         if matches!(
             self.fields.phase,
@@ -129,44 +123,7 @@ impl MoveSnapshot {
         operation["phase"] = json!("unknown");
         operation["error"] = json!(DEADLINE_ERROR);
         operation["recoveryExpiredAt"] = json!(now);
-        let mut updated = self.checked_agent(agent)?;
-        if let Some(row) = updated.as_mut() {
-            let key = if self.fields.side == Side::Source {
-                self.fields.id.as_str()
-            } else {
-                self.raw["move"]
-                    .as_str()
-                    .ok_or_else(|| invalid("runtime_agent_moves", "/move"))?
-            };
-            let bound = row.pointer("/executionMove/id").and_then(Value::as_str) == Some(key)
-                && (self.fields.side == Side::Source || truthy(row.get("moveImportPending")));
-            if bound {
-                row["executionMove"]["phase"] = json!("unknown");
-                row["error"] = json!(DEADLINE_ERROR);
-            } else {
-                updated = None;
-            }
-        }
-        Ok(Some(MoveDecision {
-            operation,
-            agent: updated,
-        }))
-    }
-    fn checked_agent(&self, agent: Option<&Value>) -> Result<Option<Value>, MoveError> {
-        agent
-            .map(|row| {
-                checked::<Value>("relocation/NativeAgent", "runtime_agents", row)?;
-                if row["id"] != self.agent {
-                    return Err(MoveError::Refused("The move belongs to another agent"));
-                }
-                if self.fields.side == Side::Source && row["epoch"] != self.raw["epoch"] {
-                    return Err(MoveError::Refused(
-                        "The move belongs to another agent epoch",
-                    ));
-                }
-                Ok(row.clone())
-            })
-            .transpose()
+        Ok(Some(MoveDecision { operation }))
     }
 }
 
@@ -201,9 +158,7 @@ pub async fn expire(store: &RuntimeStore, key: &str, now: f64) -> Result<bool, M
                 return Ok(false);
             };
             let snapshot = MoveSnapshot::from_record(&row)?;
-            let agent = AgentRepository::get(tx, &AgentId::from(snapshot.agent.as_str()))?
-                .map(|a| a.value());
-            apply(tx, snapshot.expire(agent.as_ref(), now)?)
+            apply(tx, snapshot.expire(now)?)
         })
         .await
 }
@@ -213,12 +168,6 @@ fn apply(tx: &Transaction<'_>, decision: Option<MoveDecision>) -> Result<bool, M
         return Ok(false);
     };
     Repository::save(tx, &decision.operation)?;
-    if let Some(row) = decision.agent {
-        let agent = AgentRecord::from_value(row.clone())
-            .map_err(|_| invalid("runtime_agents", "record"))?;
-        AgentRepository::put(tx, &agent)?;
-        crate::agents_create::publish_agent(tx, &row)?;
-    }
     Ok(true)
 }
 

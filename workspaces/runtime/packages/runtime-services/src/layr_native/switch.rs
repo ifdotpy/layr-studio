@@ -77,8 +77,26 @@ pub(super) async fn switch_chat_with(
                         current.layr_state_id = serde::Deserialize::deserialize(value.clone())
                             .map_err(|error| NativeLayrError::Refused(error.to_string()))?
                     }
+                    "layrVersionWarning" => {
+                        current.layr_version_warning = value.as_str().map_or(
+                            studio_runtime_schema::queue_command::Field::Null,
+                            |text| {
+                                studio_runtime_schema::queue_command::Field::Value(text.to_owned())
+                            },
+                        )
+                    }
+                    "layrCacheWarning" => {
+                        current.layr_cache_warning = value.as_str().map_or(
+                            studio_runtime_schema::queue_command::Field::Null,
+                            |text| {
+                                studio_runtime_schema::queue_command::Field::Value(text.to_owned())
+                            },
+                        )
+                    }
                     _ => {
-                        current.extra.insert(key.clone(), value.clone());
+                        return Err(NativeLayrError::Refused(
+                            "Invalid native workspace field".into(),
+                        ));
                     }
                 }
             }

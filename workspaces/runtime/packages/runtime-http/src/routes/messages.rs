@@ -3,7 +3,6 @@
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use rusqlite::OptionalExtension;
 use std::sync::Arc;
 use studio_runtime_services::commands::CommandError;
 use studio_runtime_services::coordination::{self, CoordinationError};
@@ -120,7 +119,6 @@ pub(super) async fn send_message_with<T: Send + 'static>(
     let store = state.store.ok_or_else(ApiError::internal)?;
     let wake = state.event_wake;
     let message_admission = state.message_admission.clone();
-    let orchestration_driver = state.orchestration_driver.clone();
     let assets = body
         .assets
         .unwrap_or_default()
@@ -130,47 +128,38 @@ pub(super) async fn send_message_with<T: Send + 'static>(
     let delivery = body.delivery.unwrap_or_default();
     let admission_room = body.room.clone();
     let admission_override = message_admission.clone();
-    let (federated_room, remote_worker, prepared) = store
+    let (federated_room, prepared) = store
         .read_async("runtime-http/routes/messages", move |connection| {
-                let federated_room = connection
-                    .query_row(
-                        // Raw SQL: partial projections preserve the existing identity/permission boundary.
-                        "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1)",
-                        [&admission_room],
-                        |row| row.get::<_, bool>(0),
-                    )
-                    .map_err(|_| ApiError::internal())?;
-                if federated_room {
-                    return Ok::<_, ApiError>((true, false, None));
-                }
-                let remote_worker: bool = connection
-                    .query_row(
-                        "SELECT json_type(record,'$.remoteWorker') IS NOT NULL FROM runtime_agents WHERE id=?1",
-                        [&admission_room],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(|_| ApiError::internal())?
-                    .unwrap_or(false);
-                let prepared: studio_runtime_services::message_admission::AdmissionSnapshot =
-                    if admission_override.is_some() {
-                        studio_runtime_services::message_admission::AdmissionSnapshot::Workspace(
-                            studio_runtime_services::message_admission::PreparedAdmission::read(
-                                connection,
-                                &admission_room,
-                            )
-                            .map_err(coordination_error)?,
+            let federated_room = connection
+                .query_row(
+                    // Raw SQL: partial projections preserve the existing identity/permission boundary.
+                    "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1)",
+                    [&admission_room],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(|_| ApiError::internal())?;
+            if federated_room {
+                return Ok::<_, ApiError>((true, None));
+            }
+            let prepared: studio_runtime_services::message_admission::AdmissionSnapshot =
+                if admission_override.is_some() {
+                    studio_runtime_services::message_admission::AdmissionSnapshot::Workspace(
+                        studio_runtime_services::message_admission::PreparedAdmission::read(
+                            connection,
+                            &admission_room,
                         )
-                    } else {
-                        studio_runtime_services::message_admission::AdmissionSnapshot::Ingress(
-                            studio_runtime_services::message_admission::MessageIngressAdmission::read(
-                                connection,
-                                &admission_room,
-                            )
-                            .map_err(coordination_error)?,
+                        .map_err(coordination_error)?,
+                    )
+                } else {
+                    studio_runtime_services::message_admission::AdmissionSnapshot::Ingress(
+                        studio_runtime_services::message_admission::MessageIngressAdmission::read(
+                            connection,
+                            &admission_room,
                         )
-                    };
-                Ok((false, remote_worker, Some(prepared)))
+                        .map_err(coordination_error)?,
+                    )
+                };
+            Ok((false, Some(prepared)))
         })
         .await?;
     let prepared = match prepared {
@@ -237,14 +226,6 @@ pub(super) async fn send_message_with<T: Send + 'static>(
         .await
         .map_err(super::commands::command_error)?;
     posted.notify_committed(|| wake.notify_one());
-    if remote_worker && let Some(driver) = &orchestration_driver {
-        let now = studio_runtime_services::event_write::unix_time()
-            .map_err(|_| ApiError::internal())? as i64;
-        driver
-            .pump_due(now)
-            .await
-            .map_err(|_| ApiError::internal())?;
-    }
     Ok((Json(result), finished))
 }
 

@@ -8,6 +8,7 @@ mod evidence;
 mod identity;
 mod journal;
 pub(crate) mod record;
+pub(crate) mod retained;
 mod session_table;
 mod turn_attempt;
 mod turn_table;
@@ -51,3 +52,5 @@ mod turn_tests;
 
 #[cfg(test)]
 mod shared_evidence_tests;
+
+pub(crate) mod context_repair;

@@ -13,7 +13,5 @@ export const WorkerRetainedWorktree = observer(function WorkerRetainedWorktree({
   const detail = resourceData(
     store.agentDetail(observableAgentId(agent.id)).current,
   );
-  return detail ? (
-    <RetainedWorktree agent={detail} remoteWorker={agent.remoteWorker} />
-  ) : null;
+  return detail ? <RetainedWorktree agent={detail} /> : null;
 });

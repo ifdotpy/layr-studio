@@ -45,7 +45,7 @@ pub(super) fn checked(
 #[cfg(test)]
 mod tests {
     #[test]
-    fn notification_agent_write_preserves_legacy_row_bytes_in_typed_snapshot() {
+    fn notification_agent_write_moves_typed_name_into_snapshot() {
         let mut agent = studio_runtime_store::AgentRecord::new(
             "agent".into(),
             "agent".into(),
@@ -53,17 +53,9 @@ mod tests {
             studio_runtime_store::AgentStatus::Idle,
             "default".into(),
         );
-        agent
-            .extra
-            .insert("futureExtension".into(), studio_json::json!([1, 2, 3]));
-        let allocation = agent.extra["futureExtension"].as_array().unwrap().as_ptr();
+        agent.name = Some("retained allocation".repeat(1024));
+        let allocation = agent.name.as_ref().unwrap().as_ptr();
         let snapshot = super::NotificationSnapshot::from_records(agent, None, None).unwrap();
-        assert_eq!(
-            allocation,
-            snapshot.agent().extra["futureExtension"]
-                .as_array()
-                .unwrap()
-                .as_ptr()
-        );
+        assert_eq!(allocation, snapshot.agent().name.as_ref().unwrap().as_ptr());
     }
 }

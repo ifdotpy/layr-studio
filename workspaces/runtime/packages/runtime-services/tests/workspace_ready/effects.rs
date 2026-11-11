@@ -875,7 +875,7 @@ async fn parent_and_destination_reservations_block_but_progress_does_not() {
     let fixture = Fixture::new().await;
     let context = fixture.context();
     let plan = fixture.plan();
-    fixture.patch("progress", json!("ordinary update")).await;
+    fixture.patch("name", json!("ordinary update")).await;
     assert!(matches!(
         provision(
             std::sync::Arc::clone(&fixture.store),
@@ -956,9 +956,7 @@ async fn ready_token_requires_current_generation_and_no_conflicting_reservation(
         .await
         .expect("transaction")
         .expect("admit");
-    fixture
-        .patch("progress", json!("does not invalidate"))
-        .await;
+    fixture.patch("name", json!("does not invalidate")).await;
     let unchanged_token = token.clone();
     assert!(
         fixture
@@ -2454,4 +2452,21 @@ async fn persisted_ready_vm_is_refused_before_host_preparation() {
             crate::workspace_ready::WorkspaceRefusal::VmWorkspaceUnsupported
         ))
     ));
+}
+
+#[tokio::test]
+async fn worktree_reservation_keeps_typed_preparation_and_publication() {
+    let fixture = Fixture::new().await;
+    let plan = fixture.plan();
+    fixture.reserve(&plan.identity).await;
+    let stored = fixture.actor();
+    assert_eq!(stored["worktreePreparation"], "preparing");
+    let published = crate::sync_views::agent_entity_view(&stored, &Default::default())
+        .expect("reserved actor remains publishable");
+    assert_eq!(published["worktreePreparation"], "preparing");
+    let result = prepare(std::sync::Arc::clone(&fixture.store), fixture.id.clone())
+        .await
+        .expect("resume durable reservation");
+    admitted(&fixture, result).await;
+    assert!(fixture.actor().get("worktreePreparation").is_none());
 }

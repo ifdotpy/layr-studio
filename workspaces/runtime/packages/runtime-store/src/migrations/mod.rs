@@ -6,6 +6,8 @@ pub(crate) mod m2026_11_09_online_keys;
 mod m2026_11_09_repair_invalid_entity_scopes;
 mod m2026_11_09_retired_objects;
 mod m2026_11_11_remove_account_throttle;
+mod m2026_11_11_retired_agent_keys;
+mod m2026_11_11_strict_native_review;
 
 use crate::{StoreError, StoreResult};
 use baseline_manifest::RETIRED;
@@ -107,6 +109,34 @@ static CATALOG: &[SqlMigration] = &[
             remove_when: "Supported installations and backups no longer contain account throttle waits",
         },
         apply: m2026_11_11_remove_account_throttle::apply,
+    },
+    SqlMigration {
+        definition: MigrationDefinition {
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 11,
+            },
+            ..definition(
+                "2026-11-11-strict-native-review",
+                "Legacy native review markers on deleted agents",
+            )
+        },
+        apply: m2026_11_11_strict_native_review::apply,
+    },
+    SqlMigration {
+        definition: MigrationDefinition {
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 11,
+            },
+            ..definition(
+                "2026-11-11-retired-agent-keys",
+                "Retired agent root fields on supported historical rows",
+            )
+        },
+        apply: m2026_11_11_retired_agent_keys::apply,
     },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
@@ -438,4 +468,40 @@ pub(crate) fn supervisor(db: &mut Connection) -> StoreResult<()> {
     crate::supervisor_schema::install(&tx)?;
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn retired_agent_root_keys() -> &'static [&'static str] {
+    m2026_11_11_retired_agent_keys::RETIRED
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn normalize_retired_agent_record(id: &str, raw: &str) -> crate::StoreResult<String> {
+    Ok(m2026_11_11_retired_agent_keys::destination(id, raw)?.unwrap_or_else(|| raw.to_owned()))
+}
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn retire_agent_fixture_keys(tx: &Transaction<'_>) -> crate::StoreResult<()> {
+    m2026_11_11_retired_agent_keys::apply(tx)
+}
+
+/// Canvas catalog fingerprints written by released servers. The catalog is
+/// append-only: each one must stay a prefix fingerprint so those stores open.
+#[cfg(test)]
+const RELEASED_CANVAS_CATALOGS: &[&str] =
+    &["561c94aa6bffe48d6de89805793b296560ace24b89a3b914d38635215eae5f53"];
+
+#[cfg(test)]
+mod released_catalog_tests {
+    #[test]
+    fn released_canvas_catalogs_remain_prefixes() {
+        for released in super::RELEASED_CANVAS_CATALOGS {
+            assert!(
+                (0..=super::CATALOG.len()).any(|end| super::catalog_fingerprint(
+                    &super::CATALOG[..end],
+                    super::MigrationTarget::Canvas
+                ) == *released),
+                "released catalog {released} is no longer a prefix"
+            );
+        }
+    }
 }

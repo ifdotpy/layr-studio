@@ -18,7 +18,6 @@ export function workspaceBadgeInfo(
       title: !agent.isLead && agent.cwd ? `${title} · ${agent.cwd}` : title,
     };
   }
-  if (agent.remoteWorker && (!agent.cwd || !detail?.workspaceMode)) return null;
   // Legacy rows without a mode keep only the inference their flags prove.
   const mode =
     (detail?.workspaceMode as string | null | undefined) ??

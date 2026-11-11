@@ -86,7 +86,7 @@ pub struct ContextUsageDto {
     pub at: Field<f64>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReadStateDto {
     pub thread_id: String,

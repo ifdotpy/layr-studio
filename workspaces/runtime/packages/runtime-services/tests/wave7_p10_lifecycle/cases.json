@@ -29,7 +29,9 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -42,7 +44,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -55,7 +59,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -68,7 +74,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -150,7 +158,9 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -163,7 +173,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -176,7 +188,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -189,7 +203,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -313,7 +329,9 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -347,7 +365,9 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -360,7 +380,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -373,7 +395,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -386,7 +410,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -468,7 +494,9 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -482,7 +510,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -495,7 +525,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -509,7 +541,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -633,7 +667,9 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -647,7 +683,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "grandchild",
@@ -661,7 +699,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -700,7 +740,9 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -713,7 +755,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -726,7 +770,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -739,7 +785,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -826,7 +874,9 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -839,7 +889,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -852,7 +904,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -865,7 +919,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -994,7 +1050,9 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -1033,7 +1091,9 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -1046,7 +1106,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -1059,7 +1121,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -1072,7 +1136,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -1159,7 +1225,9 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -1173,7 +1241,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -1186,7 +1256,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -1200,7 +1272,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -1329,7 +1403,9 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -1343,7 +1419,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "grandchild",
@@ -1357,7 +1435,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -1403,7 +1483,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -1416,7 +1497,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -1429,7 +1512,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -1442,7 +1527,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -1536,7 +1623,8 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -1549,7 +1637,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -1562,7 +1652,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -1575,7 +1667,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -1711,7 +1805,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       }
     ]
   },
@@ -1757,7 +1852,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -1770,7 +1866,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -1783,7 +1881,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -1796,7 +1896,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -1890,7 +1992,8 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -1904,7 +2007,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -1917,7 +2022,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -1931,7 +2038,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -2067,7 +2176,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -2081,7 +2191,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "grandchild",
@@ -2095,7 +2207,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -2143,7 +2257,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -2156,7 +2271,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -2169,7 +2286,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -2182,7 +2301,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -2277,7 +2398,8 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -2290,7 +2412,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -2303,7 +2427,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -2316,7 +2442,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -2453,7 +2581,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       }
     ]
   },
@@ -2501,7 +2630,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -2514,7 +2644,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -2527,7 +2659,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -2540,7 +2674,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -2635,7 +2771,8 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -2649,7 +2786,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -2662,7 +2801,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -2676,7 +2817,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -2813,7 +2956,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -2827,7 +2971,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "grandchild",
@@ -2841,7 +2987,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -2889,7 +3037,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -2902,7 +3051,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -2915,7 +3066,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -2928,7 +3081,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -3024,7 +3179,8 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -3037,7 +3193,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -3050,7 +3208,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -3063,7 +3223,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -3201,7 +3363,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       }
     ]
   },
@@ -3249,7 +3412,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -3262,7 +3426,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -3275,7 +3441,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -3288,7 +3456,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -3384,7 +3554,8 @@
                 "epoch": 3,
                 "sequence": 1,
                 "cancelledAtEpoch": 4
-              }
+              },
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -3398,7 +3569,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -3411,7 +3584,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -3425,7 +3600,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -3563,7 +3740,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -3577,7 +3755,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "grandchild",
@@ -3591,7 +3771,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -3621,7 +3803,16 @@
             "capacityRetry": {
               "id": "capacity-retry-1",
               "status": "scheduled",
-              "dueAt": 1234577.5
+              "dueAt": 1234577.5,
+              "accountKey": "default",
+              "attempt": 1,
+              "cause": "serverOverloaded",
+              "cwd": "/fixture",
+              "epoch": 3,
+              "maxAttempts": 4,
+              "settings": {},
+              "threadId": "thread",
+              "turnId": "turn"
             },
             "capacityRetryCount": 1,
             "startAttempt": {
@@ -3630,7 +3821,9 @@
               "submitted": false,
               "capacityRetryId": "capacity-retry-1",
               "accountKey": "fixture-account"
-            }
+            },
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -3643,7 +3836,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -3685,7 +3880,9 @@
               "agentModeRevision": 0,
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -3698,7 +3895,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -3746,7 +3945,9 @@
         "agentModeRevision": 0,
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -3794,7 +3995,8 @@
               "epoch": 3,
               "sequence": 1
             },
-            "capacityRetryCount": 2
+            "capacityRetryCount": 2,
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -3807,7 +4009,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "unrelated",
@@ -3820,7 +4024,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "grandchild",
@@ -3833,7 +4039,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -3931,7 +4139,8 @@
                 "cancelledAtEpoch": 4
               },
               "activity": null,
-              "activeTools": []
+              "activeTools": [],
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -3946,7 +4155,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "unrelated",
@@ -3959,7 +4170,9 @@
               "isLead": false,
               "autoWake": true,
               "inFlight": false,
-              "created": 1.0
+              "created": 1.0,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "grandchild",
@@ -3974,7 +4187,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -4095,7 +4310,8 @@
           "epoch": 3,
           "sequence": 1,
           "cancelledAtEpoch": 4
-        }
+        },
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -4110,7 +4326,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "grandchild",
@@ -4125,7 +4343,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -4151,7 +4371,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -4164,7 +4386,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -4206,7 +4430,9 @@
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -4221,7 +4447,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -4257,7 +4485,9 @@
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -4272,7 +4502,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -4300,7 +4532,9 @@
             "agentModeSupported": true,
             "maxAgentsExplicit": false,
             "deletedAt": 1234567.5,
-            "error": "Conversation deleted"
+            "error": "Conversation deleted",
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -4315,7 +4549,9 @@
             "inFlight": false,
             "created": 1.0,
             "deletedAt": 1234567.5,
-            "error": "Conversation deleted"
+            "error": "Conversation deleted",
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -4357,7 +4593,9 @@
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -4372,7 +4610,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -4408,7 +4648,9 @@
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -4423,7 +4665,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -4449,7 +4693,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -4462,7 +4708,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -4503,7 +4751,9 @@
               "agentMode": "multi",
               "agentModeRevision": 0,
               "agentModeSupported": true,
-              "maxAgentsExplicit": false
+              "maxAgentsExplicit": false,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -4517,7 +4767,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -4577,7 +4829,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -4603,7 +4857,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -4616,7 +4872,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -4658,7 +4916,9 @@
               "agentModeRevision": 0,
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -4672,7 +4932,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -4720,7 +4982,9 @@
         "agentModeRevision": 0,
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -4734,7 +4998,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -4760,7 +5026,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -4773,7 +5041,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -4814,7 +5084,9 @@
               "agentMode": "multi",
               "agentModeRevision": 0,
               "agentModeSupported": true,
-              "maxAgentsExplicit": false
+              "maxAgentsExplicit": false,
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -4828,7 +5100,9 @@
               "autoWake": false,
               "inFlight": false,
               "created": 1.0,
-              "error": "Stopped by user"
+              "error": "Stopped by user",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -4907,7 +5181,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -4921,7 +5197,9 @@
         "autoWake": false,
         "inFlight": false,
         "created": 1.0,
-        "error": "Stopped by user"
+        "error": "Stopped by user",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ],
     "actions": [
@@ -4959,7 +5237,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -4972,7 +5252,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -5022,7 +5304,9 @@
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -5037,7 +5321,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -5074,7 +5360,9 @@
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -5089,7 +5377,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -5115,7 +5405,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -5128,7 +5420,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [],
@@ -5170,7 +5464,9 @@
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -5185,7 +5481,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [],
@@ -5221,7 +5519,9 @@
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -5236,7 +5536,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -5262,7 +5564,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -5275,7 +5579,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [
@@ -5327,7 +5633,9 @@
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -5342,7 +5650,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [
@@ -5423,7 +5733,9 @@
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -5438,7 +5750,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   },
@@ -5464,7 +5778,9 @@
             "agentMode": "multi",
             "agentModeRevision": 0,
             "agentModeSupported": true,
-            "maxAgentsExplicit": false
+            "maxAgentsExplicit": false,
+            "accountKey": "default",
+            "provider": "codex"
           },
           {
             "id": "worker",
@@ -5477,7 +5793,9 @@
             "isLead": false,
             "autoWake": true,
             "inFlight": false,
-            "created": 1.0
+            "created": 1.0,
+            "accountKey": "default",
+            "provider": "codex"
           }
         ],
         "runtime_work": [
@@ -5529,7 +5847,9 @@
               "agentModeSupported": true,
               "maxAgentsExplicit": false,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             },
             {
               "id": "worker",
@@ -5544,7 +5864,9 @@
               "inFlight": false,
               "created": 1.0,
               "deletedAt": 1234567.5,
-              "error": "Conversation deleted"
+              "error": "Conversation deleted",
+              "accountKey": "default",
+              "provider": "codex"
             }
           ],
           "runtime_work": [
@@ -5625,7 +5947,9 @@
         "agentModeSupported": true,
         "maxAgentsExplicit": false,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       },
       {
         "id": "worker",
@@ -5640,7 +5964,9 @@
         "inFlight": false,
         "created": 1.0,
         "deletedAt": 1234567.5,
-        "error": "Conversation deleted"
+        "error": "Conversation deleted",
+        "accountKey": "default",
+        "provider": "codex"
       }
     ]
   }

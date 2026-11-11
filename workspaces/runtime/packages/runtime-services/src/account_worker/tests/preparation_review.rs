@@ -14,7 +14,12 @@ async fn change_agent(state: &State, key: &'static str, value: Value) {
                     } else if key == "agentModeRevision" {
                         row.agent_mode_revision = value.as_u64();
                     } else {
-                        row.extra.insert(key.into(), value);
+                        assert_eq!(key, "contextRepair");
+                        row.context_repair = studio_runtime_schema::queue_command::Field::Value(
+                            Box::new(studio_runtime_store::ContextRepair::test_fixture(
+                                value["phase"].as_str().unwrap(),
+                            )),
+                        );
                     }
                     AgentRepository::put(tx, &row)?;
                     Ok::<_, WorkerError>(())
@@ -121,7 +126,8 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
                         } else if key == "contextRepairWait" {
                             row.context_repair_wait = serde::Deserialize::deserialize(value).expect("typed context repair wait");
                         } else {
-                            row.extra.insert(key.into(),value);
+                            assert_eq!(key, "contextRepair");
+                            row.context_repair = studio_runtime_schema::queue_command::Field::Value(Box::new(studio_runtime_store::ContextRepair::test_fixture(value["phase"].as_str().unwrap())));
                         }
                         AgentRepository::put(tx,&row)?;
                     }
@@ -151,7 +157,6 @@ async fn context_repair_holds_and_complaint_ownership_preserve_input() {
         "preparing",
         "submitted",
         "unknown",
-        "ready",
     ] {
         let state = State::new().await;
         change_agent(&state, "contextRepair", json!({"phase":phase})).await;

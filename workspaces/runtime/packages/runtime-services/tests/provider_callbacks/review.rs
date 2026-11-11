@@ -29,6 +29,7 @@ async fn try_put_record(
             )?;
             if table == "runtime_agents" {
                 studio_runtime_store::test_fixtures::normalize_creation(tx)?;
+                studio_runtime_store::test_fixtures::retire_agent_keys(tx)?;
             }
             Ok(())
         })
@@ -362,6 +363,12 @@ async fn resolved_answering_and_unknown_cards_keep_what_nobody_inferred() {
         }
         crate::agent_view_fixtures::normalize_creation_agent(&mut expected_actor);
         crate::normalize_agent_nulls(&mut expected_actor);
+        let current_expected = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+            "expected-resolved-actor",
+            &expected_actor.to_string(),
+        )
+        .unwrap();
+        expected_actor = studio_json::from_str(&current_expected).unwrap();
         let mut actual_actor = record(&store, "runtime_agents", &context.agent);
         crate::normalize_agent_nulls(&mut actual_actor);
         assert_eq!(actual_actor, expected_actor);

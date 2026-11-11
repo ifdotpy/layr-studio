@@ -207,7 +207,7 @@ async fn restore_owned(
                     let mut expected_source = old.source.value().cloned().map(Value::Object).unwrap_or(Value::Null);
                     if old.phase == OperationPhase::Completed {
                         expected_source["threadId"] = old.provider.value().and_then(|provider| provider.get("thread")).and_then(|thread| thread.get("id")).cloned().unwrap_or(Value::Null);
-                        if snapshot.agent.extra["restoredCheckpoint"] != checkpoint.id {
+                        if snapshot.agent.restored_checkpoint.as_ref().map(std::ops::Deref::deref) != Some(checkpoint.id.as_str()) {
                             return Err(ApiError::new(StatusCode::CONFLICT, "Restore state changed. Inspect the operation before retrying"));
                         }
                     }

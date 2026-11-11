@@ -98,8 +98,11 @@ impl Fixture {
         let cwd = root.path().to_string_lossy().into_owned();
         store
             .transaction(move |tx| {
-                let mut agent: studio_runtime_store::AgentRecord =
-                    studio_json::from_str(include_str!("agent.json"))?;
+                let current = studio_runtime_store::test_fixtures::normalize_retired_agent_record(
+                    "late-operation-recipient",
+                    include_str!("agent.json"),
+                )?;
+                let mut agent: studio_runtime_store::AgentRecord = studio_json::from_str(&current)?;
                 agent.cwd = Some(workspace.to_string_lossy().into_owned());
                 agent.host_project_path = studio_runtime_schema::queue_command::Field::Value(
                     workspace.to_string_lossy().into_owned(),
