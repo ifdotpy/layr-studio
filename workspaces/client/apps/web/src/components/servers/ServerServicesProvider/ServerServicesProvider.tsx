@@ -1,4 +1,4 @@
-import { createRequestRegistry } from "../../../renameRequest.ts";
+import { createRequestRegistry } from "../../../servers/requestOperations.ts";
 import { defaultNetStatus } from "../../../servers/net/status.ts";
 import { createNet } from "../../../servers/net/net.ts";
 import type { ServerSettings } from "../../../servers/ServerSettingsContext.tsx";
@@ -24,7 +24,7 @@ import * as defaultFileDialogs from "../../../native/fileDialogs.ts";
 import { watchResourceReads } from "../../../sync/subscriptions/reads.ts";
 import { createDrafts } from "../../../sync/drafts.ts";
 import * as defaultOutbox from "../../../sync/send.ts";
-import { createContext, useContext, Fragment, type ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { localSidebarServices } from "../../sidebar/support/services.tsx";
 import * as defaultApi from "../../../servers/net/api.ts";
 import * as defaultSync from "../../../sync/client.ts";
@@ -34,11 +34,49 @@ import * as defaultTokenRates from "../../../usage/tokenRate.ts";
 import type { ServerServices } from "../../../servers/serverServices.ts";
 import { createServerStore } from "../../../store/server.ts";
 
-const Context = createContext<ServerServices | null>(null);
-const StoreContext = createContext<ReturnType<typeof createServerStore> | null>(
-  null,
-);
-export const ServerStoreProvider = StoreContext.Provider;
+export const ServerContext = createContext<{
+  services?: ServerServices;
+  store?: ServerServices["store"];
+  areas?: ServerAreas | null;
+}>({});
+
+// Store/area-only fixture roots share the authenticated tree's single context.
+export function ServerStoreProvider({
+  value,
+  children,
+}: {
+  value: ServerServices["store"];
+  children?: ReactNode;
+}) {
+  return (
+    <ServerContext.Provider
+      value={{ ...useContext(ServerContext), store: value }}
+    >
+      {children}
+    </ServerContext.Provider>
+  );
+}
+export function ServerAreasContextProvider({
+  value,
+  children,
+}: {
+  value: ServerAreas | null;
+  children?: ReactNode;
+}) {
+  return (
+    <ServerContext.Provider
+      value={{ ...useContext(ServerContext), areas: value }}
+    >
+      {children}
+    </ServerContext.Provider>
+  );
+}
+export function useServerAreas() {
+  const scope = useContext(ServerContext);
+  const areas = "areas" in scope ? scope.areas : scope.services?.areas;
+  if (!areas) throw new Error("ServerAreas must be used inside its provider");
+  return areas;
+}
 
 export function createServerViewServices(
   createAreas: (scope: AppScope) => ServerAreas,
@@ -125,22 +163,19 @@ export function ServerServicesProvider({
   children: ReactNode;
 }) {
   return (
-    <Context.Provider value={services}>
-      <Fragment
-        key={JSON.stringify([
-          services.owner.id,
-          services.owner.origin,
-          services.owner.credentialId,
-        ])}
-      >
-        <ServerStoreProvider value={services.store}>
-          {children}
-        </ServerStoreProvider>
-      </Fragment>
-    </Context.Provider>
+    <ServerContext.Provider
+      key={JSON.stringify([
+        services.owner.id,
+        services.owner.origin,
+        services.owner.credentialId,
+      ])}
+      value={{ services, store: services.store }}
+    >
+      {children}
+    </ServerContext.Provider>
   );
 }
-export const useServerServices = () => useContext(Context);
+export const useServerServices = () => useContext(ServerContext).services;
 export const useServerApi = () => useServerServices()?.api ?? defaultApi;
 export function useServerSidebarServices() {
   const services = useServerServices();
@@ -151,7 +186,7 @@ export const useServerSync = () => useServerServices()?.sync ?? defaultSync;
 export const useServerResources = () =>
   useServerServices()?.resources ?? defaultResources;
 export function useServerStore() {
-  const store = useContext(StoreContext);
+  const store = useContext(ServerContext).store;
   if (!store)
     throw new Error(
       "The server store must be provided at the application root",
@@ -213,7 +248,4 @@ export function useServerOwner() {
 export function useServerPreferences() {
   const { saved, save } = useServerApi();
   return { saved, save };
-}
-export function useServerPending() {
-  return useServerApi().pending;
 }

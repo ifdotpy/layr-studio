@@ -2,7 +2,6 @@ import { ActionIcon, Drawer } from "@mantine/core";
 import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { WorkspaceSurface } from "../WorkspaceSurface/WorkspaceSurface.tsx";
 import { panelWidthAfterResize } from "./workspacePanelWidth.ts";
 import {
   resolveLayoutLength,
@@ -273,7 +272,10 @@ export function WorkspacePanelHost({
           </Drawer.Body>
         </Drawer.Content>
       </Drawer.Root>
-      {createPortal(<WorkspaceSurface>{children}</WorkspaceSurface>, container)}
+      {createPortal(
+        <div className="workspace-surface">{children}</div>,
+        container,
+      )}
     </>
   );
 }

@@ -119,16 +119,13 @@ export class SidebarOrderOwner {
   };
   requestBackend: SidebarBackend | null = null;
   order: Order = {};
-  setOrder = (value: Order) => {
-    this.order = value;
-  };
   revision = -1;
   busy = false;
   adoptServerOrder = (value: ServerOrder | null | undefined) => {
     if (!value || value.revision <= this.revision) return;
     this.revision = value.revision;
     if (value.groups !== null) {
-      this.setOrder(value.groups);
+      this.order = value.groups;
     }
   };
   drag: Drag | null = null;
@@ -160,7 +157,7 @@ export class SidebarOrderOwner {
     let clearPending = false;
     try {
       this.outbox.set("sidebarOrder", suffix, JSON.stringify(request));
-      if (optimistic) this.setOrder(optimistic);
+      if (optimistic) this.order = optimistic;
       const backend =
         this.requestBackend ||
         this.source.services.byOwner(
@@ -175,7 +172,7 @@ export class SidebarOrderOwner {
       );
       if (isSidebarOrderResponse(result) && result.revision >= this.revision) {
         this.revision = result.revision;
-        this.setOrder(result.groups || {});
+        this.order = result.groups || {};
       }
       this.adoptServerOrder(this.source.runtime?.sidebarOrder);
       this.requestBackend = null;
@@ -190,7 +187,7 @@ export class SidebarOrderOwner {
       ) {
         this.requestBackend = null;
         clearPending = true;
-        this.setOrder(this.source.runtime?.sidebarOrder?.groups || {});
+        this.order = this.source.runtime?.sidebarOrder?.groups || {};
         this.notify?.(
           error.status === 409
             ? "Sidebar order changed in another client. Review the current order."
@@ -236,13 +233,6 @@ export class SidebarOrderOwner {
       return;
     }
     const value = { ...this.order, [group]: next };
-    if (
-      this.source.services.available &&
-      !this.source.services.available(target)
-    ) {
-      this.notify?.("The sidebar server is offline or unavailable.");
-      return;
-    }
     const backend = this.source.services.owner({ kind: "order", group });
     this.requestBackend = backend;
     void this.send(

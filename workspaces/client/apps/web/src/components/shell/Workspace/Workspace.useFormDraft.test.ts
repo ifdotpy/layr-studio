@@ -45,6 +45,14 @@ it("keeps a newer edit when an older form submission completes", async () => {
 });
 
 import { WorkspacePanel } from "../../../app/shell/WorkspaceStore.ts";
+const context = {
+  model: { submittingPanels: new Set<{ busy: boolean }>() },
+  get run() {
+    return serverApi.post;
+  },
+  reload() {},
+  notify() {},
+};
 
 it("conditionally clears a successful durable save after the form unmounts", async () => {
   const text = new UnsentText("unmounted-form");
@@ -55,7 +63,7 @@ it("conditionally clears a successful durable save after the form unmounts", asy
   vi.spyOn(serverApi, "post").mockReturnValue(pending.promise);
   const panel = new WorkspacePanel();
   const completion = panel.submit(
-    { run: serverApi.post },
+    context,
     "/api/profiles",
     { action: "save" },
     () => {},
@@ -76,7 +84,7 @@ it("preserves a newer durable edit when an unmounted save completes", async () =
   const pending = Promise.withResolvers<{}>();
   vi.spyOn(serverApi, "post").mockReturnValue(pending.promise);
   const completion = new WorkspacePanel().submit(
-    { run: serverApi.post },
+    context,
     "/api/profiles",
     { action: "save" },
     () => {},
@@ -102,7 +110,7 @@ it.each([
     const stop = autorun(() => form.value);
     vi.spyOn(serverApi, "post").mockRejectedValue(error);
     await new WorkspacePanel().submit(
-      { run: serverApi.post },
+      context,
       "/api/profiles",
       { action: "save" },
       undefined,

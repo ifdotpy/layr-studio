@@ -19,13 +19,14 @@ import {
   type PostResult,
 } from "./api.ts";
 // @vitest-environment happy-dom
-import type { post as apiPost } from "./api.ts";
 import { autorun } from "mobx";
 import { transientTestFixture } from "./sync/subscriptions/transientTestFixture.ts";
 import { agentId, requestId } from "./generated/observableResources.ts";
 import { resourceData } from "./store/runtime.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { createRequestRegistry } from "./renameRequest.ts";
+import { renameOperation } from "./renameRequest.ts";
+import { createRequestRegistry } from "./servers/requestOperations.ts";
+import { postDouble } from "./servers/postDouble.ts";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -34,20 +35,18 @@ it("a pending rename sends one POST and waits for the entity stream", async () =
   vi.useFakeTimers();
   const f = transientTestFixture();
   const post = vi
-    .fn<typeof apiPost<"/api/rename">>()
+    .fn<(body: PostBody<"/api/rename">) => Promise<PostResult<"/api/rename">>>()
     .mockResolvedValue({ id: "agent", status: "pending" });
   const registry = createRequestRegistry(
     localStorage,
-    { post },
+    { post: postDouble({ "/api/rename": post }) },
     () => f.store,
     vi.fn(),
   );
   try {
-    const entry = registry.start({
-      key: ["workspace", "rename", "agent"],
-      path: "/api/rename",
-      body: { id: "agent" },
-    });
+    const entry = registry.start(
+      renameOperation.intent(["workspace", "rename", "agent"], { id: "agent" }),
+    );
     await entry.completion;
     await vi.advanceTimersByTimeAsync(90_000);
     expect(entry.state).toBe("confirmed");
@@ -61,20 +60,18 @@ it("a pending rename sends one POST and waits for the entity stream", async () =
 it("a lost response preserves uncertainty without disturbing the entity stream", async () => {
   const f = transientTestFixture();
   const post = vi
-    .fn<typeof apiPost<"/api/rename">>()
+    .fn<(body: PostBody<"/api/rename">) => Promise<PostResult<"/api/rename">>>()
     .mockRejectedValue(new TypeError("response lost"));
   const registry = createRequestRegistry(
     localStorage,
-    { post },
+    { post: postDouble({ "/api/rename": post }) },
     () => f.store,
     vi.fn(),
   );
   try {
-    const entry = registry.start({
-      key: ["workspace", "rename", "agent"],
-      path: "/api/rename",
-      body: { id: "agent" },
-    });
+    const entry = registry.start(
+      renameOperation.intent(["workspace", "rename", "agent"], { id: "agent" }),
+    );
     await entry.completion;
     expect(entry.state).toBe("unknown");
     expect(post).toHaveBeenCalledTimes(1);
@@ -186,7 +183,6 @@ it("manual HTTP success, lost reply replay and definitive rejection follow the r
     let loseReply = false;
     const post = vi.fn(
       async (
-        _path: "/api/rename",
         body: PostBody<"/api/rename">,
       ): Promise<PostResult<"/api/rename">> => {
         const response = await browser.fetch(`${origin}/api/rename`, {
@@ -207,16 +203,14 @@ it("manual HTTP success, lost reply replay and definitive rejection follow the r
     );
     registry = createRequestRegistry(
       localStorage,
-      { post },
+      { post: postDouble({ "/api/rename": post }) },
       () => f.store,
       vi.fn(),
     );
     const key = [ready.workspaceId, "rename", "lead"] as const;
-    const first = registry.start({
-      key,
-      path: "/api/rename",
-      body: { id: "lead", name: "First" },
-    });
+    const first = registry.start(
+      renameOperation.intent(key, { id: "lead", name: "First" }),
+    );
     await first.completion;
     expect(replies[0]).toMatchObject({
       id: "lead",
@@ -227,15 +221,13 @@ it("manual HTTP success, lost reply replay and definitive rejection follow the r
     expect(first.state).toBe("applied");
     expect(registry.get(first.requestId)).toBeUndefined();
     loseReply = true;
-    const lost = registry.start({
-      key,
-      path: "/api/rename",
-      body: { id: "lead", name: "Saved" },
-    });
+    const lost = registry.start(
+      renameOperation.intent(key, { id: "lead", name: "Saved" }),
+    );
     await lost.completion;
     expect(lost.state).toBe("unknown");
     // A later entity edit must not replace the exact reply stored for the lost request.
-    await post("/api/rename", {
+    await post({
       id: "lead",
       name: "Later",
       request_id: randomUUID(),
@@ -245,11 +237,9 @@ it("manual HTTP success, lost reply replay and definitive rejection follow the r
     expect(post.mock.calls[3]).toEqual(post.mock.calls[1]);
     expect(replies[3]).toEqual(replies[1]);
     expect(registry.get(lost.requestId)).toBeUndefined();
-    const rejected = registry.start({
-      key,
-      path: "/api/rename",
-      body: { id: "missing", name: "No agent" },
-    });
+    const rejected = registry.start(
+      renameOperation.intent(key, { id: "missing", name: "No agent" }),
+    );
     await rejected.completion;
     expect(rejected.state).toBe("failed");
     expect(registry.get(rejected.requestId)).toBeUndefined();

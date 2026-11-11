@@ -1,12 +1,10 @@
+import { MenuEscapeState } from "../../ui/support/closeMenuFromTriggerOnEscape.ts";
 import { makeAutoObservable, observableRef } from "mobx";
 import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import { errorText, type GetResult } from "../../../api.ts";
 import type { ServerServices } from "../../../servers/serverServices.ts";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import {
-  saveProjectLocation,
-  ProjectReceiptRefused,
-} from "../../../servers/projectLocations.ts";
+import { projectLocationRequest } from "../../../servers/projectLocations.ts";
+import type { RequestEntry } from "../../../servers/RequestRegistry.ts";
 
 export type LocationHeadRead = {
   project: string;
@@ -17,35 +15,36 @@ export type LocationHeadRead = {
 
 export type LocationScope = {
   projectId: string;
-  services: Pick<ServerServices, "api" | "store" | "storage">;
+  services: Pick<ServerServices, "api" | "store" | "storage"> & {
+    requests?: ServerServices["requests"] | undefined;
+  };
 };
 
 export function createProjectLocationsStore(heads: LocationHeadRead[] = []) {
-  let request: {
-    id: string;
-    server: string;
-    path?: string | undefined;
-    action: "add_location" | "remove_location";
-  } | null = null;
   const form = {
     heads,
-    error: "",
-    busy: false,
-    openLocationMenu: null as string | null,
+    request: null as RequestEntry | null,
+    validationError: "",
+    get error() {
+      return this.validationError || this.request?.view.errorText || "";
+    },
+    get busy() {
+      return this.request?.view.busy || false;
+    },
+    menuState: new MenuEscapeState(),
+    get openLocationMenu() {
+      return this.menuState.openedKey;
+    },
     menu(scope: LocationScope, server: string, path: string, opened: boolean) {
       if (opened) void this.readHead(scope, server, path).catch(() => {});
-      if (opened || this.openLocationMenu === server)
-        this.openLocationMenu = opened ? server : null;
+      this.menuState.changeMenu(server, opened);
     },
     *remove(scope: LocationScope, server: string) {
-      this.busy = true;
-      this.error = "";
+      this.validationError = "";
       try {
         yield this.change(scope, "remove_location", server);
       } catch (failure) {
-        this.error = errorText(failure);
-      } finally {
-        this.busy = false;
+        this.validationError = errorText(failure);
       }
     },
     readHead(
@@ -81,41 +80,23 @@ export function createProjectLocationsStore(heads: LocationHeadRead[] = []) {
       server: string,
       path?: string,
     ) {
-      const { projectId, services } = scope;
-      const old = request;
-      if (
-        old &&
-        (old.server !== server || old.path !== path || old.action !== action)
-      )
-        throw new Error(
-          "Retry the pending location request before another change.",
-        );
-      request ||= { action, server, path, id: randomUUID() };
-      try {
-        yield saveProjectLocation(
-          {
-            action,
-            server,
-            path,
-            project: projectId,
-            request_id: request.id,
-          },
-          {
-            post: services.api.post,
-            refreshSession: services.api.refreshSession,
-            storage: services.storage,
-          },
-        );
-      } catch (error) {
-        if (error instanceof ProjectReceiptRefused) request = null;
-        throw error;
-      }
-      request = null;
-      if (action === "add_location" && path) {
-        // Read only the folder added by this explicit user action.
-        yield this.readHead(scope, server, path).catch(() => {});
-      }
+      this.validationError = "";
+      this.request = projectLocationRequest(scope.services, {
+        action,
+        server,
+        path,
+        project: scope.projectId,
+      });
+      yield this.request.view.canRetry
+        ? scope.services.requests!.retry(this.request.requestId)
+        : this.request.completion;
+      if (this.request.view.errorText)
+        throw new Error(this.request.view.errorText);
     },
   };
-  return makeAutoObservable(form, { heads: observableRef }, { autoBind: true });
+  return makeAutoObservable(
+    form,
+    { heads: observableRef, request: observableRef },
+    { autoBind: true },
+  );
 }

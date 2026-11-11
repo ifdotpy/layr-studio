@@ -174,7 +174,6 @@ export class SidebarListOwner {
   readonly selection;
   readonly preferences;
   readonly read;
-  readonly creation;
   readonly run;
   readonly notify;
   readonly renameChat;
@@ -196,7 +195,6 @@ export class SidebarListOwner {
     this.selection = combined?.selection ?? areas.navigation;
     this.preferences = combined?.preferences ?? areas.preferences;
     this.read = combined?.read ?? areas.read;
-    this.creation = combined?.creation ?? areas.creation;
     this.run = combined?.run ?? run;
     this.notify = combined?.commands.notify ?? areas.notices.notify;
     this.renameChat = combined?.commands.rename ?? areas.rename.rename;
@@ -235,6 +233,9 @@ export class SidebarListOwner {
       },
       { autoBind: true, deep: false },
     );
+  }
+  get creation() {
+    return this.combined?.creation ?? this.areas.creation;
   }
   get services() {
     return this.combined?.services ?? this.areas.scope.services.sidebarServices;

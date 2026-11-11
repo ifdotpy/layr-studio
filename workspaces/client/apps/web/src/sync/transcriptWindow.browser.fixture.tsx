@@ -15,7 +15,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { useConversationHistory } from "../conversation/historyFixture.ts";
 import {
-  useConversationScroll,
+  createConversationScroll,
   TRANSCRIPT_HISTORY_START_PX,
 } from "../components/conversation/support/useConversationScroll.ts";
 declare global {
@@ -50,7 +50,12 @@ const History = observer(function History() {
     "fixture",
     workspaceId,
   );
-  const scrolling = useConversationScroll("window-check", history.loaded);
+  const [scrolling] = React.useState(() =>
+    createConversationScroll(
+      () => history.loaded,
+      () => true,
+    ),
+  );
   return React.createElement(
     "section",
     null,

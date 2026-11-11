@@ -1,7 +1,10 @@
 import { AccessClientStatus, Reachability } from "../generated/api.ts";
 import type { ConnectionHealth } from "../sync/connectionState.ts";
-import { get, post, refreshSession, type GetResult } from "./net/api.ts";
-import { serverLocalStorage } from "./storage.ts";
+import { get, type GetResult } from "./net/api.ts";
+import { z } from "zod";
+import { ApiError } from "../api.ts";
+import { requestOperation } from "./RequestRegistry.ts";
+import type { ServerServices } from "./serverServices.ts";
 
 import { readServers, type StudioServer } from "./registry.ts";
 
@@ -85,117 +88,87 @@ export function discoveryProjectServers(
       })),
   ];
 }
-export function durableProjectRequest(
-  body: unknown,
-  proposed: string,
-  storage: Pick<
-    Storage,
-    "getItem" | "setItem" | "removeItem"
-  > = serverLocalStorage,
-) {
-  const key = "studio-project-request:" + JSON.stringify(body);
-  const existing = storage.getItem(key);
-  const id = existing || proposed;
-  storage.setItem(key, id);
-  const finish = () => {
-    if (storage.getItem(key) === id) storage.removeItem(key);
-  };
-  return {
-    id,
-    finish,
-    // An HTTP error cannot prove whether the destination applied the effect.
-    reject(_error: unknown) {
-      return id;
-    },
-  };
-}
-export class ProjectReceiptRefused extends Error {}
-
-type ProjectMutationServices = {
-  post: typeof post<"/api/projects">;
-  refreshSession: typeof refreshSession;
-  storage: Pick<Storage, "getItem" | "setItem" | "removeItem">;
-};
-export async function saveProjectLocation(
-  body: {
-    action: "add_location" | "remove_location";
-    project: string;
-    server: string;
-    path?: string | undefined;
-    request_id: string;
-  },
-  services: ProjectMutationServices = {
-    post,
-    refreshSession,
-    storage: serverLocalStorage,
-  },
-) {
-  const session = await services.refreshSession();
-  const { request_id: proposed, ...content } = body;
-  const request = durableProjectRequest(content, proposed, services.storage);
-  const result = await services
-    .post(
+/** Registration and location changes have exact durable HTTP receipts. */
+export const projectLocationOperation = requestOperation({
+  path: "/api/projects",
+  body: z.union([
+    z.object({ path: z.string(), server: z.string().optional() }).strict(),
+    z
+      .object({
+        action: z.enum(["add_location", "remove_location"]),
+        project: z.string(),
+        server: z.string(),
+        path: z.string().optional(),
+      })
+      .strict(),
+  ]),
+  label: (body) =>
+    "project" in body
+      ? `Change project folders ${body.project}`
+      : `Register project ${body.path}`,
+  async send({ api }, body, entry) {
+    const result = await api.post(
       "/api/projects",
-      { ...content, request_id: request.id },
-      { sessionToken: session.token },
-    )
-    .catch((error: unknown) => {
-      request.reject(error);
-      throw error;
-    });
-  if ("outcome" in result && result.outcome === "not_applied") {
-    request.finish();
-    throw new ProjectReceiptRefused(
-      (typeof result.error === "string" && result.error) ||
-        "The location change was refused.",
-    );
-  }
-  if (!("outcome" in result) || result.outcome !== "applied")
-    throw new Error(
-      "The location change is pending. Retry this request to read its result.",
-    );
-  request.finish();
-  return result;
-}
-export async function registerProject(
-  path: string,
-  server: string,
-  requestId: string,
-  services: ProjectMutationServices = {
-    post,
-    refreshSession,
-    storage: serverLocalStorage,
-  },
-) {
-  const session = await services.refreshSession();
-  const content = { path, ...(server !== "local" ? { server } : {}) };
-  const request = durableProjectRequest(content, requestId, services.storage);
-  const result = await services
-    .post(
-      "/api/projects",
+      { ...body, request_id: entry.requestId },
       {
-        ...content,
-        ...(server !== "local" ? { request_id: request.id } : {}),
+        requestId: entry.requestId,
       },
-      { sessionToken: session.token },
-    )
-    .catch((error: unknown) => {
-      request.reject(error);
-      throw error;
-    });
-  if ("outcome" in result && result.outcome === "not_applied") {
-    request.finish();
-    throw new ProjectReceiptRefused(
-      (typeof result.error === "string" && result.error) ||
-        "The project request was refused.",
     );
+    if (!("requestId" in result) || result.requestId !== entry.requestId)
+      throw new TypeError("The project reply did not confirm this request.");
+    if (result.outcome === "not_applied")
+      throw new ApiError(
+        result.error || "The project request was refused.",
+        409,
+      );
+    if (result.outcome !== "applied")
+      throw new TypeError(
+        "The project result is unknown. Retry the saved request.",
+      );
+    return "applied";
+  },
+});
+
+type LocationBody = Parameters<typeof projectLocationOperation.intent>[1];
+type ProjectServices = Pick<ServerServices, "api" | "storage"> & {
+  requests?: ServerServices["requests"] | undefined;
+};
+/** Resume an unresolved identity; a distinct action starts only after it settles. */
+export function projectLocationRequest(
+  services: ProjectServices,
+  body: LocationBody,
+) {
+  const key = [
+    "", // Locations belong to the server, independently of the selected workspace.
+    "project-location",
+    "project" in body ? body.project : body.path,
+  ] as const;
+  const intent = projectLocationOperation.intent(key, body);
+  const { requests, storage } = services;
+  if (!requests) throw new Error("The project request scope is unavailable.");
+  let entry = requests.latest(key);
+  const legacyKey = "studio-project-request:" + JSON.stringify(body);
+  const legacy = storage.getItem(legacyKey);
+  if (!entry && legacy) {
+    entry = requests.restore(intent, legacy);
+    storage.removeItem(legacyKey);
   }
-  if ("outcome" in result && result.outcome !== "applied")
-    throw new Error(
-      "The project request is pending. Retry this request to read its result.",
-    );
-  request.finish();
-  return result;
+  if (entry?.view.unresolved) {
+    if (JSON.stringify(entry.body) !== JSON.stringify(intent.body))
+      throw new Error(
+        "Retry the pending project request before another change.",
+      );
+  } else entry = requests.start(intent);
+  return entry;
+}
+export async function saveProjectLocation(
+  services: ProjectServices,
+  body: LocationBody,
+) {
+  const entry = projectLocationRequest(services, body);
+  if (entry.view.canRetry) await services.requests!.retry(entry.requestId);
+  else await entry.completion;
+  if (entry.view.errorText) throw new Error(entry.view.errorText);
 }
 
 export function projectLocationOn(

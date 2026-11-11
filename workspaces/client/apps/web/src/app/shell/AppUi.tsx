@@ -56,7 +56,7 @@ import ProjectFoldersDialog, {
 import ProjectServerCards from "../../components/projects/ProjectServerCards/ProjectServerCards.tsx";
 import {
   readProjectServers,
-  registerProject,
+  saveProjectLocation,
 } from "../../servers/projectLocations.ts";
 import type { ProjectBinding } from "../projects/CreationOwner.ts";
 import {
@@ -417,9 +417,9 @@ export class AppUi {
       onSelect: (path, server) =>
         flowResult(
           this.saveDialog(
-            registerProject(path, server, randomUUID(), {
-              ...this.services.api,
-              storage: this.services.storage,
+            saveProjectLocation(this.services, {
+              path,
+              ...(server !== "local" ? { server } : {}),
             }),
             current,
           ),

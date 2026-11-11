@@ -11,7 +11,6 @@ import { AccountsUi } from "../components/accounts/support/AccountsUi.ts";
 import { AppUi } from "../components/shell/App/App.tsx";
 import { SettingsUi } from "./settings/useAppSettings.ts";
 import { observable, observableRef, action, flow } from "mobx";
-import { createArea } from "./area.ts";
 import { resourceData } from "../store/runtime.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { focusSelectedComposer } from "../hooks/mobileViewport.ts";
@@ -247,7 +246,8 @@ export class ServerAreas {
   });
 }
 
-const [Provider, useServerAreas] = createArea<ServerAreas>("ServerAreas");
-export { Provider };
-
-export { useServerAreas, Provider as ServerAreasContextProvider };
+export {
+  useServerAreas,
+  ServerAreasContextProvider,
+  ServerAreasContextProvider as Provider,
+} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";

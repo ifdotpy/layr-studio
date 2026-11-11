@@ -597,18 +597,6 @@ export class ShellState {
         ),
       };
   }
-  *refreshSidebarOwner(owner: string) {
-    const service = this.serviceInstances.get(owner);
-    if (!service) throw new Error("The sidebar server is no longer paired.");
-    const value: Awaited<ReturnType<typeof fetchServerSummary>> =
-      yield fetchServerSummary(service.owner, new AbortController().signal);
-    if (this.serviceInstances.get(owner) !== service)
-      throw new Error("The sidebar server connection changed.");
-    return {
-      ...value,
-      opened: this.sidebar.navigation[owner]?.opened || null,
-    };
-  }
   add(server: StudioServer, focus = true) {
     if (server.id === "local")
       throw new Error("The remote server returned an invalid identity.");
@@ -829,7 +817,6 @@ export class ShellState {
     return this.sidebar.backends;
   }
   online = this.sidebar.online;
-  refreshOwner = (owner: string) => flowResult(this.refreshSidebarOwner(owner));
   settings = () => this.openManager();
   search = () => this.set({ searchOpen: true });
   notify = (failure: string) => this.set({ failure });

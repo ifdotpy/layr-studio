@@ -114,8 +114,8 @@ function Fixture() {
       forceColorScheme={(query.get("theme") || "dark") as "light" | "dark"}
     >
       <modelsOwner.Provider>
-        <AreasProvider value={areas}>
-          <ModelCatalogFixture value={catalog}>
+        <ModelCatalogFixture value={catalog}>
+          <AreasProvider value={areas}>
             <main
               style={{
                 padding: 8,
@@ -185,8 +185,8 @@ function Fixture() {
                 </div>
               </form>
             </main>
-          </ModelCatalogFixture>
-        </AreasProvider>
+          </AreasProvider>
+        </ModelCatalogFixture>
       </modelsOwner.Provider>
     </MantineProvider>
   );

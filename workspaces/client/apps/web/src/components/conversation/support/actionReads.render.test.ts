@@ -17,13 +17,13 @@ import type { GetResult, ServerApi } from "../../../api.ts";
 import { createServerStore } from "../../../store/server.ts";
 import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import FilePreview, { useFilePreview } from "../FilePreview/FilePreview.tsx";
+import FilePreview from "../FilePreview/FilePreview.tsx";
+import { PreviewSelection } from "./PreviewSelection.ts";
 import DirectoryField from "../../projects/DirectoryField/DirectoryField.tsx";
 import { SkillAutocomplete } from "./SkillAutocomplete.ts";
 import Analytics, {
   type AnalyticsSelection,
 } from "../../shell/Analytics/Analytics.tsx";
-import { useReadView } from "../../ui/support/useReadView.ts";
 import {
   useServerApi,
   useServerNet,
@@ -80,10 +80,17 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function Previews() {
+const Previews = observer(function Previews() {
   const [revision, setRevision] = useState(0);
-  const [left, openLeft] = useFilePreview(),
-    [right, openRight] = useFilePreview();
+  const net = useServerNet();
+  const [leftOwner] = useState(() => new PreviewSelection()),
+    [rightOwner] = useState(() => new PreviewSelection());
+  const left = leftOwner.current(net),
+    right = rightOwner.current(net);
+  const openLeft = (target: Parameters<PreviewSelection["set"]>[1]) =>
+    leftOwner.set(net, target);
+  const openRight = (target: Parameters<PreviewSelection["set"]>[1]) =>
+    rightOwner.set(net, target);
   return h(
     "div",
     { "data-revision": revision },
@@ -121,9 +128,13 @@ function Previews() {
     left && h(FilePreview, { target: left, onClose: () => openLeft(null) }),
     right && h(FilePreview, { target: right, onClose: () => openRight(null) }),
   );
-}
-function MountedPreview() {
-  const [target, open] = useFilePreview();
+});
+const MountedPreview = observer(function MountedPreview() {
+  const net = useServerNet();
+  const [owner] = useState(() => new PreviewSelection());
+  const target = owner.current(net);
+  const open = (target: Parameters<PreviewSelection["set"]>[1]) =>
+    owner.set(net, target);
   return h(
     "div",
     null,
@@ -131,11 +142,17 @@ function MountedPreview() {
     h("button", { onClick: () => open(null) }, "Close"),
     h(FilePreview, { target, onClose: () => open(null) }),
   );
-}
+});
 function AnalyticsView() {
   const api = useServerApi(),
     store = useServerStore();
-  const [selection, setSelection] = useReadView<AnalyticsSelection>();
+  const [selected, update] = useState<{
+    store: typeof store;
+    value: AnalyticsSelection | null;
+  }>();
+  const selection = selected?.store === store ? selected.value : null;
+  const setSelection = (value: AnalyticsSelection | null) =>
+    update({ store, value });
   return h(
     "div",
     null,

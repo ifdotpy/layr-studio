@@ -1,3 +1,4 @@
+import { createConversationScroll } from "../../components/conversation/support/useConversationScroll.ts";
 import type { UploadRecovery } from "../../components/conversation/support/useUploadRecovery.ts";
 import { createConversationContext } from "../../components/conversation/support/conversationContext.ts";
 import { AttachmentDrafts } from "../../components/conversation/support/useAttachmentDrafts.ts";
@@ -107,6 +108,13 @@ export class SelectedConversationOwner {
   }
   stopReaders: (() => void) | undefined;
   history: TranscriptHistory | RoomHistory;
+  get roomScrolling() {
+    const history = this.history;
+    return createConversationScroll(
+      () => history.loaded,
+      () => true,
+    );
+  }
   historyScope = "";
   histories = new Map<string, TranscriptHistory | RoomHistory>();
   historyNamespaces: unknown[][] = [];

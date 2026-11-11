@@ -15,7 +15,6 @@ import AgentAvatar from "../../agents/AgentAvatar/AgentAvatar.tsx";
 import MessageDate from "../transcript/MessageDate/MessageDate.tsx";
 import Requests, { RequestArea } from "../questions/Requests/Requests.tsx";
 import StreamingText from "../transcript/StreamingText/StreamingText.tsx";
-import { useConversationScroll } from "../support/useConversationScroll.ts";
 import PromptComposer from "../prompt-composer/PromptComposer/PromptComposer.tsx";
 
 export default observer(function RadioChat({ room }: { room: RadioRoom }) {
@@ -24,10 +23,7 @@ export default observer(function RadioChat({ room }: { room: RadioRoom }) {
   const api = useServerApi();
   const area = useConversationActions();
   const messages = area.selected.history;
-  const { scroll, content, onScroll } = useConversationScroll(
-    room.id,
-    messages.loaded,
-  );
+  const { scroll, content, onScroll } = area.selected.roomScrolling;
   useMessageRenderProbe("radio-screen", room.id);
   if (!state || !room?.radio) return <p role="status">Loading shared chat…</p>;
   const key = `studio-radio-command:${state.workspaces.values().next().value?.stateDir || ""}:${room.id}`;

@@ -209,7 +209,7 @@ export class AccountsUi {
     else if (command.operation === "rename") {
       this.renameRequest =
         this.areas.scope.services.api.saved<PostBody<"/api/accounts/name"> | null>(
-          this.renameStorageKey(account.id),
+          `account-rename:${account.id}`,
           null,
         );
       this.renameLabel = this.renameRequest?.label || account.label;
@@ -250,9 +250,6 @@ export class AccountsUi {
       this.pending = "";
     }
   }
-  renameStorageKey(key: string) {
-    return `account-rename:${key}`;
-  }
   saveRename() {
     const account = this.dialogAccount;
     if (!account || !this.canSave) return;
@@ -263,9 +260,9 @@ export class AccountsUi {
       request_id: randomUUID(),
     };
     const request = this.renameRequest;
-    api.save(this.renameStorageKey(account.id), request);
+    api.save(`account-rename:${account.id}`, request);
     const clear = () => {
-      api.save(this.renameStorageKey(account.id), null);
+      api.save(`account-rename:${account.id}`, null);
       this.renameRequest = null;
     };
     return this.action(

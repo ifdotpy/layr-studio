@@ -7,6 +7,8 @@ import {
   ServerServicesProvider,
   ServerStoreProvider,
   useServerModelReader,
+  useServerStore,
+  useServerAreas,
   useServerSidebarServices,
 } from "./ServerServicesProvider.tsx";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
@@ -29,6 +31,10 @@ it("retains factories per authenticated owner and never supplies a local model r
   const seen: unknown[] = [];
   function Reader() {
     seen.push(useServerModelReader());
+    return null;
+  }
+  function Scope() {
+    seen.push([useServerStore(), useServerAreas()]);
     return null;
   }
   function Sidebar() {
@@ -59,6 +65,17 @@ it("retains factories per authenticated owner and never supplies a local model r
     expect(second.sidebarServices).not.toBe(sidebar);
     expect(second.modelReader).not.toBe(first.modelReader);
     expect(second.modelReader.scope).not.toBe(first.modelReader.scope);
+    for (const services of [first, second]) {
+      await act(async () =>
+        root.render(
+          createElement(ServerServicesProvider, {
+            services,
+            children: createElement(Scope),
+          }),
+        ),
+      );
+      expect(seen.at(-1)).toEqual([services.store, services.areas]);
+    }
     await act(async () =>
       root.render(
         createElement(

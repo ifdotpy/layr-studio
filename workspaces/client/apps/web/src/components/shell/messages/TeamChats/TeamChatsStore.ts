@@ -1,3 +1,4 @@
+import { createConversationScroll } from "../../../conversation/support/useConversationScroll.ts";
 import { RoomViewport } from "./RoomViewport.ts";
 import { whileObserved } from "../../../../observed.ts";
 import { RoomHistory } from "../../../../conversation/roomHistory.ts";
@@ -86,6 +87,16 @@ export function createTeamChatsStore(
       return this.room ? pages.get(this.room.id) : empty;
     }
     requests = createRequestsView(store, { all: true });
+    get scrolling() {
+      const messages = this.messages;
+      // A new server scope or room starts a new scroll session.
+      void this.scope;
+      void this.selected;
+      return createConversationScroll(
+        () => !!messages?.loaded,
+        () => true,
+      );
+    }
     readonly viewport = new RoomViewport();
     measureRoom(root: HTMLElement) {
       const messages = this.messages;

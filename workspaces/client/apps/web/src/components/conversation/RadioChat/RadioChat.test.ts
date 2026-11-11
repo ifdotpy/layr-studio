@@ -35,7 +35,7 @@ vi.mock(
 
 const history = vi.spyOn(RoomHistory.prototype, "start");
 vi.mock("../support/useConversationScroll.ts", () => ({
-  useConversationScroll: () => ({
+  createConversationScroll: () => ({
     scroll: { current: null },
     content: { current: null },
     onScroll() {},

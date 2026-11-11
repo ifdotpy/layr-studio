@@ -19,7 +19,7 @@ export const ToastNotice = observer(function ToastNotice() {
               className="native-action-pending"
             >
               <span>
-                Rename {entry.body.name || entry.body.id}: {view.errorText}
+                {entry.intent.label}: {view.errorText}
               </span>
               {view.canRetry && (
                 <Button

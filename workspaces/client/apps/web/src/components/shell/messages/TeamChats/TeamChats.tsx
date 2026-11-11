@@ -28,7 +28,6 @@ import Requests, {
   RequestArea,
 } from "../../../conversation/questions/Requests/Requests.tsx";
 import UserMessages from "../UserMessages/UserMessages.tsx";
-import { useConversationScroll } from "../../../conversation/support/useConversationScroll.ts";
 
 /** A compact room clock; its native tooltip retains the full local date. */
 function RoomDate({ at }: { at?: number | null | undefined }) {
@@ -82,14 +81,7 @@ const TeamDetail = observer(function TeamDetail({
     requestId: focusRequestId,
     roomId: focusRoomId,
   } = chats.target ?? {};
-  const {
-    room,
-    selected,
-    scope,
-    detail: detailOpen,
-    leadId,
-    back: onBack,
-  } = chats;
+  const { room, selected, detail: detailOpen, leadId, back: onBack } = chats;
   const {
     notices: { notify },
   } = useConversationActions();
@@ -102,8 +94,7 @@ const TeamDetail = observer(function TeamDetail({
   useEffect(() => {
     if (detailOpen) detailHeading.current?.focus({ preventScroll: true });
   }, [detailOpen, selected]);
-  const { scroll, content, getFollow, setFollow, onScroll } =
-    useConversationScroll(scope + ":messages:" + selected, messages.loaded);
+  const { scroll, content, getFollow, setFollow, onScroll } = chats.scrolling;
   const follow = getFollow();
   const virtualRange = chats.viewport.range;
   useLayoutEffect(() => {

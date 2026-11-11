@@ -1,3 +1,4 @@
+import { flowValue as resolved } from "../../../flowValue.ts";
 import type { ResourceVersion } from "../../../sync/subscriptions/contracts.ts";
 import { ApiSchemaMismatchError } from "../../../api.ts";
 import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
@@ -21,7 +22,7 @@ import {
   modelForValue,
 } from "../../settings/models/support/modelOption.ts";
 import type { SetupRole } from "../AgentSetupPicker/AgentSetupPicker.tsx";
-import type { AgentsUi, Fields } from "../support/AgentsUi.ts";
+import type { AgentsUi } from "../support/AgentsUi.ts";
 import {
   readWorkerModels,
   supportsDaybreakMode,
@@ -41,9 +42,6 @@ export type ReviewSettings = NonNullable<Body["review_defaults"]>;
 type ExecutionContext = ReturnType<typeof projectExecution>;
 export const fastTier = (info?: WorkerModelInfo) =>
   info?.serviceTiers?.find((tier) => tier.id === "priority");
-function* resolved<T>(promise: Promise<T>): Generator<Promise<T>, T, T> {
-  return yield promise;
-}
 
 /** One server owns execution edits, permission receipts and transfer actions. */
 export class ExecutionSettingsStore {
@@ -65,12 +63,6 @@ export class ExecutionSettingsStore {
     const { ui } = this;
     const key = c.formScope;
     if (ui.fields.get(key)?.saving) return;
-    const set = <
-      K extends "saving" | "error" | "status" | "unconfirmed" | "pendingYolo",
-    >(
-      field: K,
-      value: Fields[K],
-    ) => ui.set(key, field, value);
     const accountKey = accountOf(c.agent);
     const receiptKey = `next-turn-settings:${JSON.stringify([c.agent.id, accountKey])}`;
     const permissions = request.yolo_mode !== undefined;
@@ -104,12 +96,12 @@ export class ExecutionSettingsStore {
           fastMode: !!request.fast_mode,
         },
       });
-    set("saving", true);
-    set("error", "");
-    if (!permissions) set("status", { kind: "saving", text: "" });
+    ui.set(key, "saving", true);
+    ui.set(key, "error", "");
+    if (!permissions) ui.set(key, "status", { kind: "saving", text: "" });
     if (request.next_turn) {
       c.sources.api.save(receiptKey, request);
-      set("unconfirmed", request);
+      ui.set(key, "unconfirmed", request);
     }
     const clearReceipt = () => {
       if (
@@ -117,7 +109,7 @@ export class ExecutionSettingsStore {
         request.request_id
       )
         c.sources.api.save(receiptKey, null);
-      set("unconfirmed", null);
+      ui.set(key, "unconfirmed", null);
     };
     let confirmed = false;
     try {
@@ -169,7 +161,7 @@ export class ExecutionSettingsStore {
           `permissions:${c.agent.id}:${accountKey}`,
           request.request_id || statusKey,
         );
-        set("pendingYolo", {
+        ui.set(key, "pendingYolo", {
           read: () =>
             resourceData(
               c.sources.store.agentDetail(agentId(c.agent.id)).current,
@@ -181,7 +173,7 @@ export class ExecutionSettingsStore {
         });
       } else {
         accept?.(canonical);
-        set("status", { kind: "saved", text: notice });
+        ui.set(key, "status", { kind: "saved", text: notice });
       }
     } catch (failure) {
       const rejected =
@@ -201,15 +193,16 @@ export class ExecutionSettingsStore {
         });
         c.props.onSettingsFailure(statusKey, errorText(failure), uncertain);
       }
-      if (!permissions) set("status", null);
-      set(
+      if (!permissions) ui.set(key, "status", null);
+      ui.set(
+        key,
         "error",
         confirmed
           ? `Settings saved. ${errorText(failure)}`
           : errorText(failure),
       );
     } finally {
-      set("saving", false);
+      ui.set(key, "saving", false);
     }
   }
   change(c: ExecutionContext, patch: Partial<SettingsValue>) {

@@ -1,4 +1,4 @@
-import { createRequestRegistry } from "../renameRequest.ts";
+import { createRequestRegistry } from "./requestOperations.ts";
 import { createNet } from "./net/net.ts";
 import { NetStatus } from "./net/status.ts";
 import type { ServerSettings } from "./ServerSettingsContext.tsx";

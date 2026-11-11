@@ -198,17 +198,24 @@ it("selection owns one history and releases it on deselect, replacement and tear
       releases.push(stop);
       return stop;
     });
-  const stopOwner = autorun(() => chats.current);
+  const stopOwner = autorun(() => [chats.current, chats.scrolling]);
   await Promise.resolve();
   try {
     chats.choose("a");
     expect(starts).toHaveBeenCalledOnce();
     const first = chats.messages;
+    const scrolling = chats.scrolling;
+    scrolling.setFollow(false);
+    chats.more();
+    expect(chats.scrolling).toBe(scrolling);
+    expect(chats.scrolling.getFollow()).toBe(false);
     const stopRead = autorun(() => first?.loaded);
     expect(starts).toHaveBeenCalledOnce();
     stopRead();
     expect(releases[0]).not.toHaveBeenCalled();
     chats.choose("b");
+    expect(chats.scrolling).not.toBe(scrolling);
+    expect(chats.scrolling.getFollow()).toBe(true);
     expect(releases[0]).toHaveBeenCalledOnce();
     expect(starts).toHaveBeenCalledTimes(2);
     chats.back();

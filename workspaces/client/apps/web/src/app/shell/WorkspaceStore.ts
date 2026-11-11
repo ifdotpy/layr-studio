@@ -144,19 +144,24 @@ export class WorkspacePanel<T> {
   }
   submit = flow(function* <P extends ApiPostPath>(
     this: WorkspacePanel<T>,
-    c: Pick<Context, "run">,
+    c: Pick<Context, "run" | "reload" | "notify"> & {
+      model: Pick<WorkspaceStore, "submittingPanels">;
+    },
     path: P,
     body: PostBody<P>,
     done: (value: PostResult<P>) => void = () => {},
     form?: FormDraft,
   ) {
     this.busy = true;
+    c.model.submittingPanels.add(this);
     const submitted = form?.serialized ?? null;
     try {
       const result = yield* flowValue(c.run(path, body));
+      c.reload();
       done(result);
       if (form) yield* flowValue(form.clear(submitted));
     } catch (error) {
+      c.notify(errorText(error));
       if (
         form &&
         error instanceof ApiError &&
@@ -165,6 +170,7 @@ export class WorkspacePanel<T> {
         yield* flowValue(form.clear(submitted));
     } finally {
       this.busy = false;
+      c.model.submittingPanels.delete(this);
     }
   });
   saveComment(c: Context) {
@@ -286,6 +292,7 @@ export class WorkspacePanel<T> {
 
 /** Server-owned selection, derived panel data and workspace command actions. */
 export class WorkspaceStore {
+  readonly submittingPanels = new Set<{ busy: boolean }>();
   readonly areas;
   readonly resources;
   readonly server;
@@ -299,7 +306,6 @@ export class WorkspaceStore {
       : null;
   }
   filePath = "";
-  pending = 0;
   constructor(
     resources: WorkspaceResources,
     server: ReturnType<typeof useServerStore>,
@@ -389,23 +395,6 @@ export class WorkspaceStore {
     if (this.selected) {
       props.onSelect(this.selected.id);
       props.onClose();
-    }
-  }
-  *run<P extends ApiPostPath>(
-    path: P,
-    body: PostBody<P>,
-    notify: Props["notify"],
-  ) {
-    this.pending++;
-    try {
-      const result = yield* flowValue(this.resources.api.post(path, body));
-      this.resources.reload();
-      return result;
-    } catch (error) {
-      notify(errorText(error));
-      throw error;
-    } finally {
-      this.pending--;
     }
   }
   get changeState() {

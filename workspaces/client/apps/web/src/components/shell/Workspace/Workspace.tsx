@@ -18,14 +18,9 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { flowResult } from "mobx";
 import { observer } from "mobx-react-lite";
 import { useEffect, useRef, useState } from "react";
-import {
-  type ApiPostPath,
-  type PostBody,
-  type PostResult,
-} from "../../../api.ts";
+import type { ServerApi } from "../../../api.ts";
 import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import type { Agent } from "../../../types.ts";
 import FilePreview, {
@@ -59,14 +54,9 @@ export type Props = WorkspacePanelPresentationProps & {
   onSelect: (id: string, messageId?: string) => void;
   notify: (s: string) => void;
 };
-type WorkspaceAction = <Path extends ApiPostPath>(
-  path: Path,
-  body: PostBody<Path>,
-) => Promise<PostResult<Path>>;
 export type Context = Props & {
-  stateDir: string;
   selected: SidebarAgent | undefined;
-  run: WorkspaceAction;
+  run: ServerApi["post"];
   reload: () => void;
   preview: (target: PreviewTarget) => void;
   navigate: (section: string, agent?: string, item?: string) => void;
@@ -106,15 +96,8 @@ export const Workspace = observer(function Workspace(props: Props) {
     () => model.enter(props),
     [model, props.opened, props.agent?.id, props.initialSection],
   );
-  const {
-    section,
-    agentId,
-    managedAgents,
-    selected,
-    pending,
-    filePath,
-    attention,
-  } = model;
+  const { section, agentId, managedAgents, selected, filePath, attention } =
+    model;
   const { preview } = model;
   const setPreview = model.previewFile;
   const navRef = useRef<HTMLElement>(null);
@@ -129,9 +112,8 @@ export const Workspace = observer(function Workspace(props: Props) {
   const context: Context = {
     ...props,
     model,
-    stateDir: model.stateDir,
     selected,
-    run: (path, body) => flowResult(model.run(path, body, props.notify)),
+    run: workspace.api.post,
     reload,
     preview: setPreview,
     navigate: model.navigate,
@@ -240,7 +222,14 @@ export const Workspace = observer(function Workspace(props: Props) {
                         Open chat <ChevronRight size={14} />
                       </Button>
                     )}
-                    {pending > 0 && <Loader size={16} />}
+                    {[...model.submittingPanels].some(
+                      (panel) => panel.busy,
+                    ) && (
+                      <Loader
+                        size={16}
+                        aria-label="Workspace operation in progress"
+                      />
+                    )}
                   </div>
                 )}
               </div>

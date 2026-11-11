@@ -1,4 +1,4 @@
-import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerContext } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createNet } from "../../../servers/net/net.ts";
 import * as netApi from "../../../servers/net/api.ts";
 import * as netLocalDrafts from "../../../sync/localDraft.ts";
@@ -701,7 +701,7 @@ describe("resource read callers", () => {
   it("uses streamed models for display and a fresh owner read for selection", async () => {
     const areas = conversationActionsFixture(undefined, nativeStore);
     Object.assign(areas.scope.services, { modelReader });
-    contexts.set(ServerAreasContextProvider, areas);
+    contexts.set(ServerContext, { areas });
     cleanups.push(() => {
       areas.dispose();
       areas.scope.services.close();

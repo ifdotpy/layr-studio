@@ -2,7 +2,6 @@ import "../../src/rendererStyles.ts";
 import "@mantine/core/styles.css";
 import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
-import { CombinedSidebarServicesProvider } from "../../src/servers/combinedSidebarServices.ts";
 import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const injectedStore = observableFixture();
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
@@ -193,11 +192,9 @@ const combined = createCombinedSidebarFixture(
   {
     backends,
     online,
-    refreshOwner: async () => fixtureNavigation({}),
     executeCommand: async () => {},
     aliases: { local: "Fixture" },
     send: noop,
-    applyNavigation: noop,
     settings: noop,
     search: noop,
     notify: noop,
@@ -212,22 +209,7 @@ function Fixture() {
     <MantineProvider theme={theme} defaultColorScheme="dark">
       {scenario === "combined" ? (
         <injectedStore.Provider>
-          <CombinedSidebarServicesProvider
-            value={{
-              backends: backends,
-              online: online,
-              refreshOwner: async () => fixtureNavigation({}),
-              executeCommand: async () => {},
-              aliases: { local: "Fixture" },
-              send: noop,
-              applyNavigation: noop,
-              settings: noop,
-              search: noop,
-              notify: noop,
-            }}
-          >
-            <CombinedServerSidebar fixture={combined} />
-          </CombinedSidebarServicesProvider>
+          <CombinedServerSidebar fixture={combined} />
         </injectedStore.Provider>
       ) : (
         <injectedStore.Provider>

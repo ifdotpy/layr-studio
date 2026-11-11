@@ -11,7 +11,7 @@ test("Scroll restart", async () => {
   const testRepo = fileURLToPath(
     new URL("../../../../../../", import.meta.url),
   );
-  // Exercise the real scroll hook across a browser reload and delayed history load.
+  // Exercise production transcript positioning across reload and delayed history load.
   const repo = testRepo;
   const { chromium, webkit } = await import("playwright-core");
   const browserType = process.env.BROWSER === "webkit" ? webkit : chromium;
@@ -27,7 +27,11 @@ test("Scroll restart", async () => {
         "react",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
+        "react-dom",
         "react-dom/client",
+        "@mantine/core",
+        "marked",
+        "dompurify",
       ],
     },
     server: { host: "127.0.0.1", port: 0, hmr: false },

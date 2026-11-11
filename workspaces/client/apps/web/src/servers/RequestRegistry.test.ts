@@ -2,23 +2,55 @@
 import { autorun } from "mobx";
 import { afterEach, expect, it, vi } from "vitest";
 import { ApiError, NetworkTimeoutError } from "../api.ts";
+import { z } from "zod";
 import {
   RequestRegistry,
-  type Intent,
+  requestOperation,
+  type OperationContext,
   type RequestEntry,
   type ReceiptProof,
 } from "./RequestRegistry.ts";
 
-const intent: Intent = {
-  key: ["workspace", "rename", "agent"],
-  path: "/api/rename",
-  body: { id: "agent", name: "name" },
+type Send = (entry: RequestEntry) => Promise<"applied" | void>;
+type Watch = (
+  entry: RequestEntry,
+  observe: (proof: ReceiptProof) => void,
+) => () => void;
+const handlers = new Map<OperationContext, { send: Send; watch: Watch }>();
+const handler = (context: OperationContext) => {
+  const found = handlers.get(context);
+  if (!found) throw new Error("Unknown test registry context.");
+  return found;
 };
+const operation = requestOperation({
+  path: "/api/rename",
+  body: z.object({ id: z.string(), name: z.string() }).strict(),
+  label: (body) => body.name,
+  send: (context, _body, entry) => handler(context).send(entry),
+  watch: (context, _body, entry, observe) =>
+    handler(context).watch(entry, observe),
+});
+const intent = operation.intent(["workspace", "rename", "agent"], {
+  id: "agent",
+  name: "name",
+});
 const registries: RequestRegistry[] = [];
-function fixture(storage: Storage = window.localStorage) {
-  const send = vi.fn(async () => {});
-  const registry = new RequestRegistry(storage, send, () => () => {});
+function registryWith(storage: Storage, send: Send, watch: Watch) {
+  const context: OperationContext = {
+    api: { post: vi.fn() },
+    store: () => {
+      throw new Error("No store in registry tests.");
+    },
+    notify: () => {},
+  };
+  handlers.set(context, { send, watch });
+  const registry = new RequestRegistry(storage, context, [operation]);
   registries.push(registry);
+  return registry;
+}
+function fixture(storage: Storage = window.localStorage) {
+  const send = vi.fn<Send>(async () => {});
+  const registry = registryWith(storage, send, () => () => {});
   return { registry, send };
 }
 const flush = async () => {
@@ -35,7 +67,7 @@ it("timeout then explicit retry reuses its frozen identity/body and ignores simu
   const { registry, send } = fixture();
   send.mockRejectedValueOnce(new NetworkTimeoutError());
   const body = { id: "agent", name: "name" };
-  const entry = registry.start({ ...intent, body });
+  const entry = registry.start(operation.intent(intent.key, body));
   body.name = "edited";
   await flush();
   expect(entry.view.state).toBe("unknown");
@@ -154,14 +186,13 @@ it("a later rejection cannot erase prior uncertainty, but a fresh rejection is f
 });
 it("releasing terminal history stops its proof watch but observer loss keeps unknown", async () => {
   const stopProof = vi.fn();
-  const registry = new RequestRegistry(
+  const registry = registryWith(
     localStorage,
     async () => {
       throw new NetworkTimeoutError();
     },
     () => stopProof,
   );
-  registries.push(registry);
   const entry = registry.start(intent);
   const stop = autorun(() => entry.view);
   await flush();
@@ -189,10 +220,9 @@ it("reload reconciles every saved entry even when synchronous proof removes reco
       return () => {};
     },
   );
-  const registry = new RequestRegistry(localStorage, async () => {}, watch);
-  registries.push(registry);
+  registryWith(localStorage, async () => {}, watch);
   expect(watch).toHaveBeenCalledTimes(2);
-  expect(registry.forTarget("workspace", "agent")).toHaveLength(0);
+  expect(registries.at(-1)?.forTarget("workspace", "agent")).toHaveLength(0);
 });
 it("a closed scope ignores late HTTP and a replacement retains the interrupted identity", async () => {
   const a = fixture();
@@ -211,4 +241,57 @@ it("a closed scope ignores late HTTP and a replacement retains the interrupted i
   await flush();
   expect(restored?.state).toBe("unknown");
   expect(b.send).not.toHaveBeenCalled();
+});
+it("an admitted nested body is normalized once and stays immutable for every attempt", async () => {
+  const nested = requestOperation({
+    path: "/api/rename",
+    body: z.object({ id: z.string(), tags: z.array(z.string()) }),
+    label: (body) => body.id,
+    send: async (_context, body) => {
+      expect(() => body.tags.push("changed")).toThrow();
+    },
+  });
+  const value = { id: "agent", tags: ["a"], extra: true };
+  const admitted = nested.intent(["workspace", "rename", "agent"], value);
+  value.tags.push("caller edit");
+  expect(admitted.body).toEqual({ id: "agent", tags: ["a"] });
+  const { registry } = fixture();
+  await registry.start(admitted).completion;
+  expect(admitted.body).toEqual({ id: "agent", tags: ["a"] });
+});
+it("an unknown request of an unregistered operation stays visible and cannot resend", async () => {
+  // Seed a journal from an older client before the registry restores it.
+  localStorage.setItem(
+    "studio-server-write:request:old",
+    JSON.stringify({
+      requestId: "old",
+      key: ["workspace", "retired", "target"],
+      path: "/api/retired",
+      body: { id: "target" },
+      state: "unknown",
+    }),
+  );
+  const { registry, send } = fixture();
+  const entry = registry.latest(["workspace", "retired", "target"]);
+  expect(entry?.view).toMatchObject({ state: "unknown", canRetry: false });
+  await registry.retry("old");
+  expect(send).not.toHaveBeenCalled();
+  expect(entry?.state).toBe("unknown");
+});
+it("operation bodies are non-transforming plain JSON so revival resends the admitted body", () => {
+  const send = async () => {};
+  requestOperation({
+    path: "/api/rename",
+    // @ts-expect-error A transforming schema would change the body on revival.
+    body: z.object({ count: z.number().transform(String) }),
+    label: () => "count",
+    send,
+  });
+  requestOperation({
+    path: "/api/rename",
+    // @ts-expect-error Binary views are not JSON request bodies.
+    body: z.object({ payload: z.instanceof(Uint8Array) }),
+    label: () => "payload",
+    send,
+  });
 });

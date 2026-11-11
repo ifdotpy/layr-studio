@@ -8,7 +8,8 @@ import {
 } from "mobx";
 import { z } from "zod";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { ApiError, errorText, type PostBody } from "../api.ts";
+import { ApiError, errorText, type post } from "../api.ts";
+import type { createServerStore } from "../store/server.ts";
 import { flowValue } from "../flowValue.ts";
 import { serverMutationResponseIsUncertain } from "./mutationIdentity.ts";
 
@@ -25,25 +26,112 @@ export type OperationKey = readonly [
   target: string,
   fieldOrRole?: string,
 ];
-// P1 admits only the generated rename contract; widen with the next migrated operation.
-export type Intent = {
-  key: OperationKey;
-  path: "/api/rename";
-  body: Readonly<Omit<PostBody<"/api/rename">, "request_id" | "requestId">>;
-};
 export type ReceiptProof =
   | { kind: "applied" }
   | { kind: "failed"; errorText: string };
+export type OperationContext = {
+  api: { post: typeof post };
+  store: () => ReturnType<typeof createServerStore>;
+  notify: (message: string) => void;
+};
+/** One request with its typed body bound into send/watch; `body` is the persisted JSON. */
+export type Intent = {
+  key: OperationKey;
+  path: string;
+  body: unknown;
+  label: string;
+  retryable?: false;
+  send: (
+    context: OperationContext,
+    entry: RequestEntry,
+  ) => Promise<"applied" | void>;
+  watch: (
+    context: OperationContext,
+    entry: RequestEntry,
+    observe: (proof: ReceiptProof) => void,
+  ) => () => void;
+};
+export type RequestOperation = {
+  path: string;
+  revive: (key: OperationKey, body: unknown) => Intent;
+};
+/** send returns "applied" only for an authoritative reply for this request id; otherwise
+ * the entry is confirmed and waits for watch to observe an exact receipt for the id. */
+/** Request bodies are plain JSON: persisted as JSON and resent as JSON. */
+type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | Json[]
+  | { [key: string]: Json | undefined };
+/** The schema must be plain (no transform/default/preprocess): admission and revival must yield the
+ * same body. Input = output is enforced by type; value-preserving plainness is the owner's duty. */
+export function requestOperation<
+  B extends { [key: string]: Json | undefined },
+>(spec: {
+  path: string;
+  body: z.ZodType<B, B>;
+  /** Names the request in unresolved-request notices. */
+  label: (body: B) => string;
+  send: (
+    context: OperationContext,
+    body: B,
+    entry: RequestEntry,
+  ) => Promise<"applied" | void>;
+  watch?: (
+    context: OperationContext,
+    body: B,
+    entry: RequestEntry,
+    observe: (proof: ReceiptProof) => void,
+  ) => () => void;
+}) {
+  const intent = (key: OperationKey, value: B): Intent => {
+    // A retry and a reload must resend exactly the admitted wire body.
+    const body = deepFreeze(spec.body.parse(structuredClone(value)));
+    return {
+      key: Object.freeze(structuredClone(key)),
+      path: spec.path,
+      body,
+      label: spec.label(body),
+      send: (context, entry) => spec.send(context, body, entry),
+      watch: (context, entry, observe) =>
+        spec.watch?.(context, body, entry, observe) ?? (() => {}),
+    };
+  };
+  return {
+    path: spec.path,
+    intent,
+    revive: (key: OperationKey, body: unknown) =>
+      intent(key, spec.body.parse(body)),
+  };
+}
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object")
+    Object.values(Object.freeze(value)).forEach(deepFreeze);
+  return value;
+}
+/** Keeps an unresolved request of a no-longer-registered operation visible; it cannot resend. */
+function opaqueIntent(key: OperationKey, path: string, body: unknown): Intent {
+  return {
+    key,
+    path,
+    body,
+    label: `Request ${path}`,
+    retryable: false,
+    send: () =>
+      Promise.reject(new Error("This request can no longer be resent.")),
+    watch: () => () => {},
+  };
+}
 const savedEntry = z.object({
   requestId: z.string().min(1),
   key: z.union([
     z.tuple([z.string(), z.string(), z.string()]),
     z.tuple([z.string(), z.string(), z.string(), z.string()]),
   ]),
-  path: z.literal("/api/rename"),
-  body: z
-    .object({ id: z.string(), name: z.string().nullable().optional() })
-    .strict(),
+  path: z.string(),
+  body: z.unknown(),
   state: z.enum(["sending", "unknown", "confirmed"]),
 });
 const unknownText = "The result is unknown. Retry the saved request.";
@@ -53,16 +141,23 @@ export class RequestEntry {
   readonly key;
   readonly path;
   readonly body;
+  readonly intent;
   state: RequestState = "sending";
   errorText = "";
   dismissed = false;
   completion: Promise<void> = Promise.resolve();
   constructor(intent: Intent, id: string) {
     this.requestId = id;
-    this.key = Object.freeze(structuredClone(intent.key));
+    this.key = intent.key;
     this.path = intent.path;
-    this.body = Object.freeze({ ...intent.body });
-    makeAutoObservable(this, { key: false, body: false, completion: false });
+    this.body = intent.body;
+    this.intent = intent;
+    makeAutoObservable(this, {
+      key: false,
+      body: false,
+      intent: false,
+      completion: false,
+    });
   }
   get terminal() {
     return ["applied", "applied-from-SSE", "failed"].includes(this.state);
@@ -71,7 +166,7 @@ export class RequestEntry {
     return {
       state: this.state,
       busy: this.state === "sending",
-      canRetry: this.state === "unknown",
+      canRetry: this.state === "unknown" && this.intent.retryable !== false,
       unresolved: !this.terminal,
       errorText: this.dismissed ? "" : this.errorText,
     };
@@ -82,23 +177,18 @@ export class RequestRegistry {
   readonly latestIds = new Map<string, string>();
   readonly stops = new Map<string, () => void>();
   readonly storage;
-  readonly dispatch;
-  readonly watch;
+  readonly context;
   disposed = false;
   constructor(
     storage: Storage,
-    dispatch: (entry: RequestEntry) => Promise<"applied" | void>,
-    watch: (
-      entry: RequestEntry,
-      observe: (proof: ReceiptProof) => void,
-    ) => () => void,
+    context: OperationContext,
+    operations: readonly RequestOperation[],
   ) {
     this.storage = storage;
-    this.dispatch = dispatch;
-    this.watch = watch;
+    this.context = context;
     makeAutoObservable(
       this,
-      { storage: false, dispatch: false, watch: false, stops: false },
+      { storage: false, context: false, stops: false },
       { autoBind: true },
     );
     const keys = Array.from({ length: storage.length }, (_, i) =>
@@ -109,7 +199,12 @@ export class RequestRegistry {
       const saved = savedEntry.parse(
         JSON.parse(storage.getItem(key) || "null"),
       );
-      const entry = new RequestEntry(saved, saved.requestId);
+      const operation = operations.find(({ path }) => path === saved.path);
+      const entry = new RequestEntry(
+        operation?.revive(saved.key, saved.body) ??
+          opaqueIntent(saved.key, saved.path, saved.body),
+        saved.requestId,
+      );
       entry.state = saved.state === "sending" ? "unknown" : saved.state;
       if (entry.state === "unknown") entry.errorText = unknownText;
       this.attach(entry);
@@ -124,7 +219,7 @@ export class RequestRegistry {
       ),
     ];
     this.stops.set(entry.requestId, () => stops.forEach((stop) => stop()));
-    const stopProof = this.watch(entry, (proof) =>
+    const stopProof = entry.intent.watch(this.context, entry, (proof) =>
       this.observe(entry.requestId, proof),
     );
     if (this.entries.has(entry.requestId)) stops.push(stopProof);
@@ -165,7 +260,7 @@ export class RequestRegistry {
     const entry = this.get(id);
     if (!entry || this.disposed) return;
     if (entry.state === "sending") return yield* flowValue(entry.completion);
-    if (entry.state !== "unknown") return;
+    if (entry.state !== "unknown" || entry.intent.retryable === false) return;
     this.persist(entry);
     entry.state = "sending";
     entry.dismissed = false;
@@ -174,7 +269,7 @@ export class RequestRegistry {
   });
   *send(entry: RequestEntry, uncertain: boolean) {
     try {
-      const outcome = yield* flowValue(this.dispatch(entry));
+      const outcome = yield* flowValue(entry.intent.send(this.context, entry));
       if (this.disposed || entry.terminal) return;
       entry.state = outcome === "applied" ? outcome : "confirmed";
       entry.errorText = "";

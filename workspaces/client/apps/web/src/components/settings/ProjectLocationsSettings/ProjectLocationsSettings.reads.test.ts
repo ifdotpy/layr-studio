@@ -1,13 +1,17 @@
+import { postDouble } from "../../../servers/postDouble.ts";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { createServerServices } from "../../../servers/serverServices.ts";
 import { localServer } from "../../../servers/registry.ts";
 import { ServerServicesProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { LocationProjectView } from "../../../servers/projectLocations.ts";
 import ProjectLocationsSettings from "./ProjectLocationsSettings.tsx";
+
+// Isolate persisted request journals between the real server-service fixtures.
+beforeEach(() => localStorage.clear());
 
 function mountedLocations() {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -157,5 +161,112 @@ it("retries a location mutation with the same request identity after an uncertai
     expect(second).toEqual(first);
   } finally {
     await view.close();
+  }
+});
+
+it("adding a location leaves folder information to explicit reads", async () => {
+  const { createProjectLocationsStore } =
+    await import("./ProjectLocationsStore.ts");
+  const services = createServerServices(localServer());
+  const get = vi
+    .spyOn(services.api, "get")
+    .mockResolvedValue({ gitHead: "head" });
+  vi.spyOn(services.api, "refreshSession").mockResolvedValue({
+    token: "fixture",
+  });
+  vi.spyOn(services.api, "post").mockImplementation(
+    postDouble({
+      "/api/projects": async (body) => ({
+        outcome: "applied",
+        requestId: "request_id" in body ? String(body.request_id) : "",
+        projectId: "project",
+      }),
+    }),
+  );
+  try {
+    const { flowResult } = await import("mobx");
+    const form = createProjectLocationsStore();
+    await flowResult(
+      form.change(
+        { projectId: "project", services },
+        "add_location",
+        "local",
+        "/new",
+      ),
+    );
+    expect(get).not.toHaveBeenCalled();
+  } finally {
+    services.close();
+  }
+});
+
+it("registration keeps its saved request after a mismatched receipt and remount", async () => {
+  const { saveProjectLocation } =
+    await import("../../../servers/projectLocations.ts");
+  const server = localServer();
+  const services = createServerServices(server);
+  const post = vi.spyOn(services.api, "post").mockResolvedValue({
+    requestId: "another",
+    outcome: "applied",
+    projectId: "project",
+  });
+  const body = { path: "/new" };
+  try {
+    await expect(saveProjectLocation(services, body)).rejects.toThrow(
+      "unknown",
+    );
+    const sent = post.mock.calls[0]?.[1];
+    expect(sent).toMatchObject({
+      path: "/new",
+      request_id: expect.any(String),
+    });
+    services.close();
+    const restored = createServerServices(server);
+    const retry = vi
+      .spyOn(restored.api, "post")
+      .mockImplementation(async (_path, request) => ({
+        requestId: "request_id" in request ? String(request.request_id) : "",
+        outcome: "applied",
+        projectId: "project",
+      }));
+    try {
+      expect(retry).not.toHaveBeenCalled();
+      await saveProjectLocation(restored, body);
+      expect(retry.mock.calls[0]?.[1]).toEqual(sent);
+    } finally {
+      restored.close();
+    }
+  } finally {
+    services.close();
+  }
+});
+
+it("a location conflict cannot replace an unresolved body", async () => {
+  const { saveProjectLocation } =
+    await import("../../../servers/projectLocations.ts");
+  const services = createServerServices(localServer());
+  const post = vi
+    .spyOn(services.api, "post")
+    .mockRejectedValue(new TypeError("offline"));
+  const body = {
+    action: "add_location" as const,
+    server: "local",
+    path: "/new",
+    project: "project",
+  };
+  try {
+    await expect(saveProjectLocation(services, body)).rejects.toThrow(
+      "unknown",
+    );
+    await expect(
+      saveProjectLocation(services, { ...body, path: "/other" }),
+    ).rejects.toThrow("pending");
+    expect(post).toHaveBeenCalledOnce();
+    await expect(saveProjectLocation(services, body)).rejects.toThrow(
+      "unknown",
+    );
+    expect(post.mock.calls[1]?.[1]).toEqual(post.mock.calls[0]?.[1]);
+  } finally {
+    services.close();
   }
 });

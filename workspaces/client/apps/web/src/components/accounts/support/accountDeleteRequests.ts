@@ -1,20 +1,5 @@
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { serverLocalStorage } from "../../../servers/storage.ts";
-import type { Account } from "./Accounts.tsx";
-import type { ProviderKind } from "../../../generated/providerKind.ts";
-
-export type AccountDeleteTarget = Pick<
-  Account,
-  "id" | "provider" | "email" | "label"
->;
-
-export type ExternalAccountIdentity = {
-  accountKey?: string;
-  provider: ProviderKind;
-  email: string | null;
-  label: string;
-};
-
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
 const DELETE_REQUESTS_KEY = "codex-studio-account-delete-requests-v1";
@@ -60,17 +45,6 @@ function saveDeleteRequest(
   } catch {
     // The live dialog still retains its exact request identity when storage is unavailable.
   }
-}
-
-export function accountForExternalCommand<T extends AccountDeleteTarget>(
-  accounts: readonly T[],
-  identity: ExternalAccountIdentity,
-) {
-  return accounts.find(
-    (account) =>
-      account.id === identity.accountKey &&
-      account.provider === identity.provider,
-  );
 }
 
 export function getOrCreateAccountDeleteRequest(

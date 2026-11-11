@@ -27,6 +27,7 @@ export type CombinedSidebarFixtureInput = {
 export function createCombinedSidebarFixture(
   input: CombinedSidebarFixtureInput,
   services: CombinedSidebarServices,
+  creation?: () => import("../app/shell/SidebarOwner.ts").CombinedSidebarBoundary["creation"],
 ) {
   const facts = observable.box({ input, services }, { deep: false });
 
@@ -78,22 +79,23 @@ export function createCombinedSidebarFixture(
         return facts.get().services.aliases;
       },
       online: (id) => facts.get().services.online(id),
-      refreshOwner: (id) => facts.get().services.refreshOwner(id),
       executeCommand: (id, command) =>
         facts.get().services.executeCommand(id, command),
       send: (id, command) => facts.get().services.send(id, command),
-      applyNavigation: (id, value) =>
-        facts.get().services.applyNavigation(id, value),
       settings: () => facts.get().services.settings(),
       search: () => facts.get().services.search(),
       notify: (message) => facts.get().services.notify(message),
     },
     {
       areas: sidebarFixtureAreas(models.store, localSidebarServices),
-      creation: {
-        isCreating: false,
-        unreplicatedCreatedAgents: [],
-        lookup: () => undefined,
+      get creation() {
+        return (
+          creation?.() ?? {
+            isCreating: false,
+            unreplicatedCreatedAgents: [],
+            lookup: () => undefined,
+          }
+        );
       },
     },
   );

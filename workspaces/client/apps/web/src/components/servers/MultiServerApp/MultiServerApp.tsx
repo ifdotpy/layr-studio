@@ -14,7 +14,6 @@ import {
   ServerSettingsContext,
 } from "../../../servers/ServerSettingsContext.tsx";
 import App from "../../shell/App/App.tsx";
-import { ServerAreasProvider } from "../../shell/ServerAreasProvider/ServerAreasProvider.tsx";
 import Sidebar from "../../sidebar/Sidebar/Sidebar.tsx";
 import { ServerServicesProvider } from "../ServerServicesProvider/ServerServicesProvider.tsx";
 import { ShellNewChat } from "../ShellNewChat/ShellNewChat.tsx";
@@ -41,7 +40,6 @@ const MultiServerShell = observer(function MultiServerShell({
 }: {
   shell: ShellState;
 }) {
-  const localServices = shell.localServices;
   const shellRef = useRef<HTMLDivElement>(null);
   const { setColorScheme } = useMantineColorScheme();
   const services = shell.serviceInstances;
@@ -138,9 +136,7 @@ const MultiServerShell = observer(function MultiServerShell({
         <ServerManagementPanelContext.Provider
           value={<ShellManagement shell={shell} />}
         >
-          <ServerAreasProvider areas={localServices!.areas}>
-            <App />
-          </ServerAreasProvider>
+          <App />
         </ServerManagementPanelContext.Provider>
       </ServerSettingsContext.Provider>
     );
@@ -265,9 +261,7 @@ const MultiServerShell = observer(function MultiServerShell({
               services={service}
             >
               <ScreenContext.Provider value={channel}>
-                <ServerAreasProvider areas={service.areas}>
-                  <App />
-                </ServerAreasProvider>
+                <App />
               </ScreenContext.Provider>
             </ServerServicesProvider>
           );

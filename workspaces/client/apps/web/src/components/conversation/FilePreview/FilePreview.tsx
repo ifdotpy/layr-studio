@@ -1,8 +1,4 @@
-import {
-  useServerNet,
-  useServerFileActions,
-} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useReadView } from "../../ui/support/useReadView.ts";
+import { useServerFileActions } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { observer } from "mobx-react-lite";
 import { type ReadSlot } from "../../../store/runtime.ts";
 import type { GetResult } from "../../../api.ts";
@@ -15,7 +11,6 @@ import ImageViewer from "../../shell/ImageViewer/ImageViewer.tsx";
 import PreviewModal from "../PreviewModal/PreviewModal.tsx";
 import type { FilePreviewState } from "../support/FilePreviewState.ts";
 import { SourceToggle } from "../SourceToggle/SourceToggle.tsx";
-import { openFilePreview } from "../support/PreviewSelection.ts";
 export { openFilePreview } from "../support/PreviewSelection.ts";
 
 // StreamingText opens FilePreview for links. Load it only for Markdown files.
@@ -33,17 +28,6 @@ export type PreviewSource = {
   slot: ReadSlot<GetResult<"/api/file">>;
 };
 export type FilePreviewSelection = PreviewSource & { state: FilePreviewState };
-// integration: W7 read-view owner replaces this compatibility accessor.
-export function useFilePreview() {
-  const net = useServerNet();
-  const [target, setTarget] = useReadView<FilePreviewSelection>();
-  return [
-    target,
-    (next: PreviewTarget | null) => {
-      setTarget(next ? openFilePreview(net, next) : null);
-    },
-  ] as const;
-}
 export default observer(function FilePreview({
   target: selection,
   onClose,

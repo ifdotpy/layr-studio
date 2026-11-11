@@ -1,5 +1,13 @@
 [
   {
+    "file": "components/settings/ProjectLocationsSettings/ProjectLocationsSettings.reads.test.ts",
+    "callee": "localStorage.clear"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "localStorage.setItem"
+  },
+  {
     "file": "api.test.ts",
     "callee": "syncGet"
   },

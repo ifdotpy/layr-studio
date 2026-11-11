@@ -60,7 +60,9 @@ export class CombinedSidebarOwner {
       run: (command) => {
         void this.run(command);
       },
-      creation: inputs.creation,
+      get creation() {
+        return inputs.creation;
+      },
       visibility: shell,
       selection: shell,
       preferences: shell,

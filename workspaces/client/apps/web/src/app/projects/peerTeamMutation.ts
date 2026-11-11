@@ -84,9 +84,6 @@ export class PeerTeamMutation {
   reload(complete = this.complete) {
     return this.run(true, complete);
   }
-  reportError(error: string) {
-    this.error = error;
-  }
 }
 export class PeerTeamMoveOwner {
   readonly mutation: PeerTeamMutation;
@@ -178,7 +175,6 @@ export function createPeerTeamRoom(
       backend: SidebarBackend,
       actions: PeerTeamActions,
     ) {
-      const { post } = backend;
       const requestKey = `studio-radio-open:${actions.scope}:${team.id}`;
       if (this.pending) return;
       const roomId = actions.room(team);
@@ -205,7 +201,7 @@ export function createPeerTeamRoom(
       try {
         if (!next.acknowledged && !next.rejected) {
           yield* flowValue(
-            post("/api/peer-teams", next.body, { timeoutMs: 15000 }),
+            backend.post("/api/peer-teams", next.body, { timeoutMs: 15000 }),
           );
           next = { ...next, acknowledged: true };
           this.remember(next, backend, requestKey);
@@ -299,7 +295,7 @@ export function createPeerTeamForm(
     ) {
       const mutation = (this.mutation ??= new PeerTeamMutation());
       if (typeof project.path !== "string") {
-        mutation.reportError("This team has no project path.");
+        mutation.error = "This team has no project path.";
         return;
       }
       this.frozen = true;

@@ -9,7 +9,7 @@ import { MantineProvider } from "@mantine/core";
 import TurnHistory from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
 import PromptComposer from "../../src/components/conversation/prompt-composer/PromptComposer/PromptComposer.tsx";
-import { useConversationScroll } from "../../src/components/conversation/support/useConversationScroll.ts";
+import { createConversationScroll } from "../../src/components/conversation/support/useConversationScroll.ts";
 import { revealHistoryMessage } from "../../src/components/conversation/support/historyWindowModel.ts";
 import "../../src/components/conversation/transcript/TurnHistory/turn-history.css";
 import "../../src/visual-activity.css";
@@ -92,7 +92,12 @@ function Harness() {
   const [items, setItems] = useState<Message[]>(() => readSavedHistory());
   const [sent, setSent] = useState("");
   const [enabled, setEnabled] = useState(true);
-  const sc = useConversationScroll("window-browser-fixture", true);
+  const [sc] = useState(() =>
+    createConversationScroll(
+      () => true,
+      () => true,
+    ),
+  );
   window.edit = () =>
     flushSync(() =>
       setItems((old) =>

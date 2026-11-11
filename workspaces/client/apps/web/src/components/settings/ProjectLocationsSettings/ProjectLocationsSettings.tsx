@@ -5,11 +5,12 @@ import {
   useServerOwner,
   useServerNet,
   useServerApi,
+  useServerServices,
   useServerStorage,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ActionIcon, Button, Menu } from "@mantine/core";
 import { MoreHorizontal } from "lucide-react";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   type LocationProjectView as LocationProject,
   type ProjectServerChoice,
@@ -18,11 +19,7 @@ import ProjectDirectoryPicker, {
   browseDirectory,
   type DirectoryBrowse,
 } from "../../projects/ProjectDirectoryPicker/ProjectDirectoryPicker.tsx";
-import {
-  closeMenuFromTriggerOnEscape,
-  restoreMenuTriggerFocusAfterClose,
-  useMenuEscapeSuppression,
-} from "../../ui/support/closeMenuFromTriggerOnEscape.ts";
+import { useMenuEscapeCapture } from "../../ui/support/closeMenuFromTriggerOnEscape.ts";
 
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 import { createProjectLocationsStore } from "./ProjectLocationsStore.ts";
@@ -55,19 +52,18 @@ const ProjectLocationsView = observer(function ProjectLocationsView({
   const [form] = useState(() => createProjectLocationsStore(initialHeads));
   const [adding, setAdding] = useState(initialBrowse);
   const net = useServerNet();
+  const services = useServerServices();
   const scope = {
     projectId: project.id,
     services: {
       api: useServerApi(),
       store: useServerStore(),
       storage: useServerStorage(),
+      requests: services?.requests,
     },
   };
   const { error, busy, openLocationMenu, gitHead, change } = form;
-  const locationMenuTriggers = useRef(new Map<string, HTMLButtonElement>());
-  const { suppressNextEscape, clearSuppression } = useMenuEscapeSuppression(
-    openLocationMenu !== null,
-  );
+  useMenuEscapeCapture(openLocationMenu !== null, form.menuState);
   return (
     <div className="project-locations" aria-label="Project folders">
       {(project.locations || []).map((location) => (
@@ -97,42 +93,15 @@ const ProjectLocationsView = observer(function ProjectLocationsView({
             opened={openLocationMenu === location.serverId}
             onChange={(nextOpened) => {
               form.menu(scope, location.serverId, location.path, nextOpened);
-              if (!nextOpened)
-                restoreMenuTriggerFocusAfterClose(
-                  locationMenuTriggers.current.get(location.serverId) ?? null,
-                );
             }}
             withinPortal={false}
             withInitialFocusPlaceholder={false}
           >
             <Menu.Target>
               <ActionIcon
-                ref={(node) => {
-                  if (node)
-                    locationMenuTriggers.current.set(location.serverId, node);
-                  else locationMenuTriggers.current.delete(location.serverId);
-                }}
+                {...form.menuState.triggerProps(location.serverId)}
                 className="project-location-actions"
                 size={28}
-                onClick={(event) =>
-                  event.currentTarget.focus({ preventScroll: true })
-                }
-                data-mantine-stop-propagation={
-                  openLocationMenu === location.serverId || suppressNextEscape
-                    ? "true"
-                    : undefined
-                }
-                onKeyDown={(event) =>
-                  closeMenuFromTriggerOnEscape(
-                    event,
-                    openLocationMenu === location.serverId,
-                    () =>
-                      form.menu(scope, location.serverId, location.path, false),
-                    suppressNextEscape,
-                    clearSuppression,
-                  )
-                }
-                onBlur={clearSuppression}
                 aria-label={`Options for folder ${location.path}`}
                 disabled={busy}
               >

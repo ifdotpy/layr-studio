@@ -1,9 +1,5 @@
-import { ProviderKind as GeneratedProviderProviderKind } from "../../../generated/providerKind.ts";
-import { ProviderKind as GeneratedApiProviderKind } from "../../../generated/api.ts";
-import type { AccountDeleteTarget } from "./accountDeleteRequests.ts";
 import { beforeEach, expect, it } from "vitest";
 import {
-  accountForExternalCommand,
   confirmAccountDeleteRequest,
   getOrCreateAccountDeleteRequest,
 } from "./accountDeleteRequests.ts";
@@ -16,79 +12,7 @@ const storage = {
 
 beforeEach(() => values.clear());
 
-it("resolves an exact account key without selecting a duplicate or a missing replacement", () => {
-  const accounts: AccountDeleteTarget[] = ["first", "second"].map((id) => ({
-    id,
-    provider: "claude",
-    email: "same@example.test",
-    label: "Work",
-  }));
-  const identity = {
-    provider: "claude" as const,
-    email: "same@example.test",
-    label: "Work",
-    accountKey: "second",
-  };
-  expect(accountForExternalCommand(accounts, identity)?.id).toBe("second");
-  expect(
-    accountForExternalCommand(accounts, { ...identity, accountKey: "removed" }),
-  ).toBeUndefined();
-  expect(
-    accountForExternalCommand(accounts, {
-      ...identity,
-      provider: GeneratedProviderProviderKind.Codex,
-    }),
-  ).toBeUndefined();
-  const { accountKey: _key, ...legacy } = identity;
-  expect(accountForExternalCommand(accounts, legacy)).toBeUndefined();
-  expect(
-    accountForExternalCommand(
-      accounts.map((row) => ({ ...row, email: null })),
-      { ...legacy, email: null },
-    ),
-  ).toBeUndefined();
-});
-
-it("does not match an unknown provider to a known account identity", () => {
-  const account: AccountDeleteTarget = {
-    id: "unknown-provider",
-    // @ts-expect-error Deliberately exercise an unrecognized remote provider.
-    provider: "future-provider",
-    email: "target@example.invalid",
-    label: "Work",
-  };
-  expect(
-    accountForExternalCommand([account], {
-      provider: GeneratedProviderProviderKind.Codex,
-      email: account.email ?? null,
-      label: account.label,
-    }),
-  ).toBeUndefined();
-});
-
-it("resolves an external account action to the account's stored delete identity", () => {
-  const accounts: AccountDeleteTarget[] = [
-    {
-      id: "other-account",
-      provider: GeneratedApiProviderKind.codex,
-      email: "other@example.invalid",
-      label: "Work",
-    },
-    {
-      id: "target-account",
-      provider: GeneratedApiProviderKind.codex,
-      email: "target@example.invalid",
-      label: "Work",
-    },
-  ];
-  const account = accountForExternalCommand(accounts, {
-    provider: GeneratedProviderProviderKind.Codex,
-    accountKey: "target-account",
-    email: "TARGET@example.invalid",
-    label: "Work",
-  });
-  expect(account?.id).toBe("target-account");
-
+it("reuses a deletion identity preloaded from an earlier session", () => {
   values.set(
     "codex-studio-account-delete-requests-v1:settings-state",
     JSON.stringify({ "target-account": "stored-request" }),
@@ -96,9 +20,13 @@ it("resolves an external account action to the account's stored delete identity"
   expect(
     getOrCreateAccountDeleteRequest(
       "settings-state",
-      account!.id,
+      "target-account",
       storage,
-      () => "unexpected-new-request",
+      () => {
+        throw new Error(
+          "A stored request must not get a replacement identity.",
+        );
+      },
     ),
   ).toBe("stored-request");
 });
@@ -216,27 +144,4 @@ it("keeps same-account deletion identities and acknowledgements within their own
       () => "next-b",
     ),
   ).toBe("next-b");
-});
-
-it("requires an exact key even when an email or label has only one match", () => {
-  const account = {
-    id: "exact",
-    provider: "claude" as const,
-    email: "a@example.test",
-    label: "Personal",
-  };
-  expect(
-    accountForExternalCommand([account], {
-      provider: account.provider,
-      email: account.email,
-      label: account.label,
-    }),
-  ).toBeUndefined();
-  expect(
-    accountForExternalCommand([{ ...account, email: null }], {
-      provider: account.provider,
-      email: null,
-      label: account.label,
-    }),
-  ).toBeUndefined();
 });

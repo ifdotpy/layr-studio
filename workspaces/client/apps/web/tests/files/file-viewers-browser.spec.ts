@@ -255,7 +255,10 @@ test("file-viewers-browser", async ({ browser, page }) => {
         "# Title",
       ),
     );
-    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    await page
+      .getByLabel("File view", { exact: true })
+      .getByRole("button", { name: "Preview", exact: true })
+      .click();
     await page.getByRole("link", { name: "next", exact: true }).click();
     await page.locator('[data-file-line="2"]').waitFor();
     assert.equal(

@@ -1,7 +1,6 @@
 import "./rendererStyles.ts";
 
 import { ServerAreas } from "./app/ServerAreasProvider.tsx";
-import { ServerAreasProvider } from "./components/shell/ServerAreasProvider/ServerAreasProvider.tsx";
 import {
   createServerViewServices,
   ServerServicesProvider,
@@ -73,9 +72,7 @@ async function mount() {
             <SidebarWarningsProvider>
               {services ? (
                 <ServerServicesProvider services={services}>
-                  <ServerAreasProvider areas={services.areas}>
-                    <App />
-                  </ServerAreasProvider>
+                  <App />
                 </ServerServicesProvider>
               ) : (
                 <MultiServerApp shell={shell!} />

@@ -54,7 +54,7 @@ vi.mock("react", async (original) => {
   return {
     ...actual,
     useContext: <T>(context: import("react").Context<T>) =>
-      h.live ? actual.useContext(context) : h.areas,
+      h.live ? actual.useContext(context) : { areas: h.areas },
     useState: (initial: unknown) =>
       h.live
         ? actual.useState(initial)
@@ -123,7 +123,10 @@ vi.mock("../support/usePromptRecall.ts", () => ({
 vi.mock("../support/useChatReadState.ts", () => ({
   useVisibleChatResult: () => {},
 }));
-vi.mock("../../agents/support/WorkerModelPicker.tsx", () => ({
+vi.mock("../../agents/support/WorkerModelPicker.tsx", async (original) => ({
+  ...(await original<
+    typeof import("../../agents/support/WorkerModelPicker.tsx")
+  >()),
   useWorkerModels: () => ({ models: [] }),
 }));
 vi.mock("../../../wasm/client.ts", () => ({}));

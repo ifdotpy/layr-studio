@@ -4,7 +4,6 @@ import type { ComponentSnapshot as Snapshot } from "../../conversation/ComposerA
 import { createProjectionMetadataMirror } from "../../../generated/observableResources.ts";
 import { stateFromFixture } from "../../../servers/sidebarSourceFixture.ts";
 import { SidebarCommandsProvider } from "../../sidebar/support/commands.ts";
-import { CombinedSidebarServicesProvider } from "../../../servers/combinedSidebarServices.ts";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 const injectedStore = observableFixture();
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
@@ -238,9 +237,6 @@ const combinedServices: import("../../../servers/combinedSidebarServices.ts").Co
   {
     backends: new Map([["owner", backend]]),
     online: () => true,
-    refreshOwner: async () => {
-      throw new Error("Unexpected refresh");
-    },
     executeCommand: async () => {
       throw new Error("Unexpected command");
     },
@@ -249,7 +245,6 @@ const combinedServices: import("../../../servers/combinedSidebarServices.ts").Co
       window.owner = owner;
       if (command.action === "delete-project") deletion.open(command.projectId);
     },
-    applyNavigation: () => {},
     settings: () => {},
     search: () => {},
     notify: (message) => {
@@ -297,15 +292,9 @@ const Fixture = observer(function Fixture() {
       ? React.createElement(
           injectedStore.Provider,
           {},
-          React.createElement(
-            CombinedSidebarServicesProvider,
-            {
-              value: combinedServices,
-            },
-            React.createElement(CombinedSidebarFixtureView, {
-              fixture: combined,
-            }),
-          ),
+          React.createElement(CombinedSidebarFixtureView, {
+            fixture: combined,
+          }),
         )
       : React.createElement(
           injectedStore.Provider,

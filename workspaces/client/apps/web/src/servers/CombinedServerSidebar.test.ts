@@ -1,7 +1,10 @@
 import { stateFromFixture } from "./sidebarSourceFixture.ts";
 import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import type { CombinedSidebarServices } from "./combinedSidebarServices.ts";
-import { RequestRegistry } from "./RequestRegistry.ts";
+import { createRequestRegistry } from "./requestOperations.ts";
+import { renameOperation } from "../renameRequest.ts";
+import { postDouble } from "./postDouble.ts";
+import type { PostBody, PostResult } from "../api.ts";
 import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type { SidebarCommands } from "../components/sidebar/support/commands.ts";
 // @vitest-environment happy-dom
@@ -30,7 +33,6 @@ const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
     token: "",
     stateDir: "/fixture",
   });
-import { navigationSnapshot } from "./navigation.ts";
 import { localSidebarBackend } from "../components/sidebar/support/services.tsx";
 import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 
@@ -151,11 +153,9 @@ function combinedElement(
       ]),
     ),
     online: () => true,
-    refreshOwner: async () => navigationSnapshot(undefined, null, ""),
     executeCommand,
     aliases: {},
     send,
-    applyNavigation: vi.fn(),
     settings: vi.fn(),
     search: vi.fn(),
     notify: vi.fn(),
@@ -398,22 +398,28 @@ it("retains the exact rename across a lost reply and settles without a refresh",
       }),
     ),
   );
-  const dispatch = vi.fn(async (): Promise<void> => {
-    throw new TypeError("Lost reply");
-  });
-  const registry = new RequestRegistry(
+  const dispatch = vi.fn(
+    async (
+      body: PostBody<"/api/rename">,
+    ): Promise<PostResult<"/api/rename">> => {
+      void body;
+      throw new TypeError("Lost reply");
+    },
+  );
+  const registry = createRequestRegistry(
     sessionStorage,
-    dispatch,
-    () => () => {},
+    { post: postDouble({ "/api/rename": dispatch }) },
+    () => {
+      throw new Error("No store in this sidebar test.");
+    },
+    vi.fn(),
   );
   const notify = vi.fn();
   const localRename = vi.fn(async () => {});
   const rename = vi.fn(async (id: string, name: string) => {
-    const entry = registry.start({
-      key: ["workspace", "rename", id],
-      path: "/api/rename",
-      body: { id, name },
-    });
+    const entry = registry.start(
+      renameOperation.intent(["workspace", "rename", id], { id, name }),
+    );
     await entry.completion;
     if (entry.state === "unknown") throw new Error(entry.errorText);
   });
@@ -434,9 +440,6 @@ it("retains the exact rename across a lost reply and settles without a refresh",
       {
         backends,
         notify,
-        refreshOwner: async () => {
-          throw Error("Unexpected refresh");
-        },
       },
     ),
   );
@@ -447,7 +450,12 @@ it("retains the exact rename across a lost reply and settles without a refresh",
     await owner.rename(new Event("submit"), id);
     expect(notify).toHaveBeenCalledTimes(1);
     const entry = required(registry.latest(["workspace", "rename", "same"]));
-    dispatch.mockResolvedValueOnce(undefined);
+    dispatch.mockImplementationOnce(async (body) => ({
+      id: body.id,
+      name: body.name,
+      request_id: body.request_id,
+      status: "applied",
+    }));
     await registry.retry(entry.requestId);
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(dispatch.mock.calls[0]).toEqual(dispatch.mock.calls[1]);
@@ -466,4 +474,41 @@ it("retains the exact rename across a lost reply and settles without a refresh",
     registry.dispose();
     sessionStorage.clear();
   }
+});
+
+it("reads the current creation owner after the shell switches servers", () => {
+  const first = {
+    isCreating: false,
+    unreplicatedCreatedAgents: [],
+    lookup: () => undefined,
+  };
+  const second = { ...first, isCreating: true };
+  let active = first;
+  const fixture = createCombinedSidebarFixture(
+    {
+      model: mergeSidebar([]),
+      current: "local",
+      navigation: {},
+      mobile: false,
+      hidden: false,
+      close() {},
+      notice: "",
+      hideOldChatsThreshold: 0,
+    },
+    {
+      backends: new Map([["local", localSidebarBackend]]),
+      aliases: {},
+      online: () => true,
+      async executeCommand() {},
+      send() {},
+      settings() {},
+      search() {},
+      notify() {},
+    },
+    () => active,
+  );
+  expect(fixture.owner.list.creation).toBe(first);
+  active = second;
+  expect(fixture.owner.list.creation).toBe(second);
+  fixture.start()();
 });

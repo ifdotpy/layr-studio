@@ -206,6 +206,44 @@ async function mountPanel(section: string, agent?: Agent) {
   };
 }
 
+it("keeps workspace pending feedback after leaving a saving section", async () => {
+  const pending = Promise.withResolvers<{}>();
+  api.get.mockReset().mockResolvedValue({ checkpoints: [], files: [] });
+  api.post.mockReset().mockReturnValue(pending.promise);
+  const panel = await mountPanel("checkpoints", {
+    id: "agent",
+    source: AgentSource.managed,
+  });
+  try {
+    await act(async () =>
+      panel.host
+        .querySelector("form")
+        ?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(api.post).toHaveBeenCalledWith("/api/checkpoint", {
+      agent: "agent",
+      label: "Manual checkpoint",
+    });
+    await act(async () =>
+      [...panel.host.querySelectorAll("button")]
+        .find((button) => button.textContent === "Plan")
+        ?.click(),
+    );
+    const feedback = () =>
+      panel.host.querySelector(
+        '[aria-label="Workspace operation in progress"]',
+      );
+    expect(feedback()).not.toBeNull();
+    await act(async () => pending.resolve({}));
+    expect(feedback()).toBeNull();
+  } finally {
+    pending.resolve({});
+    await panel.close();
+  }
+});
+
 it("the capabilities panel renders a deferred tools response without another user action", async () => {
   const pending = Promise.withResolvers<GetResult<"/api/capabilities">>();
   api.get.mockReset().mockReturnValueOnce(pending.promise);

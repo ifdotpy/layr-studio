@@ -20,9 +20,11 @@ declare global {
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import FilePreview, {
-  useFilePreview,
-} from "../../src/components/conversation/FilePreview/FilePreview.tsx";
+import FilePreview from "../../src/components/conversation/FilePreview/FilePreview.tsx";
+import { PreviewSelection } from "../../src/components/conversation/support/PreviewSelection.ts";
+import { observer } from "mobx-react-lite";
+import { useState } from "react";
+import { useServerNet } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
 import {
@@ -46,8 +48,12 @@ window.codexDesktop = {
     return true;
   },
 };
-function App() {
-  const [target, setTarget] = useFilePreview();
+const App = observer(function App() {
+  const net = useServerNet();
+  const [preview] = useState(() => new PreviewSelection());
+  const target = preview.current(net);
+  const setTarget = (target: Parameters<PreviewSelection["set"]>[1]) =>
+    preview.set(net, target);
   window.show = (path, line) => setTarget({ agent: "agent-a", path, line });
   return (
     <MantineProvider>
@@ -58,7 +64,7 @@ function App() {
       <FilePreview target={target} onClose={() => setTarget(null)} />
     </MantineProvider>
   );
-}
+});
 createRoot(document.getElementById("root")!).render(
   <ServerStoreProvider value={fixtureServerStore}>
     <App />
