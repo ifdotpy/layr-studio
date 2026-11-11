@@ -14,7 +14,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import TeamChats from "../../src/components/shell/messages/TeamChats/TeamChats.tsx";
+import TeamChats, {
+  createTeamChatsStore,
+} from "../../src/components/shell/messages/TeamChats/TeamChats.tsx";
+import * as api from "../../src/api.ts";
 import "../../src/style.css";
 import "../../src/workspace-layout.css";
 import "../../src/appearance.css";
@@ -66,11 +69,22 @@ const data: Snapshot = {
 const models = messageModels(data.stateDir, data.threads);
 models.apply([{ collection: "room", id: room.id, value: room }]);
 const app = createRoot(document.getElementById("root")!);
+const commands = conversationActionsFixture(undefined, models.store);
+const chats = createTeamChatsStore(models.store, api, data.stateDir, "lead");
+window.addEventListener(
+  "pagehide",
+  () => {
+    models.close();
+    commands.dispose();
+    commands.scope.services.close();
+  },
+  { once: true },
+);
 window.showCurrent = () =>
   app.render(
     <MantineProvider theme={theme} defaultColorScheme="dark">
-      <models.Provider commands={conversationActionsFixture()}>
-        <TeamChats leadId="lead" />
+      <models.Provider commands={commands}>
+        <TeamChats owner={chats} />
       </models.Provider>
     </MantineProvider>,
   );

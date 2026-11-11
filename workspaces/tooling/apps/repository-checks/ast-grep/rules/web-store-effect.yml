@@ -1,0 +1,20 @@
+id: web-store-effect
+language: TypeScript
+message: Let the MobX store owner manage start/dispose/load/subscribe lifetime.
+severity: warning
+rule:
+  any:
+    - pattern: "$EFFECT($STORE.$METHOD, $$$)"
+    - pattern: "$EFFECT(() => $STORE.$METHOD($$$), $$$)"
+    - pattern: "$EFFECT(() => { $STORE.$METHOD($$$); }, $$$)"
+    - pattern: "$EFFECT(() => { return $STORE.$METHOD($$$); }, $$$)"
+    - pattern: "$EFFECT(() => { $STORE.$METHOD($$$); return () => $STORE.$END($$$); }, $$$)"
+    - pattern: "$EFFECT(() => { $STORE.$METHOD($$$); return $STORE.$END; }, $$$)"
+    - pattern: "$EFFECT(() => () => $STORE.$METHOD($$$), $$$)"
+constraints:
+  EFFECT:
+    regex: "^(React\\.)?use(Effect|LayoutEffect)$"
+  METHOD:
+    regex: "^(start|dispose|load|subscribe)$"
+  STORE:
+    regex: "(?i)(store|model|owner)"

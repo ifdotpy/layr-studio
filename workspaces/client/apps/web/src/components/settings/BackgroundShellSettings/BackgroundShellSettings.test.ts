@@ -15,13 +15,7 @@ test("background shell settings retain Claude defaults and explain both controls
       MantineProvider,
       null,
       createElement(BackgroundShellSettings, {
-        configuration: {
-          settings: {
-            childResultCoalesceSeconds: 10,
-            idleSessionUnloadMinutes: 15,
-          },
-        },
-        setConfiguration: () => {},
+        onChange: () => {},
         disabled: false,
       }),
     ),

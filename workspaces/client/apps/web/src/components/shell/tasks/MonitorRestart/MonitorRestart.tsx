@@ -1,13 +1,12 @@
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { useState } from "react";
+import { flowResult } from "mobx";
+import { AsyncFeedback } from "../../../../stores/AsyncFeedback.ts";
 import { Button, Text, Textarea, TextInput } from "@mantine/core";
 import { observer } from "mobx-react-lite";
 import { useBackgroundTaskActions } from "../support/backgroundTaskActions.tsx";
-import { useState } from "react";
+import { restartPatterns } from "../support/taskControlModel.ts";
+export { restartPatterns } from "../support/taskControlModel.ts";
 import type { DisplayProcessTask } from "../support/backgroundTaskModel.ts";
-
-export function restartPatterns(text: string): string[] {
-  return text.split("\n").filter((line) => line.length > 0);
-}
 
 const MonitorRestart = observer(function MonitorRestart({
   task,
@@ -15,39 +14,20 @@ const MonitorRestart = observer(function MonitorRestart({
   task: DisplayProcessTask;
 }) {
   const actions = useBackgroundTaskActions();
-  const [receipt, setReceipt] = useState(() => actions.restartReceipt(task.id));
-  const [opened, setOpened] = useState(!!receipt);
-  const { outputPatterns, epoch, accountKey } = task;
-  const [patterns, setPatterns] = useState(outputPatterns.join("\n"));
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-  const values = restartPatterns(patterns);
-  const unchanged =
-    patterns === outputPatterns.join("\n") ||
-    JSON.stringify(values) === JSON.stringify(outputPatterns);
-  const submit = async () => {
-    if (pending) return;
-    const body = receipt || {
-      id: task.id,
-      agent: task.agent,
-      epoch,
-      accountKey: accountKey || "default",
-      requestId: randomUUID(),
-      outputPatterns: values,
-    };
-    setReceipt(body);
-    setPending(true);
-    setError("");
-    const result = await actions.restart(body);
-    if (result.status === "applied") {
-      setReceipt(null);
-      setOpened(false);
-    } else {
-      if (result.status === "rejected") setReceipt(null);
-      setError(result.error);
-    }
-    setPending(false);
-  };
+  return <RestartForm key={actions.leadId} task={task} />;
+});
+const RestartForm = observer(function RestartForm({
+  task,
+}: {
+  task: DisplayProcessTask;
+}) {
+  const [feedback] = useState(() => new AsyncFeedback());
+  const actions = useBackgroundTaskActions(),
+    receipt = actions.restartReceipt(task.id);
+  const [opened, setOpened] = useState(!!receipt),
+    [patterns, setPatterns] = useState(task.outputPatterns.join("\n"));
+  const values = restartPatterns(patterns),
+    unchanged = JSON.stringify(values) === JSON.stringify(task.outputPatterns);
   if (!opened && task.cancelRequested) return null;
   if (!opened)
     return (
@@ -64,7 +44,7 @@ const MonitorRestart = observer(function MonitorRestart({
       <Textarea
         label="Output patterns, one per line"
         value={receipt ? receipt.outputPatterns.join("\n") : patterns}
-        disabled={pending || !!receipt}
+        disabled={feedback.pending || !!receipt}
         onChange={(event) => setPatterns(event.currentTarget.value)}
         autosize
         minRows={2}
@@ -73,24 +53,29 @@ const MonitorRestart = observer(function MonitorRestart({
         Use more specific patterns. Confirm to stop the old command and run this
         command again after it exits.
       </Text>
-      {error && (
+      {feedback.error && (
         <Text role="alert" c="red" size="sm">
-          {error}
+          {feedback.error}
         </Text>
       )}
       <div className="task-restart-actions">
         <Button
           size="xs"
-          loading={pending}
+          loading={feedback.pending}
           disabled={!receipt && (!values.length || unchanged)}
-          onClick={() => void submit()}
+          onClick={() =>
+            void feedback.run(
+              () => flowResult(actions.restartWithPatterns(task, patterns)),
+              () => setOpened(false),
+            )
+          }
         >
           {receipt ? "Check restart result" : "Confirm restart"}
         </Button>
         <Button
           size="xs"
           variant="subtle"
-          disabled={pending || !!receipt}
+          disabled={feedback.pending || !!receipt}
           onClick={() => setOpened(false)}
         >
           Cancel

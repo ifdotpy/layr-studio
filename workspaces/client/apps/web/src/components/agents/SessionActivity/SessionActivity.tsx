@@ -1,12 +1,18 @@
 import { ChevronRight, Clock3, Terminal, Users } from "lucide-react";
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { now } from "../../../clock.ts";
 import { observer } from "mobx-react-lite";
 
 import { useVisualActivity } from "../../../hooks/useVisualActivity.ts";
 import type { ChatActivity as SessionActivityItem } from "../../sidebar/chat-status/support/chatActivity.ts";
 
-export default observer(function SessionActivity({
+export default observer(function SessionActivity(
+  props: ComponentProps<typeof ActivityRows>,
+) {
+  return <ActivityRows key={props.activities.length > 1 ? 1 : 0} {...props} />;
+});
+
+const ActivityRows = observer(function SessionActivity({
   activities,
   onOpen,
   compact = false,

@@ -1,8 +1,11 @@
+import { TranscriptStore } from "../../support/TurnHistoryStore.ts";
 // @vitest-environment happy-dom
 import { act, createElement, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import HistoryWindow from "./HistoryWindow.tsx";
+import { TranscriptProvider } from "../../support/navigation.ts";
+import type { Message } from "../../../../types.ts";
 import type { HistoryGroup } from "../../support/turnHistoryModel.ts";
 
 afterEach(() => {
@@ -45,7 +48,7 @@ it("resize and scroll retain mounted content and never reread message geometry",
     ],
   }));
   const renders = new Map<string, number>();
-  const render = (row: HistoryGroup) => {
+  const render = (row: Message) => {
     renders.set(row.id, (renders.get(row.id) || 0) + 1);
     return createElement("p", { "data-message": row.id }, row.id);
   };
@@ -53,16 +56,21 @@ it("resize and scroll retain mounted content and never reread message geometry",
   document.body.append(host);
   const scroll = createRef<HTMLDivElement>();
   scroll.current = host;
+  const model = new TranscriptStore(() => ({
+    items: rows.flatMap((row) => row.items),
+    enabled: false,
+    scrollContainer: scroll,
+    storageKey: "geometry-counts",
+  }));
   const root = createRoot(host);
   try {
     await act(async () =>
       root.render(
-        createElement(HistoryWindow, {
-          rows,
-          render,
-          scrollContainer: scroll,
-          storageKey: "geometry-counts",
-        }),
+        createElement(
+          TranscriptProvider,
+          { value: { renderMessage: render, jumpToMessage() {} } },
+          createElement(HistoryWindow, { model }),
+        ),
       ),
     );
     await act(async () => vi.advanceTimersByTimeAsync(100));

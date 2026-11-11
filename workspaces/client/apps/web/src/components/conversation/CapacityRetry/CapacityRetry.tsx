@@ -1,16 +1,14 @@
 import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { observer } from "mobx-react-lite";
-import { now as currentTime } from "../../../clock.ts";
+import { observable } from "mobx";
+import { capacityProjection } from "../support/recovery.ts";
 import ErrorDescription from "../../shell/ErrorDescription/ErrorDescription.tsx";
-import { useRef, useState } from "react";
+import { Owned } from "../../ui/Owned/Owned.tsx";
+import { AsyncFeedback } from "../../../stores/AsyncFeedback.ts";
 import { Button } from "@mantine/core";
 import { errorText, type PostResult } from "../../../api.ts";
-import {
-  DISK_FULL_CAUSE,
-  type CapacityRetry as CapacityRetryRecord,
-} from "../../../capacityRetry.ts";
+import type { CapacityRetry as CapacityRetryRecord } from "../../../capacityRetry.ts";
 
-export default observer(function CapacityRetry({
+export default function CapacityRetry({
   agentId,
   retry,
 }: {
@@ -19,104 +17,70 @@ export default observer(function CapacityRetry({
 }) {
   const { post } = useServerApi();
 
-  const [confirmed, setConfirmed] =
-    useState<PostResult<"/api/capacity-retry"> | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-
-  const lock = useRef(false);
-  const current =
-    confirmed &&
-    confirmed.id === retry.id &&
-    (confirmed.updatedAt || 0) > (retry.updatedAt || 0)
-      ? confirmed
-      : retry;
-  const scheduled = current.status === "scheduled";
-  const seconds =
-    scheduled && current.dueAt
-      ? Math.max(0, Math.ceil(current.dueAt - currentTime() / 1000))
-      : 0;
-  const available =
-    !current.claimedAt &&
-    ["scheduled", "cancelled", "exhausted"].includes(current.status);
-  const action = async (choice: "retry" | "cancel") => {
-    if (lock.current) return;
-    lock.current = true;
-    setPending(true);
-    setError("");
-    try {
-      const result = await post(
-        "/api/capacity-retry",
-        {
-          id: agentId,
-          retry_id: retry.id,
-          action: choice,
-        },
-        { timeoutMs: 15000 },
-      );
-      setConfirmed(result);
-    } catch (cause) {
-      setError(
-        choice === "cancel"
-          ? `Cancel could not be confirmed. The automatic retry may still start. ${errorText(cause)}`
-          : `Retry could not be confirmed. Check the chat status. ${errorText(cause)}`,
-      );
-    } finally {
-      lock.current = false;
-      setPending(false);
-    }
-  };
   return (
-    <div
-      className="capacity-retry"
-      data-retry-status={current.status || "unknown"}
+    <Owned
+      create={() => ({
+        action: new AsyncFeedback(),
+        confirmed: observable.box<PostResult<"/api/capacity-retry">>(),
+      })}
     >
-      <p role="status">
-        {scheduled && current.cause === DISK_FULL_CAUSE
-          ? "Waiting for free disk space."
-          : scheduled
-            ? seconds > 0
-              ? `Automatic retry in ${seconds}s.`
-              : "Waiting for the server to retry."
-            : current.status === "cancelled"
-              ? "Automatic retry cancelled."
-              : current.status === "exhausted"
-                ? "Automatic retries finished. You can retry now."
-                : current.status === "unknown"
-                  ? "Waiting for Codex to confirm the retry."
-                  : current.status === "failed"
-                    ? "The retry could not start."
-                    : current.acceptedTurnId
-                      ? "The model retry started."
-                      : "Starting the model retry."}
-      </p>
-      {current.reason && (
-        <p>
-          <ErrorDescription value={current.reason} role="status" />
-        </p>
-      )}
-      {available && (
-        <div className="native-error-actions">
-          <Button
-            size="compact-xs"
-            disabled={pending}
-            onClick={() => void action("retry")}
+      {(state) => {
+        const { current, scheduled, message, available } = capacityProjection(
+          retry,
+          state.confirmed.get(),
+        );
+        const action = (choice: "retry" | "cancel") =>
+          state.action.run(
+            () =>
+              post(
+                "/api/capacity-retry",
+                { id: agentId, retry_id: retry.id, action: choice },
+                { timeoutMs: 15000 },
+              ).catch((cause) => {
+                throw new Error(
+                  (choice === "cancel"
+                    ? "Cancel could not be confirmed. The automatic retry may still start. "
+                    : "Retry could not be confirmed. Check the chat status. ") +
+                    errorText(cause),
+                );
+              }),
+            (result) => state.confirmed.set(result),
+          );
+        const choices = scheduled
+          ? (["retry", "cancel"] as const)
+          : (["retry"] as const);
+        return (
+          <div
+            className="capacity-retry"
+            data-retry-status={current.status || "unknown"}
           >
-            Retry now
-          </Button>
-          {scheduled && (
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              disabled={pending}
-              onClick={() => void action("cancel")}
-            >
-              Cancel automatic retry
-            </Button>
-          )}
-        </div>
-      )}
-      {error && <p role="alert">{error}</p>}
-    </div>
+            <p role="status">{message}</p>
+            {current.reason && (
+              <p>
+                <ErrorDescription value={current.reason} role="status" />
+              </p>
+            )}
+            {available && (
+              <div className="native-error-actions">
+                {choices.map((choice) => (
+                  <Button
+                    key={choice}
+                    size="compact-xs"
+                    variant={choice === "cancel" ? "subtle" : "filled"}
+                    disabled={state.action.pending}
+                    onClick={() => void action(choice)}
+                  >
+                    {choice === "retry"
+                      ? "Retry now"
+                      : "Cancel automatic retry"}
+                  </Button>
+                ))}
+              </div>
+            )}
+            {state.action.error && <p role="alert">{state.action.error}</p>}
+          </div>
+        );
+      }}
+    </Owned>
   );
-});
+}

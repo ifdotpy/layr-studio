@@ -228,8 +228,7 @@ it("preview opens share bytes and discard an earlier target after navigation", a
     mime: "text/plain",
     base64: "bmV3",
   });
-  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:preview");
-  const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const allocate = vi.spyOn(URL, "createObjectURL");
   const view = await render(h(Previews));
   expect(fixture.get).not.toHaveBeenCalled();
   await act(async () => view.host.querySelectorAll("button")[0]!.click());
@@ -247,7 +246,7 @@ it("preview opens share bytes and discard an earlier target after navigation", a
   expect(dialogs[0]?.textContent).toContain("new-file");
   expect(dialogs[0]?.textContent).not.toContain("old-file");
   await view.close();
-  expect(revoke).toHaveBeenCalled();
+  expect(allocate).not.toHaveBeenCalled();
 });
 
 it("an open preview retains its pending slot across a session change", async () => {

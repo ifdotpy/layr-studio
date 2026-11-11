@@ -1,3 +1,6 @@
+// @vitest-environment happy-dom
+import { ProjectServerSelection } from "../../../app/projects/CreationOwner.ts";
+import { createServerServices } from "../../../servers/serverServices.ts";
 import { autorun } from "mobx";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ProjectServerRead } from "./ProjectServerRead.ts";
@@ -50,16 +53,12 @@ it("publishes a capability failure through the observed store", async () => {
 });
 
 it("keeps the selected server's services until selection changes and closes only foreign services", async () => {
-  const { ProjectServerSelection } =
-    await import("../../../app/projects/CreationOwner.ts");
   const first = { id: "first", label: "First", origin: "https://first.test" };
   const second = {
     id: "second",
     label: "Second",
     origin: "https://second.test",
   };
-  const { createServerServices } =
-    await import("../../../servers/serverServices.ts");
   const inherited = createServerServices(first);
   const foreign = createServerServices(second);
   const inheritedClose = vi.spyOn(inherited, "close");

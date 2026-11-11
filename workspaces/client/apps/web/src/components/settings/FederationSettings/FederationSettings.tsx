@@ -1,99 +1,13 @@
-import { whileObserved } from "../../../observed.ts";
+import { useState } from "react";
 import { observer } from "mobx-react-lite";
-import { makeAutoObservable, flowResult } from "mobx";
-import type { ServerApi } from "../../../api.ts";
-import {
-  PeerStatus as GeneratedApiPeerStatus,
-  WhoisStatus as GeneratedApiWhoisStatus,
-  RoomStatus as GeneratedApiRoomStatus,
-} from "../../../generated/api.ts";
+import { PeerStatus, WhoisStatus, RoomStatus } from "../../../generated/api.ts";
 import { useServerServices } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useMemo, useState } from "react";
 import { Button, Checkbox, Switch, Textarea, TextInput } from "@mantine/core";
-import { type PostBody, type PostResult } from "../../../api.ts";
 import type { Agent } from "../../../types.ts";
 
-type FederationResponse = PostResult<"/api/federation">;
-type FederationSnapshot = Extract<FederationResponse, { peers: unknown[] }>;
-type FederationInvitation = Extract<
-  FederationResponse,
-  { invitation: unknown }
->["invitation"];
+import { FederationSettingsStore } from "./FederationSettingsStore.ts";
+export { FederationSettingsStore } from "./FederationSettingsStore.ts";
 
-function isFederationInvitation(value: unknown): value is FederationInvitation {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const invitation = value as Record<string, unknown>;
-  return (
-    invitation.protocol === 1 &&
-    typeof invitation.inviteId === "string" &&
-    typeof invitation.token === "string" &&
-    typeof invitation.stateId === "string" &&
-    typeof invitation.label === "string" &&
-    typeof invitation.origin === "string" &&
-    typeof invitation.publicKey === "string" &&
-    typeof invitation.expires === "number"
-  );
-}
-
-export class FederationSettingsStore {
-  state: FederationSnapshot | null = null;
-  busy = false;
-  private generation = 0;
-  readonly api;
-  readonly notify;
-  private readonly stops;
-  constructor(
-    api: Pick<ServerApi, "post"> | null,
-    notify: (message: string) => void,
-  ) {
-    this.api = api;
-    this.notify = notify;
-    makeAutoObservable(
-      this,
-      { api: false, notify: false },
-      { autoBind: true, deep: false },
-    );
-    this.stops = [
-      whileObserved(this, "state", () => {
-        void this.load();
-        return this.cancel;
-      }),
-    ];
-  }
-  cancel() {
-    this.generation++;
-  }
-  load() {
-    if (this.api) void this.run({ action: "status" });
-  }
-  *run(
-    body: PostBody<"/api/federation">,
-  ): Generator<
-    Promise<FederationResponse>,
-    FederationResponse | null,
-    FederationResponse
-  > {
-    if (!this.api) return null;
-    const generation = this.generation;
-    this.busy = true;
-    try {
-      const result = yield this.api.post("/api/federation", body);
-      if (generation !== this.generation) return null;
-      if ("peers" in result) this.state = result;
-      return result;
-    } catch (error) {
-      if (generation === this.generation)
-        this.notify(error instanceof Error ? error.message : String(error));
-      return null;
-    } finally {
-      if (generation === this.generation) this.busy = false;
-    }
-  }
-  dispose() {
-    this.cancel();
-    this.stops.forEach((stop) => stop());
-  }
-}
 const unloadedFederation = new FederationSettingsStore(null, () => {});
 
 export const FederationSettings = observer(function FederationSettings({
@@ -118,39 +32,14 @@ export const FederationSettings = observer(function FederationSettings({
   const [inviteText, setInviteText] = useState("");
   const [serverLabel, setServerLabel] = useState("Studio server");
   const [expectedUser, setExpectedUser] = useState("");
-  const [membersByLead, setMembersByLead] = useState<Record<string, string[]>>(
-    {},
-  );
-  const localMembers = membersByLead[leadId] ?? [leadId];
   const [shareNames, setShareNames] = useState(false);
   const [shareStatus, setShareStatus] = useState(false);
-
-  const team = useMemo(
-    () =>
-      agents.filter((agent) => agent.id === leadId || agent.rootId === leadId),
-    [agents, leadId],
-  );
   if (!active) return null;
-  const { state, busy } = model;
-  const run = (body: PostBody<"/api/federation">) =>
-    flowResult(model.run(body));
-  const toggleMember = (id: string, checked: boolean) =>
-    setMembersByLead((current) => ({
-      ...current,
-      [leadId]: checked
-        ? [...new Set([...localMembers, id])]
-        : localMembers.filter((item) => item !== id),
-    }));
-  const pair = async () => {
-    try {
-      const invitation: unknown = JSON.parse(inviteText);
-      if (!isFederationInvitation(invitation)) throw new Error();
-      const result = await run({ action: "accept_peer", invitation });
-      if (result) setInviteText("");
-    } catch {
-      notify("Paste a valid federation invitation JSON document.");
-    }
-  };
+  const { state, busy, run } = model;
+  const localMembers = model.members(leadId);
+  const team = agents.filter(
+    (agent) => agent.id === leadId || agent.rootId === leadId,
+  );
 
   const members = (
     <>
@@ -161,7 +50,7 @@ export const FederationSettings = observer(function FederationSettings({
           checked={localMembers.includes(agent.id)}
           disabled={busy || (agent.id !== leadId && !shareNames)}
           onChange={(event) =>
-            toggleMember(agent.id, event.currentTarget.checked)
+            model.toggleMember(leadId, agent.id, event.currentTarget.checked)
           }
         />
       ))}
@@ -220,15 +109,9 @@ export const FederationSettings = observer(function FederationSettings({
         <Button
           variant="light"
           disabled={busy || !state?.enabled}
-          onClick={async () => {
-            const result = await run({
-              action: "create_invite",
-              label: serverLabel,
-              expected_user: expectedUser || undefined,
-            });
-            if (result && "invitation" in result)
-              setInviteText(JSON.stringify(result.invitation, null, 2));
-          }}
+          onClick={() =>
+            void model.invite(serverLabel, expectedUser, setInviteText)
+          }
         >
           Create pairing invitation
         </Button>
@@ -249,7 +132,7 @@ export const FederationSettings = observer(function FederationSettings({
         />
         <Button
           disabled={busy || !state?.enabled || !inviteText.trim()}
-          onClick={() => void pair()}
+          onClick={() => void model.pair(inviteText, setInviteText, notify)}
         >
           Approve pairing
         </Button>
@@ -258,19 +141,17 @@ export const FederationSettings = observer(function FederationSettings({
         <div className="federation-peer" key={peer.stateId}>
           <strong>{peer.label}</strong>
           <span>
-            {peer.status === GeneratedApiPeerStatus.approved
-              ? "Paired"
-              : peer.status}
+            {peer.status === PeerStatus.approved ? "Paired" : peer.status}
           </span>
-          {peer.whoisStatus === GeneratedApiWhoisStatus.missing && (
+          {peer.whoisStatus === WhoisStatus.missing && (
             <p role="alert">
               Tailscale could not verify this user. Continue only if you
               recognize and accept this peer.
             </p>
           )}
           {peer.lastError && <p role="status">{peer.lastError}</p>}
-          {peer.status !== GeneratedApiPeerStatus.approved &&
-            peer.status !== GeneratedApiPeerStatus.revoked && (
+          {peer.status !== PeerStatus.approved &&
+            peer.status !== PeerStatus.revoked && (
               <Button
                 size="xs"
                 disabled={busy}
@@ -279,16 +160,16 @@ export const FederationSettings = observer(function FederationSettings({
                     action: "approve_peer",
                     state_id: peer.stateId,
                     accept_missing_whois:
-                      peer.whoisStatus === GeneratedApiWhoisStatus.missing,
+                      peer.whoisStatus === WhoisStatus.missing,
                   })
                 }
               >
-                {peer.whoisStatus === GeneratedApiWhoisStatus.missing
+                {peer.whoisStatus === WhoisStatus.missing
                   ? "Accept missing identity and pair"
                   : "Approve pairing"}
               </Button>
             )}
-          {peer.status !== GeneratedApiPeerStatus.revoked && (
+          {peer.status !== PeerStatus.revoked && (
             <Button
               size="xs"
               color="red"
@@ -303,9 +184,7 @@ export const FederationSettings = observer(function FederationSettings({
           )}
         </div>
       ))}
-      {state?.peers.some(
-        (peer) => peer.status === GeneratedApiPeerStatus.approved,
-      ) && (
+      {state?.peers.some((peer) => peer.status === PeerStatus.approved) && (
         <div className="federation-room-create">
           <h3>Create a shared room</h3>
           <p>
@@ -314,7 +193,7 @@ export const FederationSettings = observer(function FederationSettings({
           </p>
           {members}
           {state.peers
-            .filter((peer) => peer.status === GeneratedApiPeerStatus.approved)
+            .filter((peer) => peer.status === PeerStatus.approved)
             .map((peer) => (
               <Button
                 key={peer.stateId}
@@ -341,11 +220,11 @@ export const FederationSettings = observer(function FederationSettings({
         <div className="federation-room" key={room.id}>
           <strong>{room.peerLabel}</strong>
           <span>
-            {room.status === GeneratedApiRoomStatus.approved
+            {room.status === RoomStatus.approved
               ? "Shared room"
               : "Room approval pending"}
           </span>
-          {room.status === GeneratedApiRoomStatus.pending &&
+          {room.status === RoomStatus.pending &&
             room.localMembers.length === 0 && (
               <>
                 <p>

@@ -12,17 +12,15 @@ import { createPortal } from "react-dom";
 export function PassiveUsage({ children }: { children: ReactNode }) {
   const host = useContext(BottomBandContext);
   const anchor = useRef<HTMLSpanElement>(null);
-  const [rect, setRect] = useState({ left: 0, width: 0 });
+  const [band, setBand] = useState<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const footer = anchor.current?.parentElement;
-    if (!host || !footer) return;
+    const element = band;
+    if (!host || !footer || !element) return;
     const update = () => {
       const bounds = footer.getBoundingClientRect();
-      setRect((old) =>
-        old.left === bounds.left && old.width === bounds.width
-          ? old
-          : { left: bounds.left, width: bounds.width },
-      );
+      element.style.left = `${bounds.left}px`;
+      element.style.width = `${bounds.width}px`;
     };
     const resize = new ResizeObserver(update);
     resize.observe(footer);
@@ -32,12 +30,12 @@ export function PassiveUsage({ children }: { children: ReactNode }) {
       resize.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [host]);
+  }, [host, band]);
   return (
     <span className="usage-passive-anchor" ref={anchor}>
       {host
         ? createPortal(
-            <div className="usage-passive-band" style={rect}>
+            <div className="usage-passive-band" ref={setBand}>
               {children}
             </div>,
             host,

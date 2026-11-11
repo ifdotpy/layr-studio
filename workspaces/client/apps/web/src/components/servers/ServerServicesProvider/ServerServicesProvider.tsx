@@ -1,3 +1,4 @@
+import { createRequestRegistry } from "../../../renameRequest.ts";
 import { defaultNetStatus } from "../../../servers/net/status.ts";
 import { createNet } from "../../../servers/net/net.ts";
 import type { ServerSettings } from "../../../servers/ServerSettingsContext.tsx";
@@ -62,7 +63,14 @@ export function createServerViewServices(
     serverId: owner.id,
   });
   let areas: ServerAreas | undefined;
+  const requests = createRequestRegistry(
+    serverLocalStorage,
+    defaultApi,
+    () => store,
+    (message) => areas?.notices.notify(message),
+  );
   const services: ServerServices = {
+    requests,
     owner,
     net,
     store,
@@ -97,6 +105,7 @@ export function createServerViewServices(
       await defaultApi.refreshSession();
     },
     close() {
+      requests.dispose();
       stopConnection();
       stopSchema();
       areas?.dispose();

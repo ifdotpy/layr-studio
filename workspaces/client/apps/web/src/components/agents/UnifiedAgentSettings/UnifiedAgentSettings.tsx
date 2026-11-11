@@ -10,10 +10,7 @@ import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import { AccountTransferChip } from "../../accounts/AccountTransferChip/AccountTransferChip.tsx";
 import type { AccountsState } from "../../accounts/support/Accounts.tsx";
 import { ExecutionSettings } from "../ExecutionSettings/ExecutionSettings.tsx";
-import { ApiError, ApiSchemaMismatchError, errorText } from "../../../api.ts";
-import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
 import { type ComponentProps } from "react";
-import { flow } from "mobx";
 
 export function UnifiedAgentSettingsView({
   state,
@@ -53,10 +50,7 @@ export function UnifiedAgentSettingsView({
 
   const accountModalOpen = accountsUi.dialogOpen;
   const exclusionScope = `exclusions:${settings.agent.id}`;
-  const [pendingVersion, setExclusionsSaving] = agentsUi.cell(
-    exclusionScope,
-    "exclusionsSaving",
-  );
+  const [pendingVersion] = agentsUi.cell(exclusionScope, "exclusionsSaving");
   const exclusionsSaving = !!(
     pendingVersion !== null &&
     (!appliedVersion ||
@@ -65,29 +59,18 @@ export function UnifiedAgentSettingsView({
         appliedVersion.revision <= pendingVersion.revision))
   );
   const showExclusions = showAccountExclusions ?? settings.agent.isLead;
-  const saveExclusions = flow(function* (
+  const saveExclusions = (
     field: "worker_excluded_account_keys" | "reviewer_excluded_account_keys",
     keys: string[],
-  ): Generator<ReturnType<typeof post<"/api/conversation">>, void, unknown> {
-    setExclusionsSaving(appliedVersion);
-    try {
-      yield post("/api/conversation", {
-        id: settings.agent.id,
-        [field]: keys,
-      });
-    } catch (error) {
-      notify(errorText(error));
-      if (
-        error instanceof ApiError &&
-        (!(error instanceof ApiSchemaMismatchError) || error.markedResponse) &&
-        !serverMutationResponseIsUncertain(error.status, error.response)
-      ) {
-        setExclusionsSaving((pending) =>
-          pending === appliedVersion ? null : pending,
-        );
-      }
-    }
-  });
+  ) =>
+    agentsUi.execution.saveExclusions(
+      settings.agent.id,
+      appliedVersion,
+      field,
+      keys,
+      post,
+      notify,
+    );
   if (!state) return <p role="status">Loading accounts…</p>;
   return (
     <>

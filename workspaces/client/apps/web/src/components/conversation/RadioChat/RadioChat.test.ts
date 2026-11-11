@@ -181,7 +181,9 @@ it.each([408, 409])(
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
-    radioApi.post.mockRejectedValue(new ApiError("Request failed", status));
+    radioApi.post
+      .mockReset()
+      .mockRejectedValue(new ApiError("Request failed", status));
     try {
       await act(async () =>
         root.render(
@@ -215,6 +217,18 @@ it.each([408, 409])(
       expect(button?.textContent).toBe(status === 408 ? "Retry" : "Refresh");
       const stored = serverLocalStorage.getItem(key);
       expect(stored).toContain('"text":"instruction"');
+      const original = radioApi.post.mock.calls[0]?.[1];
+      radioApi.post.mockResolvedValue({});
+      await act(async () => {
+        if (!(button instanceof HTMLButtonElement))
+          throw new Error("Retry missing");
+        button.click();
+        button.click();
+      });
+      expect(radioApi.post).toHaveBeenCalledTimes(status === 408 ? 2 : 1);
+      if (status === 408)
+        expect(radioApi.post.mock.calls[1]?.[1]).toEqual(original);
+      expect(serverLocalStorage.getItem(key)).toBe("null");
     } finally {
       await act(async () => root.unmount());
       f.store.dispose();
@@ -308,5 +322,82 @@ it("renders radio-turn requests and acts through the selected conversation reque
     actions.selected.closeConversation();
     actions.scope.services.close();
     f.store.dispose();
+  }
+});
+
+it("uses replacement API and draft owners when the same radio room rerenders", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: new EventTarget(),
+  });
+  const key = "studio-radio-command:radio-test:room";
+  serverLocalStorage.removeItem(key);
+  const f = fixture({
+    ...room,
+    projectPath: "/p",
+    radio: {
+      ...room.radio!,
+      controls: { ...room.radio!.controls, inputBlocked: false },
+    },
+  });
+  const first = conversationActionsFixture(undefined, f.store);
+  const second = conversationActionsFixture(undefined, f.store);
+  first.scope.services.drafts.getDraft = () => "old draft";
+  second.scope.services.drafts.getDraft = () => "new draft";
+  const clearFirst = vi.spyOn(first.scope.services.drafts, "setDrafts");
+  const clearSecond = vi.spyOn(second.scope.services.drafts, "setDrafts");
+  const oldPost = vi.fn().mockResolvedValue({});
+  const newPost = vi.fn().mockResolvedValue({});
+  const previousPost = radioApi.post;
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  const show = (actions: typeof first) =>
+    act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          {},
+          createElement(
+            f.Provider,
+            {},
+            createElement(
+              ConversationProvider,
+              { value: actions },
+              createElement(RadioChat, {
+                room: required(
+                  resourceData(f.store.state().current)?.rooms.get(room.id),
+                ),
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  try {
+    radioApi.post = oldPost;
+    await show(first);
+    radioApi.post = newPost;
+    await show(second);
+    await act(async () => {
+      host
+        .querySelector("form")
+        ?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(oldPost).not.toHaveBeenCalled();
+    expect(newPost).toHaveBeenCalledOnce();
+    expect(newPost.mock.calls[0]?.[1]).toMatchObject({ text: "new draft" });
+    expect(clearFirst).not.toHaveBeenCalled();
+    expect(clearSecond).toHaveBeenCalledOnce();
+  } finally {
+    await act(async () => root.unmount());
+    radioApi.post = previousPost;
+    first.scope.services.close();
+    second.scope.services.close();
+    f.store.dispose();
+    serverLocalStorage.removeItem(key);
+    vi.unstubAllGlobals();
   }
 });

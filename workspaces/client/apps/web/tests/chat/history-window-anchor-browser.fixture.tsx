@@ -1,9 +1,12 @@
 import "../../src/rendererStyles.ts";
-import React, { useRef, useState } from "react";
+import { createRef } from "react";
+import { action, observable } from "mobx";
+import { TranscriptStore } from "../../src/components/conversation/support/TurnHistoryStore.ts";
+import { TranscriptProvider } from "../../src/components/conversation/support/navigation.ts";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import HistoryWindow from "../../src/components/conversation/transcript/HistoryWindow/HistoryWindow.tsx";
-import type { HistoryGroup } from "../../src/components/conversation/support/turnHistoryModel.ts";
+import type { Message } from "../../src/types.ts";
 declare global {
   interface Window {
     __lastInput?: number;
@@ -20,29 +23,30 @@ const params = new URLSearchParams(location.search);
 const start = Number(params.get("start")),
   count = Number(params.get("count"));
 const disableNativeAnchoring = params.get("disableNativeAnchoring") === "true";
-const makeRows = (start: number, count: number): HistoryGroup[] =>
+const makeRows = (start: number, count: number): Message[] =>
   Array.from({ length: count }, (_, n) => {
     const id = "message-" + (start + n);
     return {
       id,
-      items: [
-        {
-          id,
-          role: "user",
-          text: "A short fixed-height transcript row",
-          turnId: id,
-        },
-      ],
+      role: "user",
+      text: "A short fixed-height transcript row",
+      turnId: id,
     };
   });
+const rows = observable.box(makeRows(start, count));
+const scroll = createRef<HTMLDivElement>();
+const model = new TranscriptStore(() => ({
+  items: rows.get(),
+  enabled: false,
+  scrollContainer: scroll,
+  storageKey: "history-window-anchor-audit",
+  hasRecentScrollInput: () =>
+    performance.now() - (window.__lastInput ?? -Infinity) < 600,
+}));
+const setRows = action((update: (current: Message[]) => Message[]) =>
+  rows.set(update(rows.get())),
+);
 function Harness() {
-  const [rows, setRows] = useState(() => makeRows(start, count));
-  const scroll = useRef<HTMLDivElement>(null);
-
-  const hasRecentScrollInput = React.useCallback(
-    () => performance.now() - (window.__lastInput ?? -Infinity) < 600,
-    [],
-  );
   window.scrollToTopAsUser = () => {
     const root = scroll.current!;
     root.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
@@ -93,20 +97,21 @@ function Harness() {
         position: "relative",
       }}
     >
-      <HistoryWindow
-        rows={rows}
-        scrollContainer={scroll}
-        hasRecentScrollInput={hasRecentScrollInput}
-        storageKey="history-window-anchor-audit"
-        render={(row) => (
-          <article
-            data-message={row.items[0].id}
-            style={{ height: 72, minHeight: 72, boxSizing: "border-box" }}
-          >
-            {row.items[0].text}
-          </article>
-        )}
-      />
+      <TranscriptProvider
+        value={{
+          jumpToMessage() {},
+          renderMessage: (message) => (
+            <article
+              data-message={message.id}
+              style={{ height: 72, minHeight: 72, boxSizing: "border-box" }}
+            >
+              {message.text}
+            </article>
+          ),
+        }}
+      >
+        <HistoryWindow model={model} />
+      </TranscriptProvider>
     </div>
   );
 }

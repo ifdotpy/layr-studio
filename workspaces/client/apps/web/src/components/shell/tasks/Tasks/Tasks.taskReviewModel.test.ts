@@ -4,7 +4,13 @@ import {
   MAX_GATE_TIMEOUT_MS,
   MAX_RESULT_SCHEMA_BYTES,
 } from "../../../../generated/taskReview.ts";
-import { gateFields, parseGate, parseResultSchema } from "./taskReviewModel.ts";
+import {
+  gateFields,
+  parseGate,
+  parseResultSchema,
+  taskDraft,
+  taskBody,
+} from "./taskReviewModel.ts";
 
 test("gate input validates the Rust-owned timeout bounds and supports disable", () => {
   expect(parseGate("   ", "bad")).toBeNull();
@@ -29,4 +35,20 @@ test("the schema editor preserves boolean schemas and rejects invalid JSON, shap
       JSON.stringify({ description: "x".repeat(MAX_RESULT_SCHEMA_BYTES) }),
     ),
   ).toThrow("bytes");
+});
+
+test("preserves stored dependency order for unchanged selection and serializes changed selections", () => {
+  const draft = taskDraft();
+  draft.dependencies = ["B", "A"];
+  const values = new FormData();
+  values.append("dependencies", "A");
+  values.append("dependencies", "B");
+  expect(taskBody(draft, undefined, values).dependencies).toEqual(["B", "A"]);
+  values.delete("dependencies");
+  values.append("dependencies", "A");
+  expect(taskBody(draft, undefined, values).dependencies).toEqual(["A"]);
+  values.append("dependencies", "C");
+  expect(taskBody(draft, undefined, values).dependencies).toEqual(["A", "C"]);
+  values.delete("dependencies");
+  expect(taskBody(draft, undefined, values).dependencies).toEqual([]);
 });

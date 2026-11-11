@@ -13,7 +13,7 @@ import {
   modelDisplayName,
   modelForValue,
 } from "../../settings/models/support/modelOption.ts";
-import { settingsFor } from "../ExecutionSettings/ExecutionSettings.tsx";
+import { settingsFor } from "../support/ExecutionSettingsStore.ts";
 import { useWorkerModels } from "../support/WorkerModelPicker.tsx";
 import { subagentsOff } from "../SubagentConcurrencyControl/SubagentConcurrencyControl.tsx";
 

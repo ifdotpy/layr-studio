@@ -1,0 +1,8 @@
+id: web-make-observable
+language: TypeScript
+message: Use makeAutoObservable for MobX stores; existing explicit annotations are shrink-only debt.
+severity: warning
+rule:
+  any:
+    - pattern: makeObservable($$$)
+    - pattern: $M.makeObservable($$$)

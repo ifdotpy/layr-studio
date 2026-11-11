@@ -362,3 +362,148 @@ it.each([
     }
   },
 );
+
+it("a mounted shell reads replacement output and sends through replacement actions", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.matchMedia = vi.fn(() => ({
+    matches: false,
+    media: "",
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent: () => true,
+  }));
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { load: async () => [] },
+  });
+  const shell = createTerminalMirror({
+    id: "replacement",
+    agent: "lead",
+    cwd: "/",
+    title: "Replacement",
+    status: TerminalState.running,
+    created: 1,
+  }).current;
+  const first = createTerminalOutputMirror({
+    text: "first output",
+    offset: 12,
+    truncated: false,
+    status: TerminalState.running,
+  });
+  const second = createTerminalOutputMirror({
+    text: "replacement output",
+    offset: 18,
+    truncated: false,
+    status: TerminalState.running,
+  });
+  const oldActions = { ...api, notify() {} };
+  const newActions = { ...api, notify() {} };
+  const pending = Promise.withResolvers<{ ok: boolean }>();
+  const oldSend = vi
+    .spyOn(oldActions, "syncPost")
+    .mockReturnValue(pending.promise);
+  const newSend = vi
+    .spyOn(newActions, "syncPost")
+    .mockResolvedValue({ ok: true });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const render = (output: typeof first, actions: typeof oldActions) =>
+    root.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(
+          TerminalActionsProvider,
+          { value: actions },
+          createElement(ShellView, {
+            shell,
+            outputSlot: { current: { status: "live", data: output.current } },
+          }),
+        ),
+      ),
+    );
+  try {
+    await act(async () => render(first, oldActions));
+    await vi.waitFor(() => expect(writes).toContain("first output"));
+    await act(async () => {
+      inputs.at(-1)?.("pending input");
+      inputs.at(-1)?.("buffered input");
+    });
+    expect(oldSend).toHaveBeenCalledTimes(1);
+    await act(async () => render(second, newActions));
+    expect(host.textContent).toContain("Previous input delivery is uncertain");
+    expect(newSend).not.toHaveBeenCalled();
+    expect(writes).toContain("replacement output");
+    const interrupt = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === "Ctrl+C",
+    );
+    await act(async () => interrupt?.click());
+    expect(newSend).toHaveBeenCalledWith(
+      "/api/terminals/input",
+      expect.objectContaining({ id: shell.id, text: "\u0003" }),
+    );
+    await act(async () => pending.resolve({ ok: true }));
+    expect(newSend).toHaveBeenCalledTimes(1);
+    expect(oldSend).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+import { createShellTerminalStore } from "./ShellTerminalStore.ts";
+it.each(["resolve", "reject"] as const)(
+  "a late reconnect %s cannot replace a newer source",
+  async (outcome) => {
+    const shell = createTerminalMirror({
+      id: "late-reconnect",
+      agent: "lead",
+      cwd: "/",
+      title: "Reconnect",
+      status: TerminalState.running,
+      created: 1,
+    }).current;
+    const oldActions = { ...api },
+      currentActions = { ...api };
+    const pending = Promise.withResolvers<GetResult<"/api/terminals/output">>();
+    vi.spyOn(oldActions, "get").mockReturnValue(pending.promise);
+    const first = createTerminalOutputMirror({
+      text: "first",
+      offset: 5,
+      truncated: false,
+      status: TerminalState.running,
+    });
+    const next = createTerminalOutputMirror({
+      text: "new",
+      offset: 3,
+      truncated: false,
+      status: TerminalState.running,
+    });
+    const controller = createShellTerminalStore(
+      shell,
+      { current: { status: "live", data: first.current } },
+      oldActions,
+    );
+    const request = flowResult(controller.reconnect());
+    controller.bind(
+      shell,
+      { current: { status: "live", data: next.current } },
+      currentActions,
+    );
+    if (outcome === "reject") pending.reject(new Error("old reconnect failed"));
+    else
+      pending.resolve({
+        text: "old reconnect",
+        offset: 13,
+        truncated: false,
+        status: TerminalState.running,
+      });
+    await request;
+    expect(controller.output?.text).toBe("new");
+    expect(controller.failure).toBe("");
+  },
+);

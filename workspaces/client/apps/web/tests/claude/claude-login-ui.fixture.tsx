@@ -23,6 +23,7 @@ import { ServerStoreProvider } from "../../src/components/servers/ServerServices
 import { browserAreas } from "../fixtures/owner-support.tsx";
 import { Provider } from "../../src/app/ServerAreasProvider.tsx";
 import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
+import { accountRows } from "../../src/servers/AccountsPanelState.ts";
 import { frameAccounts } from "../../src/components/accounts/Accounts/Accounts.tsx";
 import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
 import AccountSignInNotice from "../../src/components/accounts/AccountSignInNotice/AccountSignInNotice.tsx";
@@ -70,10 +71,17 @@ const Fixture = observer(function Fixture() {
       <Modal opened={opened} onClose={() => setOpened(false)} title="Accounts">
         <ServerAccountsPanel
           servers={[server]}
-          accountsByServer={{ fixture: frameAccounts(state) }}
-          statuses={{ fixture: "live" }}
+          rows={accountRows(
+            {
+              servers: [server],
+              accountsByServer: { fixture: frameAccounts(state) },
+              statuses: { fixture: "live" },
+              startAccount: (_id, value) => areas.accountsUi.receive(value),
+              accountAction: (_id, value) => areas.accountsUi.receive(value),
+            },
+            store,
+          )}
           startAccount={(_id, value) => areas.accountsUi.receive(value)}
-          accountAction={(_id, value) => areas.accountsUi.receive(value)}
         />
       </Modal>
     </MantineProvider>

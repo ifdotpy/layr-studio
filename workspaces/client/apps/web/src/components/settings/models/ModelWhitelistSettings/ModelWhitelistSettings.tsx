@@ -19,9 +19,31 @@ import {
   isModelEnabled,
   modelChoiceKey,
   readModelChoices,
-  useModelChoices,
   writeModelChoices,
+  useModelChoices,
 } from "../support/modelChoices.ts";
+
+function selectableModels(catalog: ReturnType<typeof useWorkerModels>) {
+  const options = toModelOptions(catalog.models.filter((row) => !row.hidden));
+  return [
+    ...new Map(options.map((model) => [modelChoiceKey(model), model])).values(),
+  ];
+}
+
+function saveModelSelection(
+  storage: Storage,
+  keys: string[],
+  choice: ModelChoice,
+) {
+  try {
+    const choices = { ...readModelChoices(storage) };
+    for (const key of keys) choices[key] = choice;
+    writeModelChoices(choices, storage);
+    return "";
+  } catch (failure) {
+    return String(failure);
+  }
+}
 
 export const ModelWhitelistSettings = observer(
   function ModelWhitelistSettings() {
@@ -33,27 +55,9 @@ export const ModelWhitelistSettings = observer(
     const storage = useServerStorage();
     const status = readPreferenceWriteStatus(storage, "server");
     const [error, setError] = useState("");
-    const models = [
-      ...new Map(
-        toModelOptions(catalog.models.filter((row) => !row.hidden)).map(
-          (model) => [modelChoiceKey(model), model],
-        ),
-      ).values(),
-    ];
-    const save = (keys: string[], choice: ModelChoice) => {
-      try {
-        writeModelChoices(
-          {
-            ...readModelChoices(storage),
-            ...Object.fromEntries(keys.map((key) => [key, choice])),
-          },
-          storage,
-        );
-        setError("");
-      } catch (failure) {
-        setError(String(failure));
-      }
-    };
+    const models = selectableModels(catalog);
+    const save = (keys: string[], choice: ModelChoice) =>
+      setError(saveModelSelection(storage, keys, choice));
     return (
       <Stack
         gap="sm"
@@ -86,31 +90,28 @@ export const ModelWhitelistSettings = observer(
           </>
         )}
         <Group gap="sm">
-          <Button
-            variant="default"
-            disabled={!models.length}
-            onClick={() =>
-              save(models.map(modelChoiceKey), ModelChoice.whitelisted)
-            }
-          >
-            Select all models
-          </Button>
-          <Button
-            variant="subtle"
-            disabled={!models.length}
-            onClick={() =>
-              save(models.map(modelChoiceKey), ModelChoice.blacklisted)
-            }
-          >
-            Clear selection
-          </Button>
+          {(
+            [
+              [ModelChoice.whitelisted, "default", "Choose all models"],
+              [ModelChoice.blacklisted, "subtle", "Clear selection"],
+            ] as const
+          ).map(([choice, variant, label]) => (
+            <Button
+              key={choice}
+              variant={variant}
+              disabled={!models.length}
+              onClick={() => save(models.map(modelChoiceKey), choice)}
+            >
+              {label}
+            </Button>
+          ))}
         </Group>
         <Text size="xs" c="dimmed">
           New models appear enabled until you hide them.
         </Text>
         {models.length > 0 &&
           !models.some((model) => isModelEnabled(model, choices)) && (
-            <Text size="sm">Select a model to start new chats.</Text>
+            <Text size="sm">Choose a model to start new chats.</Text>
           )}
         {catalog.loading && <Text role="status">Loading models…</Text>}
         {(error || catalog.error) && (

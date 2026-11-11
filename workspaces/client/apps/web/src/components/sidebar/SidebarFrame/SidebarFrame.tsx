@@ -1,30 +1,30 @@
 import { Drawer, FocusTrap } from "@mantine/core";
+import {
+  action,
+  makeAutoObservable,
+  observableRef,
+  observableStruct,
+  reaction,
+} from "mobx";
 import { observer } from "mobx-react-lite";
 import {
-  makeAutoObservable,
-  observableStruct,
-  observableRef,
-  reaction,
-  runInAction,
-} from "mobx";
-import {
   useLayoutEffect,
-  type ReactNode,
-  type PointerEvent,
   type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
 } from "react";
+import type { SidebarListOwner } from "../../../app/shell/SidebarOwner.ts";
 import {
   layoutQueries,
   layoutValues,
 } from "../../../layout/layout-contract.generated.ts";
+import { useSidebarState } from "../support/SidebarState.tsx";
+import { SidebarResizeSession } from "./sidebarResize.ts";
 import {
+  clampSidebarWidth,
   resolveSidebarWidth,
   storedSidebarWidth,
-  clampSidebarWidth,
 } from "./sidebarWidth.ts";
-import { SidebarResizeSession } from "./sidebarResize.ts";
-import { useSidebarState } from "../support/SidebarState.tsx";
-import type { SidebarListOwner } from "../../../app/shell/SidebarOwner.ts";
 
 const widthContract = {
   minimumRem: layoutValues.sidebar.min,
@@ -252,71 +252,69 @@ export class SidebarFrameOwner {
       ].join("|");
     };
     let measuredTypography: string | undefined;
-    const measure = (headerChanged = true) =>
-      runInAction(() => {
-        measuredTypography = typography();
-        const rootFontSize = Number.parseFloat(
-          getComputedStyle(document.documentElement).fontSize,
-        );
-        const hostStyle = getComputedStyle(host);
-        const hostWidth =
-          host.clientWidth -
-          parseFloat(hostStyle.paddingLeft) -
-          parseFloat(hostStyle.paddingRight);
-        const header =
-          this.aside?.querySelector<HTMLElement>(".sidebar-header");
-        // Drawer touch controls must not raise the desktop header minimum.
-        if (
-          headerChanged &&
-          header &&
-          this.aside &&
-          !this.compact &&
-          window.matchMedia(layoutQueries.navigationInline).matches
-        ) {
-          const style = getComputedStyle(header);
-          const sideStyle = getComputedStyle(this.aside);
-          const children = Array.from(header.children) as HTMLElement[];
-          const minimumWidths = children.map((child) => {
-            if (Number(getComputedStyle(child).flexGrow) === 0)
-              return child.getBoundingClientRect().width;
-            // A flexible label can wrap; its expanded width is not its minimum.
-            const previous = child.style.cssText;
-            try {
-              child.style.flex = "none";
-              child.style.inlineSize = "min-content";
-              return child.getBoundingClientRect().width;
-            } finally {
-              child.style.cssText = previous;
-            }
-          });
-          const contentMinimum =
-            style.flexWrap === "nowrap"
-              ? minimumWidths.reduce((sum, width) => sum + width, 0) +
-                Math.max(0, children.length - 1) *
-                  (parseFloat(style.columnGap) || 0)
-              : Math.max(0, ...minimumWidths);
-          this.headerMinimum =
-            contentMinimum +
-            parseFloat(sideStyle.paddingLeft) +
-            parseFloat(sideStyle.paddingRight) +
-            parseFloat(sideStyle.borderLeftWidth) +
-            parseFloat(sideStyle.borderRightWidth);
-        }
-        const next = {
-          hostWidth,
-          rootFontSize,
-          headerMinimum: this.headerMinimum,
-        };
-        const nextCompact =
-          resolveSidebarWidth({
-            ...next,
-            preferred: null,
-            contract: widthContract,
-          }).mode === "drawer";
-        if (nextCompact !== this.compact) restoreSidebarFocus();
-        this.geometry = next;
-        this.source.visibility.recordCompact(this.compact);
-      });
+    const measure = action((headerChanged = true) => {
+      measuredTypography = typography();
+      const rootFontSize = Number.parseFloat(
+        getComputedStyle(document.documentElement).fontSize,
+      );
+      const hostStyle = getComputedStyle(host);
+      const hostWidth =
+        host.clientWidth -
+        parseFloat(hostStyle.paddingLeft) -
+        parseFloat(hostStyle.paddingRight);
+      const header = this.aside?.querySelector<HTMLElement>(".sidebar-header");
+      // Drawer touch controls must not raise the desktop header minimum.
+      if (
+        headerChanged &&
+        header &&
+        this.aside &&
+        !this.compact &&
+        window.matchMedia(layoutQueries.navigationInline).matches
+      ) {
+        const style = getComputedStyle(header);
+        const sideStyle = getComputedStyle(this.aside);
+        const children = Array.from(header.children) as HTMLElement[];
+        const minimumWidths = children.map((child) => {
+          if (Number(getComputedStyle(child).flexGrow) === 0)
+            return child.getBoundingClientRect().width;
+          // A flexible label can wrap; its expanded width is not its minimum.
+          const previous = child.style.cssText;
+          try {
+            child.style.flex = "none";
+            child.style.inlineSize = "min-content";
+            return child.getBoundingClientRect().width;
+          } finally {
+            child.style.cssText = previous;
+          }
+        });
+        const contentMinimum =
+          style.flexWrap === "nowrap"
+            ? minimumWidths.reduce((sum, width) => sum + width, 0) +
+              Math.max(0, children.length - 1) *
+                (parseFloat(style.columnGap) || 0)
+            : Math.max(0, ...minimumWidths);
+        this.headerMinimum =
+          contentMinimum +
+          parseFloat(sideStyle.paddingLeft) +
+          parseFloat(sideStyle.paddingRight) +
+          parseFloat(sideStyle.borderLeftWidth) +
+          parseFloat(sideStyle.borderRightWidth);
+      }
+      const next = {
+        hostWidth,
+        rootFontSize,
+        headerMinimum: this.headerMinimum,
+      };
+      const nextCompact =
+        resolveSidebarWidth({
+          ...next,
+          preferred: null,
+          contract: widthContract,
+        }).mode === "drawer";
+      if (nextCompact !== this.compact) restoreSidebarFocus();
+      this.geometry = next;
+      this.source.visibility.recordCompact(this.compact);
+    });
     const remeasure = () => measure();
     // The host width decides the layout mode; a resize keeps the header minimum.
     const observer = new ResizeObserver(() => measure(false));

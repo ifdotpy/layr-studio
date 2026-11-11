@@ -4,7 +4,7 @@ type AttachmentState = readonly [
   AttachmentDrafts["current"],
   AttachmentDrafts["set"],
 ];
-type FormState = ReturnType<typeof useFormDraft>;
+type FormState = readonly [FormDraft["value"], FormDraft["update"]];
 export type RecoveryHarness = {
   attachments: AttachmentState[0];
   setAttachments: AttachmentState[1];
@@ -44,10 +44,12 @@ import "@mantine/core/styles.css";
 import ComposerAttachments from "../../src/components/conversation/ComposerAttachments/ComposerAttachments.tsx";
 import { AttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
 import { UploadRecovery } from "../../src/components/conversation/support/useUploadRecovery.ts";
-import { useFormDraft } from "../../src/components/shell/Workspace/useFormDraft.ts";
+import { FormDraft } from "../../src/app/shell/FormDraft.ts";
+import { UnsentText } from "../../src/unsent/useUnsentText.ts";
 import { queueUploads, pendingUploads } from "../../src/sync/uploads.ts";
 export function mount() {
   const models = observableFixture();
+  const text = new UnsentText("local");
   window.notices ||= [];
   const notify = (message: string) => window.notices.push(message);
   const drafts = new AttachmentDrafts(uploads.attachmentCancelled, notify, {
@@ -56,11 +58,15 @@ export function mount() {
   });
   const owner = makeAutoObservable({
     recovery: undefined as UploadRecovery | undefined,
+    profile: new FormDraft(text, "fixture-profile:" + window.scope),
+    rule: new FormDraft(text, "fixture-rule:" + window.scope),
   });
   let stop = () => {};
   const setScope = (scope: React.SetStateAction<string>) => {
     stop();
     window.scope = typeof scope === "function" ? scope(window.scope) : scope;
+    owner.profile = new FormDraft(text, "fixture-profile:" + window.scope);
+    owner.rule = new FormDraft(text, "fixture-rule:" + window.scope);
     owner.recovery = new UploadRecovery(
       uploads,
       "fixture",
@@ -77,8 +83,10 @@ export function mount() {
         const scope = recovery.workspaceId;
         const attachments = drafts.current,
           setAttachments = drafts.set;
-        const [profile, setProfile] = useFormDraft("fixture-profile:" + scope);
-        const [rule, setRule] = useFormDraft("fixture-rule:" + scope);
+        const profile = owner.profile.value,
+          setProfile = owner.profile.update;
+        const rule = owner.rule.value,
+          setRule = owner.rule.update;
         window.uploadRecoveryBrowserFixture = {
           attachments,
           setAttachments,

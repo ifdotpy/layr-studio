@@ -19,7 +19,10 @@ import {
   type PostResult,
 } from "../../api.ts";
 import type { Json } from "../../types.ts";
-import type { NewChatSettings } from "./newChatSettings.ts";
+import {
+  projectAllowsWorktree,
+  type NewChatSettings,
+} from "./newChatSettings.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { AgentModel, ServerAreas, SelectionIntent } from "../contracts.ts";
 type LeadCreateRequest = PostBody<"/api/leads"> &
@@ -215,12 +218,21 @@ export class CreationOwner {
       );
     }
   }
-  rememberShared(value: SharedCreation | null) {
-    this.areas.scope.services.api.save(
-      sharedCreationKey(this.areas.startup.creationScope),
-      value,
-    );
-    this.sharedAttempt = value;
+  rememberShared(
+    value: SharedCreation | null,
+    scope = this.areas.startup.creationScope,
+  ) {
+    const api = this.areas.scope.services.api,
+      key = sharedCreationKey(scope),
+      previous = api.saved<SharedCreation | null>(key, null);
+    if (
+      value &&
+      (value.roomId || value.rejected) &&
+      previous?.body.request_id !== value.body.request_id
+    )
+      return;
+    api.save(key, value);
+    if (scope === this.areas.startup.creationScope) this.sharedAttempt = value;
   }
   openShared(initialPath?: string) {
     this.sharedAttempt = this.areas.scope.services.api.saved(
@@ -420,6 +432,7 @@ export class ProjectServerSelection {
         servicesFor: false,
         create: false,
         stop: false,
+        view: false,
       },
       { autoBind: true, deep: false },
     );
@@ -447,6 +460,68 @@ export class ProjectServerSelection {
       this.attach,
       { fireImmediately: true, equals: compareShallow },
     );
+  }
+  get capabilities() {
+    const server = this.choices().find((row) => row.id === this.selected),
+      known =
+        !!server?.system &&
+        server.nativeLayr !== undefined &&
+        server.defaultWorkspaceMode !== undefined;
+    const fetched =
+      server && !server.disabled && !known ? this.read.value : undefined;
+    const nativeLayr = server?.nativeLayr ?? fetched?.nativeLayr,
+      reported = server?.defaultWorkspaceMode ?? fetched?.defaultWorkspaceMode;
+    return {
+      server,
+      system: server?.system ?? fetched?.system,
+      nativeLayr,
+      nativeAvailable: !!nativeLayr && nativeLayr.status !== "notInstalled",
+      nativeReason: server?.nativeLayrMessage ?? fetched?.nativeLayrMessage,
+      defaultMode:
+        reported === "layr-native"
+          ? ("layr-native" as const)
+          : reported
+            ? ("worktree" as const)
+            : undefined,
+      platformError: known || server?.disabled ? "" : this.read.error,
+    };
+  }
+  view(
+    project: LocationProjectView,
+    chosenMode: NewChatSettings["workspaceMode"] | undefined,
+  ) {
+    const platform = this.capabilities,
+      location = platform.server && projectLocationOn(project, platform.server),
+      worktreeAllowed = projectAllowsWorktree(project),
+      mode =
+        platform.defaultMode &&
+        (chosenMode &&
+        (chosenMode !== "layr-native" || platform.nativeAvailable)
+          ? chosenMode
+          : platform.defaultMode),
+      models = this.model?.selection;
+    const ready =
+      !!location &&
+      !!models &&
+      !!platform.system &&
+      !!mode &&
+      (mode !== "layr-native" || platform.nativeAvailable) &&
+      (mode !== "worktree" || worktreeAllowed) &&
+      !platform.platformError &&
+      !platform.server?.disabled;
+    return {
+      ...platform,
+      selected: this.selected,
+      mode,
+      worktreeAllowed,
+      selection:
+        ready && location && models && mode
+          ? {
+              location: { ...location, serverId: this.selected },
+              settings: { ...models, workspaceMode: mode },
+            }
+          : null,
+    };
   }
   get key() {
     const connection = this.choices().find(

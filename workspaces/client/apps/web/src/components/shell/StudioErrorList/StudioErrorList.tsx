@@ -1,8 +1,6 @@
 import { observer } from "mobx-react-lite";
-import { ERROR_LEVELS, isInfoNotice } from "../../../app/notices/warnings.ts";
+import { ERROR_LEVELS } from "../../../app/notices/warnings.ts";
 import { useConversationActions } from "../../conversation/support/navigation.ts";
-import { isNonBlockingWarning } from "../../../app/notices/nonBlockingWarning.ts";
-import { useState } from "react";
 import { STUDIO_ERRORS_DISMISS_MAX_IDS } from "../../../generated/sharedValues.ts";
 import {
   Badge,
@@ -13,8 +11,7 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { errorText } from "../../../api.ts";
-import { appLogEntries, clearAppLog } from "../../../appLog.ts";
+import { clearAppLog } from "../../../appLog.ts";
 import type { components } from "../../../generated/api.ts";
 
 export type StudioErrorItem = NonNullable<
@@ -69,119 +66,27 @@ export const StudioErrorList = observer(function StudioErrorList({
 }: {
   onOpen?: () => void;
 }) {
-  const { areas, items: sourceItems, logs } = useStudioErrors();
-  const [reply, setReply] = useState<{
-    source: StudioErrorItem[];
-    items: StudioErrorItem[];
-  }>();
-  const items = reply?.source === sourceItems ? reply.items : sourceItems;
-  const accept = (value: { items: StudioErrorItem[] }) => {
-    if (Array.isArray(value.items))
-      setReply({ source: sourceItems, items: value.items });
-  };
-  const [selected, setSelected] = useState(new Set<string>());
-  const [busy, setBusy] = useState<string | null>(null);
-  const [filter, setFilter] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const { get, post } = areas.scope.services.api;
-  const rows = [
-    ...items.map((item) => ({
-      type: "server" as const,
-      level: item.level,
-      at: item.at * 1000,
-      item,
-    })),
-    ...logs.map((item) => ({
-      type: "local" as const,
-      level: item.level,
-      at: item.at,
-      item,
-    })),
-  ].sort(
-    (a, b) => LEVELS.indexOf(a.level) - LEVELS.indexOf(b.level) || b.at - a.at,
-  );
-  const visible = filter ? rows.filter((row) => row.level === filter) : rows;
-  const visibleServerIds = visible
-    .filter((row) => row.type === "server")
-    .map((row) => row.item.id);
-  const onSelectAll = (ids: string[]) => {
-    if (!busy)
-      setSelected(new Set(ids.slice(0, STUDIO_ERRORS_DISMISS_MAX_IDS)));
-  };
-  const onSelect = (id: string, checked: boolean) => {
-    if (busy) return;
-    setSelected((previous) => {
-      const next = new Set(previous);
-      if (!checked) next.delete(id);
-      else if (next.size < STUDIO_ERRORS_DISMISS_MAX_IDS) next.add(id);
-      return next;
-    });
-  };
-  async function onDelete() {
-    if (busy || !selected.size) return;
-    const ids = [...selected];
-    setBusy("delete");
-    setError("");
-    setNotice("");
-    try {
-      const result = await post("/api/studio-errors/dismiss", { ids });
-      accept(result);
-      setSelected(new Set());
-      if (result.unknownIds.length)
-        setNotice(
-          `${result.unknownIds.length} selected errors were already gone.`,
-        );
-    } catch (failure) {
-      let message = `Could not confirm deletion of ${ids.join(", ")}: ${errorText(failure)}`;
-      // A lost response permits readback, never another dismissal write.
-      try {
-        accept(await get("/api/studio-errors"));
-      } catch (failure) {
-        message += `. Could not refresh: ${errorText(failure)}`;
-      }
-      setError(message);
-    } finally {
-      setBusy(null);
-    }
-  }
-  async function onAction(item: StudioErrorItem) {
-    if (item.action === "check") {
-      onOpen?.();
-      areas.open(item.agentId);
-      return;
-    }
-    if (item.action !== "resume" || busy) return;
-    setBusy(item.id);
-    setError("");
-    try {
-      await post("/api/connection-recovery", { id: item.agentId });
-      await get("/api/studio-errors");
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      setBusy(null);
-    }
-  }
+  const model = useConversationActions().ui.errors;
+  const { logs } = model.summary;
   return (
     <Stack gap="sm">
-      {error && (
+      {model.error && (
         <Text c="red" size="sm" role="alert">
-          {error}
+          {model.error}
         </Text>
       )}
-      {notice && (
+      {model.notice && (
         <Text size="sm" role="status">
-          {notice}
+          {model.notice}
         </Text>
       )}
       <Group gap="xs">
         <SegmentedControl
           aria-label="Filter by level"
-          value={filter ?? "all"}
-          onChange={(value) => setFilter(value === "all" ? null : value)}
+          value={model.filter ?? "all"}
+          onChange={model.setFilter}
           data={[
-            { value: "all", label: `All (${rows.length})` },
+            { value: "all", label: `All (${model.rows.length})` },
             ...LEVELS.map((level) => ({
               value: level,
               label: (
@@ -192,7 +97,7 @@ export const StudioErrorList = observer(function StudioErrorList({
                       background: `var(--mantine-color-${LEVEL_COLORS[level]}-filled)`,
                     }}
                   />
-                  {`${levelLabel(level)} (${rows.filter((row) => row.level === level).length})`}
+                  {`${levelLabel(level)} (${model.rows.filter((row) => row.level === level).length})`}
                 </span>
               ),
             })),
@@ -208,8 +113,8 @@ export const StudioErrorList = observer(function StudioErrorList({
         <Button
           size="xs"
           variant="default"
-          disabled={busy !== null || visibleServerIds.length === 0}
-          onClick={() => onSelectAll(visibleServerIds)}
+          disabled={model.busy !== null || model.visibleServerIds.length === 0}
+          onClick={() => model.onSelectAll(model.visibleServerIds)}
         >
           Select all
         </Button>
@@ -217,104 +122,102 @@ export const StudioErrorList = observer(function StudioErrorList({
           size="xs"
           variant="default"
           className="studio-error-delete"
-          disabled={busy !== null || selected.size === 0}
-          onClick={onDelete}
+          disabled={model.busy !== null || model.selected.size === 0}
+          onClick={model.onDelete}
         >
           Delete selected
         </Button>
         <Text size="xs" c="dimmed" role="status">
-          {selected.size} selected
+          {model.selected.size} selected
         </Text>
       </Group>
       <Text size="xs" c="dimmed">
         Only selected errors are removed from this list. Chats, commands, and
         history are kept.
       </Text>
-      {visible.length === 0 ? (
+      {model.visible.length === 0 ? (
         <Text size="sm">
-          {filter
+          {model.filter
             ? "No entries at this level."
             : "No agent work ended because of a Studio error."}
         </Text>
       ) : (
         <Stack gap="sm" aria-label="Studio errors">
-          {visible.map((row) =>
-            row.type === "local" ? (
-              <article className="studio-error-row" key={row.item.id}>
-                <Badge variant="dot" color={LEVEL_COLORS[row.level]}>
-                  {levelLabel(row.level)}
-                </Badge>
+          {model.visible.map((row) => (
+            <article
+              className="studio-error-row"
+              key={row.item.id}
+              data-kind={row.type === "server" ? row.item.kind : undefined}
+            >
+              <Badge variant="dot" color={LEVEL_COLORS[row.level]}>
+                {levelLabel(row.level)}
+              </Badge>
+              {row.type === "local" ? (
                 <Text size="sm">{row.item.title}</Text>
-                <Text size="sm">{row.item.reason}</Text>
-                {row.item.detail && (
-                  <Text size="xs" c="dimmed">
-                    {row.item.detail}
-                  </Text>
-                )}
-                <Text size="xs" c="dimmed">
-                  {new Date(row.item.at).toLocaleString()}
-                </Text>
-              </article>
-            ) : (
-              <article
-                className="studio-error-row"
-                key={row.item.id}
-                data-kind={row.item.kind}
-              >
-                <Badge variant="dot" color={LEVEL_COLORS[row.level]}>
-                  {levelLabel(row.level)}
-                </Badge>
+              ) : (
                 <Checkbox
                   label={ownerLabel(row.item)}
                   aria-label={`Select error ${row.item.id} for ${ownerLabel(row.item)}`}
-                  checked={selected.has(row.item.id)}
+                  checked={model.selected.has(row.item.id)}
                   disabled={
-                    busy !== null ||
-                    (!selected.has(row.item.id) &&
-                      selected.size >= STUDIO_ERRORS_DISMISS_MAX_IDS)
+                    model.busy !== null ||
+                    (!model.selected.has(row.item.id) &&
+                      model.selected.size >= STUDIO_ERRORS_DISMISS_MAX_IDS)
                   }
                   onChange={(event) =>
-                    onSelect(row.item.id, event.currentTarget.checked)
+                    model.onSelect(row.item.id, event.currentTarget.checked)
                   }
                 />
-                <Text size="sm">{row.item.reason}</Text>
-                {row.item.subject && (
-                  <Text size="xs" c="dimmed" lineClamp={2}>
-                    {row.item.subject}
-                  </Text>
-                )}
-                {row.item.detail && (
-                  <Text size="xs" c="dimmed" lineClamp={2}>
-                    {row.item.detail}
-                  </Text>
-                )}
-                <details>
-                  <summary>Details</summary>
-                  <pre className="studio-error-details">
-                    {JSON.stringify(row.item, null, 2)}
-                  </pre>
-                </details>
-                <Group gap="xs" mt="xs">
-                  {period(row.item) && (
-                    <Text size="xs" c="dimmed">
-                      {period(row.item)}
-                    </Text>
-                  )}
-                  {row.item.action !== "details" && (
-                    <Button
-                      size="xs"
-                      variant="light"
-                      loading={busy === row.item.id}
-                      disabled={busy !== null}
-                      onClick={() => onAction(row.item)}
-                    >
-                      {actionLabel(row.item)}
-                    </Button>
-                  )}
-                </Group>
-              </article>
-            ),
-          )}
+              )}
+              <Text size="sm">{row.item.reason}</Text>
+              {row.type === "server" && row.item.subject && (
+                <Text size="xs" c="dimmed" lineClamp={2}>
+                  {row.item.subject}
+                </Text>
+              )}
+              {row.item.detail && (
+                <Text
+                  size="xs"
+                  c="dimmed"
+                  {...(row.type === "server" ? { lineClamp: 2 } : {})}
+                >
+                  {row.item.detail}
+                </Text>
+              )}
+              {row.type === "local" ? (
+                <Text size="xs" c="dimmed">
+                  {new Date(row.item.at).toLocaleString()}
+                </Text>
+              ) : (
+                <>
+                  <details>
+                    <summary>Details</summary>
+                    <pre className="studio-error-details">
+                      {JSON.stringify(row.item, null, 2)}
+                    </pre>
+                  </details>
+                  <Group gap="xs" mt="xs">
+                    {period(row.item) && (
+                      <Text size="xs" c="dimmed">
+                        {period(row.item)}
+                      </Text>
+                    )}
+                    {row.item.action !== "details" && (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        loading={model.busy === row.item.id}
+                        disabled={model.busy !== null}
+                        onClick={() => model.onAction(row.item, onOpen)}
+                      >
+                        {actionLabel(row.item)}
+                      </Button>
+                    )}
+                  </Group>
+                </>
+              )}
+            </article>
+          ))}
         </Stack>
       )}
     </Stack>
@@ -322,45 +225,5 @@ export const StudioErrorList = observer(function StudioErrorList({
 });
 
 export function useStudioErrors() {
-  const areas = useConversationActions();
-  const items = [...(areas.state?.studioErrors.values() ?? [])].sort(
-    (left, right) => right.at - left.at || left.id.localeCompare(right.id),
-  );
-  const logs = appLogEntries();
-  const accountNotices =
-    areas.state?.workspaces
-      .values()
-      .next()
-      .value?.nativeNotices?.filter(
-        (notice) =>
-          notice.accountKey ===
-          (areas.navigation.selectedAgent?.accountKey || "default"),
-      ) || [];
-  const chatWarnings =
-    areas.selected.warningMessages.filter(isNonBlockingWarning);
-  const highestLevel = LEVELS.find(
-    (level) =>
-      items.some((item) => item.level === level) ||
-      logs.some((item) => item.level === level) ||
-      (level === "warning" &&
-        (accountNotices.some((notice) => !isInfoNotice(notice)) ||
-          chatWarnings.length > 0)),
-  );
-  const hasWarning = highestLevel !== undefined && highestLevel !== "log";
-  const noticeCount = accountNotices.length + chatWarnings.length;
-  return {
-    areas,
-    items,
-    logs,
-    accountNotices,
-    chatWarnings,
-    highestLevel,
-    hasWarning,
-    noticeCount,
-    warningTitle:
-      hasWarning || (noticeCount === 0 && logs.length === 0)
-        ? "Warnings"
-        : "Notices",
-    warningCount: noticeCount + items.length + logs.length,
-  };
+  return useConversationActions().ui.errors.summary;
 }

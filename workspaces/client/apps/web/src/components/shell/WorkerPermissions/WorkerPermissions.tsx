@@ -1,3 +1,6 @@
+import type { PostBody } from "../../../api.ts";
+import type { WorkerLaunch } from "../WorkerLaunchDialog/WorkerLaunchDialog.tsx";
+import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "../../../generated/sharedValues.ts";
 import { AgentPermissionMode } from "../../../generated/api.ts";
 import {
   ProviderKind,
@@ -111,4 +114,38 @@ export function WorkerPermissions({
     }
   }
   return provider satisfies never;
+}
+
+/** Permission validation and request projection use the current launch inputs. */
+export function workerLaunchState(
+  lead: Agent,
+  launch: WorkerLaunch,
+  prompt: string,
+  permissionMode: ClaudePermissionMode | undefined,
+) {
+  const allowed = allowedWorkerModes(lead, launch.reviewer);
+  const invalidProvider =
+    !isProviderKind(launch.provider) || !isProviderKind(lead.provider);
+  const invalidMode =
+    launch.provider === ProviderKind.Claude &&
+    (!inheritedClaudeMode(lead) ||
+      (permissionMode !== undefined && !allowed.includes(permissionMode)));
+  const invalid =
+    !prompt.trim() ||
+    Array.from(prompt).length > MAX_MANAGED_MESSAGE_CODEPOINTS ||
+    invalidMode ||
+    invalidProvider;
+  const body: PostBody<"/api/agents"> = {
+    id: launch.id,
+    name: launch.name,
+    profile_id: launch.profile_id,
+    prompt,
+    parent: lead.id,
+    cwd: lead.cwd ?? undefined,
+    ...(launch.provider === ProviderKind.Claude &&
+    (launch.reviewer || permissionMode)
+      ? { permission_mode: launch.reviewer ? "plan" : permissionMode }
+      : {}),
+  };
+  return { invalid, invalidMode, invalidProvider, body };
 }

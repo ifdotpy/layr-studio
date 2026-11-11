@@ -1,0 +1,13 @@
+id: web-store-effect-tsx
+valid:
+  - "useEffect(() => video.load(), [video]);"
+  - "useEffect(() => { node.focus(); }, [node]);"
+  - "useEffect(() => { store.start(); node.focus(); }, [store]);"
+invalid:
+  - "useEffect(store.start, [store]);"
+  - "useEffect(() => store.load(), [store]);"
+  - "useEffect(() => { store.subscribe(); }, [store]);"
+  - "useEffect(() => { return store.subscribe(); }, [store]);"
+  - "useEffect(() => { store.start(); return () => store.dispose(); }, [store]);"
+  - "React.useEffect(() => store.start(), [store]);"
+  - "useEffect(() => () => store.dispose(), [store]);"

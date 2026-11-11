@@ -1,3 +1,4 @@
+import { ExecutionSettingsStore } from "./ExecutionSettingsStore.ts";
 import { createAgentCatalog } from "./state.ts";
 import { createWorkerCatalog, workerCatalogKey } from "./WorkerModelPicker.tsx";
 import { appendAppLog } from "../../../appLog.ts";
@@ -29,7 +30,7 @@ type Receipt = {
   baseline: string;
   read: () => string;
 };
-type Fields = {
+export type Fields = {
   opened: boolean;
   role: SetupRole | null;
   changeStatus: SettingsChange | null;
@@ -60,6 +61,7 @@ const defaults: Fields = {
 
 /** Business edits and receipt lifetimes belong to the authenticated server. */
 export class AgentsUi {
+  readonly execution = new ExecutionSettingsStore(this);
   readonly agentCatalog;
   readonly workerCatalogs = observable.map<
     string,
@@ -80,6 +82,7 @@ export class AgentsUi {
       this,
       {
         scope: false,
+        execution: false,
         agentCatalog: false,
         workerCatalogs: false,
         cell: false,

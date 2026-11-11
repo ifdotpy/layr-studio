@@ -1,3 +1,4 @@
+import { createRequestRegistry } from "../renameRequest.ts";
 import { createNet } from "./net/net.ts";
 import { NetStatus } from "./net/status.ts";
 import type { ServerSettings } from "./ServerSettingsContext.tsx";
@@ -40,7 +41,10 @@ import { scopedSessionOutbox } from "../browserPersistence.ts";
 import { indexedDb } from "../indexedDb.ts";
 
 /** Services belong to a server, never to the currently visible chat. */
-export function createServerServices(server: StudioServer) {
+export function createServerServices(
+  server: StudioServer,
+  storage = preferenceStorageForServer(server.id),
+) {
   const transport = createServerTransport(server, (owner, request) => {
     if (owner.id === "local") {
       if (hasNativeClient()) return nativeFetch(request, owner.origin);
@@ -48,7 +52,6 @@ export function createServerServices(server: StudioServer) {
     }
     return serverCredentialAdapter().fetch(owner, request);
   });
-  const storage = preferenceStorageForServer(transport.owner.id);
   // The native core stores the projections of the local server; every other server keeps the page cache.
   const localNativeClient = () =>
     transport.owner.id === "local" && hasNativeClient();
@@ -174,7 +177,14 @@ export function createServerServices(server: StudioServer) {
   const screen = new ScreenOwner();
   let areas: ServerAreas | undefined;
   let sidebarServices: ReturnType<typeof createSidebarServices> | undefined;
+  const requests = createRequestRegistry(
+    storage,
+    api,
+    () => synchronization().store,
+    (message) => areas?.notices.notify(message),
+  );
   return {
+    requests,
     net,
     screen,
     shellSettings: undefined as ServerSettings | undefined,
@@ -241,6 +251,7 @@ export function createServerServices(server: StudioServer) {
     storage,
     ready,
     close(removeCache = false) {
+      requests.dispose();
       stopSchema();
       stopConnection();
       stopSequences();

@@ -1,34 +1,14 @@
-import type { ReactElement, ReactNode } from "react";
-import { beforeEach, expect, it, vi } from "vitest";
-import { required } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({
-  cursor: 0,
-  cells: [] as unknown[],
-  native: false,
-  pick: vi.fn(),
-  change: vi.fn(),
-}));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => {
-    const index = h.cursor++;
-    if (!(index in h.cells))
-      h.cells[index] = typeof initial === "function" ? initial() : initial;
-    return [
-      h.cells[index],
-      (value: unknown) => {
-        h.cells[index] = value;
-      },
-    ];
-  },
-}));
-const owner = {};
+const h = vi.hoisted(() => ({ native: false, pick: vi.fn(), change: vi.fn() }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
     useServerNet: () => ({}),
-    useServerStore: () => owner,
     useServerFileDialogs: () => ({
       canPickDirectory: () => h.native,
       pickDirectory: h.pick,
@@ -36,65 +16,76 @@ vi.mock(
   }),
 );
 vi.mock("../ProjectDirectoryPicker/ProjectDirectoryPicker.tsx", () => ({
-  default: "directory-picker",
+  default: ({ onSelect }: { onSelect: (path: string) => Promise<void> }) =>
+    createElement(
+      "button",
+      { onClick: () => void onSelect("/server") },
+      "Use server folder",
+    ),
   browseDirectory: () => ({}),
 }));
 import DirectoryField from "./DirectoryField.tsx";
-type Props = {
-  children?: ReactNode;
-  rightSection?: ReactNode;
-  onClick?: () => void;
-  onSelect?: (path: string) => Promise<void>;
-  "aria-label"?: string;
-};
-function find(
-  node: ReactNode,
-  predicate: (element: ReactElement<Props>) => boolean,
-): ReactElement<Props> | undefined {
-  if (Array.isArray(node))
-    return node.map((child) => find(child, predicate)).find(Boolean);
-  if (!node || typeof node !== "object" || !("props" in node)) return undefined;
-  const element = node as ReactElement<Props>;
-  return predicate(element)
-    ? element
-    : (find(element.props.rightSection, predicate) ??
-        find(element.props.children, predicate));
-}
-function render() {
-  h.cursor = 0;
-  return DirectoryField({ label: "Folder", value: "/old", onChange: h.change });
-}
-function choose() {
-  required(
-    required(
-      find(
-        render(),
-        (element) => element.props["aria-label"] === "Choose folder",
-      ),
-    ).props.onClick,
-  )();
-}
-beforeEach(() => {
-  h.cursor = 0;
-  h.cells = [];
+let host: HTMLDivElement;
+let root: ReturnType<typeof createRoot>;
+beforeEach(async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   h.native = false;
   h.pick.mockReset();
   h.change.mockReset();
+  host = document.body.appendChild(document.createElement("div"));
+  root = createRoot(host);
 });
+afterEach(async () => {
+  await act(async () => root.unmount());
+  host.remove();
+  vi.unstubAllGlobals();
+});
+async function choose() {
+  await act(async () =>
+    root.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(DirectoryField, {
+          label: "Folder",
+          value: "/old",
+          onChange: h.change,
+        }),
+      ),
+    ),
+  );
+  const button = host.querySelector<HTMLButtonElement>(
+    '[aria-label="Choose folder"]',
+  );
+  if (!button) throw Error("Missing folder chooser");
+  await act(async () => button.click());
+}
 it("uses the native dialog when available", async () => {
   h.native = true;
   h.pick.mockResolvedValue("/native");
-  choose();
-  await Promise.resolve();
-  await Promise.resolve();
+  await choose();
   expect(h.change).toHaveBeenCalledWith("/native");
 });
 it("uses the server picker otherwise", async () => {
-  choose();
-  const picker = required(
-    find(render(), (element) => element.type === "directory-picker"),
+  await choose();
+  const button = [...document.querySelectorAll("button")].find(
+    (node) => node.textContent === "Use server folder",
   );
-  await required(picker.props.onSelect)("/server");
+  if (!button) throw Error("Missing server picker");
+  await act(async () => button.click());
   expect(h.change).toHaveBeenCalledWith("/server");
   expect(h.pick).not.toHaveBeenCalled();
+});
+it("does not update an unmounted field when its native picker finishes", async () => {
+  let finish: (value: string) => void = () => {};
+  h.native = true;
+  h.pick.mockReturnValue(
+    new Promise<string>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await choose();
+  await act(async () => root.render(null));
+  await act(async () => finish("/late"));
+  expect(h.change).not.toHaveBeenCalled();
 });

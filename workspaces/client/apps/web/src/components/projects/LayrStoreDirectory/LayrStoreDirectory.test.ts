@@ -113,3 +113,22 @@ it.each(sources)(
     expect(button("Save").disabled).toBe(true);
   },
 );
+it("uses a replacement save callback when the effective path is unchanged", async () => {
+  await render();
+  const nextSave = vi.fn().mockResolvedValue(undefined);
+  await act(async () =>
+    root.render(
+      createElement(LayrStoreDirectory, {
+        label: "Store",
+        path: "/current",
+        source: "project",
+        overridden: true,
+        save: nextSave,
+      }),
+    ),
+  );
+  await act(async () => h.change("/replacement"));
+  await click("Save");
+  expect(nextSave).toHaveBeenCalledWith("/replacement");
+  expect(h.save).not.toHaveBeenCalled();
+});

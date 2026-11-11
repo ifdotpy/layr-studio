@@ -1,10 +1,3 @@
-import { TerminalState as GeneratedApiTerminalState } from "../../../generated/api.ts";
-import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
-import { useScreenEnvironment } from "../../../servers/ScreenContext.tsx";
-import {
-  useServerApi,
-  useServerStore,
-} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { Button, TextInput } from "@mantine/core";
 import {
   ChevronDown,
@@ -16,23 +9,30 @@ import {
   Square,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import { running, createShellTerminalStore } from "./ShellTerminalStore.ts";
-import { errorText } from "../../../api.ts";
 import { observer } from "mobx-react-lite";
-import { resourceData, type ResourceSlot } from "../../../store/runtime.ts";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { errorText } from "../../../api.ts";
+import { createArea } from "../../../app/area.ts";
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
+import { copyText } from "../../../clipboard/clipboard.ts";
 import {
   terminalId,
   type TerminalOutput,
   type TerminalRecord,
 } from "../../../generated/observableResources.ts";
-import { createArea } from "../../../app/area.ts";
-import { copyText } from "../../../clipboard/clipboard.ts";
+import { useScreenEnvironment } from "../../../servers/ScreenContext.tsx";
+import { type ResourceSlot } from "../../../store/runtime.ts";
+import {
+  useServerApi,
+  useServerStore,
+} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { createShellTerminalStore, running } from "./ShellTerminalStore.ts";
+import { TerminalSessions } from "./TerminalSessions.ts";
 
-import { layoutValues } from "../../../layout/layout-contract.generated.ts";
 import { resolveLayoutLength } from "../../../layout/deriveWorkspaceLayout.ts";
-import { useTerminalHeight } from "./useTerminalHeight.ts";
+import { layoutValues } from "../../../layout/layout-contract.generated.ts";
 import { TerminalResizeGesture } from "./terminalResize.ts";
+import { useTerminalHeight } from "./useTerminalHeight.ts";
 
 const terminalBounds = (rootFont: number) => ({
   preferred: resolveLayoutLength("terminal.preferred", rootFont),
@@ -53,17 +53,31 @@ export default observer(function TerminalDock() {
   const areas = useServerAreas();
   const ownerUi = areas.ui;
   const agent = areas.navigation.selectedAgent || areas.navigation.selectedLead;
-  const notify = areas.notices.notify;
   const { hasShell, isServerView, isClassicServerView, serverViewId } =
     useScreenEnvironment();
   const shellTerminal = isServerView && !isClassicServerView && hasShell;
   const store = useServerStore();
-  const terminalList = store.terminals().current;
-  const shells = resourceData(terminalList) ?? [];
-  const api = useServerApi();
-  const actions = useMemo(() => ({ ...api, notify }), [api, notify]);
-
   const ui = ownerUi.terminal;
+  const api = useServerApi();
+  const notify = areas.notices.notify;
+  const { actions, sessions } = useMemo(
+    () => ({
+      actions: { ...api, notify },
+      sessions: new TerminalSessions(store, ui),
+    }),
+    [api, notify, store, ui],
+  );
+  const {
+    entries,
+    current,
+    filtered,
+    start,
+    visible,
+    activeCount,
+    rowHeight,
+    error,
+    owner,
+  } = sessions;
   const { opened, height, selected, creating } = ui;
   const dock = useRef<HTMLElement>(null);
   const resize = useRef(new TerminalResizeGesture());
@@ -88,7 +102,6 @@ export default observer(function TerminalDock() {
   };
   const { scrollTop } = ui;
   const setScrollTop = ui.scroll;
-  const error = "error" in terminalList ? errorText(terminalList.error) : "";
   const list = useRef<HTMLDivElement>(null);
   // Page layout rules read this flag instead of #root:has(.terminal-dock).
   useLayoutEffect(() => {
@@ -116,31 +129,7 @@ export default observer(function TerminalDock() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [ui]);
-  const entries = shells.filter(
-    (shell) => shell.status !== GeneratedApiTerminalState.closed,
-  );
-  const current = entries.find((entry) => `shell:${entry.id}` === selected);
-  const owner = (id: string) =>
-    resourceData(store.state().current)?.agents.get(id)?.name || "Agent";
-  const filtered = entries.filter((entry) =>
-    `${entry.title} ${entry.cwd || ""} ${owner(entry.agent)} ${entry.status}`
-      .toLowerCase()
-      .includes(ui.query.toLowerCase()),
-  );
-  const rowHeight = 58;
-  const start = Math.max(
-    0,
-    Math.min(
-      Math.max(0, filtered.length - 1),
-      Math.floor(scrollTop / rowHeight) - 3,
-    ),
-  );
-  const visible = filtered.slice(
-    start,
-    start + Math.ceil(geometry.height / rowHeight) + 6,
-  );
   const create = ownerUi.createTerminal;
-  const activeCount = entries.filter((entry) => running(entry.status)).length;
   const heightStep = resolveLayoutLength(
     "resize.step",
     Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
@@ -471,6 +460,11 @@ export const ShellView = observer(function ShellView({
   const actions = useTerminalActions();
   const [state] = useState(() =>
     createShellTerminalStore(shell, outputSlot, actions),
+  );
+  // Keep xterm's DOM controller and input fence while rebinding current resources.
+  useLayoutEffect(
+    () => state.bind(shell, outputSlot, actions),
+    [state, shell, outputSlot, actions],
   );
   return (
     <div className="terminal-shell-view">

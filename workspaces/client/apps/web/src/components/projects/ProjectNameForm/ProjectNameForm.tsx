@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import {
   type Project,
   type ProjectFolder,
@@ -10,7 +11,7 @@ import { useId, useRef, useState } from "react";
 import type { ProjectSave } from "../../../app/projects/ProjectSave.ts";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
-export const ProjectNameForm = observer(function ProjectNameForm({
+const DraftForm = observer(function ProjectNameForm({
   project,
   folder,
   parentId,
@@ -65,9 +66,7 @@ export const ProjectNameForm = observer(function ProjectNameForm({
           maxLength={255}
           required
           disabled={save.pending || save.frozen}
-          onChange={(event) => {
-            setName(event.currentTarget.value);
-          }}
+          onChange={(event) => setName(event.currentTarget.value)}
         />
       </SettingsRow>
       {save.error && <p role="alert">{save.error}</p>}
@@ -80,5 +79,21 @@ export const ProjectNameForm = observer(function ProjectNameForm({
         {save.retryLabel || (folder === "new" ? "Create folder" : "Save name")}
       </Button>
     </form>
+  );
+});
+
+export const ProjectNameForm = observer(function ProjectNameForm(
+  props: ComponentProps<typeof DraftForm>,
+) {
+  return (
+    <DraftForm
+      key={JSON.stringify([
+        props.project.id,
+        props.project.path,
+        props.folder === "new" ? "new" : props.folder?.id,
+        props.parentId,
+      ])}
+      {...props}
+    />
   );
 });

@@ -1,3 +1,7 @@
+import {
+  TranscriptStore,
+  conversationTranscriptSource,
+} from "./TurnHistoryStore.ts";
 import { createTranscriptActions } from "../ConversationTranscript/ConversationTranscript.tsx";
 import { SkillAutocomplete } from "./SkillAutocomplete.ts";
 import { LimitRefresh } from "../../../usage/useLimitRefresh.ts";
@@ -79,6 +83,7 @@ export class ConversationStore {
   readonly autocomplete = new SkillAutocomplete();
   readonly limitRefresh;
   readonly transcriptActions;
+  readonly transcript;
   readonly voice;
   readonly promptNavigation;
   readonly repairReport;
@@ -254,6 +259,7 @@ export class ConversationStore {
       {
         context: false,
         transcriptActions: false,
+        transcript: false,
         autocomplete: false,
         limitRefresh: false,
         voice: false,
@@ -267,6 +273,9 @@ export class ConversationStore {
       { autoBind: true, deep: false },
     );
     this.transcriptActions = createTranscriptActions(this);
+    this.transcript = new TranscriptStore(() =>
+      conversationTranscriptSource(this),
+    );
   }
   start() {
     this.usageStore.start();

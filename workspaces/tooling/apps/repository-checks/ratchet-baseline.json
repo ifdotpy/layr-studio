@@ -2924,5 +2924,168 @@
       "file": "workspaces/client/apps/web/tests/voice/realtime-voice-ux-ui.fixture.tsx",
       "fingerprint": "4f317f62a0f189a4b83a805650d2ce3d8f6dc9e8a525855807b61107df4f7e55:0"
     }
-  ]
+  ],
+  "web-run-in-action-tsx": [],
+  "web-run-in-action": [
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "1cbb368bb00eaa6688b631a2eb77e6d5aecc328480595f190fffbd8ddaeffb85:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:1"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:10"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:11"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:12"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:13"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:14"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:2"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:3"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:4"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:5"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:6"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:7"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:8"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "49da3d589e0e4cfc931865ae107b681a055b19f5d5cec05643f391265c68896f:9"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "8faf03ae7132d67a68bcf959b83cbf80781f9dce0224dc08678725b46af90624:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "cb7f976965aff0db2157279a1b16f594538b6c025fd532f0da61c7d3aaa558d2:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "cb7f976965aff0db2157279a1b16f594538b6c025fd532f0da61c7d3aaa558d2:1"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "cb7f976965aff0db2157279a1b16f594538b6c025fd532f0da61c7d3aaa558d2:2"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "cb7f976965aff0db2157279a1b16f594538b6c025fd532f0da61c7d3aaa558d2:3"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "d150472e80468414b66052fdb97469777a26200d422ff018f9db4fc0322d9998:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "d56585e70c93908b3ee487e8c452f19ff9e88feddcc56d53944a950266433aca:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:1"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:2"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:3"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:4"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:5"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "edf2f5ed5edc0cfaeabfe95dc20fa281ea186a041d26180561dd6cd6c0b8c926:6"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/generated/observableResources.ts",
+      "fingerprint": "f166cbfea1db538f80f964994c99652a90361edaab1977eb9576ea1423930aff:0"
+    }
+  ],
+  "web-make-observable": [
+    {
+      "file": "workspaces/client/apps/web/src/components/sidebar/support/viewModel.ts",
+      "fingerprint": "b02a38ca2a5c158fa48d9d0ee936173e7530cd88fe499e2e769db3ea4b486b72:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/components/sidebar/support/viewModel.ts",
+      "fingerprint": "d4ae710a11d39458bd161cfba5adc65f777facf3b4ccef09ff4e03a62d8e2d66:0"
+    }
+  ],
+  "web-listener-set": [
+    {
+      "file": "workspaces/client/apps/web/src/native/markdownQueue.ts",
+      "fingerprint": "8947c266ef7749214304e71ccf65ed7c4e54dbc5d2ff53afe4fe2e76d905bdaf:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/servers/net/api.ts",
+      "fingerprint": "8947c266ef7749214304e71ccf65ed7c4e54dbc5d2ff53afe4fe2e76d905bdaf:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/servers/net/api.ts",
+      "fingerprint": "8947c266ef7749214304e71ccf65ed7c4e54dbc5d2ff53afe4fe2e76d905bdaf:1"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/store/runtime.ts",
+      "fingerprint": "8947c266ef7749214304e71ccf65ed7c4e54dbc5d2ff53afe4fe2e76d905bdaf:0"
+    },
+    {
+      "file": "workspaces/client/apps/web/src/sync/resume.ts",
+      "fingerprint": "8947c266ef7749214304e71ccf65ed7c4e54dbc5d2ff53afe4fe2e76d905bdaf:0"
+    }
+  ],
+  "web-listener-set-tsx": [],
+  "web-make-observable-tsx": [],
+  "web-store-effect-tsx": [],
+  "web-store-effect": []
 }

@@ -55,8 +55,7 @@ export function renderConversationTranscript() {
   const { actions, opened, stateDir } = control.context;
   const { navigation, selected, read, startup, delivery, layout } = actions;
   const { selectedAgent: agent, selectedRoom: room } = navigation;
-  const { scroll, remember, getFollow, hasRecentScrollInput, content } =
-    control.context.scrolling;
+  const { scroll, content } = control.context.scrolling;
   const {
     visibleMessages,
     history: historySession,
@@ -116,21 +115,7 @@ export function renderConversationTranscript() {
           store={control.repairReport}
         />
       )}
-      <TurnHistory
-        key={stateDir + ":" + opened}
-        history={historySession}
-        items={control.renderedMessages}
-        scrollContainer={scroll}
-        rememberScroll={remember}
-        getFollow={getFollow}
-        followTail={!after}
-        hasRecentScrollInput={hasRecentScrollInput}
-        agent={managed && !room ? agent : undefined}
-        currentTurn={agent?.turnId || undefined}
-        enabled={managed && !room}
-        storageKey={"studio-turns:" + stateDir + ":" + opened}
-        agentId={managed ? agent?.id : undefined}
-      />
+      <TurnHistory key={stateDir + ":" + opened} store={control.transcript} />
     </TranscriptProvider>
   );
   const touchHistoryY = useRef<number | null>(null);
@@ -435,7 +420,9 @@ export function renderMessageRow({ item: m }: { item: Message }) {
           </div>
         )}
       {m.truncated && <p className="notice">This message is clipped.</p>}
-      {m.fullTextBlob && <FullOutput blob={m.fullTextBlob} />}
+      {m.fullTextBlob && (
+        <FullOutput blob={m.fullTextBlob} owner={control.transcript.outputs} />
+      )}
       {(room || m.role === "user") && (
         <MessageDate at={m.at ?? m.created ?? m.timestamp} />
       )}
@@ -535,6 +522,6 @@ const PageIndicator = observer(function PageIndicator({
 
 const ObservedClaudeRepairNotice = observer(ClaudeRepairNotice);
 
-const ObservedSafetyBuffering = observer(SafetyBuffering);
+const ObservedSafetyBuffering = SafetyBuffering;
 
 const ObservedNativeNotice = observer(NativeNotice);

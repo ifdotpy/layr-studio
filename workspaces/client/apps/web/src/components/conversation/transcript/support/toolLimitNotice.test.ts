@@ -1,7 +1,7 @@
 import { componentMessage } from "../../ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { it } from "vitest";
-import { toolLimitNotice } from "./toolLimitNotice.ts";
+import { toolLimitNotice } from "../../support/toolLimitNotice.ts";
 
 it("shows limits only for failed worker results and retains the worker label", () => {
   assert.deepEqual(

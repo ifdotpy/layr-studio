@@ -10,8 +10,8 @@ import { TeamProvider, useTeamArea } from "../support/TeamPanelContext.tsx";
 import { TeamPresence } from "../TeamPresence/TeamPresence.tsx";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../../types.ts";
-import { createWaitingChildren } from "../PhaseWaitDetails/waitDetails.ts";
-import { autorun } from "mobx";
+import { waitingChildren } from "../PhaseWaitDetails/waitDetails.ts";
+import { autorun, computed } from "mobx";
 
 const h = vi.hoisted(() => ({
   commits: new Map<string, number>(),
@@ -128,27 +128,25 @@ it("keeps expandable wait names on the same generated direct-child models", () =
       inFlight: true,
     },
   ]);
-  const children = createWaitingChildren(
-    () => f.mirror.current.agents.values(),
-    "lead",
+  const children = computed(() =>
+    waitingChildren(f.mirror.current.agents.values(), "lead"),
   );
-  const branch = createWaitingChildren(
-    () => f.mirror.current.agents.values(),
-    "middle",
+  const branch = computed(() =>
+    waitingChildren(f.mirror.current.agents.values(), "middle"),
   );
   const stop = autorun(() => {
-    void children.agents;
-    void branch.agents;
+    void children.get();
+    void branch.get();
   });
   try {
-    expect(children.agents.map((agent) => agent.id)).toEqual([
+    expect(children.get().map((agent) => agent.id)).toEqual([
       "middle",
       "sibling",
     ]);
-    expect(children.agents[0]).toBe(f.mirror.current.agents.get("middle"));
-    expect(children.agents[0]?.parentId).toBe("lead");
-    expect(branch.agents.map((agent) => agent.id)).toEqual(["child"]);
-    expect(branch.agents[0]?.parentId).toBe("middle");
+    expect(children.get()[0]).toBe(f.mirror.current.agents.get("middle"));
+    expect(children.get()[0]?.parentId).toBe("lead");
+    expect(branch.get().map((agent) => agent.id)).toEqual(["child"]);
+    expect(branch.get()[0]?.parentId).toBe("middle");
   } finally {
     stop();
     f.store.dispose();

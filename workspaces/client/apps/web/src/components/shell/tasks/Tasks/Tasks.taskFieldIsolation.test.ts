@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   storage: new Storage(),
   post: vi.fn(),
   renders: new Map<string, number>(),
+  buttons: new Map<string, number>(),
 }));
 vi.mock(
   "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
@@ -22,6 +23,17 @@ vi.mock(
     useServerStorage: () => h.storage,
   }),
 );
+vi.mock("@mantine/core", async (original) => {
+  const m = await original<typeof import("@mantine/core")>();
+  return {
+    ...m,
+    Button: (props: Parameters<typeof m.Button<"button">>[0]) => {
+      if (typeof props.children === "string")
+        h.buttons.set(props.children, (h.buttons.get(props.children) || 0) + 1);
+      return createElement(m.Button<"button">, props);
+    },
+  };
+});
 vi.mock("mobx-react-lite", async (original) => {
   const m = await original<typeof import("mobx-react-lite")>();
   return {
@@ -59,6 +71,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   h.post.mockReset();
   h.renders.clear();
+  h.buttons.clear();
 });
 it("keeps versioned decision drafts and unchanged task leaves, and retries a lost decision exactly", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -115,7 +128,8 @@ it("keeps versioned decision drafts and unchanged task leaves, and retries a los
     );
     await fill("Decision reason", "Original approval");
     await fill("Gate override reason", "Original override");
-    const before = new Map(h.renders);
+    const before = new Map(h.renders),
+      buttonsBefore = new Map(h.buttons);
     await act(async () =>
       work.apply({ ...dto, items: [{ ...items[0]!, version: 2 }, items[1]!] }),
     );
@@ -128,7 +142,15 @@ it("keeps versioned decision drafts and unchanged task leaves, and retries a los
     expect(
       [...host.querySelectorAll("dd")].map((node) => node.textContent),
     ).toContain("2");
-    expect(h.renders).toEqual(before);
+    const expected = new Map(before);
+    expect(before.has("A:TaskFacts")).toBe(true);
+    expected.set("A:TaskFacts", before.get("A:TaskFacts")! + 1);
+    expect(h.renders).toEqual(expected);
+    for (const label of ["Update task", "Accept with override", "Reject task"])
+      expect(
+        h.buttons.get(label),
+        `${label} rebuilt for a version-only update`,
+      ).toBe(buttonsBefore.get(label));
     h.post.mockRejectedValueOnce(new Error("reply lost")).mockResolvedValue({});
     await click("Accept with override");
     await act(async () =>
@@ -181,6 +203,54 @@ it("keeps versioned decision drafts and unchanged task leaves, and retries a los
       result: "Revised approval",
     });
     expect(h.post.mock.calls[3]?.[1].id).not.toBe(h.post.mock.calls[2]?.[1].id);
+    await click("Create task");
+    const field = (label: string) =>
+      [
+        ...host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          "input, textarea",
+        ),
+      ].find((node) =>
+        host
+          .querySelector(`label[for="${node.id}"]`)
+          ?.textContent?.startsWith(label),
+      )!;
+    for (const [label, value] of [
+      ["Title", " New draft "],
+      ["Description", "Draft description"],
+      ["Owner agent ID", " worker "],
+      ["Result schema", "false"],
+    ]) {
+      await act(async () => {
+        const input = field(label!),
+          prototype =
+            input instanceof HTMLInputElement
+              ? HTMLInputElement.prototype
+              : HTMLTextAreaElement.prototype;
+        Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(
+          input,
+          value,
+        );
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+    await act(async () => {
+      const dependencies = host.querySelector<HTMLSelectElement>(
+        'select[aria-label="Dependencies"]',
+      )!;
+      for (const option of dependencies.options)
+        option.selected = option.value === "B";
+      dependencies.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await click("Save task");
+    expect(h.post.mock.calls.at(-1)?.[1]).toMatchObject({
+      action: "create",
+      agent: "lead",
+      title: "New draft",
+      description: "Draft description",
+      owner: "worker",
+      dependencies: ["B"],
+      result_schema: false,
+    });
   } finally {
     await act(async () => root.unmount());
     host.remove();

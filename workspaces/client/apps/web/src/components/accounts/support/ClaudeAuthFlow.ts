@@ -228,6 +228,13 @@ export class ClaudeAuthFlow {
       return null;
     }
   }
+  get startLabel() {
+    if (!this.requestId || (this.terminal && !this.#options.accountKey))
+      return this.receipt ? "Start again" : "Start sign-in";
+    return !this.receipt && !this.codeSubmissionUncertain
+      ? "Retry sign-in"
+      : "";
+  }
   setCode(value: string) {
     if (!this.busy && !this.codeSubmissionUncertain) {
       this.code = value;

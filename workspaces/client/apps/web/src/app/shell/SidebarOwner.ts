@@ -1,3 +1,4 @@
+import { reached } from "../../clock.ts";
 import { ProjectSave } from "../projects/ProjectSave.ts";
 import { flowValue } from "../../flowValue.ts";
 import { COMPACT_RECENT_WINDOW_SECONDS } from "../../generated/sharedValues.ts";
@@ -632,21 +633,29 @@ export class SidebarListOwner {
     );
   rename = flow(function* (
     this: SidebarListOwner,
-    e: React.FormEvent,
+    e: Pick<React.FormEvent, "preventDefault">,
     id: string,
   ) {
     e.preventDefault();
     try {
       yield* flowValue(this.renameChat(id, this.name));
       this.renaming = null;
-    } catch {}
+    } catch (error) {
+      this.notify(errorText(error));
+    }
   });
   get sharedProjectPaths() {
     return new Set(this.sharedRooms.map((room) => room.projectPath));
   }
-  nowSeconds = Date.now() / 1000;
-  tick() {
-    this.nowSeconds = Date.now() / 1000;
+  get nowSeconds() {
+    const now = Date.now() / 1000;
+    const expiry = Math.min(
+      ...this.model.rows
+        .map((row) => row.activityAt + COMPACT_RECENT_WINDOW_SECONDS)
+        .filter((expiry) => expiry > now),
+    );
+    if (Number.isFinite(expiry)) reached(Math.ceil(expiry * 1000));
+    return now;
   }
   keptInCompact = (row: SidebarChatView) => row.compactVisible(this.nowSeconds);
   get viewChatCounts() {
@@ -818,26 +827,7 @@ export class SidebarListOwner {
     };
   }
   start() {
-    this.tick();
-    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
     const stops = [
-      reaction(
-        () =>
-          Math.min(
-            ...this.model.rows
-              .map((row) => row.activityAt + COMPACT_RECENT_WINDOW_SECONDS)
-              .filter((expiry) => expiry > this.nowSeconds),
-          ),
-        (expiry) => {
-          clearTimeout(expiryTimer);
-          if (Number.isFinite(expiry))
-            expiryTimer = setTimeout(
-              () => this.tick(),
-              Math.max(1, Math.ceil(expiry * 1000 - Date.now())),
-            );
-        },
-        { fireImmediately: true },
-      ),
       this.sorting.start(),
       reaction(
         () => this.selection.selectedId,
@@ -860,7 +850,6 @@ export class SidebarListOwner {
       ),
     ];
     return () => {
-      clearTimeout(expiryTimer);
       stops.forEach((stop) => stop());
     };
   }

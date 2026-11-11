@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import type { Json, Message } from "../../../../types.ts";
 
-import { toolLimitNotice } from "../support/toolLimitNotice.ts";
+import { toolLimitNotice } from "../../support/toolLimitNotice.ts";
 import MarkdownImage from "../../MarkdownImage/MarkdownImage.tsx";
 import { toolImages, toolImageDisplayPayload } from "./toolImages.ts";
 import FileChangeCard from "../../FileChangeCard/FileChangeCard.tsx";

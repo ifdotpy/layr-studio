@@ -1,10 +1,11 @@
+import { FullOutputs } from "../../support/FullOutputs.ts";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, expect, it, vi } from "vitest";
 import FullOutput from "./FullOutput.tsx";
-import { clearFullOutputCache } from "./fullOutputCache.ts";
+import { clearFullOutputCache } from "../../support/fullOutputCache.ts";
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock(
@@ -21,6 +22,7 @@ it("opens on click, retries failure and shares the content read across mounted l
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const host = document.createElement("div");
   const root = createRoot(host);
+  const owner = new FullOutputs();
   const blob = { hash: "shared-output", size: 1024 };
   try {
     await act(async () =>
@@ -28,8 +30,8 @@ it("opens on click, retries failure and shares the content read across mounted l
         createElement(
           MantineProvider,
           null,
-          createElement(FullOutput, { blob }),
-          createElement(FullOutput, { blob }),
+          createElement(FullOutput, { blob, owner }),
+          createElement(FullOutput, { blob, owner }),
         ),
       ),
     );

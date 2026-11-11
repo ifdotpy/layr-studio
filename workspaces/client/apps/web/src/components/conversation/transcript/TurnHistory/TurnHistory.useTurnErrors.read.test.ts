@@ -15,21 +15,7 @@ import { createServerStore } from "../../../../store/server.ts";
 import { createSubscriptions } from "../../../../sync/subscriptions/module.ts";
 import type { GetResult } from "../../../../api.ts";
 import type { Agent, Message } from "../../../../types.ts";
-import { useTurnErrors } from "./useTurnErrors.ts";
-
-const hooks = vi.hoisted(() => ({
-  net: vi.fn(),
-  api: vi.fn(),
-  store: vi.fn(),
-}));
-vi.mock(
-  "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
-    useServerNet: hooks.net,
-    useServerApi: hooks.api,
-    useServerStore: hooks.store,
-  }),
-);
+import { TurnErrorStore } from "../../support/useTurnErrors.ts";
 
 it("shares observed analytics, enriches only its own thread, and stays idle after settling", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -59,9 +45,6 @@ it("shares observed analytics, enriches only its own thread, and stays idle afte
   });
   const net = createNet(boundApi, () => store);
   const analytics = vi.spyOn(net.reads, "analytics");
-  hooks.net.mockReturnValue(net);
-  hooks.api.mockReturnValue(boundApi);
-  hooks.store.mockReturnValue(store);
   const host = document.createElement("div"),
     root = createRoot(host);
   const items: Message[] = [
@@ -74,8 +57,9 @@ it("shares observed analytics, enriches only its own thread, and stays idle afte
     },
   ];
   const agent: Agent = { id: "agent", threadId: "thread" };
+  const errors = new TurnErrorStore(items);
   const View = observer(function View() {
-    const result = useTurnErrors(items, agent);
+    const result = errors.read(items, agent, store, net);
     return createElement("span", null, JSON.stringify(result));
   });
   try {

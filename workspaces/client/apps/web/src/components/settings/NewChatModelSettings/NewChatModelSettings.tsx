@@ -26,7 +26,6 @@ export default observer(function NewChatModelSettings({
             accounts={accounts?.accounts || []}
             presentation="panel"
             settingsRow
-            showAccountSummary
             workerExcludedAccountKeys={model.workerExcludedAccountKeys}
             reviewerExcludedAccountKeys={model.reviewerExcludedAccountKeys}
             onWorkerExcludedAccountKeysChange={model.setWorkerExcluded}

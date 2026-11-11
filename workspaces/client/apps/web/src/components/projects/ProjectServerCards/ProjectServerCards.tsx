@@ -11,10 +11,7 @@ import {
 
 import NewChatModelSettings from "../../settings/NewChatModelSettings/NewChatModelSettings.tsx";
 
-import {
-  projectAllowsWorktree,
-  type NewChatSettings,
-} from "../../../app/projects/newChatSettings.ts";
+import { type NewChatSettings } from "../../../app/projects/newChatSettings.ts";
 
 type Props = {
   project: LocationProject;
@@ -38,39 +35,19 @@ const ProjectServerSelectionView = observer(
     onAdd,
     onCancel,
   }: Props) {
-    const { selected, read } = owner;
-    const server = servers.find((row) => row.id === selected);
-    const location = server && projectLocationOn(project, server);
-    const knownSystem =
-      !!server?.system &&
-      server.nativeLayr !== undefined &&
-      server.defaultWorkspaceMode !== undefined;
-    const fetched =
-      server && !server.disabled && !knownSystem ? read.value : undefined;
-    const system = server?.system ?? fetched?.system;
-    const nativeLayr = server?.nativeLayr ?? fetched?.nativeLayr;
-    const nativeAvailable =
-      !!nativeLayr && nativeLayr.status !== "notInstalled";
-    const nativeReason =
-      server?.nativeLayrMessage ?? fetched?.nativeLayrMessage;
-    const reportedMode =
-      server?.defaultWorkspaceMode ?? fetched?.defaultWorkspaceMode;
-    const supportedDefaultMode =
-      reportedMode === "layr-native" || reportedMode === "worktree"
-        ? reportedMode
-        : reportedMode
-          ? "worktree"
-          : undefined;
     const [chosenMode, setModeChoice] =
       useState<NewChatSettings["workspaceMode"]>();
-    const mode =
-      supportedDefaultMode &&
-      (chosenMode && (chosenMode !== "layr-native" || nativeAvailable)
-        ? chosenMode
-        : supportedDefaultMode);
-    const worktreeAllowed = projectAllowsWorktree(project);
-    const models = owner.model?.selection;
-    const platformError = knownSystem || server?.disabled ? "" : read.error;
+    const {
+      selected,
+      system,
+      nativeLayr,
+      nativeAvailable,
+      nativeReason,
+      mode,
+      worktreeAllowed,
+      platformError,
+      selection,
+    } = owner.view(project, chosenMode);
     return (
       <div
         className="project-server-choice"
@@ -170,27 +147,9 @@ const ProjectServerSelectionView = observer(
           <Button onClick={onCancel}>Cancel</Button>
           <Button
             variant="filled"
-            disabled={
-              !location ||
-              !models ||
-              !system ||
-              (mode === "layr-native" && !nativeAvailable) ||
-              (mode === "worktree" && !worktreeAllowed) ||
-              !supportedDefaultMode ||
-              !!platformError ||
-              !!servers.find((row) => row.id === selected)?.disabled
-            }
+            disabled={!selection}
             onClick={() =>
-              location &&
-              mode &&
-              models &&
-              onChoose(
-                { ...location, serverId: selected },
-                {
-                  ...models,
-                  workspaceMode: mode,
-                },
-              )
+              selection && onChoose(selection.location, selection.settings)
             }
           >
             Start chat

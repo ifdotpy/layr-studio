@@ -6,7 +6,7 @@ import {
   AccountStatus as GeneratedApiAccountStatus,
   ProviderKind,
 } from "../../../generated/api.ts";
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -262,6 +262,80 @@ test("a provider round-trip invalidates the browsed tab and reveals the external
       host.querySelector('[data-account-key="codex"][data-selected="true"]'),
     ).not.toBeNull();
     expect(host.querySelector('[data-account-key="claude"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    store.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
+test("mixed-provider multi-selection keeps the browsed tab while secondary accounts change", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  const store = createServerStore(
+    createSubscriptions({
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    }),
+  );
+  const accounts = [
+    {
+      id: "codex",
+      provider: ProviderKind.codex,
+      label: "Codex account",
+      home: "",
+      source: "fixture",
+      status: GeneratedApiAccountStatus.ready,
+    },
+    {
+      id: "claude",
+      provider: ProviderKind.claude,
+      label: "Claude account",
+      home: "",
+      source: "fixture",
+      status: GeneratedApiAccountStatus.ready,
+    },
+  ] satisfies Account[];
+  function Picker() {
+    const [value, onChange] = useState(["codex"]);
+    return createElement(AccountTiles, {
+      label: "Accounts",
+      accounts,
+      multiple: true,
+      value,
+      onChange,
+    });
+  }
+  const claudeTile = () => {
+    const tile = host.querySelector<HTMLButtonElement>(
+      '[data-account-key="claude"]',
+    );
+    if (!tile) throw new Error("Browsed Claude provider was lost");
+    return tile;
+  };
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(
+            ServerStoreProvider,
+            { value: store },
+            createElement(Picker),
+          ),
+        ),
+      ),
+    );
+    const tab = host.querySelector<HTMLInputElement>('input[value="claude"]');
+    if (!tab) throw new Error("Missing Claude tab");
+    await act(async () => tab.click());
+    await act(async () => claudeTile().click());
+    expect(claudeTile().dataset.selected).toBe("true");
+    await act(async () => claudeTile().click());
+    expect(claudeTile().dataset.selected).toBeUndefined();
+    expect(host.querySelector('[data-account-key="codex"]')).toBeNull();
   } finally {
     await act(async () => root.unmount());
     store.dispose();

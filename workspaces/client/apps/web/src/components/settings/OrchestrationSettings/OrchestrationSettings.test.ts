@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { expect, test } from "vitest";
-import { OrchestrationNumberSetting } from "../OrchestrationNumberSetting/OrchestrationNumberSetting.tsx";
+import { SettingsNumber } from "../SettingsNumber/SettingsNumber.tsx";
 import {
   childResultHoldSpec,
   idleSessionUnloadSpec,
@@ -18,12 +18,14 @@ import {
 } from "../../../generated/sharedValues.ts";
 
 function render(spec: OrchestrationSettingSpec, value: number) {
+  const { field: _field, ...input } = spec;
   return renderToStaticMarkup(
     createElement(
       MantineProvider,
       null,
-      createElement(OrchestrationNumberSetting, {
-        spec,
+      createElement(SettingsNumber, {
+        ...input,
+        clampBehavior: "strict",
         value,
         disabled: false,
         onChange: () => undefined,
@@ -51,12 +53,10 @@ test.each([
   "renders %o with its tooltip and generated bounds",
   (spec, defaultValue, min, max, phrase) => {
     const markup = render(spec, defaultValue);
-    expect(markup).toContain(`aria-label="${spec.ariaLabel}"`);
-    expect(markup).toContain(
-      `title="${spec.tooltip.replaceAll("'", "&#x27;")}"`,
-    );
+    expect(markup).toContain(`aria-label="${spec["aria-label"]}"`);
+    expect(markup).toContain(`title="${spec.title.replaceAll("'", "&#x27;")}"`);
     expect(markup).toContain(`value="${defaultValue}"`);
-    expect(spec.tooltip).toContain(phrase);
+    expect(spec.title).toContain(phrase);
     expect([spec.min, spec.max]).toEqual([min, max]);
     expect(max).toBeGreaterThan(defaultValue);
   },

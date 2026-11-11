@@ -1,3 +1,6 @@
+import { downloadLog } from "./downloadLog.ts";
+import type { CopyFeedback } from "../../../../stores/CopyFeedback.ts";
+import { restartPatterns } from "./taskControlModel.ts";
 import type { ShellFlow } from "../../support/flow.ts";
 import { resourceData } from "../../../../store/runtime.ts";
 import { ProcessActionStatus } from "../../../../generated/api.ts";
@@ -16,6 +19,7 @@ import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   BackgroundTaskAction,
   BackgroundTaskKind,
+  NativeCommandAction,
 } from "../../../../generated/api.ts";
 import {
   agentId,
@@ -157,6 +161,34 @@ export function createBackgroundTaskArea(
       this.close();
       this.openAgent(task.agent);
     }
+    sendInput(task: DisplayBackgroundTask, text: string) {
+      return task.display.kind === BackgroundTaskKind.command
+        ? this.act("/api/native-command", {
+            id: task.id,
+            action: NativeCommandAction.input,
+            text: text + "\n",
+          })
+        : this.act("/api/monitor/input", { id: task.id, text: text + "\n" });
+    }
+    *copyOutput(copy: CopyFeedback, text: string): ShellFlow {
+      yield flowResult(copy.copy(text));
+      if (copy.failed) this.notify("Could not copy output");
+    }
+    *restartWithPatterns(
+      task: DisplayProcessTask,
+      patterns: string,
+    ): ShellFlow<void, Awaited<ReturnType<Panel["restart"]>>> {
+      const body = this.restartReceipt(task.id) || {
+        id: task.id,
+        agent: task.agent,
+        epoch: task.epoch,
+        accountKey: task.accountKey || "default",
+        requestId: randomUUID(),
+        outputPatterns: restartPatterns(patterns),
+      };
+      const result = yield this.restart(body);
+      if (result.status !== "applied") throw new Error(result.error);
+    }
     readOutput(task: DisplayBackgroundTask) {
       return api.get("/api/task/output", {
         query: { id: task.id, agent: task.agent },
@@ -259,12 +291,7 @@ export function createBackgroundTaskArea(
               ? "The download contains the retained part of the log."
               : "The download contains the retained output.",
           );
-        const url = URL.createObjectURL(file.blob),
-          link = document.createElement("a");
-        link.href = url;
-        link.download = file.name;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        downloadLog(file);
       } catch (error) {
         this.notify(errorText(error));
       }
@@ -375,42 +402,38 @@ export function createBackgroundTaskArea(
         accountKey: identity.accountKey,
         epoch: identity.epoch,
       };
-      let body: Stop;
-      switch (control.action) {
-        case "stop_response":
-          body = {
-            ...scope,
-            action: control.action,
-            ...responseStopIdentity(target!),
-          };
-          break;
-        case "stop_selected":
-          body = {
-            ...scope,
-            action: control.action,
-            process: processIdentity(control.process),
-            ...(control.process.agent !== leadId && this.includeWorkers
-              ? { includeDescendants: true }
-              : {}),
-          };
-          break;
-        case "stop_owned":
-          body = {
-            ...scope,
-            action: control.action,
-            processes: this.processTasks
-              .filter(
-                (task) =>
-                  task.display.actions.includes(BackgroundTaskAction.stop) &&
-                  (task.agent === leadId ||
-                    (this.includeWorkers &&
-                      this.owner(task.agent)?.rootId === leadId)),
-              )
-              .map(processIdentity),
-            includeDescendants: this.includeWorkers,
-          };
-          break;
-      }
+      const body: Stop =
+        control.action === "stop_response"
+          ? {
+              ...scope,
+              action: control.action,
+              ...responseStopIdentity(target!),
+            }
+          : control.action === "stop_selected"
+            ? {
+                ...scope,
+                action: control.action,
+                process: processIdentity(control.process),
+                ...(control.process.agent !== leadId && this.includeWorkers
+                  ? { includeDescendants: true }
+                  : {}),
+              }
+            : {
+                ...scope,
+                action: control.action,
+                processes: this.processTasks
+                  .filter(
+                    (task) =>
+                      task.display.actions.includes(
+                        BackgroundTaskAction.stop,
+                      ) &&
+                      (task.agent === leadId ||
+                        (this.includeWorkers &&
+                          this.owner(task.agent)?.rootId === leadId)),
+                  )
+                  .map(processIdentity),
+                includeDescendants: this.includeWorkers,
+              };
       this.remember(body);
       void this.control();
     }

@@ -1,156 +1,54 @@
+import { Accordion, Modal, Select } from "@mantine/core";
+import { RefreshCw } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import { useState, useRef } from "react";
-import { useServerStore } from "../ServerServicesProvider/ServerServicesProvider.tsx";
-import { AccountStatus } from "../../../generated/api.ts";
-import { Accordion, Badge, Menu, Modal, Select } from "@mantine/core";
-import { Check, CloudOff, Ellipsis, LogIn, RefreshCw } from "lucide-react";
-import {
-  useMenuEscapeSuppression,
-  closeMenuFromTriggerOnEscape,
-  restoreMenuTriggerFocusAfterClose,
-} from "../../ui/support/closeMenuFromTriggerOnEscape.ts";
-import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
-import { SettingsSection } from "../../ui/PanelHeader/PanelHeader.tsx";
-import type {
-  ServerAccount,
-  ServerCommand,
-} from "../../../servers/navigation.ts";
+import type { ServerCommand } from "../../../servers/navigation.ts";
 import type { StudioServer } from "../../../servers/registry.ts";
 import {
-  rowServers,
-  serverAccountRows,
-  type ServerAccountRow,
-} from "../../../servers/serverAccountRows.ts";
-import {
-  serverAccounts,
-  type AccountSource,
-} from "../../../servers/ServerAccountLimits.tsx";
-import { AccountLimitsAcrossServers } from "../AccountLimitsAcrossServers/AccountLimitsAcrossServers.tsx";
-import { ServerAccountGroup } from "../ServerAccountGroup/ServerAccountGroup.tsx";
-import { AccountCapacityView } from "../../accounts/AccountCapacityView/AccountCapacityView.tsx";
-import type { Account } from "../../accounts/support/Accounts.tsx";
-import { accountLimitView } from "../../accounts/support/AccountTiles.tsx";
-import { ProviderMark } from "../../accounts/ProviderMark/ProviderMark.tsx";
-import {
-  createAccountAddDraft,
-  AccountAddForm,
   AccountAddActionsContext,
+  AccountAddForm,
 } from "../../accounts/AccountAddForm/AccountAddForm.tsx";
+import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
+import { Owned } from "../../ui/Owned/Owned.tsx";
+import { SettingsSection } from "../../ui/PanelHeader/PanelHeader.tsx";
+import { useMenuEscapeCapture } from "../../ui/support/closeMenuFromTriggerOnEscape.ts";
+import { AccountRow } from "../AccountRow/AccountRow.tsx";
 import {
-  PROVIDER_LABELS,
-  ProviderKind,
-} from "../../../generated/providerKind.ts";
-import type { ServerServices } from "../../../servers/serverServices.ts";
+  AccountsPanelState,
+  type AccountRowView,
+} from "../../../servers/AccountsPanelState.ts";
+export { accountSources } from "../../../servers/AccountsPanelState.ts";
 
-type AccountAction = Extract<ServerCommand, { action: "account-action" }>;
 type StartAccount = (
   serverId: string,
   command: Extract<ServerCommand, { action: "account-sign-in" }>,
 ) => void;
 
-function serverConnection(status?: string) {
-  if (status === "offline") return { label: "Offline", blocked: true };
-  if (status === "schema-mismatch")
-    return { label: "Update required", blocked: true };
-  if (status === "degraded")
-    return { label: "Connection degraded", blocked: false };
-  if (status === "connecting") return { label: "Connecting", blocked: false };
-  if (status === "live") return null;
-  return { label: "Connection unknown", blocked: false };
-}
-
-function signInStatus(status: string) {
-  if (status === "ready") return "Signed in";
-  if (status === "signedOut" || status === "changed") return "Sign in needed";
-  if (status === "error") return "Sign-in check failed";
-  return "Sign-in status unknown";
-}
-
-/** Statuses where the inline sign-in button is shown; others use the account menu. */
-function needsSignIn(status: string) {
-  return (
-    status === AccountStatus.signedOut ||
-    status === AccountStatus.changed ||
-    status === AccountStatus.error
-  );
-}
-
-/** The copies of one provider account on each server that has it, with the
- * server's full account record. A disconnected copy is left out. */
-export function accountSources(
-  row: ServerAccountRow,
-  servers: StudioServer[],
-  fullAccounts: Record<string, readonly Account[]>,
-  servicesFor?: (serverId: string) => ServerServices | undefined,
-): AccountSource[] {
-  return servers.flatMap((server) => {
-    const services = servicesFor?.(server.id);
-    if (servicesFor && !services) return [];
-    const listed = row.byServer[server.id];
-    const account =
-      listed &&
-      fullAccounts[server.id]?.find(
-        (candidate) =>
-          candidate.id === listed.accountKey &&
-          candidate.provider === listed.provider,
-      );
-    return account && !account.disconnected
-      ? [
-          {
-            serverId: server.id,
-            serverLabel: server.label,
-            account,
-            services,
-          },
-        ]
-      : [];
-  });
-}
-
-const ServerAccountsPanel = observer(function ServerAccountsPanel({
-  servers,
-  accountsByServer,
-  statuses,
-  startAccount,
-  accountAction,
-  onDiscover,
-  servicesFor,
-  initialFocusIdentity,
-}: {
+export type ServerAccountsPanelProps = {
+  rows: AccountRowView[];
   servers: StudioServer[];
-  accountsByServer: Record<string, ServerAccount[]>;
-  statuses: Record<string, string>;
   startAccount: StartAccount;
-  accountAction: (serverId: string, command: AccountAction) => void;
   onDiscover?: () => void;
-  /** The API of each server; without it the default API serves every server. */
-  servicesFor?: (serverId: string) => ServerServices | undefined;
   initialFocusIdentity?: string | undefined;
-}) {
-  const store = useServerStore();
-  const [draft] = useState(createAccountAddDraft);
-  const [adding, setAdding] = useState(false);
-  const [serverId, setServerId] = useState<string | null>(null);
-  const [openAccountMenuKey, setMenuKey] = useState<string | null>(null);
-  const accountMenuTriggers = useRef(
-    new Map<string, HTMLButtonElement>(),
-  ).current;
-  const { suppressNextEscape, clearSuppression } = useMenuEscapeSuppression(
-    openAccountMenuKey !== null,
+};
+
+const ServerAccountsPanel = observer(function ServerAccountsPanel(
+  props: ServerAccountsPanelProps,
+) {
+  return (
+    <Owned create={() => new AccountsPanelState()}>
+      {(ui) => <AccountsView {...props} ui={ui} />}
+    </Owned>
   );
-  const setMenu = (key: string, opened: boolean) => {
-    if (opened) clearSuppression();
-    setMenuKey(
-      opened ? key : openAccountMenuKey === key ? null : openAccountMenuKey,
-    );
-  };
-  const rows = serverAccountRows(servers, accountsByServer);
-  const fullAccounts = Object.fromEntries(
-    servers.map((server) => [
-      server.id,
-      serverAccounts(store, server.id, servicesFor),
-    ]),
-  );
+});
+const AccountsView = observer(function AccountsView(
+  props: ServerAccountsPanelProps & {
+    ui: AccountsPanelState;
+    rows: AccountRowView[];
+  },
+) {
+  const { servers, onDiscover, startAccount, ui, rows } = props;
+  const { draft, adding, serverId, setAdding, setServerId } = ui;
+  useMenuEscapeCapture(ui.escape.openedKey !== null, ui.escape);
   const selected =
     servers.find((server) => server.id === serverId) || servers[0];
   return (
@@ -168,13 +66,7 @@ const ServerAccountsPanel = observer(function ServerAccountsPanel({
                 Find existing accounts
               </ActionButton>
             )}
-            <ActionButton
-              actionRole="primary"
-              onClick={() => {
-                draft.provider = "";
-                setAdding(true);
-              }}
-            >
+            <ActionButton actionRole="primary" onClick={ui.openAdd}>
               Add account
             </ActionButton>
           </div>
@@ -189,384 +81,14 @@ const ServerAccountsPanel = observer(function ServerAccountsPanel({
             transitionDuration={0}
             chevronPosition="left"
           >
-            {rows.map((row) => {
-              const sources = accountSources(
-                row,
-                servers,
-                fullAccounts,
-                servicesFor,
-              );
-              const exactAccountKey = (serverId: string) =>
-                row.byServer[serverId]?.accountKey;
-              const cannotSignIn = (server: StudioServer) =>
-                serverConnection(statuses[server.id])?.blocked === true ||
-                (!!servicesFor && !servicesFor(server.id)) ||
-                (!!row.byServer[server.id] && !exactAccountKey(server.id));
-              const signIn = (server: StudioServer) => {
-                if (cannotSignIn(server)) return;
-                const accountKey = exactAccountKey(server.id);
-                startAccount(server.id, {
-                  action: "account-sign-in",
-                  ...(accountKey
-                    ? { accountKey }
-                    : { forceAdd: true as const }),
-                  provider: row.provider,
-                  email: row.email,
-                  label: row.label,
-                  serverLabel: server.label,
-                });
-              };
-              const facts = (
-                <>
-                  <dl className="account-facts">
-                    <dt>Email</dt>
-                    <dd>{row.email || "Unavailable"}</dd>
-                    <dt>Servers</dt>
-                    <dd>
-                      {servers
-                        .filter((server) => row.byServer[server.id])
-                        .map((server) => server.label)
-                        .join(", ")}
-                    </dd>
-                    <dt>Default</dt>
-                    <dd>
-                      {servers
-                        .filter((server) => row.byServer[server.id]?.isDefault)
-                        .map((server) => server.label)
-                        .join(", ") || "No"}
-                    </dd>
-                    <dt>Sign-in</dt>
-                    <dd>
-                      {servers
-                        .filter((server) => row.byServer[server.id])
-                        .map(
-                          (server) =>
-                            `${server.label}: ${signInStatus(row.byServer[server.id]!.status)}`,
-                        )
-                        .join(", ")}
-                    </dd>
-                  </dl>
-                  <small className="server-accounts-help">
-                    Limits are shared across servers. Sign-in and turn start
-                    limits are set per server.
-                  </small>
-                </>
-              );
-              const accountDetails = (
-                <>
-                  <ul
-                    className="server-account-servers"
-                    aria-label={`Servers for ${row.email || row.label}`}
-                  >
-                    {rowServers(row, servers).map((server) => {
-                      const account = row.byServer[server.id];
-                      const connection = serverConnection(statuses[server.id]);
-                      const blocked = cannotSignIn(server);
-                      const state = blocked
-                        ? "offline"
-                        : account?.status === "ready"
-                          ? "ready"
-                          : account?.status === "error"
-                            ? "error"
-                            : account
-                              ? "reauth"
-                              : "missing";
-                      const text =
-                        state === "ready"
-                          ? `✓ ${server.label}`
-                          : state === "error"
-                            ? `⚠ ${server.label} · sign-in check failed`
-                            : state === "reauth"
-                              ? `⚠ ${server.label} · ${signInStatus(account!.status).toLocaleLowerCase()}`
-                              : state === "offline"
-                                ? `${server.label} · ${connection?.label.toLocaleLowerCase() || "connection unknown"}`
-                                : `+ ${server.label}`;
-                      const source = sources.find(
-                        (item) => item.serverId === server.id,
-                      );
-                      return (
-                        <li
-                          key={server.id}
-                          className="server-account-server"
-                          data-server-id={server.id}
-                        >
-                          <button
-                            type="button"
-                            className="server-account-chip"
-                            data-state={state}
-                            disabled={blocked}
-                            onClick={() => signIn(server)}
-                          >
-                            {text}
-                          </button>
-                          {source && (
-                            <ServerAccountGroup
-                              source={source}
-                              onSaved={() => {}}
-                            />
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </>
-              );
-              return (
-                <Accordion.Item
-                  value={row.key}
-                  className="server-account-row"
-                  key={row.key}
-                  data-account-identity={row.key}
-                >
-                  <div className="server-account-heading">
-                    <Accordion.Control
-                      aria-label={`Limit details for ${row.email || row.label}`}
-                    >
-                      <span className="account-identity">
-                        <span
-                          role="img"
-                          aria-label={PROVIDER_LABELS[row.provider]}
-                        >
-                          <ProviderMark provider={row.provider} />
-                        </span>
-                        <strong title={row.label || row.email || "Account"}>
-                          {row.label || row.email || "Account"}
-                        </strong>
-                      </span>
-                    </Accordion.Control>
-                    {row.plan && (
-                      <span className="account-plan">{row.plan}</span>
-                    )}
-                    <span className="account-status-markers">
-                      {servers
-                        .filter((server) => row.byServer[server.id])
-                        .map((server) => {
-                          const connection = serverConnection(
-                            servicesFor && !servicesFor(server.id)
-                              ? undefined
-                              : statuses[server.id],
-                          );
-                          if (!connection) return null;
-                          const label = `${server.label}: ${connection.label}`;
-                          return (
-                            <span
-                              key={server.id}
-                              className="account-strip-state"
-                              title={label}
-                            >
-                              <CloudOff size={14} aria-hidden="true" />
-                              <span>{label}</span>
-                            </span>
-                          );
-                        })}
-                      {servers
-                        .filter(
-                          (server) =>
-                            row.byServer[server.id]?.status !== "ready" &&
-                            row.byServer[server.id],
-                        )
-                        .map((server) => (
-                          <span
-                            key={server.id}
-                            className="account-strip-state"
-                            title={`${server.label}: ${signInStatus(row.byServer[server.id]!.status)}`}
-                          >
-                            <LogIn size={14} aria-hidden="true" />
-                            <span>
-                              {server.label}:{" "}
-                              <span>
-                                {signInStatus(row.byServer[server.id]!.status)}
-                              </span>
-                            </span>
-                          </span>
-                        ))}
-
-                      {servers
-                        .filter((server) => row.byServer[server.id]?.isDefault)
-                        .map((server) => (
-                          <Badge
-                            key={server.id}
-                            size="xs"
-                            variant="default"
-                            title={`Default ${server.label}`}
-                          >
-                            <Check size={12} aria-hidden="true" />
-                            <span className="account-strip-state-label">
-                              Default {server.label}
-                            </span>
-                          </Badge>
-                        ))}
-                    </span>
-                    <Menu
-                      opened={openAccountMenuKey === row.key}
-                      onChange={(nextOpened) => {
-                        setMenu(row.key, nextOpened);
-                        if (!nextOpened)
-                          restoreMenuTriggerFocusAfterClose(
-                            accountMenuTriggers.get(row.key) ?? null,
-                          );
-                      }}
-                      position="bottom-end"
-                      withinPortal={false}
-                      withInitialFocusPlaceholder={false}
-                    >
-                      <Menu.Target>
-                        <ActionButton
-                          className="account-card-menu"
-                          data-autofocus={
-                            initialFocusIdentity === row.key ? true : undefined
-                          }
-                          ref={(node) => {
-                            if (node) accountMenuTriggers.set(row.key, node);
-                            else accountMenuTriggers.delete(row.key);
-                          }}
-                          actionRole="quiet"
-                          onClick={(event) =>
-                            event.currentTarget.focus({ preventScroll: true })
-                          }
-                          data-mantine-stop-propagation={
-                            openAccountMenuKey === row.key || suppressNextEscape
-                              ? "true"
-                              : undefined
-                          }
-                          onKeyDown={(event) =>
-                            closeMenuFromTriggerOnEscape(
-                              event,
-                              openAccountMenuKey === row.key,
-                              () => setMenu(row.key, false),
-                              suppressNextEscape,
-                              clearSuppression,
-                            )
-                          }
-                          onBlur={clearSuppression}
-                          aria-label={`Actions for ${row.email || row.label}`}
-                        >
-                          <Ellipsis size={18} />
-                        </ActionButton>
-                      </Menu.Target>
-                      <Menu.Dropdown data-mantine-stop-propagation="true">
-                        {servers
-                          .filter((server) => row.byServer[server.id])
-                          .map((server) => (
-                            <div key={server.id}>
-                              <Menu.Label>{server.label}</Menu.Label>
-                              {(
-                                [
-                                  ...(row.provider === ProviderKind.Claude
-                                    ? (["configure-profile"] as const)
-                                    : []),
-                                  "rename",
-                                  "default",
-                                  "disconnect",
-                                  "remove",
-                                ] as const
-                              ).map((operation) => (
-                                <Menu.Item
-                                  key={operation}
-                                  disabled={cannotSignIn(server)}
-                                  {...(operation === "remove" ||
-                                  operation === "disconnect"
-                                    ? { color: "red" }
-                                    : {})}
-                                  onClick={() => {
-                                    if (cannotSignIn(server)) return;
-                                    const accountKey = exactAccountKey(
-                                      server.id,
-                                    );
-                                    if (!accountKey) return;
-                                    accountAction(server.id, {
-                                      action: "account-action",
-                                      accountKey,
-                                      operation,
-                                      provider: row.provider,
-                                      email: row.email,
-                                      label: row.label,
-                                    });
-                                  }}
-                                >
-                                  {operation === "rename"
-                                    ? "Rename"
-                                    : operation === "configure-profile"
-                                      ? "Configure"
-                                      : operation === "default"
-                                        ? "Make default"
-                                        : operation === "disconnect"
-                                          ? "Sign out"
-                                          : "Remove"}
-                                </Menu.Item>
-                              ))}
-                              <Menu.Item
-                                disabled={cannotSignIn(server)}
-                                onClick={() => signIn(server)}
-                              >
-                                {`Sign in again on ${server.label}`}
-                              </Menu.Item>
-                            </div>
-                          ))}
-                      </Menu.Dropdown>
-                    </Menu>
-                    <div
-                      className="server-account-login-actions"
-                      role="group"
-                      aria-label={`Sign in for ${row.email || row.label}`}
-                    >
-                      {servers
-                        .filter(
-                          (server) =>
-                            row.byServer[server.id] &&
-                            (!exactAccountKey(server.id) ||
-                              needsSignIn(row.byServer[server.id]!.status)),
-                        )
-                        .map((server) => (
-                          <ActionButton
-                            key={server.id}
-                            actionRole="secondary"
-                            leftSection={<LogIn size={14} aria-hidden="true" />}
-                            aria-label={`Sign in to ${row.label || row.email} on ${server.label}`}
-                            disabled={cannotSignIn(server)}
-                            onClick={() => signIn(server)}
-                          >
-                            Sign in on {server.label}
-                          </ActionButton>
-                        ))}
-                      {servers
-                        .filter(
-                          (server) =>
-                            row.byServer[server.id] &&
-                            !exactAccountKey(server.id),
-                        )
-                        .map((server) => (
-                          <span role="status" key={server.id}>
-                            {server.label}: Account identity unknown.
-                          </span>
-                        ))}
-                    </div>
-                  </div>
-                  {sources.length ? (
-                    <AccountLimitsAcrossServers
-                      sources={sources}
-                      extraDetails={accountDetails}
-                      facts={facts}
-                    />
-                  ) : (
-                    <AccountCapacityView
-                      card
-                      account={{
-                        status: AccountStatus.signedOut,
-                        email: row.email,
-                        label: row.label,
-                      }}
-                      view={accountLimitView(
-                        { id: row.key, status: AccountStatus.signedOut },
-                        null,
-                      )}
-                      facts={facts}
-                      extraDetails={accountDetails}
-                    />
-                  )}
-                </Accordion.Item>
-              );
-            })}
+            {props.rows.map((view) => (
+              <AccountRow
+                key={view.row.key}
+                view={view}
+                focus={props.initialFocusIdentity}
+                ui={ui}
+              />
+            ))}
           </Accordion>
         )}
       </SettingsSection>
@@ -580,23 +102,7 @@ const ServerAccountsPanel = observer(function ServerAccountsPanel({
           value={{
             onCancel: () => setAdding(false),
             unavailable: !selected,
-            onContinue: () => {
-              if (!selected || !draft.provider) return;
-              startAccount(selected.id, {
-                action: "account-sign-in",
-                provider: draft.provider,
-                email: draft.email.trim() || null,
-                label:
-                  draft.label.trim() ||
-                  draft.email.trim() ||
-                  PROVIDER_LABELS[draft.provider],
-                serverLabel: selected.label,
-                forceAdd: true,
-              });
-              setAdding(false);
-              draft.label = "";
-              draft.email = "";
-            },
+            onContinue: () => ui.continueAdd(selected, startAccount),
           }}
         >
           <AccountAddForm model={draft} gap="sm">

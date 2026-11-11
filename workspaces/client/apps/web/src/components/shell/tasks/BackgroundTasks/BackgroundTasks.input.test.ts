@@ -80,10 +80,12 @@ async function fixture() {
   let lost = true;
   let receiptStatus = "acknowledged";
   let receiptOverride: unknown;
+  let receiptWait: Promise<void> | undefined;
   let receiptOnly = false;
   const fetch = async (request: Request) => {
     requests.push(request);
     if (request.method === "GET") {
+      await receiptWait;
       if (receiptOverride) return Response.json(receiptOverride);
       const id = new URL(request.url).searchParams.get("requestId");
       return Response.json({
@@ -161,7 +163,8 @@ async function fixture() {
   document.body.append(host);
   const root = createRoot(host);
   const notify = vi.fn();
-  const area: BackgroundTaskActions = createBackgroundTaskArea(
+  const initialPost = vi.spyOn(hooks.api!, "post");
+  let area: BackgroundTaskActions = createBackgroundTaskArea(
     hooks.api!,
     store,
     "local",
@@ -251,6 +254,30 @@ async function fixture() {
   };
   return {
     storage,
+    pauseReceipt: () => {
+      let accept = () => {};
+      receiptWait = new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+      return () => {
+        receiptWait = undefined;
+        accept();
+      };
+    },
+    initialPost,
+    switchScope: async (leadId = "next-owner") => {
+      const api = open(),
+        post = vi.spyOn(api, "post");
+      area = createBackgroundTaskArea(api, store, "local", {
+        opened: true,
+        leadId,
+        close() {},
+        openAgent() {},
+        notify,
+      });
+      await render();
+      return post;
+    },
     notify,
     writes,
     requests,
@@ -407,4 +434,32 @@ it("the receipt reader keeps a pending identity for missing or mismatched eviden
   });
   expect(await hooks.api!.pendingMonitorInput("monitor-one")).toBeNull();
   expect(f.writes.size).toBe(1);
+});
+
+it("uses the new activity scope for input after its provider changes on the same element", async () => {
+  const f = await fixture();
+  await f.type("old scope draft");
+  const post = await f.switchScope();
+  expect(f.input().value).toBe("");
+  await f.type("new scope input");
+  const sameScopePost = await f.switchScope();
+  expect(f.input().value).toBe("new scope input");
+  await f.send();
+  expect(sameScopePost).toHaveBeenCalledOnce();
+  expect(post).not.toHaveBeenCalled();
+  expect(f.initialPost).not.toHaveBeenCalled();
+});
+
+it("keeps input disabled while a receipt check is pending", async () => {
+  const f = await fixture();
+  await f.type("receipt witness");
+  await f.send();
+  const resume = f.pauseReceipt();
+  try {
+    await f.check();
+    expect(f.input().disabled).toBe(true);
+  } finally {
+    await act(async () => resume());
+  }
+  expect(f.input().disabled).toBe(false);
 });

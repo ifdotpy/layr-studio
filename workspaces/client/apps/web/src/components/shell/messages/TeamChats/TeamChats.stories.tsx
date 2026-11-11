@@ -125,7 +125,7 @@ function MessagesFixture({
       >
         <models.Provider>
           <ConversationProvider value={conversationActionsFixture()}>
-            <TeamChats leadId="lead" owner={models.chats} />
+            <TeamChats owner={models.chats} />
           </ConversationProvider>
         </models.Provider>
       </div>

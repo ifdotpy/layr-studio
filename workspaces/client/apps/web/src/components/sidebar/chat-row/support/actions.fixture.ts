@@ -1,7 +1,8 @@
-import { localSidebarServices } from "../../support/services.tsx";
 import { observable } from "mobx";
-import type { SidebarRowActions, ChatRowActions } from "./actions.ts";
+import { requestId } from "studio-claude-bridge/request-id.ts";
+import { localSidebarServices } from "../../support/services.tsx";
 import type { SidebarAgent } from "../../support/viewModel.ts";
+import type { ChatRowActions, SidebarRowActions } from "./actions.ts";
 
 /** Explicit row UI owner for isolated render witnesses. */
 export function rowArea(
@@ -25,6 +26,9 @@ export function rowArea(
 ): SidebarRowActions {
   const id = props.id || "a";
   return {
+    viewKey: requestId(),
+    room: () => undefined,
+    row: () => undefined,
     commands,
     ui: {
       services: localSidebarServices,

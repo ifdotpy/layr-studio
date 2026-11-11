@@ -1,9 +1,6 @@
 import type { OrchestrationSettingSpec } from "../support/OrchestrationSettings.tsx";
-import { OrchestrationNumberSetting } from "../OrchestrationNumberSetting/OrchestrationNumberSetting.tsx";
-import {
-  IdleCompactionSettings,
-  idleCompactionDefaults,
-} from "../IdleCompactionSettings/IdleCompactionSettings.tsx";
+import { SettingsNumber } from "../SettingsNumber/SettingsNumber.tsx";
+import { IdleCompactionSettings } from "../IdleCompactionSettings/IdleCompactionSettings.tsx";
 import { BackgroundShellSettings } from "../BackgroundShellSettings/BackgroundShellSettings.tsx";
 import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import { observer } from "mobx-react-lite";
@@ -22,37 +19,31 @@ export const OrchestrationSettings = observer(function OrchestrationSettings({
 }) {
   const model = useServerAreas().settingsModels.orchestration;
   if (!active) return null;
-  const { configuration, error, busy, setConfiguration } = model;
+  const { configuration, error, busy } = model;
   return (
     <section className="settings-group" aria-label="Agent orchestration">
       <h2>Agent orchestration</h2>
       {configuration && (
         <>
-          {SPECS.map((spec) => (
-            <OrchestrationNumberSetting
-              key={spec.field}
-              spec={spec}
-              value={configuration.settings[spec.field]}
+          {SPECS.map(({ field, ...input }) => (
+            <SettingsNumber
+              key={field}
+              {...input}
+              value={configuration.settings[field]}
               disabled={busy}
-              onChange={(value) => model.patch({ [spec.field]: value })}
+              clampBehavior="strict"
+              onChange={(value) => model.patch({ [field]: value })}
             />
           ))}
           <BackgroundShellSettings
-            configuration={configuration}
-            setConfiguration={setConfiguration}
+            value={configuration.settings.shellPolicy}
+            onChange={(shellPolicy) => model.patch({ shellPolicy })}
             disabled={busy}
           />
           <IdleCompactionSettings
-            value={
-              configuration.settings.idleCompaction ?? idleCompactionDefaults
-            }
+            value={configuration.settings.idleCompaction}
             disabled={busy}
-            onChange={(value) =>
-              setConfiguration({
-                ...configuration,
-                settings: { ...configuration.settings, idleCompaction: value },
-              })
-            }
+            onChange={(idleCompaction) => model.patch({ idleCompaction })}
           />
           <Button mt="md" loading={busy} onClick={model.save}>
             Save orchestration settings
@@ -68,8 +59,8 @@ export const childResultHoldSpec: OrchestrationSettingSpec = {
   field: "childResultCoalesceSeconds",
   label: "Subagent result hold (seconds)",
   help: "Deliver results that finish close together in one lead turn.",
-  ariaLabel: "Subagent result hold in seconds",
-  tooltip:
+  "aria-label": "Subagent result hold in seconds",
+  title:
     "When a lead has several subagents running, a finished subagent's result is held " +
     "for up to this many seconds so results that arrive close together are delivered " +
     "to the lead in one turn. The lead is woken immediately when all its subagents " +
@@ -82,8 +73,8 @@ export const idleSessionUnloadSpec: OrchestrationSettingSpec = {
   field: "idleSessionUnloadMinutes",
   label: "Unload idle sessions after (minutes)",
   help: "Free the memory of leads and chats that have nothing to do.",
-  ariaLabel: "Unload idle sessions after minutes",
-  tooltip:
+  "aria-label": "Unload idle sessions after minutes",
+  title:
     "A lead's or ordinary chat's Codex thread or Claude session without a running " +
     "turn, pending input, or active monitor is unloaded after this many minutes " +
     "and resumed automatically on the next message. An account's provider process " +

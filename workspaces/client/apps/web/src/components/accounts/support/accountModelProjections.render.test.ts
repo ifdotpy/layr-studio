@@ -1,12 +1,13 @@
 import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
-import Workspace from "../../shell/Workspace/Workspace.tsx";
 import { componentSnapshot as snapshotFixture } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
+import { accountRows } from "../../../servers/AccountsPanelState.ts";
+import Workspace from "../../shell/Workspace/Workspace.tsx";
 // @vitest-environment happy-dom
+import { MantineProvider } from "@mantine/core";
+import { autorun } from "mobx";
+import { observer } from "mobx-react-lite";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { MantineProvider } from "@mantine/core";
-import { observer } from "mobx-react-lite";
-import { autorun } from "mobx";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   createModelsMirror,
@@ -14,12 +15,12 @@ import {
 } from "../../../generated/observableResources.ts";
 import { createServerStore } from "../../../store/server.ts";
 import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
+import { createWorkerCatalog } from "../../agents/support/WorkerModelPicker.tsx";
+import ServerAccountsPanel from "../../servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ModelWhitelistSettings } from "../../settings/models/ModelWhitelistSettings/ModelWhitelistSettings.tsx";
-import { createWorkerCatalog } from "../../agents/support/WorkerModelPicker.tsx";
 import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { frameAccounts } from "../Accounts/Accounts.tsx";
-import ServerAccountsPanel from "../../servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
 
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
@@ -323,10 +324,17 @@ it("updates settings account names, defaults and status from incremental generat
     return accounts
       ? createElement(ServerAccountsPanel, {
           servers: [server],
-          accountsByServer: { local: frameAccounts(accounts) },
-          statuses: { local: "live" },
+          rows: accountRows(
+            {
+              servers: [server],
+              accountsByServer: { local: frameAccounts(accounts) },
+              statuses: { local: "live" },
+              startAccount: noop,
+              accountAction: noop,
+            },
+            f.store,
+          ),
           startAccount: noop,
-          accountAction: noop,
         })
       : createElement("p", { role: "status" }, "Loading accounts…");
   });

@@ -1,7 +1,7 @@
 import { observer } from "mobx-react-lite";
 import ErrorDescription from "../../../shell/ErrorDescription/ErrorDescription.tsx";
 import type { JsonValue } from "../../../../types.ts";
-import { requestApprovalDetails } from "../support/requestData.ts";
+import { requestApprovalDetails } from "../../support/requestData.ts";
 import {
   requestRenderProbe,
   type RequestView,

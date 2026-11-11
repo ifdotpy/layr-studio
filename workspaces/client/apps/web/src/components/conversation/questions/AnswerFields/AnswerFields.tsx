@@ -1,6 +1,6 @@
 import { observer } from "mobx-react-lite";
 import { Owned } from "../../../ui/Owned/Owned.tsx";
-import { AnswerSelection } from "../support/AnswerSelection.ts";
+import { AnswerSelection } from "../../support/AnswerSelection.ts";
 import { Checkbox, TextInput, Textarea, UnstyledButton } from "@mantine/core";
 
 export type AnswerQuestion = {

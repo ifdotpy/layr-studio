@@ -4,7 +4,7 @@ import {
   useServerStorage,
   useServerStore,
 } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useMemo } from "react";
+import { Owned } from "../../../ui/Owned/Owned.tsx";
 import { observer } from "mobx-react-lite";
 
 import { complaintResponseStore } from "../support/complaintReplyRequest.ts";
@@ -26,17 +26,6 @@ export default observer(function UserMessages({
   const store = useServerStore();
   const state = resourceData(store.state().current);
   const stateDir = state?.workspaces.values().next().value?.stateDir || "";
-  const pending = useMemo(() => {
-    try {
-      return new Map(
-        Object.entries(complaintResponseStore(storage, stateDir).read()),
-      );
-    } catch {
-      return new Error(
-        "The saved response request cannot be read. Resolve it before sending another response.",
-      );
-    }
-  }, [stateDir, storage]);
   const selected = onlyComplaintId
     ? state?.complaints.get(onlyComplaintId)
     : undefined;
@@ -48,24 +37,43 @@ export default observer(function UserMessages({
       : [...(state?.complaints.values() || [])]
   ).filter((message) => message.recipient === target);
   return (
-    <section className="user-message-list">
-      {pending instanceof Error ? (
-        <p role="alert">{pending.message}</p>
-      ) : (
-        records.map((message) => (
-          <UserMessage
-            key={JSON.stringify([stateDir, message.id])}
-            message={message}
-            scope={stateDir}
-            focused={message.id === focusId}
-            focusRequestId={focusRequestId}
-            requests={pending}
-          />
-        ))
+    <Owned
+      key={stateDir}
+      create={() => readComplaintRequests(storage, stateDir)}
+    >
+      {(pending) => (
+        <section className="user-message-list">
+          {pending instanceof Error ? (
+            <p role="alert">{pending.message}</p>
+          ) : (
+            records.map((message) => (
+              <UserMessage
+                key={JSON.stringify([stateDir, message.id])}
+                message={message}
+                scope={stateDir}
+                focused={message.id === focusId}
+                focusRequestId={focusRequestId}
+                requests={pending}
+              />
+            ))
+          )}
+          {!hideEmpty && !records.length && (
+            <p className="notice">No messages yet.</p>
+          )}
+        </section>
       )}
-      {!hideEmpty && !records.length && (
-        <p className="notice">No messages yet.</p>
-      )}
-    </section>
+    </Owned>
   );
 });
+
+function readComplaintRequests(storage: Storage, stateDir: string) {
+  try {
+    return new Map(
+      Object.entries(complaintResponseStore(storage, stateDir).read()),
+    );
+  } catch {
+    return new Error(
+      "The saved response request cannot be read. Resolve it before sending another response.",
+    );
+  }
+}

@@ -1,5 +1,4 @@
 import { AgentStatus, AgentSource } from "../../../generated/api.ts";
-import { computed } from "mobx";
 import type { Agent } from "../../../types.ts";
 import type { SidebarAgent } from "../../sidebar/support/viewModel.ts";
 type WaitAgent = Agent & Pick<SidebarAgent, "hasBackgroundWork">;
@@ -30,22 +29,15 @@ export function visibleWaitingChild(child: WaitAgent) {
   return !!child.hasBackgroundWork || !!wait?.agents;
 }
 
-export function createWaitingChildren<T extends WaitAgent>(
-  agents: () => Iterable<T>,
+export function waitingChildren<T extends WaitAgent>(
+  agents: Iterable<T>,
   parentId: string,
 ) {
-  const children = computed(() =>
-    [...agents()].filter(
-      (child) =>
-        child.source === AgentSource["managed"] &&
-        child.parentId === parentId &&
-        child.id !== parentId &&
-        visibleWaitingChild(child),
-    ),
+  return [...agents].filter(
+    (child) =>
+      child.source === AgentSource["managed"] &&
+      child.parentId === parentId &&
+      child.id !== parentId &&
+      visibleWaitingChild(child),
   );
-  return {
-    get agents() {
-      return children.get();
-    },
-  };
 }

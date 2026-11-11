@@ -1,9 +1,8 @@
 import { resourceData } from "../../../store/runtime.ts";
 import { observer } from "mobx-react-lite";
-import { useMemo } from "react";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useActivityView } from "../support/state.ts";
-import { createWaitingChildren } from "./waitDetails.ts";
+import { waitingChildren } from "./waitDetails.ts";
 import type { SidebarAgent } from "../../sidebar/support/viewModel.ts";
 import { operationalWait } from "../support/phasePresentation.ts";
 
@@ -13,19 +12,15 @@ export const PhaseWaitDetails = observer(function PhaseWaitDetails({
   agent: SidebarAgent;
 }) {
   const store = useServerStore();
-  const children = useMemo(
-    () =>
-      createWaitingChildren(() => {
-        const current = store.state().current;
-        return resourceData(current)?.agents.values() ?? [];
-      }, agent.id),
-    [store, agent],
+  const children = waitingChildren(
+    resourceData(store.state().current)?.agents.values() ?? [],
+    agent.id,
   );
   const activities = useActivityView(agent);
   const reasons = operationalWait(agent).reasons;
   return (
     <ul>
-      {children.agents.map((child) => (
+      {children.map((child) => (
         <li key={child.id}>Agent: {child.name}</li>
       ))}
       {activities.commands.map((command) => (

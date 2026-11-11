@@ -15,7 +15,11 @@ import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
 import type { GetResult } from "../../../api.ts";
 import MarkdownImage from "./MarkdownImage.tsx";
 
-const hooks = vi.hoisted(() => ({ net: vi.fn(), api: vi.fn() }));
+const hooks = vi.hoisted(() => ({
+  net: vi.fn(),
+  api: vi.fn(),
+  preview: vi.fn<(...args: unknown[]) => null>(() => null),
+}));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
@@ -24,7 +28,7 @@ vi.mock(
   }),
 );
 vi.mock("../FilePreview/FilePreview.tsx", () => ({
-  default: () => null,
+  default: hooks.preview,
   useFilePreview: () => [null, vi.fn()],
 }));
 vi.mock("../PreviewModal/PreviewModal.tsx", () => ({ default: () => null }));
@@ -100,6 +104,88 @@ it("observes one file read for duplicate images and settles through a source cha
     await act(async () => root.unmount());
     store.dispose();
     subscriptions.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("uses the current server after an image provider rerender", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const sources = ["QQ==", "Qg=="].map((base64) => {
+    const subscriptions = createSubscriptions({
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    });
+    const store = createServerStore(subscriptions);
+    const api = createApiScope({
+      origin: "https://server.test",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({ name: "image.png", mime: "image/png", base64 }),
+          {
+            headers: {
+              "Content-Type": "application/json",
+              [API_SCHEMA_HASH_HEADER]: API_SCHEMA_HASH,
+            },
+          },
+        ),
+      localStorage: serverLocalStorage,
+      sessionStorage,
+      beginMutation: createMutationJournal("fixture", serverLocalStorage),
+    });
+    return {
+      net: createNet(api, () => store),
+      dispose() {
+        store.dispose();
+        subscriptions.dispose();
+      },
+    };
+  });
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  const render = (index: number) =>
+    act(async () => {
+      hooks.net.mockReturnValue(sources[index]?.net);
+      root.render(
+        createElement(MarkdownImage, {
+          src: "image.png",
+          alt: "image",
+          agentId: "agent",
+        }),
+      );
+    });
+  try {
+    await render(0);
+    expect(host.querySelector("img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,QQ==",
+    );
+    await render(1);
+    expect(host.querySelector("img")?.getAttribute("src")).toBe(
+      "data:image/png;base64,Qg==",
+    );
+    const net = sources[1]!.net,
+      slot = net.reads.file({ agent: "agent", path: "image.png" });
+    const retry = vi.spyOn(slot, "read");
+    await act(async () =>
+      host
+        .querySelector("img")
+        ?.dispatchEvent(new Event("error", { bubbles: true })),
+    );
+    await act(async () =>
+      host
+        .querySelector<HTMLButtonElement>(".markdown-image-placeholder button")
+        ?.click(),
+    );
+    expect(retry).toHaveBeenCalledOnce();
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(".image-preview-button")?.click(),
+    );
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(hooks.preview.mock.lastCall?.[0]).toEqual(
+      expect.objectContaining({ target: expect.objectContaining({ slot }) }),
+    );
+  } finally {
+    await act(async () => root.unmount());
+    sources.forEach((source) => source.dispose());
     vi.unstubAllGlobals();
   }
 });

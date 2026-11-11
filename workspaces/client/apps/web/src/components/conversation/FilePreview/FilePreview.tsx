@@ -4,20 +4,19 @@ import {
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useReadView } from "../../ui/support/useReadView.ts";
 import { observer } from "mobx-react-lite";
-import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
+import { type ReadSlot } from "../../../store/runtime.ts";
 import type { GetResult } from "../../../api.ts";
 import { Button, Loader } from "@mantine/core";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import ErrorDescription from "../../shell/ErrorDescription/ErrorDescription.tsx";
 import { isolatedDocument } from "../RichPreview/RichPreview.tsx";
-import {
-  fileFormat,
-  parseDelimited,
-  safeSvg,
-} from "../support/filePreviewFormats.ts";
 import ImageViewer from "../../shell/ImageViewer/ImageViewer.tsx";
 import PreviewModal from "../PreviewModal/PreviewModal.tsx";
+import type { FilePreviewState } from "../support/FilePreviewState.ts";
+import { SourceToggle } from "../SourceToggle/SourceToggle.tsx";
+import { openFilePreview } from "../support/PreviewSelection.ts";
+export { openFilePreview } from "../support/PreviewSelection.ts";
 
 // StreamingText opens FilePreview for links. Load it only for Markdown files.
 const Markdown = lazy(
@@ -29,17 +28,12 @@ export interface PreviewTarget {
   asset?: string;
   line?: number | undefined;
 }
-export type FilePreviewSelection = {
+export type PreviewSource = {
   target: PreviewTarget;
   slot: ReadSlot<GetResult<"/api/file">>;
 };
-type LoadedFile = {
-  name: string;
-  mime: string;
-  text: string;
-  bytes: Uint8Array<ArrayBuffer>;
-  format: ReturnType<typeof fileFormat>;
-};
+export type FilePreviewSelection = PreviewSource & { state: FilePreviewState };
+// integration: W7 read-view owner replaces this compatibility accessor.
 export function useFilePreview() {
   const net = useServerNet();
   const [target, setTarget] = useReadView<FilePreviewSelection>();
@@ -50,78 +44,32 @@ export function useFilePreview() {
     },
   ] as const;
 }
-export function openFilePreview(
-  net: ReturnType<typeof useServerNet>,
-  target: PreviewTarget,
-) {
-  const { agent, path, asset } = target;
-  const slot = net.reads.file({ agent, path, asset });
-  void slot.read().catch(() => {});
-  return { target, slot };
-}
 export default observer(function FilePreview({
   target: selection,
   onClose,
+  image,
 }: {
   target: FilePreviewSelection | null;
   onClose: () => void;
+  image?: { src: string; alt: string; onError: () => void } | undefined;
 }) {
   const { canUseNativeFiles, openFile, previewFile, revealFile, saveFile } =
     useServerFileActions();
+  const state = selection?.state;
   const target = selection?.target;
-  const slot = target && selection ? selection.slot.current : null;
-  const result = slot ? resourceData(slot) : undefined;
-
-  const file = useMemo<LoadedFile | null>(() => {
-    if (!result) return null;
-    const bytes = Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0));
-    const format = fileFormat(result.name, result.mime);
-    const text = [
-      "markdown",
-      "csv",
-      "tsv",
-      "json",
-      "text",
-      "html",
-      "svg",
-    ].includes(format)
-      ? new TextDecoder().decode(bytes)
-      : "";
-    return { name: result.name, mime: result.mime, bytes, format, text };
-  }, [result]);
-  const [failure, setFailure] = useState<{
-    selection: typeof selection;
-    error: unknown;
-  } | null>(null);
+  const file = state?.file;
   const [view, setView] = useState<{
     selection: typeof selection;
     source: boolean;
   }>();
   const source = view?.selection === selection ? view.source : !!target?.line;
   const setSource = (source: boolean) => setView({ selection, source });
+  const error = state?.error;
+  const url = state?.url;
+  const excerpt = state?.excerpt;
+  const table = state?.table;
+  const json = state?.json;
   const selectedLine = useRef<HTMLElement>(null);
-  const error =
-    failure?.selection === selection
-      ? failure.error
-      : slot?.status === "error"
-        ? slot.error
-        : null;
-  const [objectUrl, setObjectUrl] = useState<{
-    file: LoadedFile;
-    url: string;
-  }>();
-  const url = objectUrl?.file === file ? objectUrl?.url : undefined;
-  // Blob URLs are mounted browser media resources; decoded file data is derived above.
-  useEffect(() => {
-    if (!file) return setObjectUrl(undefined);
-    const url = URL.createObjectURL(
-      new Blob([file.format === "svg" ? safeSvg(file.text) : file.bytes], {
-        type: file.format === "svg" ? "image/svg+xml" : file.mime,
-      }),
-    );
-    setObjectUrl({ file, url });
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
   useEffect(() => {
     if (!file || !target?.line || !source) return;
     const frame = requestAnimationFrame(() =>
@@ -129,64 +77,34 @@ export default observer(function FilePreview({
     );
     return () => cancelAnimationFrame(frame);
   }, [file, target?.line, source]);
-  const excerpt = useMemo(() => {
-    if (!file || !target?.line) return null;
-    let start = 0;
-    for (let line = 1; line < target.line; line++) {
-      const end = file.text.indexOf("\n", start);
-      if (end < 0) return null;
-      start = end + 1;
-    }
-    const end = file.text.indexOf("\n", start),
-      stop = end < 0 ? file.text.length : end;
-    return {
-      before: file.text.slice(0, start),
-      line: file.text.slice(start, stop),
-      after: file.text.slice(stop),
-    };
-  }, [file, target?.line]);
-  const table = useMemo(
-    () =>
-      file && ["csv", "tsv"].includes(file.format)
-        ? parseDelimited(file.text, file.format === "tsv" ? "\t" : ",")
-        : null,
-    [file],
-  );
-  const json = useMemo(() => {
-    if (file?.format !== "json") return null;
-    try {
-      return {
-        text: JSON.stringify(JSON.parse(file.text), null, 2),
-        error: "",
-      };
-    } catch {
-      return {
-        text: file.text,
-        error: "Invalid JSON. The original source is shown.",
-      };
-    }
-  }, [file]);
-  const act = (operation: () => Promise<unknown>) => {
-    operation().catch((error) => setFailure({ selection, error }));
-  };
   const toggle =
     file && ["markdown", "csv", "tsv", "json"].includes(file.format);
+  const Media = file?.format === "audio" ? "audio" : "video";
   return (
     <PreviewModal
-      opened={!!target}
+      opened={!!target || !!image}
       onClose={onClose}
-      title={file?.name || target?.path || "File preview"}
+      title={
+        image
+          ? image.alt || "Image preview"
+          : file?.name || target?.path || "File preview"
+      }
       size={
-        file &&
-        file.text.length < 2000 &&
-        ["text", "json"].includes(file.format)
-          ? "min(720px, 100vw)"
-          : "min(900px, 100vw)"
+        image
+          ? "xl"
+          : file &&
+              file.text.length < 2000 &&
+              ["text", "json"].includes(file.format)
+            ? "min(720px, 100vw)"
+            : "min(900px, 100vw)"
       }
       overlayProps={{ blur: 0 }}
-      className="workspace-file-modal"
+      className={image ? undefined : "workspace-file-modal"}
     >
-      <div className="file-preview-toolbar">
+      <div
+        className="file-preview-toolbar"
+        style={image ? { display: "none" } : undefined}
+      >
         {file && (
           <>
             <span title={file.mime}>
@@ -199,7 +117,7 @@ export default observer(function FilePreview({
               size="xs"
               variant="subtle"
               onClick={() =>
-                act(() =>
+                state?.act(() =>
                   saveFile({
                     name: file.name,
                     mime: file.mime,
@@ -212,31 +130,22 @@ export default observer(function FilePreview({
             </Button>
           </>
         )}
-        {target && canUseNativeFiles() && (
-          <>
+        {target &&
+          canUseNativeFiles() &&
+          [
+            { label: "Open", operation: openFile },
+            { label: "Show in folder", operation: revealFile },
+            { label: "Preview", operation: previewFile },
+          ].map(({ label, operation }) => (
             <Button
+              key={label}
               size="xs"
               variant="subtle"
-              onClick={() => act(() => openFile(target))}
+              onClick={() => state?.act(() => operation(target))}
             >
-              Open
+              {label}
             </Button>
-            <Button
-              size="xs"
-              variant="subtle"
-              onClick={() => act(() => revealFile(target))}
-            >
-              Show in folder
-            </Button>
-            <Button
-              size="xs"
-              variant="subtle"
-              onClick={() => act(() => previewFile(target))}
-            >
-              Preview
-            </Button>
-          </>
-        )}
+          ))}
       </div>
       {error != null && (
         <p>
@@ -246,26 +155,9 @@ export default observer(function FilePreview({
       {!file && error == null && target && (
         <Loader size="sm" aria-label="Load file" />
       )}
-      {toggle && (
-        <div className="file-preview-toolbar" aria-label="File view">
-          <button
-            type="button"
-            aria-pressed={!source}
-            onClick={() => setSource(false)}
-          >
-            Preview
-          </button>
-          <button
-            type="button"
-            aria-pressed={source}
-            onClick={() => setSource(true)}
-          >
-            Source
-          </button>
-        </div>
-      )}
+      {toggle && state && <SourceToggle source={source} onChange={setSource} />}
+      {image && <ImageViewer {...image} />}
       {file &&
-        url &&
         (source || file.format === "text" ? (
           <pre className="file-preview-body file-preview-source">
             {excerpt ? (
@@ -280,13 +172,11 @@ export default observer(function FilePreview({
               file.text
             )}
           </pre>
-        ) : file.format === "image" || file.format === "svg" ? (
+        ) : (file.format === "image" || file.format === "svg") && url ? (
           <ImageViewer
             src={url}
             alt={file.name}
-            onError={() =>
-              setFailure({ selection, error: "Cannot load this image." })
-            }
+            onError={() => state?.fail("Cannot load this image.")}
           />
         ) : file.format === "markdown" ? (
           <div className="file-preview-body">
@@ -334,30 +224,20 @@ export default observer(function FilePreview({
             referrerPolicy="no-referrer"
             srcDoc={isolatedDocument(file.text)}
           />
-        ) : file.format === "pdf" ? (
+        ) : file.format === "pdf" && url ? (
           <iframe
             title={file.name}
             className="workspace-preview-frame"
             src={url}
           />
-        ) : file.format === "audio" ? (
-          <audio
+        ) : ["audio", "video"].includes(file.format) && url ? (
+          <Media
             onError={() =>
-              setFailure({ selection, error: "Cannot play this audio format." })
+              state?.fail(`Cannot play this ${file.format} format.`)
             }
             className="file-preview-media"
             controls
-            preload="metadata"
-            src={url}
-          />
-        ) : file.format === "video" ? (
-          <video
-            onError={() =>
-              setFailure({ selection, error: "Cannot play this video format." })
-            }
-            className="file-preview-media"
-            controls
-            playsInline
+            playsInline={file.format === "video"}
             preload="metadata"
             src={url}
           />

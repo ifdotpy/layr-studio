@@ -2,7 +2,7 @@ import { serverLocalStorage } from "./servers/storage.ts";
 // @vitest-environment happy-dom
 import { action, autorun, spy } from "mobx";
 import { expect, it, vi } from "vitest";
-import { WorkspaceResource } from "./components/shell/Workspace/WorkspaceResource.ts";
+import { WorkspaceResource } from "./app/shell/WorkspaceResource.ts";
 import { OrchestrationSettingsStore } from "./app/settings/SettingsModels.ts";
 import { FederationSettingsStore } from "./components/settings/FederationSettings/FederationSettings.tsx";
 import { ClaudeSettingsStore } from "./components/settings/ClaudeSettingsView/ClaudeSettingsStore.ts";

@@ -10,8 +10,6 @@ import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 
 export const AppPanels = observer(function AppPanels() {
   const a = useServerAreas(),
-    ui = a.ui,
-    l = a.layout,
     active = a.scope.screen.active,
     lead = a.navigation.selectedLead,
     agent = a.navigation.selectedAgent;
@@ -20,8 +18,8 @@ export const AppPanels = observer(function AppPanels() {
       {a.layout.isNarrowTeam ? (
         <TeamPresence>
           <Drawer
-            opened={ui.isTeamVisible}
-            onClose={ui.closeTeamDrawer}
+            opened={a.ui.isTeamVisible}
+            onClose={a.ui.closeTeamDrawer}
             position="right"
             size="var(--studio-team-size)"
             padding={0}
@@ -32,19 +30,19 @@ export const AppPanels = observer(function AppPanels() {
             <TeamPanel />
           </Drawer>
         </TeamPresence>
-      ) : ui.isTeamVisible ? (
+      ) : a.ui.isTeamVisible ? (
         <TeamPanel />
       ) : null}
-      {ui.visited && a.startup.isReady && (
+      {a.ui.visited && a.startup.isReady && (
         <Workspace
           key={`workspace:${lead?.id || "none"}`}
-          opened={active && ui.opened}
-          onClose={ui.closeWorkspace}
-          initialSection={ui.section}
-          initialFocus={ui.focus}
-          inlineTarget={l.slot}
-          panelLayout={l.panelLayout}
-          onPanelWidthChange={l.setPreferredPanelWidth}
+          opened={active && a.ui.opened}
+          onClose={a.ui.closeWorkspace}
+          initialSection={a.ui.section}
+          initialFocus={a.ui.focus}
+          inlineTarget={a.layout.slot}
+          panelLayout={a.layout.panelLayout}
+          onPanelWidthChange={a.layout.setPreferredPanelWidth}
           resizeScope={
             a.startup.workspaceId || a.startup.creationScope || "pending"
           }
@@ -54,20 +52,20 @@ export const AppPanels = observer(function AppPanels() {
         />
       )}
       <BackgroundTasks
-        actions={ui.activity}
+        actions={a.ui.activity}
         key={`tasks:${lead?.id || "none"}`}
-        opened={active && ui.tasksOpen}
-        initialFocus={ui.taskFocus}
-        close={ui.closeTasks}
-        afterClose={ui.afterTaskClose}
-        leadId={active && ui.tasksOpen ? lead?.id : undefined}
+        opened={active && a.ui.tasksOpen}
+        initialFocus={a.ui.taskFocus}
+        close={a.ui.closeTasks}
+        afterClose={a.ui.afterTaskClose}
+        leadId={active && a.ui.tasksOpen ? lead?.id : undefined}
         openAgent={a.open}
         notify={a.notices.notify}
       />
-      {ui.terminalVisible && <TerminalDock />}
+      {a.ui.terminalVisible && <TerminalDock />}
       <FilePreview
-        target={active ? ui.filePreview : null}
-        onClose={ui.closePreview}
+        target={active ? a.ui.filePreview : null}
+        onClose={a.ui.closePreview}
       />
     </>
   );

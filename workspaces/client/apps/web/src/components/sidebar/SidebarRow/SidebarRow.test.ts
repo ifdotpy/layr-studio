@@ -1,11 +1,14 @@
+import { MarkUnreadEligibility } from "../../../generated/api.ts";
 import { createStateMirror } from "../../../generated/observableResources.ts";
-import { SidebarOrderOwner } from "../support/useSidebarOrder.ts";
-import { localSidebarServices } from "../support/services.tsx";
 import { rowArea } from "../chat-row/support/actions.fixture.ts";
 import { SidebarRowActionsProvider } from "../chat-row/support/actions.ts";
 import type { Summary } from "../chat-row/support/testFixture.ts";
-import { MarkUnreadEligibility } from "../../../generated/api.ts";
+import { localSidebarServices } from "../support/services.tsx";
+import { SidebarOrderOwner } from "../support/useSidebarOrder.ts";
 // @vitest-environment happy-dom
+import { MantineProvider } from "@mantine/core";
+import { observable, runInAction } from "mobx";
+import { observer } from "mobx-react-lite";
 import {
   act,
   createElement,
@@ -13,16 +16,13 @@ import {
   StrictMode,
   type ComponentType,
 } from "react";
-import { MantineProvider } from "@mantine/core";
-import { observer } from "mobx-react-lite";
 import { expect, it, vi } from "vitest";
+import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
+import type { SidebarRowActions } from "../chat-row/support/actions.ts";
+import { actions, fixture, makeRow } from "../chat-row/support/testFixture.ts";
+import ProjectStateCounts from "../ProjectStateCounts/ProjectStateCounts.tsx";
 import type { SidebarAgent } from "../support/viewModel.ts";
 import SidebarRow from "./SidebarRow.tsx";
-import ProjectStateCounts from "../ProjectStateCounts/ProjectStateCounts.tsx";
-import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
-import { actions, fixture, makeRow } from "../chat-row/support/testFixture.ts";
-import { observable, runInAction } from "mobx";
-import type { SidebarRowActions } from "../chat-row/support/actions.ts";
 
 it("the count leaf observes status without observing chat names", async () => {
   const f = fixture();
@@ -98,6 +98,9 @@ it.each([false, true])(
       services: localSidebarServices,
     });
     const area: SidebarRowActions = {
+      viewKey: "fixture",
+      row: () => undefined,
+      room: () => undefined,
       ui,
       commands: () => actions,
       disabled: (row) => ui.offline.has(row.id),

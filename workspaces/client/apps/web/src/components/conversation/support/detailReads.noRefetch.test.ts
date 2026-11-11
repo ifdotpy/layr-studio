@@ -16,7 +16,7 @@ import type { ComponentHookCell } from "../ComposerAttachments/componentTestFixt
 import { required } from "../ComposerAttachments/componentTestFixtures.ts";
 import type { EffectCallback, PropsWithChildren } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { createElement, isValidElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, Message } from "../../../types.ts";
@@ -100,7 +100,7 @@ const detailStore = {
     return reads.reads;
   },
   agentDetail: () => ({ current: { status: "loading" } }),
-  sessionCost: () => ({
+  sessionCost: (): ReturnType<MessageInfoSource["sessionCost"]> => ({
     current: h.cost ? { status: "live", data: h.cost } : { status: "absent" },
   }),
 };
@@ -138,22 +138,18 @@ vi.mock(
   () => ({ default: "directory-picker" }),
 );
 
-import { useTurnErrors } from "../transcript/TurnHistory/useTurnErrors.ts";
-import MessageInfo from "../transcript/MessageInfo/MessageInfo.tsx";
+import { TurnErrorStore } from "./useTurnErrors.ts";
+import {
+  MessageInfoStore,
+  type MessageInfoSource,
+} from "../transcript/MessageInfo/MessageInfoStore.ts";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
   observer: <T>(component: T) => component,
 }));
 
-function messageInfo(props: ComponentProps<typeof MessageInfo>) {
-  const node = MessageInfo(props);
-  if (!isValidElement<{ onClick(): void; onChange(open: boolean): void }>(node))
-    throw new Error("Expected the message info trigger or popover");
-  return node;
-}
 import { ClaudeSettingsView as ClaudeSettings } from "../../settings/ClaudeSettingsView/ClaudeSettingsView.tsx";
 import ClaudeRepairNotice from "../ClaudeRepairNotice/ClaudeRepairNotice.tsx";
-import ProjectLocationsSettings from "../../settings/ProjectLocationsSettings/ProjectLocationsSettings.tsx";
 import { NativeNotice } from "../../shell/NativeNotice/NativeNotice.tsx";
 
 let renderReaction = new Reaction("detail reads harness", () => {});
@@ -217,7 +213,9 @@ const agent: Agent = {
 
 it("new failed and uncertain turns use inline errors without analytics reads", async () => {
   h.get.mockResolvedValue({ turns: [] });
-  renderObserved(() => useTurnErrors([], agent, "live-turns"));
+  const errors = new TurnErrorStore([]);
+  const net = createNet({ ...api, get: h.get, post: h.post }, () => reads);
+  renderObserved(() => errors.read([], agent, reads, net));
   await settle();
   for (const turnStatus of ["failed", "uncertain"] as const) {
     const items: Message[] = [
@@ -229,17 +227,16 @@ it("new failed and uncertain turns use inline errors without analytics reads", a
         turnStatus,
       },
     ];
-    const result = renderObserved(() =>
-      useTurnErrors(items, agent, "live-turns"),
-    );
+    const result = renderObserved(() => errors.read(items, agent, reads, net));
     await settle();
     expect(result.loading.length).toBe(0);
     expect(h.get).not.toHaveBeenCalled();
     const inline = renderObserved(() =>
-      useTurnErrors(
+      errors.read(
         [{ ...required(items[0]), turnError: "Streamed failure" }],
         agent,
-        "live-turns",
+        reads,
+        net,
       ),
     );
     expect(
@@ -272,7 +269,9 @@ it("historical error first load and an explicit retry still read once each", asy
       turnStatus: "failed",
     },
   ];
-  const read = () => useTurnErrors(items, agent, "past-turns");
+  const errors = new TurnErrorStore(items);
+  const net = createNet({ ...api, get: h.get, post: h.post }, () => reads);
+  const read = () => errors.read(items, agent, reads, net);
   renderObserved(read);
   await settle();
   const result = renderObserved(read);
@@ -295,20 +294,24 @@ it("opening a different thread loads its historical errors once", async () => {
       turnStatus: "failed",
     },
   ];
-  renderObserved(() => useTurnErrors(items, agent, "thread-switch"));
+  let errors = new TurnErrorStore(items);
+  const net = createNet({ ...api, get: h.get, post: h.post }, () => reads);
+  renderObserved(() => errors.read(items, agent, reads, net));
   await settle();
   const nextAgent = { ...agent, threadId: "next-thread" };
-  renderObserved(() => useTurnErrors(items, nextAgent, "thread-switch"));
+  errors = new TurnErrorStore(items);
+  renderObserved(() => errors.read(items, nextAgent, reads, net));
   await settle();
   expect(h.get).toHaveBeenCalledTimes(2);
   expect(required(required(h.get.mock.calls[1])[1]).query.thread).toBe(
     "next-thread",
   );
   renderObserved(() =>
-    useTurnErrors(
+    errors.read(
       [...items, { ...required(items[0]), id: "live", turnId: "live" }],
       nextAgent,
-      "thread-switch",
+      reads,
+      net,
     ),
   );
   await settle();
@@ -323,18 +326,13 @@ it("message info reads on open and reopen but not streamed turn metadata changes
     text: "answer",
     streaming: true,
   };
+  const model = new MessageInfoStore();
+  const net = createNet({ ...api, get: h.get, post: h.post }, () => reads);
   const read = () =>
-    messageInfo({
-      message,
-      agentId: agent.id,
-      stateDir: "fixture",
-      onCopy: vi.fn(),
-    });
-  let view = render(read);
+    model.view(message, agent.id, undefined, undefined, detailStore);
   expect(h.get).not.toHaveBeenCalled();
-  // The closed message info is its plain trigger; the popover mounts on open.
-  view.props.onClick();
-  render(read);
+  model.changeOpen(true, read().query, detailStore, net);
+  renderObserved(read);
   await settle();
   message = {
     ...message,
@@ -343,36 +341,25 @@ it("message info reads on open and reopen but not streamed turn metadata changes
     streaming: false,
     turnStatus: "completed",
   };
-  view = render(read);
+  const view = renderObserved(read);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(1);
-  expect(
-    find(
-      view,
-      (node) => node.type === "dd" && node.props.children === "queried-model",
-    ),
-  ).toBeDefined();
-  view.props.onChange(false);
-  view = render(read);
-  view.props.onChange(true);
-  render(read);
+  expect(view.rows).toContainEqual(["Model", "queried-model"]);
+  model.close();
+  model.changeOpen(true, read().query, detailStore, net);
+  renderObserved(read);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(2);
 });
 
 it("message info uses streamed cost and leaves missing cost unavailable", async () => {
   h.get.mockResolvedValue({});
+  const model = new MessageInfoStore();
+  const net = createNet({ ...api, get: h.get, post: h.post }, () => reads);
+  const message: Message = { id: "item", role: "assistant", text: "answer" };
   const read = () =>
-    messageInfo({
-      message: { id: "item", role: "assistant", text: "answer" },
-      agentId: agent.id,
-      stateDir: "fixture",
-      rootId: "root",
-      onCopy: vi.fn(),
-    });
-  let view = render(read);
-  view.props.onClick();
-  render(read);
+    model.view(message, agent.id, "root", undefined, detailStore);
+  model.changeOpen(true, read().query, detailStore, net);
   const notify = (snapshot: Snapshot) => {
     h.cost = snapshot.runtime.sessionCostsByAgent?.root;
   };
@@ -393,14 +380,9 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
       { token: "", stateDir: "/fixture" },
     ),
   );
-  view = render(read);
   expect(
-    find(
-      view,
-      (node) =>
-        node.type === "dt" && node.props.children === "Session estimate (USD)",
-    ),
-  ).toBeUndefined();
+    read().rows.some(([label]) => label === "Session estimate (USD)"),
+  ).toBe(false);
   notify(
     Object.assign(
       snapshotFixture([], {
@@ -409,23 +391,13 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
       { token: "", stateDir: "/fixture" },
     ),
   );
-  view = render(read);
   expect(
-    find(
-      view,
-      (node) =>
-        node.type === "dt" && node.props.children === "Session estimate (USD)",
-    ),
-  ).toBeDefined();
+    read().rows.some(([label]) => label === "Session estimate (USD)"),
+  ).toBe(true);
   notify(Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }));
-  view = render(read);
   expect(
-    find(
-      view,
-      (node) =>
-        node.type === "dt" && node.props.children === "Session estimate (USD)",
-    ),
-  ).toBeUndefined();
+    read().rows.some(([label]) => label === "Session estimate (USD)"),
+  ).toBe(false);
 });
 
 it("Claude account status and key updates do not reload settings; explicit retry does", async (ctx) => {
@@ -516,112 +488,4 @@ it("repair scope changes hide old evidence without reads; refresh uses the curre
   render(read);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(2);
-});
-
-it("location menu reads once and location changes do not refetch folder info", async () => {
-  vi.stubGlobal("window", { addEventListener() {}, removeEventListener() {} });
-  h.get.mockResolvedValue({ gitHead: "initial-head" });
-  const location = { serverId: "local", path: "/one", projectId: "project" };
-  let project = {
-    id: "project",
-    name: "Project",
-    path: "/one",
-    locations: [location],
-  };
-  const read = () => {
-    const view = ProjectLocationsSettings({ project });
-    if (!isValidElement(view)) throw new Error("Expected location settings");
-    return view;
-  };
-  render(read);
-  await settle();
-  expect(h.get).not.toHaveBeenCalled();
-  const menu = find(
-    render(read),
-    (node) =>
-      node.props.opened === false && typeof node.props.onChange === "function",
-  );
-  const open = menu?.props.onChange;
-  if (typeof open !== "function") throw new Error("Missing location menu");
-  open(true);
-  await settle();
-  expect(h.get).toHaveBeenCalledTimes(1);
-  for (const locations of [
-    [{ ...location }],
-    [{ ...location, path: "/two" }],
-    [location, { ...location, serverId: "remote" }],
-  ]) {
-    project = { ...project, locations };
-    const view = render(read);
-    await settle();
-    expect(h.get).toHaveBeenCalledTimes(1);
-    const row = find(
-      view,
-      (node) => node.props.className === "project-location-row",
-    );
-    const label = row?.props.label;
-    if (!isValidElement(label)) throw new Error("Missing location label");
-    if (locations[0]?.path === "/two")
-      expect(renderToStaticMarkup(label)).not.toContain("initial-head");
-  }
-});
-
-it("overlapping location HEAD actions keep their requested paths isolated", async () => {
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-    callback(0);
-    return 0;
-  });
-  vi.stubGlobal("window", { addEventListener() {}, removeEventListener() {} });
-  const one = Promise.withResolvers<{ gitHead: string }>(),
-    two = Promise.withResolvers<{ gitHead: string }>();
-  h.get.mockReturnValueOnce(one.promise).mockReturnValueOnce(two.promise);
-  let project = {
-    id: "project",
-    name: "Project",
-    path: "/one",
-    locations: [{ projectId: "project", serverId: "local", path: "/one" }],
-  };
-  const read = () => {
-    const view = ProjectLocationsSettings({ project });
-    if (!isValidElement(view)) throw new Error("Missing settings");
-    return view;
-  };
-  const menu = () => {
-    const node = find(
-      render(read),
-      (node) =>
-        typeof node.props.onChange === "function" && "opened" in node.props,
-    );
-    const change = node?.props.onChange;
-    if (typeof change !== "function") throw new Error("Missing menu");
-    return change;
-  };
-  menu()(true);
-  await settle();
-  menu()(false);
-  project = {
-    ...project,
-    locations: [{ projectId: "project", serverId: "local", path: "/two" }],
-  };
-  menu()(true);
-  await settle();
-  expect(h.get).toHaveBeenCalledTimes(2);
-  expect(h.get).toHaveBeenNthCalledWith(
-    2,
-    "/api/project-locations",
-    expect.objectContaining({
-      query: expect.objectContaining({ path: "/two" }),
-    }),
-  );
-  two.resolve({ gitHead: "head-two" });
-  await settle();
-  one.resolve({ gitHead: "head-one" });
-  await settle();
-  const label = find(
-    render(read),
-    (node) => node.props.className === "project-location-row",
-  )?.props.label;
-  if (!isValidElement(label)) throw new Error("Missing location label");
-  expect(renderToStaticMarkup(label)).toContain("head-two");
-  expect(renderToStaticMarkup(label)).not.toContain("head-one");
 });

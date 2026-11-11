@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { failedTurnsNeedingLookup } from "./useTurnErrors.ts";
+import { failedTurnsNeedingLookup } from "../../support/useTurnErrors.ts";
 
 describe("failedTurnsNeedingLookup", () => {
   it("ignores failed transcript rows without a nonempty turn ID", () => {

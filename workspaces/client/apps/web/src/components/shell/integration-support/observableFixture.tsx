@@ -146,30 +146,32 @@ export function conversationActionsFixture(
   store = observableFixture().store,
   injectedServices?: ServerServices,
 ): ServerAreas {
+  const values = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return values.size;
+    },
+    key: (index) => [...values.keys()][index] ?? null,
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => {
+      values.set(key, value);
+    },
+    removeItem: (key) => {
+      values.delete(key);
+    },
+    clear: () => values.clear(),
+  };
   const services =
     injectedServices ||
-    createServerServices({
-      id: "local",
-      origin: "https://fixture.test",
-      label: "Fixture",
-    });
+    createServerServices(
+      {
+        id: "local",
+        origin: "https://fixture.test",
+        label: "Fixture",
+      },
+      storage,
+    );
   if (!injectedServices) {
-    const values = new Map<string, string>();
-    const storage: Storage = {
-      get length() {
-        return values.size;
-      },
-      key: (index) => [...values.keys()][index] ?? null,
-      getItem: (key) => values.get(key) ?? null,
-      setItem: (key, value) => {
-        values.set(key, value);
-      },
-      removeItem: (key) => {
-        values.delete(key);
-      },
-      clear: () => values.clear(),
-    };
-    services.storage = storage;
     services.api.saved = (key, fallback) => {
       const value = storage.getItem(key);
       return value === null ? fallback : JSON.parse(value);

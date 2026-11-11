@@ -1,0 +1,95 @@
+{
+  "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/conversation/ComposerAttachments/ComposerAttachments.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/ComposerAutocomplete/ComposerAutocomplete.tsx": {
+    "useRef": 1,
+    "useCallback": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/ConversationTranscript/ConversationTranscript.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/FilePreview/FilePreview.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/MessageQueue/MessageQueue.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/PreviewModal/PreviewModal.tsx": {
+    "useRef": 6
+  },
+  "workspaces/client/apps/web/src/components/conversation/TokenRate/TokenRate.tsx": {
+    "useRef": 3,
+    "useCallback": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/prompt-composer/PromptInput/PromptInput.tsx": {
+    "useRef": 6,
+    "useCallback": 3
+  },
+  "workspaces/client/apps/web/src/components/conversation/questions/SignInCard/SignInCard.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/conversation/support/useConversationScroll.ts": {
+    "useRef": 1,
+    "useMemo": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/transcript/HistoryWindow/HistoryWindow.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/conversation/transcript/MessageInfo/MessageInfo.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/conversation/transcript/SelectionQuote/SelectionQuote.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/projects/MoveChatForm/MoveChatForm.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/projects/ProjectNameForm/ProjectNameForm.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/servers/MultiServerApp/MultiServerApp.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/settings/ProjectLocationsSettings/ProjectLocationsSettings.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/settings/StudioSettingsLayout/StudioSettingsLayout.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/shell/ImageViewer/ImageViewer.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/shell/PassiveUsage/PassiveUsage.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/shell/TerminalDock/TerminalDock.tsx": {
+    "useMemo": 1,
+    "useRef": 3
+  },
+  "workspaces/client/apps/web/src/components/shell/Workspace/Workspace.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/shell/WorkspacePanelHost/WorkspacePanelHost.tsx": {
+    "useRef": 7
+  },
+  "workspaces/client/apps/web/src/components/shell/edge-rail/EdgeRail/EdgeRail.tsx": {
+    "useRef": 2
+  },
+  "workspaces/client/apps/web/src/components/shell/messages/TeamChats/TeamChats.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/shell/tasks/TaskOutput/TaskOutput.tsx": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/components/ui/BottomSheet/useSheetSwipe.ts": {
+    "useRef": 1
+  },
+  "workspaces/client/apps/web/src/hooks/useVisualActivity.ts": {
+    "useRef": 1,
+    "useCallback": 1
+  }
+}

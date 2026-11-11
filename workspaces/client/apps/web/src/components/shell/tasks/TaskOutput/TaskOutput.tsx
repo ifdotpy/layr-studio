@@ -3,44 +3,37 @@ import type { TaskProps } from "../TaskStatus/TaskStatus.tsx";
 import { observer } from "mobx-react-lite";
 import { useBackgroundTaskActions } from "../support/backgroundTaskActions.tsx";
 import { activeTask } from "../support/backgroundTaskModel.ts";
-import { BackgroundTaskAction } from "../../../../generated/api.ts";
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { ActionIcon, Button } from "@mantine/core";
-import {
-  ChevronDown,
-  Check,
-  Copy,
-  Download,
-  LoaderCircle,
-  Terminal,
-} from "lucide-react";
-import { copyText } from "../../../../clipboard/clipboard.ts";
+import * as Icons from "lucide-react";
+import { AsyncFeedback } from "../../../../stores/AsyncFeedback.ts";
+import { CopyFeedback } from "../../../../stores/CopyFeedback.ts";
+import { BackgroundTaskAction } from "../../../../generated/api.ts";
+import type { GetResult } from "../../../../api.ts";
 import ErrorDescription from "../../ErrorDescription/ErrorDescription.tsx";
-import { errorText } from "../../../../api.ts";
 import { probe } from "../../../../perf/backgroundTaskRenderProbe.ts";
 
 export const TaskOutput = observer(function TaskOutput({ task }: TaskProps) {
-  const [fileOutput, setFileOutput] = useState<{
-    text: string;
-    truncated: boolean;
-  } | null>(null);
-  const [filePending, setFilePending] = useState(false);
-  const [fileError, setFileError] = useState("");
-  const outputSupported = task.display.actions.includes(
-    BackgroundTaskAction.readOutput,
-  );
-  const outputTail = outputSupported
-    ? (fileOutput?.text ?? task.tail)
-    : undefined;
   const actions = useBackgroundTaskActions();
-  const { pending, notify } = actions;
-  const [follow, setFollow] = useState(true),
-    [copied, setCopied] = useState(false);
+  return <OutputView key={actions.leadId} task={task} />;
+});
+
+const OutputView = observer(function OutputView({ task }: TaskProps) {
+  const [feedback] = useState(() => new AsyncFeedback()),
+    [copy] = useState(() => new CopyFeedback());
+  const actions = useBackgroundTaskActions();
+  const [fileOutput, setFileOutput] =
+      useState<GetResult<"/api/task/output"> | null>(null),
+    [follow, setFollow] = useState(true);
+  const supported = task.display.actions.includes(
+      BackgroundTaskAction.readOutput,
+    ),
+    tail = supported ? (fileOutput?.text ?? task.tail) : undefined;
   const output = useRef<HTMLPreElement>(null);
   useEffect(() => {
     if (follow && output.current)
       output.current.scrollTop = output.current.scrollHeight;
-  }, [outputTail, follow]);
+  }, [tail, follow]);
 
   probe("background-task-output", task.id);
   return (
@@ -50,24 +43,16 @@ export const TaskOutput = observer(function TaskOutput({ task }: TaskProps) {
           <p className="task-cwd">{task.outputFile}</p>
           <Button
             size="xs"
-            loading={filePending}
-            onClick={async () => {
-              setFilePending(true);
-              setFileError("");
-              try {
-                setFileOutput(await actions.readOutput(task));
-              } catch (error) {
-                setFileError(errorText(error));
-              } finally {
-                setFilePending(false);
-              }
-            }}
+            loading={feedback.pending}
+            onClick={() =>
+              void feedback.run(() => actions.readOutput(task), setFileOutput)
+            }
           >
             View output
           </Button>
-          {fileError && (
+          {feedback.error && (
             <p className="task-error" role="alert">
-              {fileError}
+              {feedback.error}
             </p>
           )}
           {fileOutput?.truncated && (
@@ -91,20 +76,20 @@ export const TaskOutput = observer(function TaskOutput({ task }: TaskProps) {
         <div className="task-terminal-header">
           <span>
             {activeTask(task) ? (
-              <LoaderCircle size={12} className="spin" />
+              <Icons.LoaderCircle size={12} className="spin" />
             ) : (
-              <Terminal size={12} />
+              <Icons.Terminal size={12} />
             )}
-            {outputSupported ? "Output" : "Output unavailable"}
+            {supported ? "Output" : "Output unavailable"}
           </span>
-          {outputSupported && (
+          {supported && (
             <div>
               <Button
                 variant="subtle"
                 size="compact-xs"
                 aria-pressed={follow}
                 onClick={() => setFollow(!follow)}
-                leftSection={<ChevronDown size={12} />}
+                leftSection={<Icons.ChevronDown size={12} />}
                 color={follow ? "ink" : "gray"}
               >
                 Follow
@@ -112,47 +97,47 @@ export const TaskOutput = observer(function TaskOutput({ task }: TaskProps) {
               <ActionIcon
                 size="sm"
                 aria-label="Download task log"
-                disabled={pending || (!!task.outputFile && !fileOutput)}
+                disabled={actions.pending || (!!task.outputFile && !fileOutput)}
                 onClick={() => void actions.downloadLog(task, fileOutput?.text)}
               >
-                <Download size={13} />
+                <Icons.Download size={13} />
               </ActionIcon>
               <ActionIcon
                 size="sm"
                 aria-label="Copy task output"
-                disabled={!outputTail}
-                onClick={() => {
-                  void copyText(outputTail || "")
-                    .then(() => setCopied(true))
-                    .catch(() => notify("Could not copy output"));
-                }}
+                disabled={!tail}
+                onClick={() => void actions.copyOutput(copy, tail || "")}
               >
-                {copied ? <Check size={13} /> : <Copy size={13} />}
+                {copy.copied() ? (
+                  <Icons.Check size={13} />
+                ) : (
+                  <Icons.Copy size={13} />
+                )}
               </ActionIcon>
             </div>
           )}
         </div>
         <pre
           ref={output}
-          className={`task-output ${!outputTail ? "empty" : ""}`}
+          className={`task-output ${!tail ? "empty" : ""}`}
           onScroll={(e) => {
             const el = e.currentTarget;
             if (el.scrollHeight - el.scrollTop - el.clientHeight > 35)
               setFollow(false);
           }}
         >
-          {!outputSupported
+          {!supported
             ? "This provider does not expose process output."
-            : outputTail ||
+            : tail ||
               (task.outputFile && !fileOutput
-                ? "Select View output to read this file."
+                ? "Choose View output to read this file."
                 : activeTask(task)
                   ? "Waiting for output…"
                   : "No output recorded.")}
         </pre>
         {(task.outputTruncated ||
           (("bytes" in task ? task.bytes : 0) || 0) >
-            new TextEncoder().encode(outputTail || "").length) && (
+            new TextEncoder().encode(tail || "").length) && (
           <p className="task-output-limit">
             Latest output shown
             {("log" in task ? task.log : undefined)

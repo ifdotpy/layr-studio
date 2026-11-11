@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -112,6 +113,10 @@ function fixture() {
     path.join(path.dirname(checkerPath), "react-glue-exceptions.json"),
     "{}\n",
   );
+  writeFileSync(
+    path.join(path.dirname(checkerPath), "react-hook-ceilings.json"),
+    "{}\n",
+  );
   for (const config of [".oxlintrc.json", ".oxfmtrc.json"]) {
     copyFileSync(path.join(repositoryRoot, config), path.join(root, config));
   }
@@ -139,9 +144,28 @@ function fixture() {
     ".oxfmtrc.json",
     "workspaces/tooling/apps/repository-checks/javascript-exceptions.json",
     "workspaces/tooling/apps/repository-checks/react-glue-exceptions.json",
+    "workspaces/tooling/apps/repository-checks/react-hook-ceilings.json",
     "workspaces/tooling/apps/repository-checks/ratchet-baseline.json",
   );
+  git(
+    root,
+    "add",
+    "--",
+    "sgconfig.yml",
+    ...readdirSync(path.join(path.dirname(checkerPath), "ast-grep/rules")).map(
+      (file) =>
+        "workspaces/tooling/apps/repository-checks/ast-grep/rules/" + file,
+    ),
+  );
   git(root, "commit", "--quiet", "-m", "fixture tooling baseline");
+  git(
+    root,
+    "commit",
+    "--quiet",
+    "--allow-empty",
+    "-m",
+    "Fixture with a historical parent",
+  );
   return root;
 }
 
@@ -668,6 +692,184 @@ try {
     assert.match(
       rejected.stdout + rejected.stderr,
       /Use MobX owners\/reactions/,
+    );
+  }
+  {
+    const root = fixture();
+    const file = "workspaces/client/apps/web/src/Probe.ts";
+    const manifest =
+      "workspaces/tooling/apps/repository-checks/react-hook-ceilings.json";
+    stage(
+      root,
+      file,
+      'import { useMemo } from "react"; export const value = useMemo(0);\n',
+    );
+    writeFileSync(path.join(root, file), "export const value = 0;\n");
+    let rejected = runHook(root);
+    assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr);
+    assert.match(
+      rejected.stdout + rejected.stderr,
+      /useMemo count 1 exceeds ceiling 0/,
+    );
+    const update = command(
+      process.execPath,
+      ["workspaces/tooling/apps/repository-checks/react-glue.ts", "--update"],
+      root,
+    );
+    assert.equal(update.status, 0, update.stdout + update.stderr);
+    // CLI update reads the working tree, and refuses growth without rewriting the manifest.
+    writeFileSync(
+      path.join(root, file),
+      readFileSync(path.join(root, file), "utf8") +
+        'import { useRef } from "react"; useRef(null);\n',
+    );
+    const before = readFileSync(path.join(root, manifest), "utf8");
+    const refused = command(
+      process.execPath,
+      ["workspaces/tooling/apps/repository-checks/react-glue.ts", "--update"],
+      root,
+    );
+    assert.notEqual(refused.status, 0, refused.stdout + refused.stderr);
+    assert.match(
+      refused.stdout + refused.stderr,
+      /useRef count 1 exceeds ceiling 0/,
+    );
+    assert.equal(readFileSync(path.join(root, manifest), "utf8"), before);
+    // Raising the staged manifest cannot grant a new allowance.
+    stage(root, manifest, JSON.stringify({ [file]: { useMemo: 1 } }) + "\n");
+    rejected = runHook(root);
+    assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr);
+    assert.match(
+      rejected.stdout + rejected.stderr,
+      /useMemo count 1 exceeds ceiling 0/,
+    );
+  }
+  {
+    const root = fixture();
+    const file = "workspaces/client/apps/web/src/Probe.ts";
+    for (const [source, message] of [
+      ["export const value = runInAction(() => 1);\n", /generator flows/],
+      [
+        "export const value = makeObservable(owner, {});\n",
+        /makeAutoObservable/,
+      ],
+      [
+        'import { useEffect } from "react"; useEffect(() => store.start(), [store]);\n',
+        /manage.*lifetime/,
+      ],
+    ] as const) {
+      stage(root, file, source);
+      if (source.includes("useEffect"))
+        stage(
+          root,
+          "workspaces/tooling/apps/repository-checks/react-glue-exceptions.json",
+          JSON.stringify({ [file]: "Existing DOM integration." }) + "\n",
+        );
+      writeFileSync(path.join(root, file), "export const value = 1;\n");
+      const rejected = runHook(root);
+      assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr);
+      assert.match(rejected.stdout + rejected.stderr, message);
+    }
+  }
+  {
+    const root = fixture();
+    const file = "workspaces/client/apps/web/src/Probe.ts";
+    const rule =
+      "workspaces/tooling/apps/repository-checks/ast-grep/rules/web-run-in-action.yml";
+    stage(root, file, "export const value = runInAction(() => 1);\n");
+    writeFileSync(
+      path.join(root, rule),
+      readFileSync(path.join(root, rule), "utf8").replaceAll(
+        "runInAction",
+        "allowedAction",
+      ),
+    );
+    const rejected = runHook(root);
+    assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr);
+    assert.match(rejected.stdout + rejected.stderr, /generator flows/);
+  }
+  {
+    const root = fixture();
+    git(root, "branch", "main");
+    const file = "workspaces/client/apps/web/src/Probe.ts";
+    const manifest =
+      "workspaces/tooling/apps/repository-checks/react-hook-ceilings.json";
+    stage(
+      root,
+      file,
+      'import { useMemo } from "react"; export const value = useMemo(0);\n',
+    );
+    stage(root, manifest, JSON.stringify({ [file]: { useMemo: 1 } }) + "\n");
+    git(
+      root,
+      "commit",
+      "--quiet",
+      "--no-verify",
+      "-m",
+      "commit an invalid ceiling increase",
+    );
+    const fullLint = command(
+      process.execPath,
+      [
+        "workspaces/tooling/apps/repository-checks/check-code.ts",
+        "lint-all",
+        file,
+      ],
+      root,
+    );
+    assert.notEqual(fullLint.status, 0, fullLint.stdout + fullLint.stderr);
+    assert.match(fullLint.stdout + fullLint.stderr, /exceeds ceiling 0/);
+    for (const flag of ["--check", "--update"]) {
+      const before = readFileSync(path.join(root, manifest), "utf8");
+      const rejected = command(
+        process.execPath,
+        ["workspaces/tooling/apps/repository-checks/react-glue.ts", flag],
+        root,
+      );
+      assert.notEqual(rejected.status, 0, rejected.stdout + rejected.stderr);
+      assert.match(rejected.stdout + rejected.stderr, /exceeds ceiling 0/);
+      assert.equal(readFileSync(path.join(root, manifest), "utf8"), before);
+    }
+  }
+  {
+    const root = fixture();
+    git(root, "branch", "main");
+    const file = "workspaces/client/apps/web/src/Probe.ts";
+    const baseline =
+      "workspaces/tooling/apps/repository-checks/ratchet-baseline.json";
+    const source = "runInAction(() => 1)";
+    const { fingerprintMatches } = await import("../ratchet.ts");
+    const hits = fingerprintMatches([{ file, text: source, message: "fix" }]);
+    stage(root, file, "export const value = " + source + ";\n");
+    stage(root, baseline, JSON.stringify({ "web-run-in-action": hits }) + "\n");
+    const stagedRejected = runHook(root);
+    assert.notEqual(
+      stagedRejected.status,
+      0,
+      stagedRejected.stdout + stagedRejected.stderr,
+    );
+    assert.match(stagedRejected.stdout + stagedRejected.stderr, /allowance/);
+    git(
+      root,
+      "commit",
+      "--quiet",
+      "--no-verify",
+      "-m",
+      "commit an invalid pattern allowance",
+    );
+    const committedRejected = command(
+      process.execPath,
+      ["workspaces/tooling/apps/repository-checks/ast-grep.ts"],
+      root,
+    );
+    assert.notEqual(
+      committedRejected.status,
+      0,
+      committedRejected.stdout + committedRejected.stderr,
+    );
+    assert.match(
+      committedRejected.stdout + committedRejected.stderr,
+      /allowance/,
     );
   }
   console.log("Pre-commit staged-content fixtures passed.");

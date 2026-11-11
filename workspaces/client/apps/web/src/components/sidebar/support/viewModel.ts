@@ -1,7 +1,7 @@
-import { AgentSource, AgentStatus } from "../../../generated/api.ts";
 import { computed, makeObservable } from "mobx";
-import type { components } from "../../../generated/api.ts";
 import type { DeepReadonly } from "../../../deepReadonly.ts";
+import type { components } from "../../../generated/api.ts";
+import { AgentSource, AgentStatus } from "../../../generated/api.ts";
 import type { StateCollections } from "../../../generated/observableResources.ts";
 import { COMPACT_RECENT_WINDOW_SECONDS } from "../../../generated/sharedValues.ts";
 import { formatOperationalStatus } from "../../../status/operationalStatus.ts";
@@ -236,6 +236,7 @@ export function createSidebarList(
   getInputs: () => SidebarInputs,
 ) {
   const rows = computed(getRows);
+  const byId = computed(() => new Map(rows.get().map((row) => [row.id, row])));
   const ordered = computed(() => {
     const { rank } = getInputs();
     const chatRank = (row: SidebarChatView) => {
@@ -282,6 +283,9 @@ export function createSidebarList(
   return {
     get rows() {
       return rows.get();
+    },
+    get byId() {
+      return byId.get();
     },
     get orderedRows() {
       return ordered.get();

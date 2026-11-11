@@ -1,4 +1,5 @@
-import type { Json, JsonInput, JsonValue } from "../../../../types.ts";
+import { objectValue } from "../../support/jsonValue.ts";
+import type { Json, JsonInput } from "../../../../types.ts";
 
 export interface ToolImage {
   kind: "path" | "inline";
@@ -6,31 +7,6 @@ export interface ToolImage {
   name: string;
 }
 const inlineImage = /^data:image\/(png|jpeg|gif|webp);base64,/i;
-
-function objectValue(value: unknown): Record<string, JsonValue> | null {
-  return isJsonObject(value) ? value : null;
-}
-
-function isJsonObject(value: unknown): value is Record<string, JsonValue> {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.values(value).every(isJsonValue)
-  );
-}
-
-function isJsonValue(value: unknown): value is JsonValue {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  )
-    return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return isJsonObject(value);
-}
 
 // Native ThreadItem.imageView supplies path. Dynamic tools use inputImage;
 // MCP results use image content blocks. Do not search arbitrary JSON fields.

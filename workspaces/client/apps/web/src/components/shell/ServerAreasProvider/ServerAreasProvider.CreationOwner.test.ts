@@ -234,6 +234,7 @@ it("opens an acknowledged shared room only after replication, then clears its du
     },
     roomId: "shared-room",
   };
+  f.owner.rememberShared({ body: attempt.body });
   f.owner.rememberShared(attempt);
   expect(open).not.toHaveBeenCalled();
   f.apply([

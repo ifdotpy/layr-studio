@@ -1,15 +1,15 @@
 import { observer } from "mobx-react-lite";
-import type { components } from "../../../../generated/api.ts";
+import type {
+  BackgroundTaskLabel,
+  BackgroundTaskKindLabel,
+} from "../../../../generated/api.ts";
 import {
   activeTask,
   type DisplayBackgroundTask,
 } from "../support/backgroundTaskModel.ts";
 import { probe } from "../../../../perf/backgroundTaskRenderProbe.ts";
 export type TaskProps = { task: DisplayBackgroundTask };
-export const labels: Record<
-  components["schemas"]["BackgroundTaskLabel"],
-  string
-> = {
+export const labels: Record<BackgroundTaskLabel, string> = {
   running: "Running",
   starting: "Starting",
   pending: "Pending",
@@ -23,10 +23,7 @@ export const labels: Record<
   waitingForExit: "Waiting for exit",
   unknown: "Unknown",
 };
-export const kindLabels: Record<
-  components["schemas"]["BackgroundTaskKindLabel"],
-  string
-> = {
+export const kindLabels: Record<BackgroundTaskKindLabel, string> = {
   monitor: "Monitor",
   command: "Command",
   backgroundCommand: "Background command",

@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import {
   type Project,
   folderLabel,
@@ -9,7 +10,7 @@ import type { ProjectSave } from "../../../app/projects/ProjectSave.ts";
 import type { Agent } from "../../../types.ts";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
-export const MoveChatForm = observer(function MoveChatForm({
+const DraftForm = observer(function MoveChatForm({
   project,
   agent,
   save,
@@ -60,5 +61,20 @@ export const MoveChatForm = observer(function MoveChatForm({
         {save.retryLabel || "Move chat"}
       </Button>
     </form>
+  );
+});
+
+export const MoveChatForm = observer(function MoveChatForm(
+  props: ComponentProps<typeof DraftForm>,
+) {
+  return (
+    <DraftForm
+      key={JSON.stringify([
+        props.project.id,
+        props.project.path,
+        props.agent.id,
+      ])}
+      {...props}
+    />
   );
 });

@@ -71,13 +71,10 @@ export const ClaudeSettingsView = function ClaudeSettings({
   const locked =
     permissionsLocked ||
     (typeof agent.status === "string" && busy.has(agent.status));
-  const nativeStatus = detail?.nativeStatus;
   const nativeStatusError =
-    nativeStatus &&
-    typeof nativeStatus === "object" &&
-    "error" in nativeStatus &&
-    typeof nativeStatus.error === "string"
-      ? nativeStatus.error
+    typeof detail?.nativeStatus === "object" &&
+    typeof detail.nativeStatus?.error === "string"
+      ? detail.nativeStatus.error
       : undefined;
 
   const fieldStatus = (field: string) => (

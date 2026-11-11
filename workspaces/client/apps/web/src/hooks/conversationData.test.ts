@@ -2,7 +2,7 @@ import type { ComponentSnapshot as Snapshot } from "../components/conversation/C
 import { autorun, computed, reaction, runInAction } from "mobx";
 
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import { createWaitingChildren } from "../components/agents/PhaseWaitDetails/waitDetails.ts";
+import { waitingChildren } from "../components/agents/PhaseWaitDetails/waitDetails.ts";
 import { AgentSource, AgentStatus } from "../generated/api.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import { observableFixture } from "../components/shell/integration-support/observableFixture.tsx";
@@ -87,11 +87,9 @@ function pipeline() {
   };
   stops.push(() => generated.store.dispose());
   stops.push(autorun(() => conversation.threads));
-  const children = createWaitingChildren(
-    () => mirror.current.agents.values(),
-    "lead",
-  );
-  const wait = computed(() => ({ agents: children.agents }));
+  const wait = computed(() => ({
+    agents: waitingChildren(mirror.current.agents.values(), "lead"),
+  }));
   stops.push(autorun(() => wait.get()));
   return (data: Snapshot) => {
     mirror.apply(

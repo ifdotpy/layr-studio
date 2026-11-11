@@ -4,7 +4,7 @@ import { configure, observable, runInAction } from "mobx";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { TranscriptProvider } from "../../support/navigation.ts";
-import TurnHistory from "./TurnHistory.tsx";
+import TurnHistory from "./TurnHistory.fixture.tsx";
 import type { Agent, Message } from "../../../../types.ts";
 
 vi.mock(
@@ -270,5 +270,48 @@ it("changing cwd updates the rows rendered through the retained row callback", a
   } finally {
     await act(async () => root.unmount());
     host.remove();
+  }
+});
+
+import ProductionTurnHistory from "./TurnHistory.tsx";
+import { TranscriptStore } from "../../support/TurnHistoryStore.ts";
+it("follow-tail changes do not render unchanged content rows", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const follow = observable.box(true);
+  const items: Message[] = [
+    { id: "first", role: "user", text: "one" },
+    { id: "second", role: "user", text: "two" },
+  ];
+  const model = new TranscriptStore(() => ({
+    items,
+    enabled: false,
+    storageKey: "follow-isolation",
+    followTail: follow.get(),
+  }));
+  const rows: string[] = [];
+  window.__studioPromptComposerRenderProbe = (component, id) => {
+    if (component === "history-row" && id) rows.push(id);
+  };
+  const host = document.body.appendChild(document.createElement("div")),
+    root = createRoot(host);
+  const actions = {
+    renderMessage: (message: Message) => createElement("p", null, message.text),
+    jumpToMessage() {},
+  };
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          TranscriptProvider,
+          { value: actions },
+          createElement(ProductionTurnHistory, { store: model }),
+        ),
+      ),
+    );
+    rows.length = 0;
+    await act(async () => runInAction(() => follow.set(false)));
+    expect(rows).toEqual([]);
+  } finally {
+    await act(async () => root.unmount());
   }
 });

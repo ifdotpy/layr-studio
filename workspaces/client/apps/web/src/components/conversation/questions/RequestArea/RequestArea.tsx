@@ -1,12 +1,12 @@
-import { AnswerSelection } from "../support/AnswerSelection.ts";
+import { AnswerSelection } from "../../support/AnswerSelection.ts";
 import { CopyFeedback } from "../../../../stores/CopyFeedback.ts";
-import { pasteBody, RESULT_SENT_NOTE } from "../support/signInCardModel.ts";
-import { elicitationSchema } from "../support/requestData.ts";
+import { pasteBody, RESULT_SENT_NOTE } from "../../support/signInCardModel.ts";
+import { elicitationSchema } from "../../support/requestData.ts";
 import { answerList } from "../AnswerFields/AnswerFields.tsx";
 import {
   questionAnswer,
   savedAnswer as serializeAnswer,
-} from "../support/answerData.ts";
+} from "../../support/answerData.ts";
 import { createRef, type ReactNode } from "react";
 import { reaction, flowResult, makeAutoObservable, observable } from "mobx";
 import { ApiError, errorText } from "../../../../api.ts";
@@ -38,7 +38,7 @@ import {
   browserOpenDetails,
   isFieldRequest,
   requestQuestions,
-} from "../support/requestData.ts";
+} from "../../support/requestData.ts";
 import {
   createRequestsView,
   type RequestScope,

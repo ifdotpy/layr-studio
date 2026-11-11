@@ -1,3 +1,4 @@
+import { RoomViewport } from "./RoomViewport.ts";
 import { whileObserved } from "../../../../observed.ts";
 import { RoomHistory } from "../../../../conversation/roomHistory.ts";
 import { roomId } from "../../../../generated/observableResources.ts";
@@ -85,6 +86,17 @@ export function createTeamChatsStore(
       return this.room ? pages.get(this.room.id) : empty;
     }
     requests = createRequestsView(store, { all: true });
+    readonly viewport = new RoomViewport();
+    measureRoom(root: HTMLElement) {
+      const messages = this.messages;
+      if (messages)
+        this.markSeen(
+          this.room,
+          messages.loaded && !messages.notice,
+          this.detail,
+          this.viewport.measure(root, messages.items),
+        );
+    }
     selected = "you";
     detail = false;
     query = "";
@@ -185,7 +197,15 @@ export function createTeamChatsStore(
     more() {
       this.limit += 60;
     }
+    target:
+      | {
+          roomId?: string | undefined;
+          id?: string | undefined;
+          requestId?: string | undefined;
+        }
+      | undefined;
     focus(room?: string, item?: string, request?: string) {
+      this.target = { roomId: room, id: item, requestId: request };
       if (room) this.choose(room);
       else if (item || request) this.choose("you");
     }
@@ -224,6 +244,7 @@ export function createTeamChatsStore(
           () => [this.scope, source?.().focus] as const,
           ([scope, focus], previous) => {
             if (scope !== previous?.[0]) {
+              if (previous) this.target = undefined;
               this.selected = "you";
               this.query = "";
               this.detail = false;
@@ -239,7 +260,8 @@ export function createTeamChatsStore(
                 ),
               );
             }
-            if (focus) this.focus(focus.roomId, focus.id, focus.requestId);
+            const target = focus ?? (!previous ? this.target : undefined);
+            if (target) this.focus(target.roomId, target.id, target.requestId);
           },
           { fireImmediately: true, equals: compareShallow },
         );

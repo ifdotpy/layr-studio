@@ -1,0 +1,5 @@
+id: web-listener-set
+valid:
+  - "const values = new Set<string>();"
+invalid:
+  - "const listeners = new Set<() => void>();"

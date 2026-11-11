@@ -1,128 +1,83 @@
+import { flow, makeAutoObservable } from "mobx";
+import { z } from "zod";
 import { flowValue } from "../../flowValue.ts";
-import { agentId, requestId } from "../../generated/observableResources.ts";
-import { resourceData } from "../../store/runtime.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
-import { makeAutoObservable, observable, reaction, flow } from "mobx";
-import { errorText } from "../../api.ts";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { submitRename } from "../../renameRequest.ts";
-type PendingRename = {
-  text: string;
-  id: string;
-};
+import type { Intent, RequestEntry } from "../../servers/RequestRegistry.ts";
+
+const oldRenames = z.record(
+  z.string(),
+  z.object({ text: z.string(), id: z.string() }),
+);
+const oldSidebarRename = z.object({
+  body: z.object({
+    id: z.string(),
+    name: z.string().nullable().optional(),
+    request_id: z.string(),
+  }),
+});
 export class RenameOwner {
-  pending = observable.map<string, PendingRename>({}, { deep: false });
   readonly areas;
   constructor(areas: ServerAreas) {
     this.areas = areas;
     makeAutoObservable(this, { areas: false }, { autoBind: true });
   }
-  get storageKey() {
-    return `studio-pending-renames:${this.areas.startup.creationScope || ""}`;
-  }
-  persist() {
-    this.areas.scope.services.api.save(
-      this.storageKey,
-      Object.fromEntries(this.pending),
-    );
-  }
-  start() {
-    const restore = reaction(
-      () => this.areas.startup.creationScope,
-      () => this.restore(),
-      {
-        fireImmediately: true,
-      },
-    );
-    const watch = reaction(
-      () =>
-        [...this.pending].map(([id, request]) => ({
-          id,
-          request,
-          receipt: resourceData(
-            this.areas.scope.store.renameProgress(
-              agentId(id),
-              requestId(request.id),
-            ).current,
-          ),
-        })),
-      (entries) => {
-        for (const { id, request, receipt } of entries)
-          if (receipt && receipt.id === id && receipt.request_id === request.id)
-            this.settle(id, request.id, receipt);
-      },
-      { fireImmediately: true },
-    );
-    return () => {
-      restore();
-      watch();
-    };
-  }
-  restore() {
-    this.pending.replace(
-      this.areas.startup.creationScope
-        ? this.areas.scope.services.api.saved<Record<string, PendingRename>>(
-            this.storageKey,
-            {},
-          )
-        : {},
-    );
-  }
-  settle(
-    id: string,
-    requestId: string,
-    receipt: Awaited<ReturnType<typeof submitRename>>,
-  ) {
-    if (this.pending.get(id)?.id !== requestId || receipt.status === "pending")
-      return;
-    this.pending.delete(id);
-    this.persist();
-    if (receipt.status === "failed")
-      this.areas.notices.notify(
-        receipt.error || "The title could not be generated.",
-      );
-  }
+  wait = flow(function* (this: RenameOwner, entry: RequestEntry) {
+    yield* flowValue(entry.completion);
+    if (entry.state === "unknown" || entry.state === "failed")
+      throw new Error(entry.errorText);
+    if (entry.state === "confirmed")
+      this.areas.notices.notify("Rename requested. Waiting for live update.");
+  });
   submit = flow(function* (
     this: RenameOwner,
     id: string,
     text: string,
     name?: string | null,
   ) {
-    const { scope } = this.areas;
     if (name && name.length > 80)
       throw new Error("A name must have 1 to 80 characters.");
-    const previous = this.pending.get(id);
-    const request =
-      previous?.text === text ? previous : { text, id: randomUUID() };
-    if (request !== previous) {
-      this.pending.set(id, request);
-      this.persist();
-    }
-    const result = yield* flowValue(
-      submitRename(
-        { id, name, request_id: request.id },
-        scope.services.api.post,
-      ),
-    );
-    this.settle(id, request.id, result);
-    if (result.status === "pending" && this.pending.get(id)?.id === request.id)
-      this.areas.notices.notify(
-        "Rename requested. Waiting for live updates. Use /rename again to check this request.",
+    const { requests, storage, api } = this.areas.scope.services;
+    const intent: Intent = {
+      key: [
+        this.areas.startup.workspaceId || api.getWorkspaceId(),
+        "rename",
+        id,
+      ],
+      path: "/api/rename",
+      body: { id, name },
+    };
+    const current = requests.latest(intent.key);
+    if (current?.state === "sending")
+      return yield* flowValue(this.wait(current));
+    // One-time conversion only; no parallel pending map or status lifecycle remains.
+    const key = text
+      ? `studio-pending-renames:${this.areas.startup.creationScope}`
+      : `studio-sidebar-rename:${id}`;
+    const raw = storage.getItem(key);
+    let restored: RequestEntry | undefined;
+    if (raw && text) {
+      const old = oldRenames.parse(JSON.parse(raw));
+      if (old[id]?.text === text) {
+        restored = requests.restore(intent, old[id].id);
+        delete old[id];
+        if (Object.keys(old).length) storage.setItem(key, JSON.stringify(old));
+        else storage.removeItem(key);
+      }
+    } else if (raw) {
+      const { body } = oldSidebarRename.parse(JSON.parse(raw));
+      if (body.name !== name)
+        throw new Error("Retry the saved name before changing it.");
+      restored = requests.restore(
+        { ...intent, body: { id: body.id, name: body.name } },
+        body.request_id,
       );
-  });
-  rename = flow(function* (this: RenameOwner, id: string, name: string) {
-    const { scope, notices } = this.areas;
-    try {
-      yield* flowValue(
-        scope.services.api.post("/api/rename", {
-          id,
-          name,
-          request_id: randomUUID(),
-        }),
-      );
-    } catch (error) {
-      notices.notify(errorText(error));
-      throw error;
+      storage.removeItem(key);
     }
+    const entry = restored || requests.start(intent);
+    if (restored) yield* flowValue(requests.retry(entry.requestId));
+    yield* flowValue(this.wait(entry));
   });
+  rename(id: string, name: string) {
+    return this.submit(id, "", name);
+  }
 }

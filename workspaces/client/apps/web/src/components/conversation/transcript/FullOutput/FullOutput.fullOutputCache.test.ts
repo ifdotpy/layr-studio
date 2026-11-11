@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { beforeEach, it } from "vitest";
-import { clearFullOutputCache, fullOutputText } from "./fullOutputCache.ts";
+import {
+  clearFullOutputCache,
+  fullOutputText,
+} from "../../support/fullOutputCache.ts";
 
 beforeEach(clearFullOutputCache);
 

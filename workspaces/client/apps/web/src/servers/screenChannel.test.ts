@@ -58,3 +58,21 @@ it("routes terminal controls only to the mounted terminal of their owner", async
   a.close();
   b.close();
 });
+
+it("makes a delayed bind observable to readiness waiters without another navigation change", async () => {
+  const { when } = await import("mobx");
+  vi.useFakeTimers();
+  const screen = createScreenChannel("late", () => {});
+  try {
+    const ready = when(() => screen.ready, { timeout: 20 }).then(
+      () => true,
+      () => false,
+    );
+    screen.bind(() => {});
+    await vi.advanceTimersByTimeAsync(21);
+    expect(await ready).toBe(true);
+  } finally {
+    screen.close();
+    vi.useRealTimers();
+  }
+});

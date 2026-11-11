@@ -2,9 +2,14 @@
 
 import {
   GLUE_MANIFEST,
+  HOOK_MANIFEST,
+  hookManifestErrors,
+  previousHookCeilings,
   glueManifestErrors,
   isGlueSource,
 } from "./react-glue.ts";
+
+import { webPatternErrors } from "./ast-grep.ts";
 
 import ts from "typescript";
 import {
@@ -372,7 +377,14 @@ function main() {
           ),
       );
     const allPaths = [...getIndexPaths()];
-    const glueErrors = glueManifestErrors(repositoryRoot, allPaths);
+    const glueErrors = [
+      ...glueManifestErrors(repositoryRoot, allPaths),
+      ...hookManifestErrors(
+        repositoryRoot,
+        allPaths,
+        previousHookCeilings(repositoryRoot),
+      ),
+    ];
     if (glueErrors.length) {
       for (const error of glueErrors) console.error(error);
       return 1;
@@ -489,7 +501,18 @@ function main() {
         : [];
     const glueChanged =
       check !== "format" &&
-      changedPaths.some((file) => isGlueSource(file) || file === GLUE_MANIFEST);
+      changedPaths.some(
+        (file) =>
+          isGlueSource(file) ||
+          file === GLUE_MANIFEST ||
+          file === HOOK_MANIFEST ||
+          file ===
+            "workspaces/tooling/apps/repository-checks/ratchet-baseline.json" ||
+          file === "sgconfig.yml" ||
+          file.startsWith(
+            "workspaces/tooling/apps/repository-checks/ast-grep/rules/",
+          ),
+      );
     const gluePaths = glueChanged ? [...indexPaths].filter(isGlueSource) : [];
     const enumSources = typeTargets.length
       ? [...indexPaths].filter((file) => /\.(?:[cm]?[jt]sx?|json)$/.test(file))
@@ -506,7 +529,19 @@ function main() {
       ...policyPaths,
       ...enumSources,
       ...gluePaths,
-      ...(glueChanged ? [GLUE_MANIFEST] : []),
+      ...(glueChanged
+        ? [
+            GLUE_MANIFEST,
+            HOOK_MANIFEST,
+            "workspaces/tooling/apps/repository-checks/ratchet-baseline.json",
+            "sgconfig.yml",
+            ...[...indexPaths].filter((file) =>
+              file.startsWith(
+                "workspaces/tooling/apps/repository-checks/ast-grep/rules/",
+              ),
+            ),
+          ]
+        : []),
       ...[...indexPaths].filter(
         (file) => isTypeScriptProject(file) || file === "tsconfig.base.json",
       ),
@@ -525,7 +560,15 @@ function main() {
     }
 
     if (glueChanged) {
-      const errors = glueManifestErrors(temporaryRoot, gluePaths);
+      const errors = [
+        ...glueManifestErrors(temporaryRoot, gluePaths),
+        ...hookManifestErrors(
+          temporaryRoot,
+          gluePaths,
+          previousHookCeilings(repositoryRoot),
+        ),
+        ...webPatternErrors(temporaryRoot, gluePaths, repositoryRoot),
+      ];
       if (errors.length) {
         for (const error of errors) console.error(error);
         return 1;

@@ -19,10 +19,7 @@ export const ManagedConversationRoot = observer(
             {selected.deletionMessage}
           </div>
         ) : navigation.selectedRoom?.radio ? (
-          <RadioChat
-            room={navigation.selectedRoom}
-            visible={selected.isConversationVisible}
-          />
+          <RadioChat room={navigation.selectedRoom} />
         ) : (
           <Conversation key={navigation.selectedId || "new"} />
         )}

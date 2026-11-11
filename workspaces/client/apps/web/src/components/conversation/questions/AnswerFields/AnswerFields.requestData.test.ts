@@ -10,7 +10,7 @@ import {
   browserOpenDetails,
   requestApprovalDetails,
   requestQuestions,
-} from "../support/requestData.ts";
+} from "../../support/requestData.ts";
 
 describe("requestQuestions", () => {
   it("preserves the producer's question fields and option descriptions", () => {

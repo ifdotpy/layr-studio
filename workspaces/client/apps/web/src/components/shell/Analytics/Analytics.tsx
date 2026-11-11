@@ -1,9 +1,4 @@
-import { observer } from "mobx-react-lite";
-import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
-import { AnalyticsScope as GeneratedApiAnalyticsScope } from "../../../generated/api.ts";
-import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { localDateTime, localTime } from "../../../local-time.ts";
-import { useState } from "react";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   ActionIcon,
   Button,
@@ -19,62 +14,36 @@ import {
   ChevronRight,
   RefreshCw,
 } from "lucide-react";
-import { errorText, type GetOptions, type GetResult } from "../../../api.ts";
-import type { Agent } from "../../../types.ts";
+import { observer } from "mobx-react-lite";
+import { Fragment, type ReactNode } from "react";
+import { errorText } from "../../../api.ts";
+import { AnalyticsScope as GeneratedApiAnalyticsScope } from "../../../generated/api.ts";
+import { type Agent } from "../../../types.ts";
+import {
+  useServerNet,
+  useServerOwner,
+} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { Owned } from "../../ui/Owned/Owned.tsx";
 import "./Analytics.css";
+import {
+  AnalyticsStore,
+  type AnalyticsPayload,
+  type AnalyticsQuery,
+  type AnalyticsSelection,
+  type AnalyticsTokenGroup,
+  type ContextChartData,
+  type MetricRow,
+} from "../../../analytics/AnalyticsStore.ts";
+import {
+  bytes,
+  count,
+  duration,
+  finite,
+  shortTime,
+  time,
+} from "../../../analytics/format.ts";
+export type { AnalyticsSelection } from "../../../analytics/AnalyticsStore.ts";
 
-type AnalyticsResult = GetResult<"/api/analytics">;
-type AnalyticsUsageRecord = NonNullable<AnalyticsResult["timeline"]>[number];
-type AnalyticsItemRecord = NonNullable<AnalyticsResult["itemRecords"]>[number];
-type AnalyticsTool = NonNullable<AnalyticsResult["tools"]>[number];
-type AnalyticsTokenGroup =
-  | NonNullable<AnalyticsResult["agentTotals"]>[number]
-  | NonNullable<AnalyticsResult["modelTotals"]>[number]
-  | NonNullable<AnalyticsResult["accountTotals"]>[number];
-type AnalyticsPayload = NonNullable<AnalyticsItemRecord["input"]>;
-type AnalyticsTokens = NonNullable<AnalyticsResult["tokens"]>;
-type AnalyticsContextPoint = AnalyticsUsageRecord & {
-  last: AnalyticsUsageRecord["last"] & { totalTokens: number };
-  modelContextWindow: number;
-};
-export type AnalyticsSelection = {
-  query: AnalyticsQuery;
-  read: ReadSlot<AnalyticsResult>;
-};
-type AnalyticsQuery = NonNullable<GetOptions<"/api/analytics">["query"]>;
-type AnalyticsScope = NonNullable<AnalyticsQuery["scope"]>;
-const analyticsScopes: readonly AnalyticsScope[] = [
-  GeneratedApiAnalyticsScope.agent,
-  GeneratedApiAnalyticsScope.team,
-  GeneratedApiAnalyticsScope.all,
-];
-const isAnalyticsScope = (value: string): value is AnalyticsScope =>
-  analyticsScopes.some((scope) => scope === value);
-
-const finite = (n: unknown): n is number =>
-  typeof n === "number" && Number.isFinite(n);
-const count = (n: unknown) => (finite(n) ? n.toLocaleString() : "Unavailable");
-const bytes = (n: unknown) => {
-  if (!finite(n)) return "Unavailable";
-  if (n < 1024) return `${count(n)} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${(n / 1024 ** 2).toFixed(2)} MiB`;
-};
-const duration = (n: unknown) =>
-  !finite(n)
-    ? "Unavailable"
-    : n < 1000
-      ? `${Math.round(n)} ms`
-      : n < 60000
-        ? `${(n / 1000).toFixed(1)} s`
-        : `${(n / 60000).toFixed(1)} min`;
-const time = (n: unknown) =>
-  finite(n) ? localDateTime(new Date(n * 1000)) : "Unavailable";
-const shortTime = (n: number) =>
-  localTime(new Date(n * 1000), {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 const colors = [
   "light-dark(#7044bc, #a59bff)",
   "light-dark(#187c70, #70c9bd)",
@@ -83,32 +52,22 @@ const colors = [
   "light-dark(#286fbf, #82b4ef)",
   "light-dark(#65751f, #c1ca81)",
 ];
-const tokenFields = [
-  ["inputTokens", "Input", "Includes cached input"],
-  ["cachedInputTokens", "Cached input", "Subset of input"],
-  ["cacheWriteInputTokens", "Cache write", "Only when reported"],
-  ["outputTokens", "Output", "Includes reasoning output"],
-  ["reasoningOutputTokens", "Reasoning output", "Subset of output"],
-  ["totalTokens", "Total", "Provider-reported total"],
-] as const satisfies readonly (readonly [
-  keyof AnalyticsTokens,
-  string,
-  string,
-])[];
-function Metric({
-  label,
-  value,
-  hint,
+function Metrics({
+  rows,
+  secondary = false,
 }: {
-  label: string;
-  value: string;
-  hint?: string;
+  rows: readonly MetricRow[];
+  secondary?: boolean;
 }) {
   return (
-    <div className="analytics-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {hint && <small>{hint}</small>}
+    <div className={secondary ? "analytics-secondary" : "analytics-metrics"}>
+      {rows.map(([label, value, hint]) => (
+        <div className="analytics-metric" key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+          {hint && <small>{hint}</small>}
+        </div>
+      ))}
     </div>
   );
 }
@@ -127,51 +86,26 @@ function Raw({
   );
 }
 function ContextChart({
-  timeline,
+  chart,
   compactions,
-  aggregate,
 }: {
-  timeline: AnalyticsUsageRecord[];
-  compactions: AnalyticsItemRecord[];
-  aggregate: boolean;
+  chart: ContextChartData;
+  compactions: NonNullable<AnalyticsStore["data"]>["compactions"];
 }) {
-  const points = timeline
-    .filter(
-      (p): p is AnalyticsContextPoint =>
-        finite(p.at) &&
-        finite(p.last?.totalTokens) &&
-        finite(p.modelContextWindow) &&
-        p.modelContextWindow > 0,
-    )
-    .sort((a, b) => a.at - b.at);
-  if (!points.length)
+  if (!chart)
     return (
       <div className="analytics-empty">
         No context-window measurements in this period.
       </div>
     );
-  const start = points[0]!.at,
-    end = points.at(-1)!.at;
-  const groups = new Map<string, AnalyticsContextPoint[]>();
-  points.forEach((p) => {
-    const id = aggregate ? "Selected agents" : p.agentId;
-    groups.set(id, [...(groups.get(id) || []), p]);
-  });
-  const peak = Math.max(
-    100,
-    ...points.map((p) => (p.last.totalTokens / p.modelContextWindow) * 100),
-  );
-  const xAt = (at: number) => 42 + ((at - start) / (end - start || 1)) * 906;
-  const x = (p: AnalyticsContextPoint) => xAt(p.at);
-  const y = (p: AnalyticsContextPoint) =>
-    152 - (((p.last.totalTokens / p.modelContextWindow) * 100) / peak) * 136;
+  const { points, start, end, groups, peak, xAt, x, y, aggregate } = chart;
   return (
     <>
       <svg
         className="analytics-chart"
         viewBox="0 0 970 182"
         role="img"
-        aria-label={`Context usage over time, ${points.length} observations across ${groups.size} agents`}
+        aria-label={`Context usage over time, ${points.length} observations across ${groups.length} agents`}
       >
         {[0, 50, 100].map((n) => (
           <g key={n}>
@@ -186,7 +120,7 @@ function ContextChart({
             </text>
           </g>
         ))}
-        {compactions
+        {(compactions ?? [])
           .filter((c) => finite(c.at) && c.at >= start && c.at <= end)
           .map((c) => (
             <line
@@ -200,7 +134,7 @@ function ContextChart({
               <title>{`Compaction · ${c.agentName || c.agentId} · ${time(c.at)}`}</title>
             </line>
           ))}
-        {[...groups].map(([id, group], i) => (
+        {groups.map(([id, group], i) => (
           <g key={id} style={{ color: colors[i % colors.length] }}>
             <polyline
               points={group.map((p) => `${x(p)},${y(p)}`).join(" ")}
@@ -223,7 +157,7 @@ function ContextChart({
         </text>
       </svg>
       <div className="analytics-legend">
-        {[...groups].map(([id, group], i) => (
+        {groups.map(([id, group], i) => (
           <span key={id}>
             <i style={{ background: colors[i % colors.length] }} />
             {aggregate ? id : group[0]?.agentName || id}
@@ -233,80 +167,50 @@ function ContextChart({
     </>
   );
 }
+const tokenColumns = [
+  "inputTokens",
+  "cachedInputTokens",
+  "outputTokens",
+  "totalTokens",
+] as const;
 function TokenGroups<
   T extends AnalyticsTokenGroup,
   K extends keyof T & string,
->({
-  title,
-  rows,
-  identity,
-  detail = false,
-}: {
-  title: string;
-  rows: T[];
-  identity: K;
-  detail?: boolean;
-}) {
+>(props: { title: string; rows: T[]; identity: K; detail?: boolean }) {
   return (
-    <section className="analytics-section">
-      <header>
-        <h3>{title}</h3>
-        <span>Provider token use</span>
-      </header>
-      {!rows.length ? (
+    <Section title={props.title} description="Provider token use">
+      {!props.rows.length ? (
         <p className="analytics-note">No usage records.</p>
       ) : (
-        <div className="analytics-table-scroll">
-          <table className="analytics-table">
-            <thead>
-              <tr>
-                <th>
-                  {title === "Agents"
-                    ? "Agent"
-                    : title === "Models"
-                      ? "Model"
-                      : "Account"}
-                </th>
-                <th>Input</th>
-                <th>Cached input</th>
-                <th>Output</th>
-                <th>Total</th>
-                {detail && (
-                  <>
-                    <th>Calls</th>
-                    <th>Failed</th>
-                    <th>Compactions</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={`${r[identity]}:${i}`}>
-                  <td>
-                    {typeof r[identity] === "string"
-                      ? r[identity]
-                      : "Unavailable"}
-                    {detail && <Raw value={r} label="Details" />}
-                  </td>
-                  <td>{count(r.tokens?.inputTokens)}</td>
-                  <td>{count(r.tokens?.cachedInputTokens)}</td>
-                  <td>{count(r.tokens?.outputTokens)}</td>
-                  <td>{count(r.tokens?.totalTokens)}</td>
-                  {detail && "toolCalls" in r && (
-                    <>
-                      <td>{count(r.toolCalls)}</td>
-                      <td>{count(r.failedToolCalls)}</td>
-                      <td>{count(r.compactions)}</td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          headings={[
+            props.title === "Agents"
+              ? "Agent"
+              : props.title === "Models"
+                ? "Model"
+                : "Account",
+            "Input",
+            "Cached input",
+            "Output",
+            "Total",
+            ...(props.detail ? ["Calls", "Failed", "Compactions"] : []),
+          ]}
+          rows={props.rows.map((row, index) => [
+            String(row[props.identity]) + ":" + index,
+            <>
+              {typeof row[props.identity] === "string"
+                ? String(row[props.identity])
+                : "Unavailable"}
+              {props.detail && <Raw value={row} label="Details" />}
+            </>,
+            ...tokenColumns.map((field) => count(row.tokens?.[field])),
+            ...(props.detail && "toolCalls" in row
+              ? [row.toolCalls, row.failedToolCalls, row.compactions].map(count)
+              : []),
+          ])}
+        />
       )}
-    </section>
+    </Section>
   );
 }
 function CountGroup({
@@ -319,88 +223,68 @@ function CountGroup({
   return (
     <div>
       <h4>{title}</h4>
-      <dl>
-        {Object.entries(values).map(([key, value]) => (
-          <div key={key}>
-            <dt>{key}</dt>
-            <dd>{count(value)}</dd>
-          </div>
-        ))}
-      </dl>
+      <Fields
+        values={Object.entries(values).map(([key, value]) => [
+          key,
+          count(value),
+        ])}
+      />
       {!Object.keys(values).length && (
         <p className="analytics-note">No records.</p>
       )}
     </div>
   );
 }
-function ToolRanking({
-  title,
-  tools,
-  model = false,
-  onSelect,
-}: {
-  title: string;
-  tools: AnalyticsTool[];
-  model?: boolean;
+function ToolRanking(props: {
+  ranking: AnalyticsStore["rankings"][number];
   onSelect: (name: string) => void;
 }) {
-  const output = (t: AnalyticsTool) =>
-    model ? t.modelOutputBytes : t.outputBytes;
-  const input = (t: AnalyticsTool) =>
-    model ? t.modelInputBytes : t.inputBytes;
-  const ranked = [...tools].sort((a, b) => (output(b) || 0) - (output(a) || 0));
-  const maxBytes = Math.max(1, ...ranked.map((t) => output(t) || 0));
   return (
-    <section className="analytics-section">
-      <header>
-        <h3>{title}</h3>
-        <span>Ranked by output bytes</span>
-      </header>
-      {!ranked.length ? (
+    <Section title={props.ranking.title} description="Ranked by output bytes">
+      {!props.ranking.rows.length ? (
         <p className="analytics-note">No measurements recorded.</p>
       ) : (
-        <div className="analytics-table-scroll">
-          <table className="analytics-table">
-            <thead>
-              <tr>
-                <th>Tool</th>
-                <th>Calls</th>
-                <th>Input</th>
-                <th>Output</th>
-                <th>Duration</th>
-                <th>Failed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ranked.map((t) => (
-                <tr key={`${t.type}:${t.name}`}>
-                  <td>
-                    <button
-                      className="analytics-tool-name"
-                      onClick={() => onSelect(t.name)}
-                    >
-                      {t.name}
-                    </button>
-                    <div className="analytics-bar">
-                      <i
-                        style={{
-                          width: `${((output(t) || 0) / maxBytes) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </td>
-                  <td>{count(t.calls)}</td>
-                  <td>{bytes(input(t))}</td>
-                  <td>{bytes(output(t))}</td>
-                  <td>{duration(t.durationMs)}</td>
-                  <td>{count(t.failed)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          headings={["Tool", "Calls", "Input", "Output", "Duration", "Failed"]}
+          rows={props.ranking.rows.map((row) => [
+            row.type + ":" + row.name,
+            <>
+              <button
+                className="analytics-tool-name"
+                onClick={() => props.onSelect(row.name)}
+              >
+                {row.name}
+              </button>
+              <div className="analytics-bar">
+                <i style={{ width: row.width }} />
+              </div>
+            </>,
+            count(row.calls),
+            bytes(row.input),
+            bytes(row.output),
+            duration(row.durationMs),
+            count(row.failed),
+          ])}
+        />
       )}
-    </section>
+    </Section>
+  );
+}
+function Fields(props: {
+  values: readonly (readonly [string, ReactNode])[];
+  className?: string;
+  flat?: boolean;
+}) {
+  const Wrap = props.flat ? Fragment : "div";
+  return (
+    <dl className={props.className}>
+      {props.values.map(([label, value]) => (
+        <Wrap key={label}>
+          <dt>{label}</dt>
+          <dd>{value || "Unavailable"}</dd>
+        </Wrap>
+      ))}
+    </dl>
   );
 }
 function Payload({
@@ -413,910 +297,740 @@ function Payload({
   return (
     <div className="analytics-payload">
       <h4>{title}</h4>
-      <dl>
-        <dt>UTF-8 bytes</dt>
-        <dd>{count(data?.bytes)}</dd>
-        <dt>Characters</dt>
-        <dd>{count(data?.chars)}</dd>
-        <dt>Lines</dt>
-        <dd>{count(data?.lines)}</dd>
-        <dt>Images</dt>
-        <dd>{count(data?.imageCount)}</dd>
-        <dt>Image bytes</dt>
-        <dd>{bytes(data?.imageBytes)}</dd>
-      </dl>
+      <Fields
+        flat
+        values={Object.entries({
+          "UTF-8 bytes": count(data?.bytes),
+          Characters: count(data?.chars),
+          Lines: count(data?.lines),
+          Images: count(data?.imageCount),
+          "Image bytes": bytes(data?.imageBytes),
+        })}
+      />
     </div>
   );
 }
-export default observer(function Analytics({
-  agent,
-  selection,
-  onClose,
+function Section({
+  title,
+  description,
+  children,
 }: {
+  title: string;
+  description: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="analytics-section">
+      <header>
+        <h3>{title}</h3>
+        <span>{description}</span>
+      </header>
+      {children}
+    </section>
+  );
+}
+function DataTable(props: {
+  headings: string[];
+  rows: [string, ...ReactNode[]][];
+}) {
+  return (
+    <div className="analytics-table-scroll">
+      <table className="analytics-table">
+        <thead>
+          <tr>
+            {props.headings.map((heading) => (
+              <th key={heading}>{heading}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {props.rows.map(([key, ...cells]) => (
+            <tr key={key}>
+              {cells.map((cell, index) => (
+                <td key={index}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+function Records<T>(props: {
+  rows: readonly T[];
+  identify: (row: T, index: number) => string | number | null;
+  summary: (row: T) => ReactNode[];
+  raw?: (row: T) => unknown;
+  label?: string;
+  children?: (row: T) => ReactNode;
+}) {
+  return (
+    <div className="analytics-observations">
+      {props.rows.map((row, index) => {
+        const [name, at, value, detail] = props.summary(row);
+        return (
+          <details key={props.identify(row, index)}>
+            <summary>
+              <span>
+                {name}
+                {at && <small>{at}</small>}
+              </span>
+              <span>
+                {value}
+                {detail && <small>{detail}</small>}
+              </span>
+            </summary>
+            {props.children ? (
+              props.children(row)
+            ) : (
+              <Raw
+                value={props.raw ? props.raw(row) : row}
+                {...(props.label ? { label: props.label } : {})}
+              />
+            )}
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+type AnalyticsPanelProps = { model: AnalyticsStore };
+const Overview = observer(function Overview({ model }: AnalyticsPanelProps) {
+  const { data, setTab } = model;
+  if (!data) return null;
+  const s = data.summary;
+  return (
+    <>
+      {(finite(s?.exactResponseSamples) || finite(s?.legacyUsageSamples)) && (
+        <p className="analytics-note">
+          Token evidence: {count(s?.exactResponseSamples)} identified response
+          records; {count(s?.legacyUsageSamples)} legacy usage records.
+        </p>
+      )}
+      <Metrics rows={model.metrics.tokens} />
+      <Metrics rows={model.metrics.secondary} secondary />
+      <Section
+        title="Context over time"
+        description="Peak report per time bucket / model window"
+      >
+        <ContextChart
+          chart={model.chart}
+          compactions={data.compactions || []}
+        />
+        <p className="analytics-note">
+          Each point is the highest context report in its time bucket. Dotted
+          lines mark compactions.
+        </p>
+      </Section>
+      <section className="analytics-section">
+        <header>
+          <h3>Tool payloads</h3>
+          <Button
+            variant="subtle"
+            size="compact-xs"
+            onClick={() => setTab("tools")}
+          >
+            Inspect calls
+          </Button>
+        </header>
+        <Metrics rows={model.metrics.payload} secondary />
+        <p className="analytics-note">
+          Model tool time: {duration(s?.modelDurationMs)}. Native tool time:{" "}
+          {duration(s?.protocolDurationMs)}. Each value sums measured calls
+          within its group; parallel calls can overlap.
+        </p>
+      </section>
+    </>
+  );
+});
+const Calls = observer(function Calls({ model }: AnalyticsPanelProps) {
+  const { data, busy, selected, tools, selectedCall, setSelected } = model;
+  const net = useServerNet();
+  const load = (patch: Partial<AnalyticsQuery>) => model.load(net, patch);
+  if (!data) return null;
+  const { offset = 0 } = model.query;
+  const calls = data.calls ?? [],
+    total = data.pagination?.total ?? 0;
+  return (
+    <>
+      {model.rankings.map((ranking) => (
+        <ToolRanking
+          key={ranking.title}
+          ranking={ranking}
+          onSelect={(name) => load({ tool: name })}
+        />
+      ))}
+      <Raw
+        value={tools}
+        label="Tool measurement coverage and duration distributions"
+      />
+      <p className="analytics-note">
+        These groups overlap. Do not add them together.
+      </p>
+      <Section
+        title="Call records"
+        description={<>{count(total)} model and native records</>}
+      >
+        <div className="analytics-calls">
+          {calls.map((c) => (
+            <div
+              key={c.id}
+              className={`analytics-call ${selected === c.id ? "is-selected" : ""}`}
+            >
+              <button
+                className="analytics-call-row"
+                aria-expanded={selected === c.id}
+                onClick={() => setSelected(selected === c.id ? null : c.id)}
+              >
+                <span className="analytics-call-main">
+                  <strong>{c.name}</strong>
+                  <small>
+                    {c.agentName || c.agentId} · {time(c.startedAt)} ·{" "}
+                    {c.payloadBoundary === "model"
+                      ? "Model-visible"
+                      : "Native protocol"}
+                  </small>
+                </span>
+                <span
+                  className={`analytics-status ${["failed", "error"].includes(c.status) ? "is-failed" : ""}`}
+                >
+                  {c.status}
+                </span>
+                <span>
+                  {bytes(
+                    c.payloadBoundary === "model"
+                      ? c.modelOutput?.bytes
+                      : c.output?.bytes,
+                  )}
+                </span>
+                <span>{duration(c.durationMs)}</span>
+              </button>
+              {selected === c.id && selectedCall && (
+                <div className="analytics-call-detail">
+                  <Fields
+                    className="analytics-identities"
+                    values={[
+                      ["Call", c.id],
+                      ["Agent", c.agentId],
+                      ["Thread", c.threadId],
+                      ["Turn", c.turnId],
+                      ["Model", c.model],
+                      ["Account", c.accountKey],
+                      ["Source", c.source],
+                      ["Started", time(c.startedAt)],
+                      ["Finished", time(c.finishedAt)],
+                    ]}
+                  />
+                  {c.command && (
+                    <pre className="analytics-command">
+                      {Array.isArray(c.command)
+                        ? c.command.join(" ")
+                        : c.command}
+                    </pre>
+                  )}
+                  {c.error && (
+                    <p className="analytics-error">
+                      {typeof c.error === "string"
+                        ? c.error
+                        : JSON.stringify(c.error)}
+                    </p>
+                  )}
+                  {c.payloadBoundary === "model" ||
+                  c.modelInput ||
+                  c.modelOutput ? (
+                    <div className="analytics-payloads">
+                      <Payload
+                        title="Model tool arguments"
+                        data={c.modelInput}
+                      />
+                      <Payload
+                        title="Model-visible result"
+                        data={c.modelOutput}
+                      />
+                    </div>
+                  ) : null}
+                  {c.payloadBoundary !== "model" && (
+                    <div className="analytics-payloads">
+                      <Payload title="Protocol input" data={c.input} />
+                      <Payload title="Protocol output" data={c.output} />
+                    </div>
+                  )}
+                  <Raw value={c} />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        {!calls.length && <p className="analytics-empty">No call records.</p>}
+        <div className="analytics-pagination">
+          <span>
+            {total
+              ? `${offset + 1} to ${Math.min(offset + calls.length, total)} of ${count(total)}`
+              : "0 calls"}
+          </span>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            leftSection={<ChevronLeft size={14} />}
+            disabled={busy || offset === 0}
+            onClick={() => {
+              const next = Math.max(0, offset - 30);
+              load({ offset: next });
+            }}
+          >
+            Previous
+          </Button>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            rightSection={<ChevronRight size={14} />}
+            disabled={busy || !data.pagination?.hasMore}
+            onClick={() => {
+              load({ offset: offset + 30 });
+            }}
+          >
+            Next
+          </Button>
+        </div>
+      </Section>
+    </>
+  );
+});
+const Activity = observer(function Activity({ model }: AnalyticsPanelProps) {
+  const data = model.data;
+  if (!data) return null;
+  const timeline = data.timeline ?? [];
+  return (
+    <>
+      <TokenGroups
+        title="Agents"
+        rows={data.agentTotals ?? []}
+        identity="name"
+        detail
+      />
+      <TokenGroups
+        title="Models"
+        rows={data.modelTotals ?? []}
+        identity="model"
+      />
+      <TokenGroups
+        title="Accounts"
+        rows={data.accountTotals ?? []}
+        identity="accountKey"
+      />
+      <Section
+        title="Turns"
+        description={`Showing ${count(model.turns.length)} of ${count(data.detailPagination?.turns?.total ?? 0)} turns; elapsed time includes tools and waits`}
+      >
+        <Records
+          rows={model.turns}
+          identify={(turn) => turn.agentId + ":" + turn.turnId}
+          summary={(turn) => [
+            turn.agentName || turn.agentId,
+            `${time(turn.startedAt)} · ${turn.status}`,
+            duration(turn.durationMs),
+            `First output ${duration(turn.firstOutputDelayMs)}`,
+          ]}
+        />
+        {!data.turns?.length && (
+          <p className="analytics-note">No turn measurements recorded.</p>
+        )}
+        <Older model={model} detail="turns" />
+      </Section>
+      <Section
+        title="Background activity"
+        description="Latest 100 monitors and event delivery"
+      >
+        <div className="analytics-operation-counts">
+          <CountGroup
+            title="Events"
+            values={data.operations?.eventCounts ?? {}}
+          />
+          <CountGroup
+            title="Approval states"
+            values={data.operations?.approvalCounts ?? {}}
+          />
+        </div>
+        <Records
+          rows={model.monitors}
+          identify={(row) => row.id}
+          summary={(row) => [
+            row.id,
+            `${row.agent} · ${time(row.created)}`,
+            row.status,
+            `${bytes(row.bytes)} · Exit ${count(row.exitCode)}`,
+          ]}
+        />
+      </Section>
+      <Section title="Protocol events" description="Grouped by UTC hour">
+        <DataTable
+          headings={["Method", "Events", "Bytes"]}
+          rows={model.notifications.map(([method, row]) => [
+            method,
+            method,
+            count(row.count),
+            bytes(row.bytes),
+          ])}
+        />
+        <Raw
+          value={data.notifications ?? []}
+          label="Event buckets by agent and hour"
+        />
+      </Section>
+      <Section
+        title="Account limit history"
+        description={`Showing ${count(model.rateLimits.length)} of ${count(data.detailPagination?.rateLimits?.total ?? 0)} allowance snapshots`}
+      >
+        <Records
+          rows={model.rateLimits}
+          identify={(row, index) => row.accountKey + ":" + row.at + ":" + index}
+          summary={(row) => [row.accountKey, "", time(row.at)]}
+          raw={(row) => row.data}
+          label="Recorded allowance"
+        />
+        {!data.rateLimits?.length && (
+          <p className="analytics-note">No allowance snapshots recorded.</p>
+        )}
+        <Older model={model} detail="rateLimits" />
+      </Section>
+      <Section
+        title="Compactions"
+        description={`${count(data.summary?.compactions)} recorded; latest 100 shown`}
+      >
+        <Records
+          rows={(data.compactions ?? []).slice(0, 100)}
+          identify={(row) => row.id}
+          summary={(row) => [
+            row.agentName || row.agentId,
+            time(row.at),
+            "Compaction",
+          ]}
+        />
+        {!data.compactions?.length && (
+          <p className="analytics-note">
+            No compaction records available in this period.
+          </p>
+        )}
+      </Section>
+      <Section
+        title="Recorded item types"
+        description="Messages, reasoning, tools and other observed items"
+      >
+        <DataTable
+          headings={["Type", "Items", "Bytes", "Characters"]}
+          rows={(data.items ?? []).map((row) => [
+            row.type,
+            row.type,
+            count(row.count),
+            bytes(row.bytes),
+            count(row.chars),
+          ])}
+        />
+        {!data.items?.length && (
+          <p className="analytics-empty">No item measurements recorded.</p>
+        )}
+      </Section>
+      <Section
+        title="Usage reports"
+        description={`${timeline.length} recent observations`}
+      >
+        <Records
+          rows={[...timeline].reverse()}
+          identify={(row) => row.id}
+          summary={(row) => [
+            row.agentName || row.agentId,
+            `${time(row.at)} · ${row.source}`,
+            `${count(row.last?.totalTokens)} tokens`,
+            row.reset ? "Cumulative counter reset" : "",
+          ]}
+        >
+          {(row) => (
+            <div>
+              <Fields
+                className="analytics-identities"
+                values={[
+                  ["Turn", row.turnId],
+                  ["Model", row.model],
+                ]}
+              />
+              <Raw value={row} label="Provider report and recorded metadata" />
+            </div>
+          )}
+        </Records>
+        {!timeline.length && (
+          <p className="analytics-empty">No provider usage reports recorded.</p>
+        )}
+      </Section>
+    </>
+  );
+});
+
+const Older = observer(function Older({
+  model,
+  detail,
+}: {
+  model: AnalyticsStore;
+  detail: "turns" | "rateLimits";
+}) {
+  const net = useServerNet();
+  const total = model.data?.detailPagination?.[detail]?.total ?? 0;
+  const loaded =
+    (model.data?.[detail]?.length ?? 0) + model.olderDetails[detail].length;
+  return (
+    loaded < total && (
+      <Button
+        size="compact-xs"
+        variant="subtle"
+        loading={model.loadingDetails[detail]}
+        onClick={() => model.loadOlderDetails(net, detail)}
+      >
+        Load 100 older {detail === "turns" ? "turns" : "snapshots"}
+      </Button>
+    )
+  );
+});
+
+const analyticsScopes = Object.values(GeneratedApiAnalyticsScope);
+const isAnalyticsScope = (
+  value: string,
+): value is NonNullable<AnalyticsSelection["query"]["scope"]> =>
+  analyticsScopes.some((scope) => scope === value);
+type AnalyticsProps = {
   agent: Agent;
   selection: AnalyticsSelection;
   onClose: () => void;
-}) {
-  const net = useServerNet();
-
-  const [current, setCurrent] = useState(selection);
-  const { query, read: currentRead } = current;
-  const { scope = "agent", tool = "", offset = 0 } = query;
-  const period =
-    query.from_time && query.to_time
-      ? String(query.to_time - query.from_time)
-      : "all";
-  const data = resourceData(currentRead.current);
-  const [error, setError] = useState("");
-  const busy = currentRead.current.status === "loading";
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<string | null>("overview");
-  const [previousTools, setKnownTools] = useState<string[]>([]);
-  const [details, setDetails] = useState<{
-    rateLimits: ReadSlot<AnalyticsResult>[];
-    turns: ReadSlot<AnalyticsResult>[];
-  }>({ rateLimits: [], turns: [] });
-  const olderDetails = {
-    rateLimits: details.rateLimits.flatMap(
-      (slot) => resourceData(slot.current)?.rateLimits || [],
-    ),
-    turns: details.turns.flatMap(
-      (slot) => resourceData(slot.current)?.turns || [],
-    ),
-  };
-  const loadingDetails = {
-    rateLimits: details.rateLimits.some(
-      (slot) => slot.current.status === "loading",
-    ),
-    turns: details.turns.some((slot) => slot.current.status === "loading"),
-  };
-  const knownTools = [
-    ...new Set([
-      ...previousTools,
-      ...(data?.tools || []).map((tool) => tool.name),
-    ]),
-  ].sort();
-  const detailError = [...details.turns, ...details.rateLimits]
-    .map((slot) => slot.current)
-    .find((state) => state.status === "error");
-  const readError =
-    currentRead.current.status === "error"
-      ? currentRead.current.error
-      : detailError?.error;
-  const loadOlderDetails = (detail: "rateLimits" | "turns") => {
-    if (!data) return;
-    const read = net.reads.analytics({
-      ...query,
-      view: "detail",
-      detail,
-      limit: 100,
-      offset: (data[detail]?.length || 0) + olderDetails[detail].length,
-    });
-    setDetails((previous) =>
-      previous[detail].includes(read)
-        ? previous
-        : { ...previous, [detail]: [...previous[detail], read] },
-    );
-    void read.read().catch(() => {});
-  };
-  const load = (patch: Partial<AnalyticsQuery> = {}) => {
-    const next = { ...query, offset: 0, ...patch };
-    const read = net.reads.analytics(next);
-    setKnownTools(knownTools);
-    setCurrent({ query: next, read });
-    setSelected(null);
-    setDetails({ rateLimits: [], turns: [] });
-    setError("");
-    void read.read().catch(() => {});
-  };
-  const timeRange = (value = period) => {
-    const now = Math.floor(Date.now() / 1000);
-    return {
-      to_time: now,
-      from_time: value === "all" ? undefined : now - Number(value),
-    };
-  };
-  const download = async () => {
-    setError("");
-    try {
-      const { blob } = await net.exportAnalytics({
-        ...query,
-        export: "1",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `codex-studio-analytics-${scope}-${new Date().toISOString().replaceAll(":", "-")}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (failure) {
-      setError(errorText(failure));
-    }
-  };
-  const s = data?.summary;
-  const timeline: AnalyticsUsageRecord[] = data?.timeline || [];
-  const tools: AnalyticsTool[] = [...(data?.tools || [])].sort(
-    (a, b) => (b.outputBytes || 0) - (a.outputBytes || 0),
-  );
-  const calls: AnalyticsItemRecord[] = data?.calls || [];
-  const selectedCall = calls.find((c) => c.id === selected);
-  const total = data?.pagination?.total || 0;
+};
+const readKeys = new WeakMap<AnalyticsSelection["read"], string>();
+function readKey(read: AnalyticsSelection["read"]) {
+  let key = readKeys.get(read);
+  if (!key) {
+    key = randomUUID();
+    readKeys.set(read, key);
+  }
+  return key;
+}
+export default function Analytics(props: AnalyticsProps) {
+  const owner = useServerOwner(),
+    net = useServerNet();
+  const { agent, onClose } = props;
   return (
-    <Modal
-      opened
-      onClose={onClose}
-      title="Context analytics"
-      size="min(1160px, calc(100vw - 24px))"
-      className="analytics-modal"
-      styles={{ body: { padding: 0 }, content: { overflow: "hidden" } }}
+    <Owned
+      key={JSON.stringify([
+        owner?.id,
+        props.selection.query,
+        readKey(props.selection.read),
+      ])}
+      create={() => new AnalyticsStore(props.selection)}
     >
-      <div className="analytics-root" aria-busy={busy}>
-        <div className="analytics-toolbar">
-          <NativeSelect
-            label="Scope"
-            aria-label="Analytics scope"
-            value={scope}
-            onChange={(e) => {
-              if (!isAnalyticsScope(e.currentTarget.value)) return;
-              load({
-                ...timeRange(),
-                scope: e.currentTarget.value,
-                tool: undefined,
-              });
-              setKnownTools([]);
-            }}
-            data={[
-              { value: "agent", label: "This agent" },
-              { value: "team", label: "Whole team" },
-              { value: "all", label: "All agents" },
-            ]}
-          />
-          <NativeSelect
-            label="Period"
-            aria-label="Analytics period"
-            value={period}
-            onChange={(e) => load(timeRange(e.currentTarget.value))}
-            data={[
-              { value: "all", label: "All recorded history" },
-              { value: "3600", label: "Last hour" },
-              { value: "86400", label: "Last 24 hours" },
-              { value: "604800", label: "Last 7 days" },
-              { value: "2592000", label: "Last 30 days" },
-            ]}
-          />
-          <NativeSelect
-            label="Tool calls"
-            aria-label="Analytics tool"
-            value={tool}
-            onChange={(e) => {
-              load({ tool: e.currentTarget.value || undefined });
-              setTab("tools");
-            }}
-            data={[
-              { value: "", label: "All tools" },
-              ...knownTools.map((name) => ({ value: name, label: name })),
-            ]}
-          />
-          <div className="analytics-toolbar-actions">
-            <Tooltip label="Refresh analytics">
-              <ActionIcon
-                aria-label="Refresh analytics"
-                variant="subtle"
-                size="lg"
-                disabled={busy}
-                onClick={() => load(timeRange())}
-              >
-                <RefreshCw size={16} />
-              </ActionIcon>
-            </Tooltip>
-            <Button
-              variant="light"
-              size="xs"
-              leftSection={<ArrowDownToLine size={14} />}
-              disabled={busy || !data}
-              onClick={() => void download()}
-            >
-              Export JSON
-            </Button>
-          </div>
-        </div>
-        <div className="analytics-scope">
-          <span>
-            {scope === GeneratedApiAnalyticsScope.agent
-              ? agent.name
-              : scope === "team"
-                ? "Selected team"
-                : "All recorded agents"}
-          </span>
-          <span>
-            {busy
-              ? "Updating…"
-              : data
-                ? `Updated ${time(data.generatedAt)}`
-                : ""}
-          </span>
-        </div>
-        {(error || readError) && (
-          <p className="analytics-error" role="alert">
-            {error || errorText(readError)}
-          </p>
-        )}
-        {busy && !data && (
-          <div className="analytics-empty">
-            <Loader size="sm" aria-label="Load analytics" />
-          </div>
-        )}
-        {data && (
-          <Tabs value={tab} onChange={setTab} keepMounted={false}>
-            <Tabs.List>
-              <Tabs.Tab value="overview">Overview</Tabs.Tab>
-              <Tabs.Tab value="tools">
-                Tool calls{" "}
-                <span
-                  className="analytics-tab-count"
-                  title="Model-visible tool calls"
-                >
-                  {count(s?.modelToolCalls)}
+      {(model) => {
+        const {
+          period,
+          data,
+          error,
+          busy,
+          tab,
+          knownTools,
+          readError,
+          timeRange,
+          setTab,
+          setKnownTools,
+        } = model;
+        const load = (patch: Partial<AnalyticsQuery> = {}) =>
+          model.load(net, patch);
+        const download = () => model.download(net);
+        const { scope = "agent", tool = "" } = model.query;
+        const s = data?.summary;
+        return (
+          <Modal
+            opened
+            onClose={onClose}
+            title="Context analytics"
+            size="min(1160px, calc(100vw - 24px))"
+            className="analytics-modal"
+            styles={{ body: { padding: 0 }, content: { overflow: "hidden" } }}
+          >
+            <div className="analytics-root" aria-busy={busy}>
+              <div className="analytics-toolbar">
+                <NativeSelect
+                  label="Scope"
+                  aria-label="Analytics scope"
+                  value={scope}
+                  onChange={(e) => {
+                    if (!isAnalyticsScope(e.currentTarget.value)) return;
+                    load({
+                      ...timeRange(),
+                      scope: e.currentTarget.value,
+                      tool: undefined,
+                    });
+                    setKnownTools([]);
+                  }}
+                  data={[
+                    { value: "agent", label: "This agent" },
+                    { value: "team", label: "Whole team" },
+                    { value: "all", label: "All agents" },
+                  ]}
+                />
+                <NativeSelect
+                  label="Period"
+                  aria-label="Analytics period"
+                  value={period}
+                  onChange={(e) => load(timeRange(e.currentTarget.value))}
+                  data={[
+                    { value: "all", label: "All recorded history" },
+                    { value: "3600", label: "Last hour" },
+                    { value: "86400", label: "Last 24 hours" },
+                    { value: "604800", label: "Last 7 days" },
+                    { value: "2592000", label: "Last 30 days" },
+                  ]}
+                />
+                <NativeSelect
+                  label="Tool calls"
+                  aria-label="Analytics tool"
+                  value={tool}
+                  onChange={(e) => {
+                    load({ tool: e.currentTarget.value || undefined });
+                    setTab("tools");
+                  }}
+                  data={[
+                    { value: "", label: "All tools" },
+                    ...knownTools.map((name) => ({ value: name, label: name })),
+                  ]}
+                />
+                <div className="analytics-toolbar-actions">
+                  <Tooltip label="Refresh analytics">
+                    <ActionIcon
+                      aria-label="Refresh analytics"
+                      variant="subtle"
+                      size="lg"
+                      disabled={busy}
+                      onClick={() => load(timeRange())}
+                    >
+                      <RefreshCw size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                  <Button
+                    variant="light"
+                    size="xs"
+                    leftSection={<ArrowDownToLine size={14} />}
+                    disabled={busy || !data}
+                    onClick={() => void download()}
+                  >
+                    Export JSON
+                  </Button>
+                </div>
+              </div>
+              <div className="analytics-scope">
+                <span>
+                  {scope === GeneratedApiAnalyticsScope.agent
+                    ? agent.name
+                    : scope === "team"
+                      ? "Selected team"
+                      : "All recorded agents"}
                 </span>
-              </Tabs.Tab>
-              <Tabs.Tab value="activity">Activity</Tabs.Tab>
-            </Tabs.List>
-            <div className="analytics-scroll">
-              <p className="analytics-definition">
-                Tokens come from provider reports. Tool sizes are in bytes.
-              </p>
-              {(data.coverage?.captureErrors?.count ?? 0) > 0 ||
-              (data.coverage?.historyErrors?.length ?? 0) > 0 ? (
-                <p className="analytics-filter-note" role="status">
-                  Collection reported errors. Some measurements may be missing.
-                  See Data coverage below.
-                </p>
-              ) : null}
-              {(s?.provisionalUsageSamples || 0) > 0 && (
-                <p className="analytics-filter-note">
-                  {count(s?.provisionalUsageSamples)} provisional notices
-                  excluded; current requests may appear after history sync.
-                  These notices can duplicate known requests.
+                <span>
+                  {busy
+                    ? "Updating…"
+                    : data
+                      ? `Updated ${time(data.generatedAt)}`
+                      : ""}
+                </span>
+              </div>
+              {(error || readError) && (
+                <p className="analytics-error" role="alert">
+                  {error || errorText(readError)}
                 </p>
               )}
-              {tool && (
-                <p className="analytics-filter-note">
-                  The tool filter applies to tool calls only.
-                </p>
+              {busy && !data && (
+                <div className="analytics-empty">
+                  <Loader size="sm" aria-label="Load analytics" />
+                </div>
               )}
-              <Tabs.Panel value="overview">
-                {(finite(s?.exactResponseSamples) ||
-                  finite(s?.legacyUsageSamples)) && (
-                  <p className="analytics-note">
-                    Token evidence: {count(s?.exactResponseSamples)} identified
-                    response records; {count(s?.legacyUsageSamples)} legacy
-                    usage records.
-                  </p>
-                )}
-                <div className="analytics-metrics">
-                  {tokenFields.map(([key, label, hint]) => {
-                    const observations = s?.tokenObservations?.[key];
-                    const samples = s?.usageSamples;
-                    return (
-                      <Metric
-                        key={key}
-                        label={label}
-                        value={count(s?.tokens?.[key])}
-                        hint={
-                          finite(observations) && finite(samples) && samples > 0
-                            ? `${hint}. ${observations < samples ? `Partial: ${count(observations)} of ${count(samples)} reports` : `All ${count(samples)} reports`}`
-                            : hint
-                        }
-                      />
-                    );
-                  })}
-                </div>
-                <div className="analytics-secondary">
-                  <Metric
-                    label="Cache hit rate"
-                    value={
-                      finite(s?.cacheHitRate)
-                        ? `${((s?.cacheHitRate ?? 0) * 100).toFixed(1)}%`
-                        : "Unavailable"
-                    }
-                    hint="Cached input / input"
-                  />
-                  <Metric
-                    label="Peak context"
-                    value={
-                      finite(s?.peakContextPercent)
-                        ? `${(s?.peakContextPercent ?? 0).toFixed(1)}%`
-                        : "Unavailable"
-                    }
-                    hint={`${count(s?.peakContextTokens)} tokens`}
-                  />
-                  <Metric
-                    label="Compactions"
-                    value={count(s?.compactions)}
-                    hint="Recorded events"
-                  />
-                  <Metric
-                    label="Agents / turns"
-                    value={`${count(s?.agents)} / ${count(s?.turns)}`}
-                    hint={`${count(s?.usageSamples)} usage reports`}
-                  />
-                </div>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Context over time</h3>
-                    <span>Peak report per time bucket / model window</span>
-                  </header>
-                  <ContextChart
-                    timeline={data.chartBuckets || timeline}
-                    compactions={data.compactions || []}
-                    aggregate={scope !== GeneratedApiAnalyticsScope.agent}
-                  />
-                  <p className="analytics-note">
-                    Each point is the highest context report in its time bucket.
-                    Dotted lines mark compactions.
-                  </p>
-                </section>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Tool payloads</h3>
-                    <Button
-                      variant="subtle"
-                      size="compact-xs"
-                      onClick={() => setTab("tools")}
-                    >
-                      Inspect calls
-                    </Button>
-                  </header>
-                  <div className="analytics-secondary">
-                    <Metric
-                      label="Model input payload"
-                      value={bytes(s?.modelInputBytes)}
-                      hint="Recorded tool arguments"
-                    />
-                    <Metric
-                      label="Model result payload"
-                      value={bytes(s?.modelOutputBytes)}
-                      hint="Tool results returned to the model"
-                    />
-                    <Metric
-                      label="Model tool calls"
-                      value={count(s?.modelToolCalls)}
-                      hint={`${count(s?.modelFailedToolCalls)} reported failures`}
-                    />
-                    <Metric
-                      label="Native tool calls"
-                      value={count(s?.protocolToolCalls)}
-                      hint={`${count(s?.protocolFailedToolCalls)} reported failures`}
-                    />
-                  </div>
-                  <p className="analytics-note">
-                    Model tool time: {duration(s?.modelDurationMs)}. Native tool
-                    time: {duration(s?.protocolDurationMs)}. Each value sums
-                    measured calls within its group; parallel calls can overlap.
-                  </p>
-                </section>
-              </Tabs.Panel>
-              <Tabs.Panel value="tools">
-                <ToolRanking
-                  title="Model-visible tool results"
-                  tools={tools.filter(
-                    (t) =>
-                      t.payloadBoundary === "model" ||
-                      t.type === "modelToolCall",
-                  )}
-                  model
-                  onSelect={(name) => {
-                    load({ tool: name });
-                  }}
-                />
-                <ToolRanking
-                  title="Native protocol output"
-                  tools={tools.filter(
-                    (t) =>
-                      t.payloadBoundary !== "model" &&
-                      t.type !== "modelToolCall",
-                  )}
-                  onSelect={(name) => {
-                    load({ tool: name });
-                  }}
-                />
-                <Raw
-                  value={tools}
-                  label="Tool measurement coverage and duration distributions"
-                />
-                <p className="analytics-note">
-                  These groups overlap. Do not add them together.
-                </p>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Call records</h3>
-                    <span>{count(total)} model and native records</span>
-                  </header>
-                  <div className="analytics-calls">
-                    {calls.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`analytics-call ${selected === c.id ? "is-selected" : ""}`}
+              {data && (
+                <Tabs value={tab} onChange={setTab} keepMounted={false}>
+                  <Tabs.List>
+                    <Tabs.Tab value="overview">Overview</Tabs.Tab>
+                    <Tabs.Tab value="tools">
+                      Tool calls{" "}
+                      <span
+                        className="analytics-tab-count"
+                        title="Model-visible tool calls"
                       >
-                        <button
-                          className="analytics-call-row"
-                          aria-expanded={selected === c.id}
-                          onClick={() =>
-                            setSelected(selected === c.id ? null : c.id)
-                          }
-                        >
-                          <span className="analytics-call-main">
-                            <strong>{c.name}</strong>
-                            <small>
-                              {c.agentName || c.agentId} · {time(c.startedAt)} ·{" "}
-                              {c.payloadBoundary === "model"
-                                ? "Model-visible"
-                                : "Native protocol"}
-                            </small>
-                          </span>
-                          <span
-                            className={`analytics-status ${["failed", "error"].includes(c.status) ? "is-failed" : ""}`}
-                          >
-                            {c.status}
-                          </span>
-                          <span>
-                            {bytes(
-                              c.payloadBoundary === "model"
-                                ? c.modelOutput?.bytes
-                                : c.output?.bytes,
-                            )}
-                          </span>
-                          <span>{duration(c.durationMs)}</span>
-                        </button>
-                        {selected === c.id && selectedCall && (
-                          <div className="analytics-call-detail">
-                            <dl className="analytics-identities">
-                              {[
-                                ["Call", c.id],
-                                ["Agent", c.agentId],
-                                ["Thread", c.threadId],
-                                ["Turn", c.turnId],
-                                ["Model", c.model],
-                                ["Account", c.accountKey],
-                                ["Source", c.source],
-                                ["Started", time(c.startedAt)],
-                                ["Finished", time(c.finishedAt)],
-                              ].map(([label, value]) => (
-                                <div key={label}>
-                                  <dt>{label}</dt>
-                                  <dd>{value || "Unavailable"}</dd>
-                                </div>
-                              ))}
-                            </dl>
-                            {c.command && (
-                              <pre className="analytics-command">
-                                {Array.isArray(c.command)
-                                  ? c.command.join(" ")
-                                  : c.command}
-                              </pre>
-                            )}
-                            {c.error && (
-                              <p className="analytics-error">
-                                {typeof c.error === "string"
-                                  ? c.error
-                                  : JSON.stringify(c.error)}
-                              </p>
-                            )}
-                            {c.payloadBoundary === "model" ||
-                            c.modelInput ||
-                            c.modelOutput ? (
-                              <div className="analytics-payloads">
-                                <Payload
-                                  title="Model tool arguments"
-                                  data={c.modelInput}
-                                />
-                                <Payload
-                                  title="Model-visible result"
-                                  data={c.modelOutput}
-                                />
-                              </div>
-                            ) : null}
-                            {c.payloadBoundary !== "model" && (
-                              <div className="analytics-payloads">
-                                <Payload
-                                  title="Protocol input"
-                                  data={c.input}
-                                />
-                                <Payload
-                                  title="Protocol output"
-                                  data={c.output}
-                                />
-                              </div>
-                            )}
-                            <Raw value={c} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {!calls.length && (
-                    <p className="analytics-empty">No call records.</p>
-                  )}
-                  <div className="analytics-pagination">
-                    <span>
-                      {total
-                        ? `${offset + 1} to ${Math.min(offset + calls.length, total)} of ${count(total)}`
-                        : "0 calls"}
-                    </span>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      leftSection={<ChevronLeft size={14} />}
-                      disabled={busy || offset === 0}
-                      onClick={() => {
-                        const next = Math.max(0, offset - 30);
-                        load({ offset: next });
-                      }}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      rightSection={<ChevronRight size={14} />}
-                      disabled={busy || !data.pagination?.hasMore}
-                      onClick={() => {
-                        load({ offset: offset + 30 });
-                      }}
-                    >
-                      Next
-                    </Button>
-                  </div>
-                </section>
-              </Tabs.Panel>
-              <Tabs.Panel value="activity">
-                <TokenGroups
-                  title="Agents"
-                  rows={data.agentTotals || []}
-                  identity="name"
-                  detail
-                />
-                <TokenGroups
-                  title="Models"
-                  rows={data.modelTotals || []}
-                  identity="model"
-                />
-                <TokenGroups
-                  title="Accounts"
-                  rows={data.accountTotals || []}
-                  identity="accountKey"
-                />
-                <section className="analytics-section">
-                  <header>
-                    <h3>Turns</h3>
-                    <span>
-                      Showing{" "}
-                      {count(
-                        (data.turns || []).length +
-                          (olderDetails.turns || []).length,
-                      )}{" "}
-                      of {count(data.detailPagination?.turns?.total || 0)}{" "}
-                      turns; elapsed time includes tools and waits
-                    </span>
-                  </header>
-                  <div className="analytics-observations">
-                    {[...(data.turns || []), ...(olderDetails.turns || [])]
-                      .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
-                      .map((turn) => (
-                        <details key={`${turn.agentId}:${turn.turnId}`}>
-                          <summary>
-                            <span>
-                              {turn.agentName || turn.agentId}
-                              <small>
-                                {time(turn.startedAt)} · {turn.status}
-                              </small>
-                            </span>
-                            <span>
-                              {duration(turn.durationMs)}
-                              <small>
-                                First output {duration(turn.firstOutputDelayMs)}
-                              </small>
-                            </span>
-                          </summary>
-                          <Raw value={turn} />
-                        </details>
+                        {count(s?.modelToolCalls)}
+                      </span>
+                    </Tabs.Tab>
+                    <Tabs.Tab value="activity">Activity</Tabs.Tab>
+                  </Tabs.List>
+                  <div className="analytics-scroll">
+                    <p className="analytics-definition">
+                      Tokens come from provider reports. Tool sizes are in
+                      bytes.
+                    </p>
+                    {(data.coverage?.captureErrors?.count ?? 0) > 0 ||
+                    (data.coverage?.historyErrors?.length ?? 0) > 0 ? (
+                      <p className="analytics-filter-note" role="status">
+                        Collection reported errors. Some measurements may be
+                        missing. See Data coverage below.
+                      </p>
+                    ) : null}
+                    {(s?.provisionalUsageSamples || 0) > 0 && (
+                      <p className="analytics-filter-note">
+                        {count(s?.provisionalUsageSamples)} provisional notices
+                        excluded; current requests may appear after history
+                        sync. These notices can duplicate known requests.
+                      </p>
+                    )}
+                    {tool && (
+                      <p className="analytics-filter-note">
+                        The tool filter applies to tool calls only.
+                      </p>
+                    )}
+                    <Tabs.Panel value="overview">
+                      <Overview model={model} />
+                    </Tabs.Panel>
+                    <Tabs.Panel value="tools">
+                      <Calls model={model} />
+                    </Tabs.Panel>
+                    <Tabs.Panel value="activity">
+                      <Activity model={model} />
+                    </Tabs.Panel>
+                    <details className="analytics-coverage">
+                      <summary>Data coverage and measurement limits</summary>
+                      <p>
+                        Collection started {time(data.coverage?.trackingSince)}.
+                        Older stored history may have fewer measurements.
+                        Missing values stay unavailable.
+                      </p>
+                      {(data.coverage?.notes || []).map((note, i) => (
+                        <p key={i}>{note}</p>
                       ))}
-                  </div>
-                  {!data.turns?.length && (
-                    <p className="analytics-note">
-                      No turn measurements recorded.
-                    </p>
-                  )}
-                  {(data.turns || []).length +
-                    (olderDetails.turns || []).length <
-                    (data.detailPagination?.turns?.total || 0) && (
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      loading={!!loadingDetails.turns}
-                      onClick={() => loadOlderDetails("turns")}
-                    >
-                      Load 100 older turns
-                    </Button>
-                  )}
-                </section>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Background activity</h3>
-                    <span>Latest 100 monitors and event delivery</span>
-                  </header>
-                  <div className="analytics-operation-counts">
-                    <CountGroup
-                      title="Events"
-                      values={data.operations?.eventCounts || {}}
-                    />
-                    <CountGroup
-                      title="Approval states"
-                      values={data.operations?.approvalCounts || {}}
-                    />
-                  </div>
-                  <div className="analytics-observations">
-                    {[...(data.operations?.monitors || [])]
-                      .sort((a, b) => (b.created || 0) - (a.created || 0))
-                      .slice(0, 100)
-                      .map((m) => (
-                        <details key={m.id}>
-                          <summary>
-                            <span>
-                              {m.id}
-                              <small>
-                                {m.agent} · {time(m.created)}
-                              </small>
-                            </span>
-                            <span>
-                              {m.status}
-                              <small>
-                                {bytes(m.bytes)} · Exit {count(m.exitCode)}
-                              </small>
-                            </span>
-                          </summary>
-                          <Raw value={m} />
-                        </details>
+                      <p>
+                        Cached input is part of input. Reasoning is part of
+                        output.
+                      </p>
+                      <p>Cost estimates are in Account limits.</p>
+                      {(data.coverage?.captureErrors?.count ?? 0) > 0 && (
+                        <p className="analytics-error">
+                          {count(data.coverage?.captureErrors?.count)}{" "}
+                          collection errors recorded. Some data may be missing.
+                        </p>
+                      )}
+                      {Object.entries({
+                        "Coverage metadata": data.coverage,
+                        "Excluded provisional notices (latest 100)":
+                          data.provisionalUsage ?? [],
+                        "History import checkpoints": data.history ?? [],
+                        "Summary and measurement counts": data.summary,
+                      }).map(([label, value]) => (
+                        <Raw key={label} label={label} value={value} />
                       ))}
+                    </details>
                   </div>
-                </section>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Protocol events</h3>
-                    <span>Grouped by UTC hour</span>
-                  </header>
-                  <div className="analytics-table-scroll">
-                    <table className="analytics-table">
-                      <thead>
-                        <tr>
-                          <th>Method</th>
-                          <th>Events</th>
-                          <th>Bytes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(
-                          (data.notifications || []).reduce<
-                            Record<string, { count: number; bytes: number }>
-                          >((groups, n) => {
-                            const group = (groups[n.method] ||= {
-                              count: 0,
-                              bytes: 0,
-                            });
-                            group.count += n.count;
-                            group.bytes += n.bytes;
-                            return groups;
-                          }, {}),
-                        ).map(([method, n]) => (
-                          <tr key={method}>
-                            <td>{method}</td>
-                            <td>{count(n.count)}</td>
-                            <td>{bytes(n.bytes)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <Raw
-                    value={data.notifications || []}
-                    label="Event buckets by agent and hour"
-                  />
-                </section>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Account limit history</h3>
-                    <span>
-                      Showing{" "}
-                      {count(
-                        (data.rateLimits || []).length +
-                          (olderDetails.rateLimits || []).length,
-                      )}{" "}
-                      of {count(data.detailPagination?.rateLimits?.total || 0)}{" "}
-                      allowance snapshots
-                    </span>
-                  </header>
-                  <div className="analytics-observations">
-                    {[
-                      ...(data.rateLimits || []),
-                      ...(olderDetails.rateLimits || []),
-                    ]
-                      .sort((a, b) => (b.at || 0) - (a.at || 0))
-                      .map((r, i: number) => (
-                        <details key={`${r.accountKey}:${r.at}:${i}`}>
-                          <summary>
-                            <span>{r.accountKey}</span>
-                            <span>{time(r.at)}</span>
-                          </summary>
-                          <Raw value={r.data} label="Recorded allowance" />
-                        </details>
-                      ))}
-                  </div>
-                  {!data.rateLimits?.length && (
-                    <p className="analytics-note">
-                      No allowance snapshots recorded.
-                    </p>
-                  )}
-                  {(data.rateLimits || []).length +
-                    (olderDetails.rateLimits || []).length <
-                    (data.detailPagination?.rateLimits?.total || 0) && (
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      loading={!!loadingDetails.rateLimits}
-                      onClick={() => loadOlderDetails("rateLimits")}
-                    >
-                      Load 100 older snapshots
-                    </Button>
-                  )}
-                </section>
-
-                <section className="analytics-section">
-                  <header>
-                    <h3>Compactions</h3>
-                    <span>
-                      {count(s?.compactions)} recorded; latest 100 shown
-                    </span>
-                  </header>
-                  {!(data.compactions || []).length ? (
-                    <p className="analytics-note">
-                      No compaction records available in this period.
-                    </p>
-                  ) : (
-                    <div className="analytics-observations">
-                      {(data.compactions || []).slice(0, 100).map((c) => (
-                        <details key={c.id}>
-                          <summary>
-                            <span>
-                              {c.agentName || c.agentId}
-                              <small>{time(c.at)}</small>
-                            </span>
-                            <span>Compaction</span>
-                          </summary>
-                          <Raw value={c} />
-                        </details>
-                      ))}
-                    </div>
-                  )}
-                </section>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Recorded item types</h3>
-                    <span>
-                      Messages, reasoning, tools and other observed items
-                    </span>
-                  </header>
-                  <div className="analytics-table-scroll">
-                    <table className="analytics-table">
-                      <thead>
-                        <tr>
-                          <th>Type</th>
-                          <th>Items</th>
-                          <th>Bytes</th>
-                          <th>Characters</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(data.items || []).map((item) => (
-                          <tr key={item.type}>
-                            <td>{item.type}</td>
-                            <td>{count(item.count)}</td>
-                            <td>{bytes(item.bytes)}</td>
-                            <td>{count(item.chars)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {!data.items?.length && (
-                    <p className="analytics-empty">
-                      No item measurements recorded.
-                    </p>
-                  )}
-                </section>
-                <section className="analytics-section">
-                  <header>
-                    <h3>Usage reports</h3>
-                    <span>{timeline.length} recent observations</span>
-                  </header>
-                  <div className="analytics-observations">
-                    {[...timeline].reverse().map((p) => (
-                      <details key={p.id}>
-                        <summary>
-                          <span>
-                            {p.agentName || p.agentId}
-                            <small>
-                              {time(p.at)} · {p.source}
-                            </small>
-                          </span>
-                          <span>
-                            {count(p.last?.totalTokens)} tokens
-                            {p.reset && <small>Cumulative counter reset</small>}
-                          </span>
-                        </summary>
-                        <div>
-                          <dl className="analytics-identities">
-                            <div>
-                              <dt>Turn</dt>
-                              <dd>{p.turnId || "Unavailable"}</dd>
-                            </div>
-                            <div>
-                              <dt>Model</dt>
-                              <dd>{p.model || "Unavailable"}</dd>
-                            </div>
-                          </dl>
-                          <Raw
-                            value={p}
-                            label="Provider report and recorded metadata"
-                          />
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                  {!timeline.length && (
-                    <p className="analytics-empty">
-                      No provider usage reports recorded.
-                    </p>
-                  )}
-                </section>
-              </Tabs.Panel>
-              <details className="analytics-coverage">
-                <summary>Data coverage and measurement limits</summary>
-                <p>
-                  Collection started {time(data.coverage?.trackingSince)}. Older
-                  stored history may have fewer measurements. Missing values
-                  stay unavailable.
-                </p>
-                {(data.coverage?.notes || []).map((note, i) => (
-                  <p key={i}>{note}</p>
-                ))}
-                <p>
-                  Cached input is part of input. Reasoning is part of output.
-                </p>
-                <p>Cost estimates are in Account limits.</p>
-                {(data.coverage?.captureErrors?.count ?? 0) > 0 && (
-                  <p className="analytics-error">
-                    {count(data.coverage?.captureErrors?.count)} collection
-                    errors recorded. Some data may be missing.
-                  </p>
-                )}
-                <Raw value={data.coverage} label="Coverage metadata" />
-                <Raw
-                  value={data.provisionalUsage || []}
-                  label="Excluded provisional notices (latest 100)"
-                />
-                <Raw
-                  value={data.history || []}
-                  label="History import checkpoints"
-                />
-                <Raw
-                  value={data.summary}
-                  label="Summary and measurement counts"
-                />
-              </details>
+                </Tabs>
+              )}
             </div>
-          </Tabs>
-        )}
-      </div>
-    </Modal>
+          </Modal>
+        );
+      }}
+    </Owned>
   );
-});
+}

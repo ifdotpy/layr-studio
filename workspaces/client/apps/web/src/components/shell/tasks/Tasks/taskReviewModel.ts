@@ -1,4 +1,5 @@
-import type { PostBody } from "../../../../api.ts";
+import type { Task, WorkBody } from "./TasksStore.ts";
+import { errorText, type PostBody } from "../../../../api.ts";
 import {
   DEFAULT_GATE_TIMEOUT_MS,
   MAX_GATE_TIMEOUT_MS,
@@ -60,4 +61,63 @@ export function parseResultSchema(
   )
     throw new Error("The result schema must be a JSON object or boolean.");
   return value as TaskConfiguration["result_schema"];
+}
+
+export function taskDraft(task?: Task) {
+  return {
+    title: task?.title || "",
+    description: task?.description || "",
+    owner: task?.owner || "",
+    dependencies: [...(task?.dependencies || [])],
+    status: (task ? "" : "ready") as "ready" | "blocked" | "",
+    mode: task ? "custom" : "inherit",
+    gateInput: gateFields(task?.gate),
+    schema:
+      task?.resultSchema === undefined ? "" : prettyJson(task.resultSchema),
+  };
+}
+export function taskSchemaError(schema: string) {
+  try {
+    parseResultSchema(schema);
+    return "";
+  } catch (failure) {
+    return errorText(failure);
+  }
+}
+
+export function taskBody(
+  draft: ReturnType<typeof taskDraft>,
+  task: Task | undefined,
+  values: FormData,
+): WorkBody {
+  const status = values.get("status");
+  const resultSchema = parseResultSchema(draft.schema);
+  if (task?.resultSchema !== undefined && resultSchema === undefined)
+    throw new Error(
+      "Use true to allow any JSON result. An existing result schema cannot be removed.",
+    );
+  const dependencies = values.getAll("dependencies").map(String);
+  const fields = {
+    title: draft.title.trim(),
+    description: String(values.get("description") || ""),
+    owner: String(values.get("owner") || "").trim() || null,
+    dependencies:
+      dependencies.length === draft.dependencies.length &&
+      draft.dependencies.every((id) => dependencies.includes(id))
+        ? draft.dependencies
+        : dependencies,
+    ...(status === "ready" || status === "blocked" ? { status } : {}),
+    ...(draft.mode === "custom" && {
+      gate: parseGate(draft.gateInput.command, draft.gateInput.timeout),
+    }),
+    ...(resultSchema === undefined ? {} : { result_schema: resultSchema }),
+  } satisfies Omit<TaskConfiguration, "action">;
+  return task
+    ? {
+        action: "update",
+        task_id: task.id,
+        version: task.version,
+        ...fields,
+      }
+    : { action: "create", ...fields };
 }

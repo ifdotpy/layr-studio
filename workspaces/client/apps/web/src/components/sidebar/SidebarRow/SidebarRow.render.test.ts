@@ -1,22 +1,22 @@
 import { rowArea } from "../chat-row/support/actions.fixture.ts";
 import { SidebarRowActionsProvider } from "../chat-row/support/actions.ts";
 // @vitest-environment happy-dom
-import { act, createElement, StrictMode, Suspense } from "react";
-import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { observer } from "mobx-react-lite";
+import { act, createElement, StrictMode, Suspense } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createServerStore } from "../../../store/server.ts";
-import { createObservableResourceRuntime } from "../../../store/runtime.ts";
-import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
-import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
-import SidebarRow from "./SidebarRow.tsx";
-import type { ResourceVersion } from "../../../sync/resourceEvents.ts";
 import { createStateMirror } from "../../../generated/observableResources.ts";
+import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
+import { createObservableResourceRuntime } from "../../../store/runtime.ts";
+import { createServerStore } from "../../../store/server.ts";
+import type { ResourceVersion } from "../../../sync/resourceEvents.ts";
+import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
 import {
   createSidebarViewModel,
   type SidebarAgent,
 } from "../support/viewModel.ts";
+import SidebarRow from "./SidebarRow.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -273,4 +273,46 @@ it("finalizes a keyed abandoned Suspense render through the existing grace owner
   resume();
   runtime.dispose();
   await f.close();
+});
+
+it("keeps a focused row mounted when another agent is added", async () => {
+  const f = fixture();
+  const area = rowArea(() => actions, { bindings });
+  area.row = (id) => f.model.byId.get(id);
+  const Rows = observer(() =>
+    f.model.rows.map((row) => createElement(SidebarRow, { key: row.id, row })),
+  );
+  try {
+    await act(async () =>
+      f.root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            SidebarRowActionsProvider,
+            { value: area },
+            createElement(Rows),
+          ),
+        ),
+      ),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    await act(async () => f.publish([agentSummaryFixture("a")]));
+    const button = document.querySelector<HTMLButtonElement>(
+      'button[data-chat="a"]',
+    );
+    expect(button).not.toBeNull();
+    button?.focus();
+    await act(async () =>
+      f.publish([
+        agentSummaryFixture("a", { name: "Updated" }),
+        agentSummaryFixture("b"),
+      ]),
+    );
+    expect(document.querySelector('button[data-chat="a"]')).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(button?.title).toBe("Updated");
+  } finally {
+    await f.close();
+  }
 });

@@ -25,6 +25,7 @@ export type SidebarTarget =
 
 /** One immutable server connection, including its original saved-state keys. */
 export type SidebarBackend = {
+  rename?(id: string, name: string): Promise<void>;
   ownerId: string;
   post: typeof post;
   resources?: Pick<

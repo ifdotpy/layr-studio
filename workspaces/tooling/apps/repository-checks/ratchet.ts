@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const RATCHET_BASELINE = fileURLToPath(
@@ -26,7 +29,11 @@ export function fingerprintMatches(
 }
 
 export function readBaseline(path = RATCHET_BASELINE): Baseline {
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  return parseBaseline(readFileSync(path, "utf8"));
+}
+
+export function parseBaseline(text: string): Baseline {
+  const parsed: unknown = JSON.parse(text);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     throw new Error("Malformed ratchet baseline: expected an object");
   const result: Baseline = {};
@@ -71,4 +78,82 @@ export function checkRatchet(
           `${ruleId}: fixed violation in ${entry.file}; shrink the baseline (${entry.fingerprint})`,
       ),
   ];
+}
+
+// Owner: main source revision used to seed the web ratchets before their manifests existed.
+export const WEB_RATCHET_SEED_BASE = "44bbf5237ecb947620f44d2bb3de8f6fca98c770";
+export function withRatchetBase<T>(
+  root: string,
+  marker: string,
+  check: (snapshot: string) => T,
+): T {
+  const git = (args: string[]) =>
+    spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  const head = git(["rev-parse", "HEAD"]).stdout.trim();
+  const local = git(["merge-base", "HEAD", "main"]);
+  const mergeBase =
+    local.status === 0 ? local : git(["merge-base", "HEAD", "origin/main"]);
+  const parent = git(["rev-parse", "HEAD^"]);
+  const base =
+    mergeBase.status === 0 && mergeBase.stdout.trim() !== head
+      ? mergeBase.stdout.trim()
+      : parent.status === 0
+        ? parent.stdout.trim()
+        : undefined;
+  if (!base)
+    throw new Error(
+      "Web ratchet checks require Git history with a main merge-base or HEAD parent. Fetch full history before running these checks.",
+    );
+  const revision =
+    git(["cat-file", "-e", `${base}:${marker}`]).status === 0
+      ? base
+      : WEB_RATCHET_SEED_BASE;
+  const paths = execFileSync(
+    "git",
+    [
+      "ls-tree",
+      "-d",
+      "--name-only",
+      revision,
+      "--",
+      "workspaces/client/apps/web/src",
+      "workspaces/tooling/apps/repository-checks",
+    ],
+    { cwd: root, encoding: "utf8" },
+  )
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const snapshot = mkdtempSync(path.join(os.tmpdir(), "studio-ratchet-base-"));
+  try {
+    const archive = execFileSync("git", ["archive", revision, ...paths], {
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    execFileSync("tar", ["-x", "-C", snapshot], { input: archive });
+    return check(snapshot);
+  } finally {
+    rmSync(snapshot, { recursive: true, force: true });
+  }
+}
+
+export function baselineGrowthErrors(
+  candidate: Baseline,
+  previous: Baseline,
+): string[] {
+  return Object.entries(candidate)
+    .filter(([rule]) => rule.startsWith("web-"))
+    .flatMap(([rule, entries]) => {
+      const allowed = new Set(
+        (previous[rule] ?? []).map(
+          (entry) => `${entry.file}\0${entry.fingerprint}`,
+        ),
+      );
+      return entries
+        .filter((entry) => !allowed.has(`${entry.file}\0${entry.fingerprint}`))
+        .map(
+          (entry) =>
+            `${rule}: baseline allowance grew in ${entry.file}; existing allowances may only shrink`,
+        );
+    });
 }

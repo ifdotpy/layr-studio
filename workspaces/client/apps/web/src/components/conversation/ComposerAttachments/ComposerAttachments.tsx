@@ -1,14 +1,15 @@
-import { observer } from "mobx-react-lite";
-import { resourceData } from "../../../store/runtime.ts";
 import { MAX_TURN_ATTACHMENTS } from "../../../generated/sharedValues.ts";
 import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useServerFileDialogs } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { Button, Loader } from "@mantine/core";
 import { File, Paperclip, X } from "lucide-react";
-import { useRef, useState } from "react";
-import { errorText } from "../../../api.ts";
+import { useRef } from "react";
 import { IconAction } from "../../ui/actions/IconAction/IconAction.tsx";
-import FilePreview, { useFilePreview } from "../FilePreview/FilePreview.tsx";
+import FilePreview from "../FilePreview/FilePreview.tsx";
+import { PreviewSelection } from "../support/PreviewSelection.ts";
+import MarkdownImage from "../MarkdownImage/MarkdownImage.tsx";
+import { Owned } from "../../ui/Owned/Owned.tsx";
+import { AttachmentSave } from "./AttachmentSave.ts";
 
 export type { LocalMessageAttachment as Attachment } from "../../../types.ts";
 import type { LocalMessageAttachment as Attachment } from "../../../types.ts";
@@ -22,189 +23,144 @@ export default function ComposerAttachments(p: {
   remove: (id: string) => void;
 }) {
   const { canPickFiles, pickFiles } = useServerFileDialogs();
+  const net = useServerNet();
   const input = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useFilePreview();
-  const unsavedFiles = useRef<{
-    files: globalThis.File[];
-    add: typeof p.add;
-  } | null>(null);
-  const [saveError, setSaveError] = useState("");
-  const saveFiles = async (files: globalThis.File[], add = p.add) => {
-    if (!files.length) return;
-    const pending = { files, add };
-    unsavedFiles.current = pending;
-    try {
-      await add(files);
-      if (unsavedFiles.current !== pending) return;
-      unsavedFiles.current = null;
-      setSaveError("");
-      if (input.current) input.current.value = "";
-    } catch (error) {
-      if (unsavedFiles.current !== pending) return;
-      setSaveError(errorText(error));
-      p.notify(errorText(error));
-    }
+  const reset = () => {
+    if (input.current) input.current.value = "";
   };
   return (
-    <div className="composer-attachments">
-      <FilePreview target={preview} onClose={() => setPreview(null)} />
-      <input
-        ref={input}
-        type="file"
-        multiple
-        hidden
-        aria-label="Choose attachments"
-        onChange={(event) => {
-          void saveFiles(Array.from(event.currentTarget.files || []));
-        }}
-      />
-      <IconAction
-        type="button"
-        size={28}
-        variant="subtle"
-        className="attach-button"
-        label="Attach files"
-        title="Attach files"
-        disabled={
-          p.disabled || p.uploading || p.assets.length >= MAX_TURN_ATTACHMENTS
-        }
-        onClick={() => {
-          if (!canPickFiles()) {
-            input.current?.click();
-            return;
-          }
-          void pickFiles()
-            .then((files) => saveFiles(files))
-            .catch((error) => p.notify(errorText(error)));
-        }}
-      >
-        {p.uploading ? <Loader size={13} /> : <Paperclip size={16} />}
-      </IconAction>
-      {saveError && (
-        <p role="status">
-          {saveError}{" "}
-          <button
+    <Owned
+      create={() => ({
+        preview: new PreviewSelection(),
+        save: new AttachmentSave(),
+      })}
+    >
+      {({ preview, save }) => (
+        <div className="composer-attachments">
+          <FilePreview
+            target={preview.current(net)}
+            onClose={() => preview.set(net, null)}
+          />
+          <input
+            ref={input}
+            type="file"
+            multiple
+            hidden
+            aria-label="Choose attachments"
+            onChange={(event) => {
+              void save.save(
+                Array.from(event.currentTarget.files || []),
+                p.add,
+                p.notify,
+                reset,
+              );
+            }}
+          />
+          <IconAction
             type="button"
+            size={28}
+            variant="subtle"
+            className="attach-button"
+            label="Attach files"
+            title="Attach files"
+            disabled={
+              p.disabled ||
+              p.uploading ||
+              p.assets.length >= MAX_TURN_ATTACHMENTS
+            }
             onClick={() => {
-              const pending = unsavedFiles.current;
-              if (pending) void saveFiles(pending.files, pending.add);
+              if (!canPickFiles()) {
+                input.current?.click();
+                return;
+              }
+              void save.save(pickFiles, p.add, p.notify, reset);
             }}
           >
-            Retry saving files
-          </button>
-        </p>
-      )}
-      {!!p.assets.length && (
-        <div className="attachment-list">
-          {p.assets.map((asset) => (
-            <div
-              className="attachment-chip"
-              key={asset.id}
-              title={`${asset.name} · ${Math.ceil(asset.size / 1024)} KiB`}
-            >
-              <button
-                type="button"
-                className="attachment-preview-button"
-                aria-label={`Preview ${asset.name}`}
-                onClick={() => setPreview({ asset: asset.id })}
-              >
-                {asset.preview ? (
-                  <img src={asset.preview} alt="" />
-                ) : (
-                  <File size={15} />
-                )}
-                <span>{asset.name}</span>
+            {p.uploading ? <Loader size={13} /> : <Paperclip size={16} />}
+          </IconAction>
+          {save.error && (
+            <p role="status">
+              {save.error}{" "}
+              <button type="button" onClick={() => save.retry(p.notify, reset)}>
+                Retry saving files
               </button>
-              <IconAction
-                type="button"
-                size="xs"
-                label={`Remove ${asset.name}`}
-                onClick={() => p.remove(asset.id)}
-              >
-                <X size={12} />
-              </IconAction>
+            </p>
+          )}
+          {!!p.assets.length && (
+            <div className="attachment-list">
+              {p.assets.map((asset) => (
+                <div
+                  className="attachment-chip"
+                  key={asset.id}
+                  title={`${asset.name} · ${Math.ceil(asset.size / 1024)} KiB`}
+                >
+                  <button
+                    type="button"
+                    className="attachment-preview-button"
+                    aria-label={`Preview ${asset.name}`}
+                    onClick={() => preview.set(net, { asset: asset.id })}
+                  >
+                    {asset.preview ? (
+                      <img src={asset.preview} alt="" />
+                    ) : (
+                      <File size={15} />
+                    )}
+                    <span>{asset.name}</span>
+                  </button>
+                  <IconAction
+                    type="button"
+                    size="xs"
+                    label={`Remove ${asset.name}`}
+                    onClick={() => p.remove(asset.id)}
+                  >
+                    <X size={12} />
+                  </IconAction>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
-    </div>
+    </Owned>
   );
 }
-
-const AttachmentImage = observer(function AttachmentImage(p: {
-  asset: Attachment;
-  onPreview: () => void;
-}) {
-  const net = useServerNet();
-
-  const slot = net.reads.file({ asset: p.asset.id }).current;
-  const file = resourceData(slot);
-  const [failed, setFailed] = useState<string>();
-  const supported =
-    file &&
-    ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.mime);
-  const src = supported ? `data:${file.mime};base64,${file.base64}` : undefined;
-  const error =
-    failed === p.asset.id
-      ? "Cannot load this image."
-      : slot.status === "error"
-        ? errorText(slot.error)
-        : file && !supported
-          ? "This image type has no preview."
-          : "";
-  return error ? (
-    <p role="alert">{error}</p>
-  ) : src ? (
-    <button
-      type="button"
-      className="image-preview-button"
-      aria-label={`Preview ${p.asset.name}`}
-      onClick={p.onPreview}
-    >
-      <img
-        src={src}
-        alt={p.asset.name}
-        loading="lazy"
-        onError={() => setFailed(p.asset.id)}
-      />
-    </button>
-  ) : (
-    <span role="status">Load image…</span>
-  );
-});
 
 export function MessageAttachments(p: {
   assets: readonly Attachment[];
   notify: (message: string) => void;
 }) {
-  const [preview, setPreview] = useFilePreview();
+  const net = useServerNet();
   if (!p.assets.length) return null;
   return (
-    <>
-      <FilePreview target={preview} onClose={() => setPreview(null)} />
-      <div className="message-attachments">
-        {p.assets.map((asset) => (
-          <div
-            key={asset.id}
-            className={asset.image ? "message-attachment-image" : ""}
-          >
-            {asset.image && (
-              <AttachmentImage
-                asset={asset}
-                onPreview={() => setPreview({ asset: asset.id })}
-              />
-            )}
-            <Button
-              variant="default"
-              size="compact-sm"
-              leftSection={<File size={14} />}
-              onClick={() => setPreview({ asset: asset.id })}
-            >
-              {asset.name}
-            </Button>
+    <Owned create={() => new PreviewSelection()}>
+      {(preview) => (
+        <>
+          <FilePreview
+            target={preview.current(net)}
+            onClose={() => preview.set(net, null)}
+          />
+          <div className="message-attachments">
+            {p.assets.map((asset) => (
+              <div
+                key={asset.id}
+                className={asset.image ? "message-attachment-image" : ""}
+              >
+                {asset.image && (
+                  <MarkdownImage src="" asset={asset.id} alt={asset.name} />
+                )}
+                <Button
+                  variant="default"
+                  size="compact-sm"
+                  leftSection={<File size={14} />}
+                  onClick={() => preview.set(net, { asset: asset.id })}
+                >
+                  {asset.name}
+                </Button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </>
+        </>
+      )}
+    </Owned>
   );
 }

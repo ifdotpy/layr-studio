@@ -1,6 +1,7 @@
 import {
   GLUE_MANIFEST,
   GLUE_MESSAGE,
+  MAX_REACT_GLUE_EXCEPTIONS,
   REACT_GLUE_APIS,
   WEB_SOURCE,
   glueFiles,
@@ -534,6 +535,17 @@ test("React glue manifest rejects one more exception even with a real violation"
     for (const file of Object.keys(manifest)) writeViolation(file);
     writeManifest();
     assert.deepEqual(glueManifestErrors(temporary, glueFiles(temporary)), []);
+    for (
+      let index = Object.keys(manifest).length;
+      index < MAX_REACT_GLUE_EXCEPTIONS;
+      index++
+    ) {
+      const file = WEB_SOURCE + `components/GlueProbe${index}.tsx`;
+      manifest[file] = "DOM integration.";
+      writeViolation(file);
+    }
+    writeManifest();
+    assert.deepEqual(glueManifestErrors(temporary, glueFiles(temporary)), []);
     const extra = WEB_SOURCE + "components/ExtraGlueProbe.tsx";
     manifest[extra] = "DOM integration.";
     writeViolation(extra);
@@ -574,4 +586,126 @@ test("React glue manifest rejects missing and stale entries", () => {
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
+});
+
+test("hook counts follow React aliases and count calls instead of imports", async () => {
+  const { hookCounts } = await import("../react-glue.ts");
+  assert.deepEqual(
+    hookCounts(
+      "probe.tsx",
+      `
+    import React, { useMemo as state, useMemo, type useRef } from "react";
+    import * as R from "react";
+    state(1); state(2); React.useRef(null); R.useCallback(() => {});
+    const text = "useMemo(0)";
+  `,
+    ),
+    { useMemo: 2, useRef: 1, useCallback: 1 },
+  );
+});
+
+test("hook ceiling update lowers counts and refuses new files and per-hook growth", async () => {
+  const { hookCeilingErrors, lowerHookCeilings } =
+    await import("../react-glue.ts");
+  const file = WEB_SOURCE + "Probe.tsx";
+  const baseline = { [file]: { useMemo: 2, useCallback: 1 } };
+  const actual = { [file]: { useMemo: 1 } };
+  assert.deepEqual(hookCeilingErrors(actual, baseline), []);
+  assert.deepEqual(lowerHookCeilings(actual, baseline), actual);
+  assert.deepEqual(lowerHookCeilings({}, baseline), {});
+  for (const counts of [
+    { [file]: { useMemo: 3 } },
+    { [file]: { useRef: 1 } },
+    { [WEB_SOURCE + "New.tsx"]: { useMemo: 1 } },
+  ]) {
+    assert.match(hookCeilingErrors(counts, baseline).join("\n"), /MobX/);
+    assert.throws(() => lowerHookCeilings(counts, baseline), /MobX/);
+  }
+});
+
+test("hook inventory excludes tests and permits the sanctioned Owned class boundary", async () => {
+  const { hookInventory, hookManifestErrors, HOOK_MANIFEST, readHookCeilings } =
+    await import("../react-glue.ts");
+  const temporary = mkdtempSync(path.join(tmpdir(), "studio-hook-counts-"));
+  try {
+    const file = WEB_SOURCE + "stores/Owned.tsx";
+    const testFile = WEB_SOURCE + "Probe.test.tsx";
+    mkdirSync(path.dirname(path.join(temporary, file)), { recursive: true });
+    mkdirSync(path.dirname(path.join(temporary, HOOK_MANIFEST)), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(temporary, file),
+      'import { Component } from "react"; export class Owned extends Component { store = this.props.create(); }',
+    );
+    writeFileSync(
+      path.join(temporary, testFile),
+      'import { useMemo } from "react"; useMemo(0);',
+    );
+    writeFileSync(path.join(temporary, HOOK_MANIFEST), "{}");
+    assert.deepEqual(hookInventory(temporary, [file, testFile]), {});
+    assert.deepEqual(hookManifestErrors(temporary, [file, testFile]), []);
+    writeFileSync(
+      path.join(temporary, HOOK_MANIFEST),
+      JSON.stringify({ [file]: { useMemo: 1 } }),
+    );
+    assert.match(
+      hookManifestErrors(temporary, [file], {}).join("\n"),
+      /exceeds ceiling 0/,
+    );
+    for (const value of [
+      null,
+      [],
+      { [file]: { useMemo: -1 } },
+      { [file]: { useMemo: 1.2 } },
+      { [file]: { other: 1 } },
+    ])
+      assert.throws(() => readHookCeilings(JSON.stringify(value)), /Malformed/);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test("repository state hook counts stay within their per-file ceilings", async () => {
+  const { hookManifestErrors } = await import("../react-glue.ts");
+  assert.deepEqual(hookManifestErrors(root, glueFiles(root)), []);
+});
+
+test("hook counts cover named default imports and namespace destructuring", async () => {
+  const { hookCounts } = await import("../react-glue.ts");
+  assert.deepEqual(
+    hookCounts(
+      "probe.tsx",
+      'import { default as React } from "react"; React.useCallback(() => {}); const {useMemo: memo, useRef} = React; memo(() => 1, []); useRef(null);',
+    ),
+    { useCallback: 1, useMemo: 1, useRef: 1 },
+  );
+});
+
+test("trivial useState is allowed in new files under policy A", async () => {
+  const { hookCounts, hookCeilingErrors } = await import("../react-glue.ts");
+  const counts = hookCounts(
+    "New.tsx",
+    'import { useState } from "react"; const [open, setOpen] = useState(false);',
+  );
+  assert.deepEqual(counts, {});
+  assert.deepEqual(
+    hookCeilingErrors({ [WEB_SOURCE + "New.tsx"]: counts }, {}),
+    [],
+  );
+});
+
+test("namespace hook aliases are counted before their declaration", async () => {
+  const { hookCounts } = await import("../react-glue.ts");
+  assert.deepEqual(
+    hookCounts(
+      "Probe.tsx",
+      `
+    import * as React from "react";
+    function Component() { return memo(() => 1, []); }
+    const { useMemo: memo } = React;
+  `,
+    ),
+    { useMemo: 1 },
+  );
 });

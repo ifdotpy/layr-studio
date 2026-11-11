@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { autorun, flowResult } from "mobx";
 import { expect, it, vi } from "vitest";
-import { WorkspaceResources } from "./WorkspaceResources.ts";
-import { WorkspaceResource } from "./WorkspaceResource.ts";
+import { WorkspaceResources } from "../../../app/shell/WorkspaceResources.ts";
+import { WorkspaceResource } from "../../../app/shell/WorkspaceResource.ts";
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock(

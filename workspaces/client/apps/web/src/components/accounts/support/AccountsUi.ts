@@ -153,6 +153,7 @@ export class AccountsUi {
     const { api, store, resources, owner } = this.areas.scope.services;
     if (!account && !this.addFlow) return;
     const provider = account?.provider ?? this.addDraft.provider;
+    const accountKey = account?.id;
     const options = {
       scope: owner.id,
       ...(account ? { accountKey: account.id } : {}),
@@ -161,9 +162,10 @@ export class AccountsUi {
         this.addDraft.label ||
         (provider === ProviderKind.Claude ? "Claude Code" : ""),
       email: account?.email || this.addDraft.email,
-      onReady: (connected = account) =>
-        connected?.disconnected
-          ? api.post("/api/accounts/reconnect", { account_key: connected.id })
+      onReady: () =>
+        accountKey &&
+        this.accounts.find((a) => a.id === accountKey)?.disconnected
+          ? api.post("/api/accounts/reconnect", { account_key: accountKey })
           : undefined,
     };
     if (provider === ProviderKind.Codex)

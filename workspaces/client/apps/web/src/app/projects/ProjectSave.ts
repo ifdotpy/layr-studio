@@ -38,17 +38,15 @@ export class ProjectSave<Path extends ApiPostPath> {
       this.request = stored?.body ?? null;
       this.acknowledged = !!stored?.acknowledged;
       this.frozen = !!stored;
-      this.retryLabel = stored
-        ? this.acknowledged
-          ? "Refresh project"
-          : "Retry saved request"
-        : null;
     } catch {
       /* Unreadable local requests cannot be restored. */
     }
     makeAutoObservable(this, { request: observableRef }, { autoBind: true });
   }
-  retryLabel: string | null = null;
+  get retryLabel() {
+    if (!this.frozen) return null;
+    return this.acknowledged ? "Refresh project" : "Retry saved request";
+  }
   persist() {
     if (this.#storageKey)
       this.#outbox.set(
@@ -86,12 +84,7 @@ export class ProjectSave<Path extends ApiPostPath> {
         if (this.#storageKey)
           this.#outbox.remove("projectSave", this.#storageKey);
         this.frozen = false;
-        this.retryLabel = null;
       }
-      if (this.frozen)
-        this.retryLabel = this.acknowledged
-          ? "Refresh project"
-          : "Retry saved request";
       this.error = errorText(failure);
     } finally {
       this.pending = false;

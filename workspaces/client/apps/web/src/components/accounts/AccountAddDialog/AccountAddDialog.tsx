@@ -3,10 +3,10 @@ import {
   AccountAddForm,
   AccountAddActionsContext,
 } from "../AccountAddForm/AccountAddForm.tsx";
-import { Modal, Stack, TextInput } from "@mantine/core";
+import { Modal, TextInput } from "@mantine/core";
 import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import { layerZIndex } from "../../../theme.ts";
-import AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
+import CodexSignIn from "../CodexSignIn/CodexSignIn.tsx";
 import ClaudeSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
 import { ProviderKind } from "../../../generated/providerKind.ts";
 export type AddAccountIntent = {
@@ -21,6 +21,8 @@ export default observer(function AccountAddDialog() {
     draft = ui.addDraft;
   const serverLabel = ui.addIntent?.serverLabel || "This device",
     scope = ui.areas.scope.services.owner.id;
+  const SignIn =
+    draft.provider === ProviderKind.Codex ? CodexSignIn : ClaudeSignIn;
   return (
     <>
       <Modal
@@ -38,35 +40,12 @@ export default observer(function AccountAddDialog() {
           </AccountAddForm>
         </AccountAddActionsContext>
       </Modal>
-      {ui.addFlow && draft.provider === ProviderKind.Codex && (
-        <Modal
-          opened
-          zIndex={layerZIndex.modalAbovePopover}
-          onClose={ui.close}
-          title={`Sign in to Codex · ${draft.label || "Codex"}`}
-          centered
-        >
-          <Stack gap="sm">
-            <TextInput label="Server" value={serverLabel} readOnly />
-            <p>
-              Open auth.openai.com/codex/device. Use a private window if your
-              browser has another ChatGPT account signed in.
-            </p>
-            <AccountSignIn
-              scope={scope}
-              emailHint={draft.email}
-              label={draft.label}
-            />
-          </Stack>
-        </Modal>
-      )}
-      {ui.addFlow && draft.provider === ProviderKind.Claude && (
-        <ClaudeSignIn
-          label={draft.label || "Claude Code"}
+      {ui.addFlow && (
+        <SignIn
+          label={draft.label}
           email={draft.email}
-          serverLabel={serverLabel}
           scope={scope}
-          opened
+          serverLabel={serverLabel}
           onClose={ui.close}
         />
       )}

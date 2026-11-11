@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { SignInPushSettings } from "./components/accounts/SignInPushSettings/SignInPushSettings.tsx";
 import { nativeErrorView } from "./nativeErrors.ts";
 import { workspaceBadgeInfo } from "./components/shell/workspace/support/WorkspaceBadge.tsx";
-import { resultTarget } from "./components/conversation/questions/support/signInCardModel.ts";
+import { resultTarget } from "./components/conversation/support/signInCardModel.ts";
 import { deviceName } from "./push/signInPush.ts";
 import type { Agent } from "./types.ts";
 

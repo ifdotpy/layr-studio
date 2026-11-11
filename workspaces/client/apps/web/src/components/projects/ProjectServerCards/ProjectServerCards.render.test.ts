@@ -1,3 +1,4 @@
+import { observable, action } from "mobx";
 import { ProjectServerSelection } from "../../../app/projects/CreationOwner.ts";
 import type { NewChatModelStore } from "../../settings/NewChatModelSettings/NewChatModelStore.ts";
 import { createServerServices } from "../../../servers/serverServices.ts";
@@ -97,9 +98,12 @@ it("requires the newly selected server's model settings before starting", async 
       },
     },
   ]);
+  const liveChoices = observable.box<ProjectServerChoice[]>(servers, {
+    deep: false,
+  });
   const owner = new ProjectServerSelection(
     project,
-    () => servers,
+    () => liveChoices.get(),
     undefined,
     () => service,
   );
@@ -122,6 +126,44 @@ it("requires the newly selected server's model settings before starting", async 
     );
     await act(async () => button("Choose model").click());
     expect(button("Start chat").disabled).toBe(false);
+    const replacement = servers.map((row) => ({
+      ...row,
+      nativeLayr: { status: "ready" as const },
+    }));
+    const updatedProject = {
+      ...project,
+      locations: project.locations.map((location) => ({
+        ...location,
+        path: location.path + "/updated",
+      })),
+    };
+    const choose = vi.fn();
+    await act(async () => {
+      action(() => liveChoices.set(replacement))();
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(ProjectServerCards, {
+            project: updatedProject,
+            servers: replacement,
+            owner,
+            onChoose: choose,
+            onAdd: vi.fn(),
+            onCancel: vi.fn(),
+          }),
+        ),
+      );
+    });
+    expect(
+      host.querySelector<HTMLInputElement>('input[value="layr-native"]')
+        ?.disabled,
+    ).toBe(false);
+    await act(async () => button("Start chat").click());
+    expect(choose).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/first/updated" }),
+      expect.anything(),
+    );
     await act(async () => button("second").click());
     expect(button("Start chat").disabled).toBe(true);
     await act(async () => button("Choose model").click());

@@ -1,3 +1,4 @@
+import { flowResult } from "mobx";
 import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type {
   ApiPostPath,
@@ -19,6 +20,11 @@ export function serverSidebarBackend(
   const ownerId = services.owner.id;
   const storage = services.storage;
   return {
+    async rename(id, name) {
+      if (!online()) throw new Error("The sidebar server is offline.");
+      await services.ready();
+      await flowResult(services.areas.rename.rename(id, name));
+    },
     ownerId,
     storage,
     resources: services.resources,

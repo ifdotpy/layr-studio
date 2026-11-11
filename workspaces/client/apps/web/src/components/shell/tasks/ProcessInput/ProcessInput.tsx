@@ -1,79 +1,44 @@
+import { useState } from "react";
+import { AsyncFeedback } from "../../../../stores/AsyncFeedback.ts";
 import type { TaskProps } from "../TaskStatus/TaskStatus.tsx";
 import { observer } from "mobx-react-lite";
 import { useBackgroundTaskActions } from "../support/backgroundTaskActions.tsx";
-import {
-  BackgroundTaskAction,
-  BackgroundTaskKind,
-} from "../../../../generated/api.ts";
-import { useState } from "react";
+import * as API from "../../../../generated/api.ts";
+import { inputControls, receiptText } from "../support/taskControlModel.ts";
 import { TextInput, NumberInput, Button, Text } from "@mantine/core";
-import { displayError } from "../../../../errorPresentation.ts";
-import {
-  ProcessStdinState,
-  NativeCommandAction as GeneratedApiNativeCommandAction,
-} from "../../../../generated/api.ts";
 export const ProcessInput = observer(function ProcessInput({
   task,
 }: TaskProps) {
   const actions = useBackgroundTaskActions();
-  const { pending, act } = actions;
-  const owner = actions.owner(task.agent);
-  const receiptOnly =
-    !task.display.actions.includes(BackgroundTaskAction.input) &&
-    !task.display.actions.includes(BackgroundTaskAction.resize);
+  return <InputForm key={actions.leadId} task={task} />;
+});
+const InputForm = observer(function InputForm({ task }: TaskProps) {
+  const [feedback] = useState(() => new AsyncFeedback());
+  const actions = useBackgroundTaskActions();
   const [input, setInput] = useState("");
-  const [rows, setRows] = useState<string | number>(24);
-  const [cols, setCols] = useState<string | number>(80);
-  const [inputClosed, setStdinClosed] = useState(false);
-  const [receiptState, setReceiptState] = useState("");
-  const [checkingReceipt, setCheckingReceipt] = useState(false);
-  const stdinClosed =
-    inputClosed || task.display.stdinState === ProcessStdinState.closed;
-  const stdinUnavailable =
-    stdinClosed || !task.display.actions.includes(BackgroundTaskAction.input);
-  const blocked = pending || checkingReceipt || stdinUnavailable;
-  const native = task.display.kind === BackgroundTaskKind.command;
-  const checkReceipt = async () => {
-    if (!owner || owner.epoch == null || checkingReceipt || pending) return;
-    setCheckingReceipt(true);
-    try {
-      const status = await actions.checkInputReceipt(task);
-      setReceiptState(
-        {
-          acknowledged: "The process acknowledged the input.",
-          rejected: "The process rejected the input.",
-          none: "No input request needs a receipt check.",
-          unknown: "The input result is unknown. Do not send different input.",
-        }[status || "unknown"],
-      );
-    } catch (error) {
-      setReceiptState(displayError(error));
-    } finally {
-      setCheckingReceipt(false);
-    }
-  };
-  const send = async () => {
-    if (pending || checkingReceipt || receiptOnly || stdinUnavailable) return;
-    const sent = input;
-    const ok = native
-      ? await act("/api/native-command", {
-          id: task.id,
-          action: GeneratedApiNativeCommandAction.input,
-          text: sent + "\n",
-        })
-      : await act("/api/monitor/input", {
-          id: task.id,
-          text: sent + "\n",
-        });
-    if (ok) setInput((current) => (current === sent ? "" : current));
-  };
+  const [s, setDraft] = useState({
+    rows: 24 as string | number,
+    cols: 80 as string | number,
+    closed: false,
+    receipt: "",
+  });
+  const patch = (value: Partial<typeof s>) =>
+    setDraft((current) => ({ ...current, ...value }));
+  const controls = inputControls(task, s.closed),
+    owner = actions.owner(task.agent),
+    pending = actions.pending || feedback.pending;
+  const blocked = pending || controls.unavailable;
   return (
     <section className="process-input" aria-label="Command controls">
-      {!receiptOnly && (
+      {!controls.receiptOnly && (
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            void send();
+            void feedback.run(
+              () => actions.sendInput(task, input),
+              (ok) =>
+                ok && setInput((current) => (current === input ? "" : current)),
+            );
           }}
           className="process-input-line"
         >
@@ -81,32 +46,41 @@ export const ProcessInput = observer(function ProcessInput({
             aria-label="Terminal input"
             placeholder="Type terminal input"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => setInput(e.currentTarget.value)}
             disabled={blocked}
             maxLength={16000}
           />
           <Button size="sm" type="submit" disabled={blocked}>
-            {native ? "Send via agent" : "Send line"}
+            {controls.native ? "Send via agent" : "Send line"}
           </Button>
         </form>
       )}
       <div className="process-input-actions">
-        {!native && (
+        {!controls.native && (
           <Button
             size="compact-xs"
-            disabled={pending || checkingReceipt || !owner}
-            onClick={() => void checkReceipt()}
+            disabled={pending || !owner}
+            onClick={() =>
+              void feedback.run(
+                () => Promise.resolve(actions.checkInputReceipt(task)),
+                (status) =>
+                  patch({ receipt: receiptText[status || "unknown"] }),
+              )
+            }
           >
             Check input receipt
           </Button>
         )}
-        {!native && !receiptOnly && (
+        {!controls.native && !controls.receiptOnly && (
           <>
             <Button
               size="compact-xs"
               disabled={blocked}
               onClick={() =>
-                void act("/api/monitor/input", { id: task.id, text: "\u0003" })
+                void actions.act("/api/monitor/input", {
+                  id: task.id,
+                  text: "\u0003",
+                })
               }
             >
               Ctrl+C
@@ -114,33 +88,35 @@ export const ProcessInput = observer(function ProcessInput({
             <Button
               size="compact-xs"
               disabled={blocked}
-              onClick={() => {
-                void act("/api/monitor/input", {
-                  id: task.id,
-                  closeStdin: true,
-                }).then((ok) => {
-                  if (ok) setStdinClosed(true);
-                });
-              }}
+              onClick={() =>
+                void feedback.run(
+                  () =>
+                    actions.act("/api/monitor/input", {
+                      id: task.id,
+                      closeStdin: true,
+                    }),
+                  (ok) => {
+                    if (ok) patch({ closed: true });
+                  },
+                )
+              }
             >
-              {stdinClosed
+              {controls.stdinClosed
                 ? "Input closed"
-                : task.display.stdinState === ProcessStdinState.closeRequested
+                : task.display.stdinState ===
+                    API.ProcessStdinState.closeRequested
                   ? "Closing input…"
                   : "Close input (EOF)"}
             </Button>
             <details className="process-resize">
               <summary>Terminal size</summary>
               <div>
-                {(
-                  [
-                    ["Rows", rows, setRows],
-                    ["Columns", cols, setCols],
-                  ] as const
-                ).map(([label, value, onChange]) => (
+                {(["rows", "cols"] as const).map((name) => (
                   <NumberInput
-                    key={label}
-                    {...{ label, value, onChange }}
+                    key={name}
+                    label={name === "rows" ? "Rows" : "Columns"}
+                    value={s[name]}
+                    onChange={(value) => patch({ [name]: value })}
                     size="xs"
                     min={1}
                     max={500}
@@ -151,18 +127,17 @@ export const ProcessInput = observer(function ProcessInput({
                   size="xs"
                   disabled={
                     pending ||
-                    checkingReceipt ||
                     !task.display.actions.includes(
-                      BackgroundTaskAction.resize,
+                      API.BackgroundTaskAction.resize,
                     ) ||
-                    !Number(rows) ||
-                    !Number(cols)
+                    !Number(s.rows) ||
+                    !Number(s.cols)
                   }
                   onClick={() =>
-                    void act("/api/monitor/input", {
+                    void actions.act("/api/monitor/input", {
                       id: task.id,
-                      rows: Number(rows),
-                      cols: Number(cols),
+                      rows: Number(s.rows),
+                      cols: Number(s.cols),
                     })
                   }
                 >
@@ -173,9 +148,9 @@ export const ProcessInput = observer(function ProcessInput({
           </>
         )}
       </div>
-      {receiptState && (
+      {(feedback.error || s.receipt) && (
         <Text size="xs" role="status">
-          {receiptState}
+          {feedback.error || s.receipt}
         </Text>
       )}
     </section>

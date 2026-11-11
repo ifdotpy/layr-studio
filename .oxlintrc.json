@@ -15,9 +15,7 @@
   },
   "overrides": [
     {
-      "files": [
-        "workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts"
-      ],
+      "files": ["workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts"],
       "rules": {
         "typescript/ban-ts-comment": [
           "error",
@@ -54,9 +52,7 @@
       }
     },
     {
-      "files": [
-        "workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"
-      ],
+      "files": ["workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -135,25 +131,19 @@
               },
               {
                 "regex": "(^|/)(servers/)?combinedSidebarServices(\\.[jt]sx?)?$",
-                "importNames": [
-                  "useCombinedSidebarServices"
-                ],
+                "importNames": ["useCombinedSidebarServices"],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(servers/)?sidebarServices(\\.[jt]sx?)?$",
-                "importNames": [
-                  "createMergedSidebarServices"
-                ],
+                "importNames": ["createMergedSidebarServices"],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(components/agents/)?WorkerModelPicker(\\.[jt]sx?)?$",
-                "importNames": [
-                  "useModelCatalogReader"
-                ],
+                "importNames": ["useModelCatalogReader"],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
@@ -190,12 +180,7 @@
         "no-restricted-globals": [
           "error",
           {
-            "globals": [
-              "fetch",
-              "EventSource",
-              "XMLHttpRequest",
-              "WebSocket"
-            ],
+            "globals": ["fetch", "EventSource", "XMLHttpRequest", "WebSocket"],
             "checkGlobalObject": true
           }
         ],
@@ -278,6 +263,7 @@
         "workspaces/client/apps/web/src/app/ServerAreasProvider.tsx",
         "workspaces/client/apps/web/src/app/conversation/delivery/removeSendingMessages.ts",
         "workspaces/client/apps/web/src/app/projects/newChatSettings.ts",
+        "workspaces/client/apps/web/src/app/shell/ShellState.ts",
         "workspaces/client/apps/web/src/components/accounts/AccountGroup/AccountGroup.tsx",
         "workspaces/client/apps/web/src/components/accounts/SignInPushSettings/SignInPushSettings.tsx",
         "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
@@ -293,15 +279,14 @@
         "workspaces/client/apps/web/src/components/conversation/TokenRate/TokenRate.tsx",
         "workspaces/client/apps/web/src/components/conversation/Usage/Usage.tsx",
         "workspaces/client/apps/web/src/components/conversation/questions/SignInCard/SignInCard.tsx",
+        "workspaces/client/apps/web/src/components/conversation/support/useTurnErrors.ts",
         "workspaces/client/apps/web/src/components/conversation/support/useUploadRecovery.ts",
         "workspaces/client/apps/web/src/components/conversation/transcript/FullOutput/FullOutput.tsx",
         "workspaces/client/apps/web/src/components/conversation/transcript/MoveToBackgroundButton/MoveToBackgroundButton.tsx",
         "workspaces/client/apps/web/src/components/conversation/transcript/SafetyBuffering/SafetyBuffering.tsx",
-        "workspaces/client/apps/web/src/components/conversation/transcript/TurnHistory/useTurnErrors.ts",
         "workspaces/client/apps/web/src/components/projects/SharedChatCreate/SharedChatCreate.tsx",
-        "workspaces/client/apps/web/src/components/servers/MultiServerApp/MultiServerApp.tsx",
         "workspaces/client/apps/web/src/components/servers/ServerAccessSettings/ServerAccessSettings.tsx",
-        "workspaces/client/apps/web/src/components/servers/ServerManager/ServerManager.tsx",
+        "workspaces/client/apps/web/src/components/servers/ServerManager/PairingForm.ts",
         "workspaces/client/apps/web/src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
         "workspaces/client/apps/web/src/components/settings/ClaudeSettingsView/ClaudeSettingsView.tsx",
         "workspaces/client/apps/web/src/components/settings/FederationSettings/FederationSettings.tsx",
@@ -311,7 +296,6 @@
         "workspaces/client/apps/web/src/components/shell/ClaudeProfile/ClaudeProfile.tsx",
         "workspaces/client/apps/web/src/components/shell/ConnectionRecovery/ConnectionRecovery.tsx",
         "workspaces/client/apps/web/src/components/shell/TerminalDock/TerminalDock.tsx",
-        "workspaces/client/apps/web/src/components/shell/Workspace/Workspace.tsx",
         "workspaces/client/apps/web/src/components/shell/messages/PeerTeamGroup/PeerTeamGroup.tsx",
         "workspaces/client/apps/web/src/components/shell/messages/TeamChats/TeamChats.tsx",
         "workspaces/client/apps/web/src/components/shell/messages/UserMessage/UserMessage.tsx",
@@ -330,9 +314,7 @@
       }
     },
     {
-      "files": [
-        "workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"
-      ],
+      "files": ["workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"],
       "excludeFiles": [
         "**/*.test.*",
         "**/*.spec.*",
@@ -460,25 +442,19 @@
               },
               {
                 "regex": "(^|/)(servers/)?combinedSidebarServices(\\.[jt]sx?)?$",
-                "importNames": [
-                  "useCombinedSidebarServices"
-                ],
+                "importNames": ["useCombinedSidebarServices"],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(servers/)?sidebarServices(\\.[jt]sx?)?$",
-                "importNames": [
-                  "createMergedSidebarServices"
-                ],
+                "importNames": ["createMergedSidebarServices"],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
               {
                 "regex": "(^|/)(components/agents/)?WorkerModelPicker(\\.[jt]sx?)?$",
-                "importNames": [
-                  "useModelCatalogReader"
-                ],
+                "importNames": ["useModelCatalogReader"],
                 "allowTypeImports": true,
                 "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
               },
@@ -563,6 +539,7 @@
         "workspaces/client/apps/web/src/app/ServerAreasProvider.tsx",
         "workspaces/client/apps/web/src/app/conversation/delivery/removeSendingMessages.ts",
         "workspaces/client/apps/web/src/app/projects/newChatSettings.ts",
+        "workspaces/client/apps/web/src/app/shell/ShellState.ts",
         "workspaces/client/apps/web/src/components/accounts/AccountGroup/AccountGroup.tsx",
         "workspaces/client/apps/web/src/components/accounts/SignInPushSettings/SignInPushSettings.tsx",
         "workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
@@ -578,15 +555,14 @@
         "workspaces/client/apps/web/src/components/conversation/TokenRate/TokenRate.tsx",
         "workspaces/client/apps/web/src/components/conversation/Usage/Usage.tsx",
         "workspaces/client/apps/web/src/components/conversation/questions/SignInCard/SignInCard.tsx",
+        "workspaces/client/apps/web/src/components/conversation/support/useTurnErrors.ts",
         "workspaces/client/apps/web/src/components/conversation/support/useUploadRecovery.ts",
         "workspaces/client/apps/web/src/components/conversation/transcript/FullOutput/FullOutput.tsx",
         "workspaces/client/apps/web/src/components/conversation/transcript/MoveToBackgroundButton/MoveToBackgroundButton.tsx",
         "workspaces/client/apps/web/src/components/conversation/transcript/SafetyBuffering/SafetyBuffering.tsx",
-        "workspaces/client/apps/web/src/components/conversation/transcript/TurnHistory/useTurnErrors.ts",
         "workspaces/client/apps/web/src/components/projects/SharedChatCreate/SharedChatCreate.tsx",
-        "workspaces/client/apps/web/src/components/servers/MultiServerApp/MultiServerApp.tsx",
         "workspaces/client/apps/web/src/components/servers/ServerAccessSettings/ServerAccessSettings.tsx",
-        "workspaces/client/apps/web/src/components/servers/ServerManager/ServerManager.tsx",
+        "workspaces/client/apps/web/src/components/servers/ServerManager/PairingForm.ts",
         "workspaces/client/apps/web/src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
         "workspaces/client/apps/web/src/components/settings/ClaudeSettingsView/ClaudeSettingsView.tsx",
         "workspaces/client/apps/web/src/components/settings/FederationSettings/FederationSettings.tsx",
@@ -596,7 +572,6 @@
         "workspaces/client/apps/web/src/components/shell/ClaudeProfile/ClaudeProfile.tsx",
         "workspaces/client/apps/web/src/components/shell/ConnectionRecovery/ConnectionRecovery.tsx",
         "workspaces/client/apps/web/src/components/shell/TerminalDock/TerminalDock.tsx",
-        "workspaces/client/apps/web/src/components/shell/Workspace/Workspace.tsx",
         "workspaces/client/apps/web/src/components/shell/messages/PeerTeamGroup/PeerTeamGroup.tsx",
         "workspaces/client/apps/web/src/components/shell/messages/TeamChats/TeamChats.tsx",
         "workspaces/client/apps/web/src/components/shell/messages/UserMessage/UserMessage.tsx",

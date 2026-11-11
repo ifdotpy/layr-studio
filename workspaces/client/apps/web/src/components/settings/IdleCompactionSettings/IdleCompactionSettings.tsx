@@ -1,4 +1,5 @@
-import { NativeSelect, NumberInput } from "@mantine/core";
+import { SettingsNumber } from "../SettingsNumber/SettingsNumber.tsx";
+import { NativeSelect } from "@mantine/core";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 import {
   MAX_SAFE_INTEGER,
@@ -16,11 +17,11 @@ export const idleCompactionDefaults: Settings = {
 };
 
 export function IdleCompactionSettings({
-  value,
+  value = idleCompactionDefaults,
   disabled,
   onChange,
 }: {
-  value: Settings;
+  value?: Settings | undefined;
   disabled: boolean;
   onChange: (value: Settings) => void;
 }) {
@@ -52,26 +53,19 @@ export function IdleCompactionSettings({
           }
         />
       </SettingsRow>
-      <SettingsRow
+      <SettingsNumber
         label="Minimum context tokens"
         help={`The default is ${IDLE_COMPACTION_DEFAULT_MIN_TOKENS.toLocaleString("en-US")} tokens. The minimum is ${IDLE_COMPACTION_MIN_TOKENS.toLocaleString("en-US")} tokens. This setting applies to Claude agents.`}
-      >
-        <NumberInput
-          aria-label="Idle compaction minimum context tokens"
-          min={IDLE_COMPACTION_MIN_TOKENS}
-          max={MAX_SAFE_INTEGER}
-          aria-valuemin={IDLE_COMPACTION_MIN_TOKENS}
-          allowDecimal={false}
-          allowNegative={false}
-          clampBehavior="strict"
-          value={value.minTokens}
-          disabled={disabled}
-          onChange={(next) => {
-            if (typeof next === "number")
-              onChange({ ...value, minTokens: next });
-          }}
-        />
-      </SettingsRow>
+
+        aria-label="Idle compaction minimum context tokens"
+        min={IDLE_COMPACTION_MIN_TOKENS}
+        max={MAX_SAFE_INTEGER}
+        aria-valuemin={IDLE_COMPACTION_MIN_TOKENS}
+        clampBehavior="strict"
+        value={value.minTokens}
+        disabled={disabled}
+        onChange={(minTokens) => onChange({ ...value, minTokens })}
+      />
     </>
   );
 }

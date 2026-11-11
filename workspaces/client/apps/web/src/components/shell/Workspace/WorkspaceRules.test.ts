@@ -68,3 +68,43 @@ it("preserves file-watch timeout and liveness command across edit and save", () 
     command: "npm run check-files",
   });
 });
+
+import {
+  lowWorkerDefaults,
+  newRuleDraft,
+} from "../../../app/shell/WorkspaceRules.ts";
+
+it("keeps new-rule scheduling separate from restored field fallbacks", () => {
+  expect(newRuleDraft("new")).toMatchObject({
+    id: "new",
+    isNew: true,
+    intervalSeconds: 300,
+    ...lowWorkerDefaults,
+  });
+  const record = ruleDraftFromRecord({ id: "existing", kind: "interval" });
+  expect(record).toMatchObject({ intervalSeconds: 60, ...lowWorkerDefaults });
+  expect(record.isNew).toBeUndefined();
+  expect(
+    parseRuleDraft({ id: "saved", name: "", kind: "interval" }),
+  ).toMatchObject({
+    intervalSeconds: 60,
+    ...lowWorkerDefaults,
+  });
+});
+
+it("normalizes record and persisted rule fields through the same defaults", () => {
+  const record = ruleDraftFromRecord({
+    id: "rule",
+    kind: "file",
+    name: "Watch",
+    at: 1700000000,
+  });
+  const restored = parseRuleDraft({ ...record });
+  expect(restored).toEqual({ ...record, isNew: false });
+  expect(record.at).toBe(
+    new Date(1700000000000)
+      .toLocaleString("sv-SE")
+      .slice(0, 16)
+      .replace(" ", "T"),
+  );
+});

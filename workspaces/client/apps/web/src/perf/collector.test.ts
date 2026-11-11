@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, expect, it, vi } from "vitest";
 import { createServerServices } from "../servers/serverServices.ts";
 import {

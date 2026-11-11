@@ -1,4 +1,4 @@
-import { ProviderMark } from "../ProviderMark/ProviderMark.tsx";
+import { AccountTilesLayout } from "../AccountTilesLayout/AccountTilesLayout.tsx";
 import {
   accountLimitView,
   useAccountLimitView,
@@ -6,15 +6,13 @@ import {
 import { AccountTileLabel } from "../AccountTileLabel/AccountTileLabel.tsx";
 import { AccountRemainingBar } from "../AccountRemainingBar/AccountRemainingBar.tsx";
 import { observer } from "mobx-react-lite";
-import { Checkbox, SegmentedControl, Tooltip } from "@mantine/core";
+import { Checkbox, Tooltip } from "@mantine/core";
 import { Check } from "lucide-react";
 import { useState } from "react";
 import { ActionButton } from "../../ui/ActionButton/ActionButton.tsx";
 import { accountDisplayName, accountTooltip } from "../../../accountName.ts";
 import type { Account } from "../support/Accounts.tsx";
 import type { SetupRole } from "../../agents/AgentSetupPicker/AgentSetupPicker.tsx";
-
-import { providerLabel } from "../../../generated/providerKind.ts";
 
 export const AccountTiles = observer(function AccountTiles(
   p: AccountTilesProps,
@@ -24,13 +22,12 @@ export const AccountTiles = observer(function AccountTiles(
   const selected = p.multiple ? p.value[0] : p.value;
   const selectedProvider =
     p.accounts.find((account) => account.id === selected)?.provider || "";
-  const selection = JSON.stringify([p.value, selectedProvider]);
-  const [choice, setChoice] = useState<[string, string]>([
-    selection,
-    selectedProvider,
-  ]);
+  const selection = p.multiple
+    ? selectedProvider
+    : JSON.stringify([p.value, selectedProvider]);
+  const [choice, setChoice] = useState([selection, selectedProvider]);
   if (choice[0] !== selection) setChoice([selection, selectedProvider]);
-  const provider = p.provider || choice[1];
+  const provider = p.provider || choice[1] || "";
   const providers = p.providers || [
     ...new Set(
       p.accounts
@@ -47,105 +44,91 @@ export const AccountTiles = observer(function AccountTiles(
       );
     else p.onChange(key);
   };
+  const accounts = p.accounts.filter(
+    (account) => account.provider === provider,
+  );
+  const allowedCount = p.accounts.filter(
+    (account) => !excluded?.includes(account.id),
+  ).length;
+  const role = p.exclusionRole === "worker" ? "workers" : "reviewers";
   return (
-    <div
-      className="account-tiles"
-      role="group"
-      aria-label={p.label}
+    <AccountTilesLayout
+      label={p.label}
+      provider={provider}
+      providers={providers}
       data-value={p.multiple ? p.value.join(",") : p.value}
-      aria-disabled={p.disabled}
+      disabled={p.disabled}
+      heading={
+        p.showLabel !== false && (
+          <span className="account-tiles-label">
+            {p.visibleLabel || p.label}
+          </span>
+        )
+      }
+      showSingleProvider
+      onProvider={(value) => {
+        setChoice([selection, value]);
+        p.onProvider?.(value);
+      }}
     >
-      {p.showLabel !== false && (
-        <span className="account-tiles-label">{p.visibleLabel || p.label}</span>
-      )}
-      {providers.length > 0 && (
-        <SegmentedControl
-          fullWidth
-          aria-label={`${p.label} provider`}
-          value={provider}
-          disabled={!!p.disabled}
-          onChange={(value) => {
-            setChoice([selection, value]);
-            p.onProvider?.(value);
-          }}
-          data={providers.map((value) => ({
-            value,
-            label: (
-              <span className="setup-provider">
-                <ProviderMark provider={value} />
-                {providerLabel(value)}
-              </span>
-            ),
-          }))}
-        />
-      )}
       <div className="setup-accounts">
-        {p.accounts
-          .filter((account) => account.provider === provider)
-          .map((account) => (
-            <div
-              key={account.id}
-              className={excluded ? "setup-account-choice" : undefined}
-            >
-              {excluded && onExcludedChange && p.exclusionRole && (
-                <Tooltip
-                  label={
-                    p.exclusionRole === "worker"
-                      ? "Use for workers"
-                      : "Use for reviewers"
+        {accounts.map((account) => (
+          <div
+            key={account.id}
+            className={excluded ? "setup-account-choice" : undefined}
+          >
+            {excluded && onExcludedChange && p.exclusionRole && (
+              <Tooltip
+                label={`Use for ${role}`}
+                events={{ hover: true, focus: true, touch: false }}
+              >
+                <Checkbox
+                  className="setup-account-exclusion"
+                  aria-label={`Use ${setupAccountName(account)} for ${role}`}
+                  checked={!excluded.includes(account.id)}
+                  disabled={
+                    p.disabled ||
+                    (allowedCount === 1 && !excluded.includes(account.id))
                   }
-                  events={{ hover: true, focus: true, touch: false }}
-                >
-                  <Checkbox
-                    className="setup-account-exclusion"
-                    aria-label={`Use ${setupAccountName(account)} for ${p.exclusionRole === "worker" ? "workers" : "reviewers"}`}
-                    checked={!excluded.includes(account.id)}
-                    disabled={
-                      p.disabled ||
-                      (p.accounts.filter((item) => !excluded.includes(item.id))
-                        .length === 1 &&
-                        !excluded.includes(account.id))
-                    }
-                    onChange={(event) =>
-                      onExcludedChange(
-                        event.currentTarget.checked
-                          ? excluded.filter((key) => key !== account.id)
-                          : [...excluded, account.id],
-                      )
-                    }
-                  />
-                </Tooltip>
-              )}
-              <AccountTile
-                account={account}
-                selected={
-                  p.multiple
-                    ? p.value.includes(account.id)
-                    : p.value === account.id
-                }
-                multiple={p.multiple}
-                readOnly={
-                  p.selectable === false ||
-                  (!p.multiple &&
-                    p.value === account.id &&
-                    !excluded &&
-                    p.accounts.filter((item) => item.provider === provider)
-                      .length === 1)
-                }
-                disabled={
-                  !!p.disabled ||
-                  !!p.accountDisabled?.(account) ||
-                  !!p.accountUnavailableReason?.(account)
-                }
-                onSelect={() => select(account.id)}
-              />
-              {p.accountUnavailableReason?.(account) && (
-                <small>{p.accountUnavailableReason(account)}</small>
-              )}
-            </div>
-          ))}
+                  onChange={(event) =>
+                    onExcludedChange(
+                      event.currentTarget.checked
+                        ? excluded.filter((key) => key !== account.id)
+                        : [...excluded, account.id],
+                    )
+                  }
+                />
+              </Tooltip>
+            )}
+            <AccountTile
+              account={account}
+              selected={
+                p.multiple
+                  ? p.value.includes(account.id)
+                  : p.value === account.id
+              }
+              multiple={p.multiple}
+              readOnly={
+                p.selectable === false ||
+                (!p.multiple &&
+                  p.value === account.id &&
+                  !excluded &&
+                  accounts.length === 1)
+              }
+              disabled={
+                !!p.disabled ||
+                !!p.accountDisabled?.(account) ||
+                !!p.accountUnavailableReason?.(account)
+              }
+              onSelect={() => select(account.id)}
+            />
+            {p.accountUnavailableReason?.(account) && (
+              <small>{p.accountUnavailableReason(account)}</small>
+            )}
+          </div>
+        ))}
       </div>
-    </div>
+    </AccountTilesLayout>
   );
 });
 
@@ -173,49 +156,37 @@ const AccountTile = observer(function AccountTile({
   const { remaining, color } = useAccountLimitView(account, {
     signedInOnly: false,
   });
-  if (readOnly)
-    return (
-      <Tooltip label={accountTooltip(account)}>
-        <div
-          className="setup-account setup-account-status"
-          data-account-key={account.id}
-          data-selected={selected || undefined}
-        >
-          <AccountTileLabel
-            name={setupAccountName(account)}
-            remaining={remaining}
-          />
-          {remaining !== null && (
-            <AccountRemainingBar remaining={remaining} color={color} />
-          )}
-        </div>
-      </Tooltip>
-    );
+  const content = (
+    <>
+      <AccountTileLabel name={setupAccountName(account)} remaining={remaining}>
+        {!readOnly && multiple && selected && (
+          <Check size={13} aria-hidden="true" />
+        )}
+      </AccountTileLabel>
+      {remaining !== null && (
+        <AccountRemainingBar remaining={remaining} color={color} />
+      )}
+    </>
+  );
+  const Control = readOnly ? "div" : ActionButton;
   return (
     <Tooltip label={accountTooltip(account)}>
-      <ActionButton
-        className="setup-account"
+      <Control
+        className={`setup-account${readOnly ? " setup-account-status" : ""}`}
         data-account-key={account.id}
         data-selected={selected || undefined}
-        data-exhausted={remaining === 0 || undefined}
-        aria-label={`Select account ${setupAccountName(account)}`}
-        aria-description={
-          remaining === null ? undefined : `${remaining}% remaining`
-        }
-        aria-pressed={selected}
-        disabled={disabled}
-        onClick={onSelect}
+        {...(!readOnly && {
+          "data-exhausted": remaining === 0 || undefined,
+          "aria-label": `Select account ${setupAccountName(account)}`,
+          "aria-description":
+            remaining === null ? undefined : `${remaining}% remaining`,
+          "aria-pressed": selected,
+          disabled,
+          onClick: onSelect,
+        })}
       >
-        <AccountTileLabel
-          name={setupAccountName(account)}
-          remaining={remaining}
-        >
-          {multiple && selected && <Check size={13} aria-hidden="true" />}
-        </AccountTileLabel>
-        {remaining !== null && (
-          <AccountRemainingBar remaining={remaining} color={color} />
-        )}
-      </ActionButton>
+        {content}
+      </Control>
     </Tooltip>
   );
 });

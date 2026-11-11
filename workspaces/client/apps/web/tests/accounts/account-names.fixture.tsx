@@ -11,6 +11,7 @@ import Accounts, {
   frameAccounts,
 } from "../../src/components/accounts/Accounts/Accounts.tsx";
 import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
+import { accountRows } from "../../src/servers/AccountsPanelState.ts";
 import { theme } from "../../src/theme.ts";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
@@ -42,10 +43,17 @@ const Fixture = observer(function Fixture() {
         {accounts && (
           <ServerAccountsPanel
             servers={[server]}
-            accountsByServer={{ local: frameAccounts(accounts) }}
-            statuses={{ local: "live" }}
+            rows={accountRows(
+              {
+                servers: [server],
+                accountsByServer: { local: frameAccounts(accounts) },
+                statuses: { local: "live" },
+                startAccount: (_id, value) => areas.accountsUi.receive(value),
+                accountAction: (_id, value) => areas.accountsUi.receive(value),
+              },
+              models.store,
+            )}
             startAccount={(_id, value) => areas.accountsUi.receive(value)}
-            accountAction={(_id, value) => areas.accountsUi.receive(value)}
           />
         )}
       </main>

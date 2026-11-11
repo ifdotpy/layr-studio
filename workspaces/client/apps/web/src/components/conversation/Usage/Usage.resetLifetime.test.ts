@@ -1,3 +1,5 @@
+import { action, observable, spy } from "mobx";
+import * as usageLimits from "../../../usage/accountUsage.ts";
 // @vitest-environment happy-dom
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
@@ -62,6 +64,14 @@ it("settles a pending reset while unobserved and permits a retry with its saved 
   const agent = { id: "chat", accountKey: "account" } satisfies Agent;
   const models = observableFixture([agent]);
   const limits = projectedLimits("account", 1);
+  const session = observable.box<
+    ReturnType<typeof models.store.sessionCost>["current"]
+  >({ status: "loading" }, { deep: false });
+  models.store.sessionCost = () => ({
+    get current() {
+      return session.get();
+    },
+  });
   models.apply([
     {
       collection: "accounts",
@@ -148,6 +158,37 @@ it("settles a pending reset while unobserved and permits a retry with its saved 
   };
   try {
     await act(async () => render());
+    const limitReads = vi.spyOn(usageLimits, "accountLimits");
+    const projectionReads = vi.fn();
+    const stopProjectionSpy = spy((event) => {
+      if (event.type === "action" && event.name.includes("projectionFor"))
+        projectionReads();
+    });
+    await act(async () =>
+      action(() =>
+        session.set({
+          status: "live",
+          data: {
+            rootId: agent.id,
+            pricingState: "ready",
+            totalUSD: 1,
+            estimated: true,
+            refreshing: false,
+            cacheAgeSeconds: 0,
+            pricedSamples: 1,
+            unknownModels: [],
+            breakdown: { models: {}, providers: {} },
+          },
+        }),
+      )(),
+    );
+    expect(
+      document.querySelector(".session-cost-summary")?.textContent,
+    ).toContain("1.00");
+    stopProjectionSpy();
+    expect(projectionReads).not.toHaveBeenCalled();
+    expect(limitReads).not.toHaveBeenCalled();
+    limitReads.mockRestore();
     await click("Apply reset");
     await click("Use one reset credit");
     expect(usageStore.resetPending).toBe(true);

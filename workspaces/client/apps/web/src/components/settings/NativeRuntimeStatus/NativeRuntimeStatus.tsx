@@ -1,8 +1,8 @@
 import {
-  NativeAccountState as GeneratedApiNativeAccountState,
-  NativeCandidateState as GeneratedApiNativeCandidateState,
-  NativeRuntimeState as GeneratedApiNativeRuntimeState,
-  ProviderVersionState as GeneratedApiProviderVersionState,
+  NativeAccountState,
+  NativeCandidateState,
+  NativeRuntimeState,
+  ProviderVersionState,
 } from "../../../generated/api.ts";
 import { ProviderKind } from "../../../generated/providerKind.ts";
 import Disclosure from "../../ui/Disclosure/Disclosure.tsx";
@@ -13,6 +13,14 @@ import { resourceData } from "../../../store/runtime.ts";
 import { errorText } from "../../../api.ts";
 import type { Account } from "../../accounts/support/Accounts.tsx";
 import ProviderUpdateNotices from "../../shell/ProviderUpdateNotices/ProviderUpdateNotices.tsx";
+
+function CheckedAt({ value }: { value: number | null | undefined }) {
+  return value != null && value > 0 ? (
+    <time dateTime={new Date(value * 1000).toISOString()}>
+      Checked {localDateTime(new Date(value * 1000))}
+    </time>
+  ) : null;
+}
 
 const accountStatus = {
   current: "Up to date",
@@ -51,14 +59,13 @@ export default observer(function NativeRuntimeStatus({
   const entries = Object.entries(data?.accounts || {});
   const pending = entries.filter(
     ([, account]) =>
-      account.status === GeneratedApiNativeAccountState.waiting ||
-      account.status === GeneratedApiNativeAccountState.updating,
+      account.status === NativeAccountState.waiting ||
+      account.status === NativeAccountState.updating,
   ).length;
   const reasonCount = (reason: string) =>
     entries.filter(([, runtime]) => runtime.reason === reason).length;
   const rejected = data?.candidates.filter(
-    (candidate) =>
-      candidate.status === GeneratedApiNativeCandidateState.rejected,
+    (candidate) => candidate.status === NativeCandidateState.rejected,
   );
   return (
     <section
@@ -67,18 +74,17 @@ export default observer(function NativeRuntimeStatus({
     >
       <h3>Runtime and provider versions</h3>
       {(error ||
-        data?.status === GeneratedApiNativeRuntimeState.failed ||
+        data?.status === NativeRuntimeState.failed ||
         data?.error ||
         rejected?.length ||
         entries.some(
-          ([, runtime]) =>
-            runtime.status === GeneratedApiNativeAccountState.failed,
+          ([, runtime]) => runtime.status === NativeAccountState.failed,
         ) ||
         providers.providers.some(
           (provider) =>
-            provider.status === GeneratedApiProviderVersionState.error ||
-            provider.status === GeneratedApiProviderVersionState.outdated ||
-            provider.status === GeneratedApiProviderVersionState.unknown ||
+            provider.status === ProviderVersionState.error ||
+            provider.status === ProviderVersionState.outdated ||
+            provider.status === ProviderVersionState.unknown ||
             !!provider.error,
         )) && (
         <p role="status" className="native-runtime-error">
@@ -93,19 +99,15 @@ export default observer(function NativeRuntimeStatus({
               {data.selected && <span>{data.selected.version}</span>}
             </div>
             <p className="native-runtime-summary" role="status">
-              {data.status === GeneratedApiNativeRuntimeState.checking
+              {data.status === NativeRuntimeState.checking
                 ? "Checking installed versions…"
-                : data.status === GeneratedApiNativeRuntimeState.failed
+                : data.status === NativeRuntimeState.failed
                   ? "Runtime check failed"
                   : "Automatic updates"}
               {pending > 0 &&
                 ` · ${pending} account${pending === 1 ? "" : "s"} pending`}
             </p>
-            {data.checkedAt != null && data.checkedAt > 0 && (
-              <time dateTime={new Date(data.checkedAt * 1000).toISOString()}>
-                Checked {localDateTime(new Date(data.checkedAt * 1000))}
-              </time>
-            )}
+            <CheckedAt value={data.checkedAt} />
             {data.error && <p className="native-runtime-error">{data.error}</p>}
             {entries.length > 0 && (
               <ul className="native-runtime-accounts">
@@ -117,8 +119,7 @@ export default observer(function NativeRuntimeStatus({
                         <span>{account?.label || account?.email || key}</span>
                         <span
                           className={
-                            runtime.status ===
-                            GeneratedApiNativeAccountState.failed
+                            runtime.status === NativeAccountState.failed
                               ? "native-runtime-error"
                               : undefined
                           }
@@ -131,8 +132,7 @@ export default observer(function NativeRuntimeStatus({
                         <small>{runtime.reason}</small>
                       )}
                       {runtime.targetVersion &&
-                        runtime.status !==
-                          GeneratedApiNativeAccountState.current && (
+                        runtime.status !== NativeAccountState.current && (
                           <small>Target: {runtime.targetVersion}</small>
                         )}
                     </li>
@@ -169,13 +169,7 @@ export default observer(function NativeRuntimeStatus({
         >
           <div className="native-runtime-heading">
             <strong>Provider CLI versions</strong>
-            {providers.checkedAt != null && providers.checkedAt > 0 && (
-              <time
-                dateTime={new Date(providers.checkedAt * 1000).toISOString()}
-              >
-                Checked {localDateTime(new Date(providers.checkedAt * 1000))}
-              </time>
-            )}
+            <CheckedAt value={providers.checkedAt} />
           </div>
           {error && <p className="native-runtime-error">{error}</p>}
           {providers.providers.length === 0 ? (
@@ -210,11 +204,9 @@ export default observer(function NativeRuntimeStatus({
                       </span>
                       <span
                         className={
-                          provider.status ===
-                          GeneratedApiProviderVersionState.error
+                          provider.status === ProviderVersionState.error
                             ? "native-runtime-error"
-                            : provider.status ===
-                                GeneratedApiProviderVersionState.outdated
+                            : provider.status === ProviderVersionState.outdated
                               ? "native-runtime-warning"
                               : undefined
                         }
@@ -223,43 +215,42 @@ export default observer(function NativeRuntimeStatus({
                       </span>
                     </div>
                     <ProviderUpdateNotices notices={updateNotices} />
-                    <small>
-                      Running version: {provider.runningVersion || "Unknown"}
-                    </small>
-                    <small>
-                      Installed version:{" "}
-                      {provider.installedVersion || "Unknown"}
-                    </small>
-                    {provider.configuredVersion &&
-                      provider.configuredVersion !==
-                        provider.installedVersion && (
-                        <small>
-                          Current profile executable:{" "}
-                          {provider.configuredVersion}
-                        </small>
-                      )}
-                    <small>
-                      Tested minimum: {provider.baseline || "Not established"}
-                    </small>
-                    {provider.error && (
-                      <small className="native-runtime-error">
-                        {provider.error}
-                      </small>
+                    {Object.entries({
+                      "Running version": provider.runningVersion || "Unknown",
+                      "Installed version":
+                        provider.installedVersion || "Unknown",
+                      "Current profile executable":
+                        provider.configuredVersion !==
+                          provider.installedVersion &&
+                        provider.configuredVersion,
+                      "Tested minimum": provider.baseline || "Not established",
+                    }).map(
+                      ([label, value]) =>
+                        value && (
+                          <small key={label}>
+                            {label}: {value}
+                          </small>
+                        ),
                     )}
-                    {provider.message &&
-                      provider.status !==
-                        GeneratedApiProviderVersionState.current && (
-                        <small
-                          className={
-                            provider.status ===
-                            GeneratedApiProviderVersionState.outdated
-                              ? "native-runtime-warning"
-                              : undefined
-                          }
-                        >
-                          {provider.message}
-                        </small>
-                      )}
+                    {(
+                      [
+                        [provider.error, "native-runtime-error"],
+                        [
+                          provider.status !== ProviderVersionState.current &&
+                            provider.message,
+                          provider.status === ProviderVersionState.outdated
+                            ? "native-runtime-warning"
+                            : undefined,
+                        ],
+                      ] as const
+                    ).map(
+                      ([message, className], index) =>
+                        message && (
+                          <small key={index} className={className}>
+                            {message}
+                          </small>
+                        ),
+                    )}
                   </li>
                 );
               })}

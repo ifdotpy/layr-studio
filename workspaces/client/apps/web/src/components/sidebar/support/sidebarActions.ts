@@ -1,11 +1,14 @@
-import { computed, runInAction, type IComputedValue } from "mobx";
-import type { Project } from "../../../app/projects/ProjectOrganization.tsx";
-import type { PeerTeam } from "../../shell/messages/PeerTeamGroup/PeerTeamGroup.tsx";
-import type { SidebarChatView } from "./viewModel.ts";
+import { action, computed, type IComputedValue } from "mobx";
 import type { FormEvent, HTMLAttributes } from "react";
-import type { PeerTeamActions } from "../../shell/messages/PeerTeamGroup/PeerTeamGroup.tsx";
-import { DEFAULT_LOCAL_SERVER_ALIAS } from "../../../servers/serverAliases.ts";
+import { requestId } from "studio-claude-bridge/request-id.ts";
+import type { Project } from "../../../app/projects/ProjectOrganization.tsx";
 import type { SidebarListOwner } from "../../../app/shell/SidebarOwner.ts";
+import { DEFAULT_LOCAL_SERVER_ALIAS } from "../../../servers/serverAliases.ts";
+import type {
+  PeerTeam,
+  PeerTeamActions,
+} from "../../shell/messages/PeerTeamGroup/PeerTeamGroup.tsx";
+import type { SidebarChatView } from "./viewModel.ts";
 
 /** Local controls stay with the sidebar; stable command areas read the current handlers. */
 export function createSidebarActions(state: SidebarListOwner) {
@@ -32,6 +35,9 @@ export function createSidebarActions(state: SidebarListOwner) {
     >;
   } = state;
   const rows = {
+    viewKey: requestId(),
+    row: (id: string) => state.model.byId.get(id),
+    room: (id: string) => state.rooms.find((room) => room.id === id),
     ui,
     commands: (row: SidebarChatView, priority: boolean) => ({
       open: () => state.openChat(row.id),
@@ -43,20 +49,17 @@ export function createSidebarActions(state: SidebarListOwner) {
       rename: (event: FormEvent) => {
         void state.rename(event, row.id);
       },
-      name: (value: string) =>
-        runInAction(() => {
-          ui.name = value;
-        }),
-      cancelRename: () =>
-        runInAction(() => {
-          ui.renaming = null;
-        }),
-      beginRename: () =>
-        runInAction(() => {
-          ui.name = row.agent.name ?? "";
-          ui.renameInPriority = priority;
-          ui.renaming = row.id;
-        }),
+      name: action((value: string) => {
+        ui.name = value;
+      }),
+      cancelRename: action(() => {
+        ui.renaming = null;
+      }),
+      beginRename: action(() => {
+        ui.name = row.agent.name ?? "";
+        ui.renameInPriority = priority;
+        ui.renaming = row.id;
+      }),
       unread: () => {
         if (row.agent.markRead)
           void state.run({

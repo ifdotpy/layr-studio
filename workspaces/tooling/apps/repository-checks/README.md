@@ -73,3 +73,39 @@ listener sets before running Oxlint. The TypeScript syntax check rejects literal
 `Set<() => void>` and named listener/subscriber/observer/callback sets in files
 with subscribe/notify implementations. It does not resolve callback type aliases
 or follow custom collection factories.
+
+`react-hook-ceilings.json` owns per-file call ceilings for `useMemo`,
+`useCallback` and `useRef`, seeded from main `44bbf5237ecb947620f44d2bb3de8f6fca98c770`.
+New files have zero allowance for these three hooks. The existing TypeScript parser
+counts named React imports (including named default aliases), default and
+namespace member calls, and namespace destructuring. It matches identifiers by
+spelling, so a shadowed hook name can produce a conservative false positive.
+Keep trivial local UI state in React `useState`; move async/derived/shared logic
+into MobX stores. `useState` has no ceiling. The sanctioned
+`src/stores/Owned.tsx` class boundary uses no hooks and passes these checks. DOM refs remain within the recorded ceilings.
+
+After removing hooks, lower ceilings with
+`node workspaces/tooling/apps/repository-checks/react-glue.ts --update`.
+This command refuses any increase before writing. Use `--check` for a read-only
+count check. `lint:all`, staged checks and the short tooling tier enforce counts;
+all entry points also reject increases relative to the merge base with main
+(or the previous commit when checking main). Before the manifests existed,
+allowances are derived with the same scanners from the pinned seed source
+revision above. Historical comparisons require Git history. Keep the
+existing no-argument command for regenerating the Oxlint glue overrides.
+
+The `web-*` ast-grep rules reject `runInAction` calls, `Set<() => void>` listener
+sets, `makeObservable` calls and effects used only to start/load/subscribe/dispose
+a store. Prefer generator flows and owner-managed lifetimes. They share the
+production-source exclusions of `react-glue.ts`. Existing main matches alone
+are grandfathered in `ratchet-baseline.json`, including computed-only sidebar
+facades. The exact generated owner `src/generated/observableResources.ts` is
+exempt from the `makeObservable` rule because its generator owns explicit
+annotations. Other rules still cover that file. The lifetime-effect rule uses
+receivers containing store/model/owner in their name to preserve DOM integration
+such as `video.load()`. Staged scans read their configuration and rules from the
+index. Both staged and full scans reject baseline additions relative to the base.
+Shrink this existing baseline
+with `node workspaces/tooling/apps/repository-checks/ast-grep.ts --shrink`.
+The rules inspect syntax and do not resolve renamed MobX imports or callback
+indirection. Ast-grep tests cover TypeScript and TSX forms in `ast-grep/tests`.

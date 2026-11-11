@@ -1,3 +1,4 @@
+import { reached } from "../clock.ts";
 import { TeamOwner } from "../components/agents/support/TeamOwner.ts";
 import { SettingsModels } from "./settings/SettingsModels.ts";
 import { WorkspaceResources } from "../components/shell/Workspace/Workspace.tsx";
@@ -66,19 +67,16 @@ export class ServerAreas {
   readonly native: NativeActionOwner;
   readonly delivery: DeliveryOwner;
   readonly selected: SelectedConversationOwner;
-  private toastTimer: ReturnType<typeof setTimeout> | undefined;
   readonly notices = observable({
-    toast: "",
+    message: "",
+    until: 0,
+    get toast() {
+      return this.message && !reached(this.until) ? this.message : "";
+    },
     notify: action((message: string) => {
       if (this.disposed) return;
-      this.notices.toast = message;
-      clearTimeout(this.toastTimer);
-      this.toastTimer = setTimeout(
-        action(() => {
-          this.notices.toast = "";
-        }),
-        5000,
-      );
+      this.notices.message = message;
+      this.notices.until = Date.now() + 5000;
     }),
   });
   stops: Disposer[] = [];
@@ -221,7 +219,6 @@ export class ServerAreas {
       this.navigation.start(),
       this.creation.start(),
       this.read.start(),
-      this.rename.start(),
       this.native.start(),
       this.delivery.start(),
       this.selected.start(),
@@ -242,8 +239,7 @@ export class ServerAreas {
     this.team.dispose();
     this.agentsUi.dispose();
     this.ui.generation++;
-    clearTimeout(this.toastTimer);
-    this.notices.toast = "";
+    this.notices.message = "";
     this.stops
       .splice(0)
       .reverse()

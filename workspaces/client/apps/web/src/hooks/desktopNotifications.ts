@@ -1,13 +1,16 @@
+import { autorun } from "mobx";
+import type { AlertStore, DesktopAlert } from "../desktop/desktopAlerts.ts";
+import {
+  alertsSince,
+  desktopAlerts,
+  nextAlertChange,
+} from "../desktop/desktopAlerts.ts";
+import type { ProjectionMetadata } from "../generated/observableResources.ts";
 import {
   hasDesktopNotifications,
   notifyDesktop,
 } from "../native/notifications.ts";
 import { isServerView } from "../servers/environment.ts";
-import { autorun } from "mobx";
-import { alertsSince, desktopAlerts } from "../desktop/desktopAlerts.ts";
-import { nextAlertChange } from "../desktop/desktopAlerts.ts";
-import type { AlertStore } from "../desktop/desktopAlerts.ts";
-import type { ProjectionMetadata } from "../generated/observableResources.ts";
 import { resourceData } from "../store/runtime.ts";
 
 export function startDesktopNotifications(source: {
@@ -15,6 +18,8 @@ export function startDesktopNotifications(source: {
   readonly metadata: ProjectionMetadata;
   readonly opened: string | null;
   readonly enabled: boolean;
+  readonly server?: { id: string; label: string };
+  navigate?: (target: DesktopAlert["target"]) => void;
 }) {
   const state = {
     current: {
@@ -29,7 +34,7 @@ export function startDesktopNotifications(source: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const publish = () => {
     if (stopped) return;
-    const { store, metadata, opened, enabled } = source;
+    const { store, metadata, opened, enabled, server } = source;
     const data = resourceData(store.state().current);
     clearTimeout(timer);
     if (enabled && data) {
@@ -38,7 +43,9 @@ export function startDesktopNotifications(source: {
         timer = setTimeout(publish, Math.max(0, next * 1000 - Date.now()) + 50);
     }
 
-    if (!enabled || !data || isServerView) return;
+    // A resumed delivery owner baselines alerts received during its handoff.
+    if (!enabled) state.current.initialized = false;
+    if (!enabled || !data || (isServerView && !server)) return;
     const scope = data.workspaces.values().next().value?.stateDir ?? "";
     if (state.current.scope !== scope)
       state.current = {
@@ -70,7 +77,13 @@ export function startDesktopNotifications(source: {
           openedShared?.members?.includes(alert.target.agentId))
       )
         continue;
-      const { id, ...notification } = alert;
+      const { id, ...notification } = {
+        ...alert,
+        title: server
+          ? (server.label + ": " + alert.title).slice(0, 160)
+          : alert.title,
+        target: { ...alert.target, ...(server ? { serverId: server.id } : {}) },
+      };
       if (hasDesktopNotifications()) {
         void notifyDesktop(notification).catch((error) => {
           if (stopped) return;
@@ -97,18 +110,23 @@ export function startDesktopNotifications(source: {
         "Notification" in window &&
         Notification.permission === "granted"
       ) {
-        const native = new Notification(alert.title, {
-          body: alert.body,
-          tag: id,
+        const native = new Notification(notification.title, {
+          body: notification.body,
+          tag: server ? `${server.id}:${id}` : id,
           silent: !alert.sound,
         });
         native.onclick = () => {
           native.close();
           if (stopped) return;
-          window.focus();
-          window.dispatchEvent(
-            new CustomEvent("studio-navigate", { detail: alert.target }),
-          );
+          if (source.navigate) source.navigate(notification.target);
+          else {
+            window.focus();
+            window.dispatchEvent(
+              new CustomEvent("studio-navigate", {
+                detail: notification.target,
+              }),
+            );
+          }
         };
       }
     }

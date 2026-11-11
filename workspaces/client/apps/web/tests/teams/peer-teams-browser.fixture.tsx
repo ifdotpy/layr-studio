@@ -13,7 +13,8 @@ import {
 } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../src/store/runtime.ts";
 import { syncDatabase, defaultSyncClient } from "../../src/sync/client.ts";
-import { when } from "mobx";
+import { when, observable, action } from "mobx";
+import * as api from "../../src/api.ts";
 import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
 
@@ -56,12 +57,14 @@ declare global {
   }
 }
 
-import React, { useState } from "react";
+import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import Sidebar from "../../src/components/sidebar/Sidebar/Sidebar.fixture.tsx";
-import TeamChats from "../../src/components/shell/messages/TeamChats/TeamChats.tsx";
+import TeamChats, {
+  createTeamChatsStore,
+} from "../../src/components/shell/messages/TeamChats/TeamChats.tsx";
 import "../../src/style.css";
 import "../../src/workspace-layout.css";
 import "../../src/appearance.css";
@@ -131,9 +134,19 @@ await syncDatabase();
 const release = defaultSyncClient.retainStateDelivery(() => {});
 await when(() => defaultSyncClient.projectionMetadata.ready);
 window.addEventListener("pagehide", release, { once: true });
+const selected = observable.box("a");
+const open = action((id: string) => selected.set(id));
+const chats = createTeamChatsStore(
+  fixtureServerStore,
+  api,
+  initial.stateDir,
+  undefined,
+  () => ({ stateDir: initial.stateDir, leadId: selected.get() }),
+);
+const commands = conversationActionsFixture(open, fixtureServerStore);
 const Fixture = observer(function Fixture() {
   const collections = resourceData(useServerStore().state().current);
-  const [opened, open] = useState("a");
+  const opened = selected.get();
   const data = initial;
   window.peerTeamsData = {
     ...initial,
@@ -176,8 +189,8 @@ const Fixture = observer(function Fixture() {
           />
         </SidebarCommandsProvider>
       </div>
-      <ConversationProvider value={conversationActionsFixture(open)}>
-        <TeamChats leadId={opened} />
+      <ConversationProvider value={commands}>
+        <TeamChats owner={chats} />
       </ConversationProvider>
     </MantineProvider>
   );

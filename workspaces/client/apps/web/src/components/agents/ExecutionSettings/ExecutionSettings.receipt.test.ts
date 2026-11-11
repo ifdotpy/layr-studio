@@ -342,8 +342,9 @@ function render(
     undefined,
     generatedAgents.get(agent.id)?.store,
   );
-  const controller = invoke(
-    createElement(permissions ? ExecutionPermissions : ExecutionSettings, {
+  const controller = createElement(
+    permissions ? ExecutionPermissions : ExecutionSettings,
+    {
       input,
       agentsUi: areas.agentsUi,
       catalog: {
@@ -369,9 +370,9 @@ function render(
           team: [],
           onOpen: trigger.onClick,
         }),
-    }),
+    },
   );
-  const menu = invoke(controller);
+  const menu = invoke(permissions ? invoke(controller) : controller);
   const scoped = (permissions ? [menu] : children(menu.props.children)).find(
     (node) =>
       typeof node.type === "function" &&

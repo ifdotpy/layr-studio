@@ -1,21 +1,14 @@
+import { createContext, useContext } from "react";
 import * as legacy from "./environment.ts";
-import type { ScreenMessage } from "./screenChannel.ts";
-import { createContext, useContext, useCallback } from "react";
-import type { ScreenChannel } from "./screenChannel.ts";
+import type { ScreenChannel, ScreenMessage } from "./screenChannel.ts";
 
 export const ScreenContext = createContext<ScreenChannel | null>(null);
 export const useScreenChannel = () => useContext(ScreenContext);
 
 export function useScreenEnvironment() {
   const screen = useScreenChannel();
-  const postToShell = useCallback(
-    (message: ScreenMessage, _legacyOrigin?: string) => {
-      if (screen) screen.publish(message);
-      else if (window.parent !== window)
-        window.parent.postMessage(message, legacy.serverParentOrigin);
-    },
-    [screen],
-  );
+  const postToShell: (message: ScreenMessage, legacyOrigin?: string) => void =
+    screen?.publish ?? postToLegacyShell;
   const owner = screen?.owner ?? legacy.serverViewId;
   return {
     screen,
@@ -26,4 +19,9 @@ export function useScreenEnvironment() {
     isClassicServerView: !screen && legacy.isClassicServerView,
     isRemoteServerView: !!owner && owner !== "local",
   };
+}
+
+function postToLegacyShell(message: ScreenMessage) {
+  if (window.parent !== window)
+    window.parent.postMessage(message, legacy.serverParentOrigin);
 }

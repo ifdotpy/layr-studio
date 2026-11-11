@@ -1,0 +1,5 @@
+id: web-make-observable-tsx
+valid:
+  - "makeAutoObservable(this);"
+invalid:
+  - "makeObservable(this, { value: observable });"

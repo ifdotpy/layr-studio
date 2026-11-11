@@ -1,0 +1,8 @@
+id: web-run-in-action-tsx
+language: Tsx
+message: Use MobX generator flows for async actions.
+severity: warning
+rule:
+  any:
+    - pattern: runInAction($$$)
+    - pattern: $M.runInAction($$$)

@@ -317,7 +317,8 @@ import {
   readWorkerModels,
 } from "../../agents/support/WorkerModelPicker.tsx";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
-import ProductUsage, { createUsageView } from "../Usage/Usage.tsx";
+import { createUsageView } from "../Usage/Usage.tsx";
+import { UsageCosts as ProductUsage } from "../UsageCosts/UsageCosts.tsx";
 let usageStore: ReturnType<typeof createUsageView>;
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
 import { serializeStateCollections } from "../../../generated/observableResources.ts";

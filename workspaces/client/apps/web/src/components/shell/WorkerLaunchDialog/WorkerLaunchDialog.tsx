@@ -1,7 +1,3 @@
-import {
-  isProviderKind,
-  ProviderKind,
-} from "../../../generated/providerKind.ts";
 import { Button, Modal, Textarea } from "@mantine/core";
 import { useState } from "react";
 import type { PostBody } from "../../../api.ts";
@@ -10,8 +6,7 @@ import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "../../../generated/sharedValues.
 import type { ClaudePermissionMode } from "../../../generated/claudePermissions.ts";
 import {
   WorkerPermissions,
-  allowedWorkerModes,
-  inheritedClaudeMode,
+  workerLaunchState,
 } from "../WorkerPermissions/WorkerPermissions.tsx";
 
 export type WorkerLaunch = {
@@ -37,18 +32,12 @@ export function WorkerLaunchDialog({
 }) {
   const [prompt, setPrompt] = useState("");
   const [permissionMode, setPermissionMode] = useState<ClaudePermissionMode>();
-  const allowed = allowedWorkerModes(lead, launch.reviewer);
-  const invalidProvider =
-    !isProviderKind(launch.provider) || !isProviderKind(lead.provider);
-  const invalidMode =
-    launch.provider === ProviderKind.Claude &&
-    (!inheritedClaudeMode(lead) ||
-      (permissionMode !== undefined && !allowed.includes(permissionMode)));
-  const invalid =
-    !prompt.trim() ||
-    Array.from(prompt).length > MAX_MANAGED_MESSAGE_CODEPOINTS ||
-    invalidMode ||
-    invalidProvider;
+  const { invalid, invalidMode, invalidProvider, body } = workerLaunchState(
+    lead,
+    launch,
+    prompt,
+    permissionMode,
+  );
   return (
     <Modal
       opened
@@ -61,18 +50,7 @@ export function WorkerLaunchDialog({
         onSubmit={async (event) => {
           event.preventDefault();
           if (invalid) return;
-          await onStart({
-            id: launch.id,
-            name: launch.name,
-            profile_id: launch.profile_id,
-            prompt,
-            parent: lead.id,
-            cwd: lead.cwd ?? undefined,
-            ...(launch.provider === ProviderKind.Claude &&
-            (launch.reviewer || permissionMode)
-              ? { permission_mode: launch.reviewer ? "plan" : permissionMode }
-              : {}),
-          });
+          await onStart(body);
         }}
       >
         <p className="workspace-muted">

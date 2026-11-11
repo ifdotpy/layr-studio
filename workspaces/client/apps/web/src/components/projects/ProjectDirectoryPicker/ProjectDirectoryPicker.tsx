@@ -1,6 +1,9 @@
-import { useReadView } from "../../ui/support/useReadView.ts";
+import { AsyncFeedback } from "../../../stores/AsyncFeedback.ts";
+import { whileObserved } from "../../../observed.ts";
+import { textField } from "../../../stores/fields.ts";
+import { Owned } from "../../ui/Owned/Owned.tsx";
 import { observer } from "mobx-react-lite";
-import { flow, observable } from "mobx";
+import { flow, observable, makeAutoObservable, observableRef } from "mobx";
 import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { GetResult } from "../../../api.ts";
@@ -15,7 +18,6 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { ArrowUp, ChevronRight, Folder, Search } from "lucide-react";
-import { useState } from "react";
 import { errorText } from "../../../api.ts";
 import type { paths } from "../../../generated/api.ts";
 import {
@@ -69,16 +71,7 @@ export function browseDirectory(
   return browse;
 }
 
-export default observer(function ProjectDirectoryPicker({
-  initialPath,
-  initialBrowse,
-  onSelect,
-  serverChoices,
-  initialServer,
-  projectId,
-  showServerSelector = true,
-  submitLabel = "Add project",
-}: {
+type Props = {
   initialPath?: string | undefined;
   initialBrowse?: DirectoryBrowse | undefined;
   onSelect: (path: string, server: string) => Promise<void>;
@@ -87,205 +80,290 @@ export default observer(function ProjectDirectoryPicker({
   projectId?: string;
   showServerSelector?: boolean;
   submitLabel?: string;
-}) {
-  const { canPickDirectory, pickDirectory } = useServerFileDialogs();
-  const net = useServerNet(),
-    store = useServerStore();
+};
+function createDirectoryPicker(
+  props: Props,
+  net: ReturnType<typeof useServerNet>,
+  store: ReturnType<typeof useServerStore>,
+  dialogs: ReturnType<typeof useServerFileDialogs>,
+) {
+  const initial: {
+    browse: DirectoryBrowse | null;
+    typedPath: string | undefined;
+  } = { browse: props.initialBrowse || null, typedPath: undefined };
+  let active = false;
+  const draft = makeAutoObservable(
+    {
+      server: props.initialServer || props.serverChoices?.[0]?.id || "local",
+      ...initial,
+      query: "",
+      feedback: new AsyncFeedback(),
+      get directory(): Directory | undefined {
+        return this.browse
+          ? resourceData(this.browse.directory.current)
+          : undefined;
+      },
+      view({ serverChoices, initialPath }: Props) {
+        const { browse, server, typedPath, query } = this;
+        const discovery = serverChoices
+          ? undefined
+          : store.multiServer().current;
+        const snapshot = discovery && resourceData(discovery);
+        const servers =
+          serverChoices ??
+          (snapshot
+            ? discoveryProjectServers(snapshot)
+            : [{ id: "local", label: "This computer" }]);
+        const serverError =
+          discovery?.status === "error" ? errorText(discovery.error) : "";
+        const matchRead = browse?.matches;
+        const matches = (
+          matchRead ? resourceData(matchRead.current)?.matches || [] : []
+        ).map((row) => row.path);
+        const selectedServer = servers.find((row) => row.id === server);
+        const path = browse?.path || initialPath;
+        const directoryRead = browse?.directory;
+        const directory = this.directory;
+        const loading =
+          !directoryRead || directoryRead.current.status === "loading";
+        const error =
+          directoryRead?.current.status === "error"
+            ? errorText(directoryRead.current.error)
+            : "";
+        const rows = directory?.directories.filter((row) =>
+          row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+        );
+        const enteredPath = typedPath ?? directory?.path ?? path ?? "";
+        const pathChanged =
+          !!directory && enteredPath.trim() !== directory.path;
 
-  const discovery = serverChoices ? undefined : store.multiServer().current;
-  const snapshot = discovery && resourceData(discovery);
-  const servers =
-    serverChoices ??
-    (snapshot
-      ? discoveryProjectServers(snapshot)
-      : [{ id: "local", label: "This computer" }]);
-  const [server, setServer] = useState(
-    initialServer || serverChoices?.[0]?.id || "local",
+        return {
+          servers,
+          serverError,
+          directory,
+          loading,
+          error,
+          rows,
+          enteredPath,
+          pathChanged,
+          path,
+          matches,
+          selectedServer,
+        };
+      },
+
+      setTypedPath(value: string) {
+        this.typedPath = value;
+      },
+      navigate(
+        next: string | undefined,
+        projectId?: string,
+        nextServer?: string,
+      ) {
+        this.feedback.error = "";
+        this.query = "";
+        this.typedPath = undefined;
+        this.browse = browseDirectory(
+          net,
+          next,
+          nextServer ?? this.server,
+          projectId,
+        );
+      },
+      selectServer(next: string | null, projectId?: string) {
+        if (!next || next === this.server) return;
+        this.server = next;
+        this.navigate(undefined, projectId, next);
+      },
+      pick(projectId?: string) {
+        return this.feedback.run(
+          () => dialogs.pickDirectory(),
+          (path) => {
+            if (path && active) this.navigate(path, projectId);
+          },
+        );
+      },
+      select(props: Props) {
+        const directory = this.directory,
+          server = this.server,
+          selected = this.view(props).selectedServer;
+        return directory && selected && !selected.disabled
+          ? this.feedback.run(() => props.onSelect(directory.path, server))
+          : undefined;
+      },
+    },
+    { browse: observableRef, view: false },
+    { autoBind: true },
   );
-  const serverError =
-    discovery?.status === "error" ? errorText(discovery.error) : "";
-  const [browse, setBrowse] = useReadView(initialBrowse || null);
-  const matchRead = browse?.matches;
-  const matches = (
-    matchRead ? resourceData(matchRead.current)?.matches || [] : []
-  ).map((row) => row.path);
-  const selectedServer = servers.find((row) => row.id === server);
-  const path = browse?.path || initialPath;
-  const [typedPath, setTypedPath] = useState<string>();
-  const directoryRead = browse?.directory;
-  const directory = directoryRead
-    ? resourceData(directoryRead.current)
-    : undefined;
-  const [query, setQuery] = useState("");
-  const loading = !directoryRead || directoryRead.current.status === "loading";
-  const [saving, setSaving] = useState(false);
-  const error =
-    directoryRead?.current.status === "error"
-      ? errorText(directoryRead.current.error)
-      : "";
-  const [selectionError, setSelectionError] = useState("");
-  const navigate = (next?: string, nextServer = server) => {
-    setSelectionError("");
-    setQuery("");
-    setTypedPath(undefined);
-    setBrowse(browseDirectory(net, next, nextServer, projectId));
-  };
-  const rows = directory?.directories.filter((row) =>
-    row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
-  );
-  const enteredPath = typedPath ?? directory?.path ?? path ?? "";
-  const pathChanged = !!directory && enteredPath.trim() !== directory.path;
+  whileObserved(draft, "directory", () => {
+    active = true;
+    return () => {
+      active = false;
+    };
+  });
+  return draft;
+}
+export default observer(function ProjectDirectoryPicker(props: Props) {
+  const net = useServerNet(),
+    store = useServerStore(),
+    dialogs = useServerFileDialogs();
+  const { showServerSelector = true, submitLabel = "Add project" } = props;
   return (
-    <div
-      className="directory-picker"
-      aria-busy={loading || saving}
-      data-server-selector={showServerSelector}
+    <Owned
+      key={props.projectId}
+      create={() => createDirectoryPicker(props, net, store, dialogs)}
     >
-      {showServerSelector && (
-        <Select
-          label="Server"
-          value={server}
-          disabled={saving}
-          data={servers.map((row) => ({
-            value: row.id,
-            label: row.label + (row.disabled ? " (Offline)" : ""),
-            disabled: !!row.disabled,
-          }))}
-          onChange={(next) => {
-            if (!next || next === server) return;
-            setServer(next);
-            void navigate(undefined, next);
-          }}
-        />
-      )}
-      {serverError && <p role="alert">{serverError}</p>}
-      <form
-        className="directory-path-entry"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void navigate(enteredPath.trim() || undefined);
-        }}
-      >
-        <TextInput
-          label="Folder path"
-          placeholder="/Users/…/Projects/…"
-          value={enteredPath}
-          onChange={(event) => setTypedPath(event.currentTarget.value)}
-          disabled={saving}
-        />
-        <Button type="submit" disabled={saving}>
-          Open path
-        </Button>
-      </form>
-      {canPickDirectory() && server === "local" && (
-        <Button
-          variant="light"
-          onClick={() => {
-            void pickDirectory()
-              .then((folder) => {
-                if (folder) navigate(folder);
-              })
-              .catch((failure) => setSelectionError(errorText(failure)));
-          }}
-          disabled={saving}
-        >
-          Browse folders…
-        </Button>
-      )}
-      <div className="directory-location">
-        <ActionIcon
-          aria-label="Parent folder"
-          disabled={loading || saving || !directory?.parent}
-          onClick={() => directory?.parent && navigate(directory.parent)}
-        >
-          <ArrowUp size={18} />
-        </ActionIcon>
-        <span>{loading || error ? path || "Projects" : directory?.path}</span>
-      </div>
-      <TextInput
-        aria-label="Filter folders"
-        placeholder="Filter folders"
-        leftSection={<Search size={16} />}
-        value={query}
-        disabled={loading || saving}
-        onChange={(event) => setQuery(event.currentTarget.value)}
-      />
-      <div className="directory-list" aria-label="Folders">
-        {loading ? (
-          <p role="status">Loading folders…</p>
-        ) : error ? (
-          <div role="alert">
-            <p>{error}</p>
-            <Button onClick={() => void navigate(path)}>Retry</Button>
-            {directory && directory.path !== path && (
-              <Button onClick={() => navigate(directory.path)}>
-                Back to previous folder
-              </Button>
+      {(draft) => {
+        const view = draft.view(props);
+        const { directory, path, pathChanged } = view;
+        const navigate = (next?: string) =>
+          draft.navigate(next, props.projectId);
+        const { canPickDirectory } = dialogs;
+        return (
+          <div
+            className="directory-picker"
+            aria-busy={view.loading || draft.feedback.pending}
+            data-server-selector={showServerSelector}
+          >
+            {showServerSelector && (
+              <Select
+                label="Server"
+                value={draft.server}
+                disabled={draft.feedback.pending}
+                data={view.servers.map((row) => ({
+                  value: row.id,
+                  label: row.label + (row.disabled ? " (Offline)" : ""),
+                  disabled: !!row.disabled,
+                }))}
+                onChange={(next) => draft.selectServer(next, props.projectId)}
+              />
             )}
-            {/* A saved path that does not exist yet opens from its parent. */}
-            {path && parentPath(path) !== path && (
-              <Button onClick={() => navigate(parentPath(path))}>
-                Open parent folder
-              </Button>
-            )}
-          </div>
-        ) : rows?.length ? (
-          rows.map((row) => (
-            <UnstyledButton
-              className="directory-row"
-              key={row.path}
-              disabled={saving}
-              onClick={() => navigate(row.path)}
+            {view.serverError && <p role="alert">{view.serverError}</p>}
+            <form
+              className="directory-path-entry"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void navigate(view.enteredPath.trim() || undefined);
+              }}
             >
-              <Folder size={17} />
+              <TextInput
+                label="Folder path"
+                placeholder="/Users/…/Projects/…"
+                value={view.enteredPath}
+                onChange={(event) =>
+                  draft.setTypedPath(event.currentTarget.value)
+                }
+                disabled={draft.feedback.pending}
+              />
+              <Button type="submit" disabled={draft.feedback.pending}>
+                Open path
+              </Button>
+            </form>
+            {canPickDirectory() && draft.server === "local" && (
+              <Button
+                variant="light"
+                onClick={() => void draft.pick(props.projectId)}
+                disabled={draft.feedback.pending}
+              >
+                Browse folders…
+              </Button>
+            )}
+            <div className="directory-location">
+              <ActionIcon
+                aria-label="Parent folder"
+                disabled={
+                  view.loading || draft.feedback.pending || !directory?.parent
+                }
+                onClick={() => directory?.parent && navigate(directory.parent)}
+              >
+                <ArrowUp size={18} />
+              </ActionIcon>
               <span>
-                {row.name}
-                {matches.includes(row.path) && (
-                  <small> (same git origin)</small>
-                )}
+                {view.loading || view.error
+                  ? path || "Projects"
+                  : directory?.path}
               </span>
-              <ChevronRight size={15} />
-            </UnstyledButton>
-          ))
-        ) : (
-          <p>{query ? "No matching folders" : "No folders inside"}</p>
-        )}
-      </div>
-      {selectionError && (
-        <p className="directory-error" role="alert">
-          {selectionError}
-        </p>
-      )}
-      <div className="directory-footer">
-        {!loading && !error && pathChanged && (
-          <p role="status">Select Open path to open the entered folder.</p>
-        )}
-        <Button
-          variant="filled"
-          loading={saving}
-          disabled={
-            loading ||
-            !!error ||
-            !directory ||
-            pathChanged ||
-            !!selectedServer?.disabled
-          }
-          onClick={async () => {
-            if (!directory || saving) return;
-            setSaving(true);
-            setSelectionError("");
-            try {
-              await onSelect(directory.path, server);
-            } catch (failure) {
-              setSelectionError(errorText(failure));
-            } finally {
-              setSaving(false);
-            }
-          }}
-        >
-          {submitLabel}
-        </Button>
-      </div>
-    </div>
+            </div>
+            <TextInput
+              aria-label="Filter folders"
+              placeholder="Filter folders"
+              leftSection={<Search size={16} />}
+              {...textField(draft, "query")}
+              disabled={view.loading || draft.feedback.pending}
+            />
+            <div className="directory-list" aria-label="Folders">
+              {view.loading ? (
+                <p role="status">Loading folders…</p>
+              ) : view.error ? (
+                <div role="alert">
+                  <p>{view.error}</p>
+                  <Button onClick={() => void navigate(path)}>Retry</Button>
+                  {directory && directory.path !== path && (
+                    <Button onClick={() => navigate(directory.path)}>
+                      Back to previous folder
+                    </Button>
+                  )}
+                  {/* A saved path that does not exist yet opens from its parent. */}
+                  {path && parentPath(path) !== path && (
+                    <Button onClick={() => navigate(parentPath(path))}>
+                      Open parent folder
+                    </Button>
+                  )}
+                </div>
+              ) : view.rows?.length ? (
+                view.rows.map((row) => (
+                  <UnstyledButton
+                    className="directory-row"
+                    key={row.path}
+                    disabled={draft.feedback.pending}
+                    onClick={() => navigate(row.path)}
+                  >
+                    <Folder size={17} />
+                    <span>
+                      {row.name}
+                      {view.matches.includes(row.path) && (
+                        <small> (same git origin)</small>
+                      )}
+                    </span>
+                    <ChevronRight size={15} />
+                  </UnstyledButton>
+                ))
+              ) : (
+                <p>
+                  {draft.query ? "No matching folders" : "No folders inside"}
+                </p>
+              )}
+            </div>
+            {draft.feedback.error && (
+              <p className="directory-error" role="alert">
+                {draft.feedback.error}
+              </p>
+            )}
+            <div className="directory-footer">
+              {!view.loading && !view.error && pathChanged && (
+                <p role="status">
+                  Select Open path to open the entered folder.
+                </p>
+              )}
+              <Button
+                variant="filled"
+                loading={draft.feedback.pending}
+                disabled={
+                  view.loading ||
+                  !!view.error ||
+                  !directory ||
+                  pathChanged ||
+                  !view.selectedServer ||
+                  !!view.selectedServer.disabled
+                }
+                onClick={() => void draft.select(props)}
+              >
+                {submitLabel}
+              </Button>
+            </div>
+          </div>
+        );
+      }}
+    </Owned>
   );
 });

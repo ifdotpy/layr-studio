@@ -1,6 +1,5 @@
 import { makeAutoObservable, observableShallow, flowResult } from "mobx";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { ApiError, errorText, type PostBody } from "../api.ts";
+import { errorText } from "../api.ts";
 import {
   createMergedSidebarServices,
   sidebarOwner,
@@ -205,38 +204,11 @@ export class CombinedSidebarOwner {
       this.shell.model.chatReferences,
       id,
     );
-    const key = `studio-sidebar-rename:${reference.id}`;
-    type Request = {
-      body: PostBody<"/api/rename">;
-      acknowledged: boolean;
-    };
-    const request = backend.saved<Request | null>(key, null) || {
-      body: { id, name, request_id: randomUUID() },
-      acknowledged: false,
-    };
-    try {
-      if (request.body.name !== name)
-        throw new Error("Retry the saved name before changing it.");
-      backend.storage.setItem(key, JSON.stringify(request));
-      if (!request.acknowledged) {
-        yield backend.post("/api/rename", request.body);
-        request.acknowledged = true;
-        backend.storage.setItem(key, JSON.stringify(request));
-      }
-      backend.storage.removeItem(key);
-    } catch (failure) {
-      if (
-        !request.acknowledged &&
-        failure instanceof ApiError &&
-        failure.status >= 400 &&
-        failure.status < 500 &&
-        failure.status !== 408
-      )
-        backend.storage.removeItem(key);
-      this.source.notify(errorText(failure));
-      throw failure;
-    }
+    if (!backend.rename)
+      throw new Error("Rename is unavailable on this server.");
+    yield backend.rename(reference.id, name);
   }
+
   start() {
     return this.list.start();
   }

@@ -22,6 +22,7 @@ export function messageModels(stateDir: string, agents: readonly Agent[]) {
     state: () => ({ current: { status: "live", data: mirror.current } }),
   };
   return {
+    store,
     apply(entities: readonly StateEntity[]) {
       mirror.apply([
         { collection: "workspace", id: "workspace", value: { stateDir } },

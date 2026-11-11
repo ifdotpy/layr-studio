@@ -1,10 +1,8 @@
-import { useReadView } from "../../ui/support/useReadView.ts";
-import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
-import type { GetResult } from "../../../api.ts";
+import { flowResult } from "mobx";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { observer } from "mobx-react-lite";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
+  useServerOwner,
   useServerNet,
   useServerApi,
   useServerStorage,
@@ -12,10 +10,7 @@ import {
 import { ActionIcon, Button, Menu } from "@mantine/core";
 import { MoreHorizontal } from "lucide-react";
 import { useRef, useState } from "react";
-import { errorText } from "../../../api.ts";
 import {
-  saveProjectLocation,
-  ProjectReceiptRefused,
   type LocationProjectView as LocationProject,
   type ProjectServerChoice,
 } from "../../../servers/projectLocations.ts";
@@ -30,102 +25,49 @@ import {
 } from "../../ui/support/closeMenuFromTriggerOnEscape.ts";
 
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
-export type LocationHeadRead = {
-  project: string;
-  server: string;
-  path: string;
-  slot: ReadSlot<GetResult<"/api/project-locations">>;
-};
+import { createProjectLocationsStore } from "./ProjectLocationsStore.ts";
+export type { LocationHeadRead } from "./ProjectLocationsStore.ts";
+import type { LocationHeadRead } from "./ProjectLocationsStore.ts";
 
-const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
-  project,
-  servers,
-  initialServer,
-  initialBrowse,
-  initialHeads = [],
-}: {
+type Props = {
   project: LocationProject;
   servers?: ProjectServerChoice[] | undefined;
   initialServer?: string | undefined;
   initialBrowse?: DirectoryBrowse | undefined;
   initialHeads?: LocationHeadRead[] | undefined;
-}) {
-  const net = useServerNet();
-  const api = useServerApi(),
-    store = useServerStore();
-  const { post, refreshSession } = api;
-  const storage = useServerStorage();
-
+};
+function ProjectLocationsSettings(props: Props) {
+  const owner = useServerOwner();
+  return (
+    <ProjectLocationsView
+      key={`${owner?.id || "local"}:${props.project.id}`}
+      {...props}
+    />
+  );
+}
+const ProjectLocationsView = observer(function ProjectLocationsView({
+  project,
+  servers,
+  initialServer,
+  initialBrowse,
+  initialHeads,
+}: Props) {
+  const [form] = useState(() => createProjectLocationsStore(initialHeads));
   const [adding, setAdding] = useState(initialBrowse);
-  const [heads, setHeads] = useReadView(initialHeads);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [openLocationMenu, setOpenLocationMenu] = useState<string | null>(null);
+  const net = useServerNet();
+  const scope = {
+    projectId: project.id,
+    services: {
+      api: useServerApi(),
+      store: useServerStore(),
+      storage: useServerStorage(),
+    },
+  };
+  const { error, busy, openLocationMenu, gitHead, change } = form;
   const locationMenuTriggers = useRef(new Map<string, HTMLButtonElement>());
   const { suppressNextEscape, clearSuppression } = useMenuEscapeSuppression(
     openLocationMenu !== null,
   );
-  const request = useRef<{
-    id: string;
-    server: string;
-    path?: string | undefined;
-    action: "add_location" | "remove_location";
-  } | null>(null);
-  const readHead = (server: string, path: string) => {
-    const slot = store.reads.projectLocations(api, {
-      project: project.id,
-      server,
-      path,
-      action: "info",
-    });
-    setHeads([
-      ...(heads || []).filter((row) => row.server !== server),
-      { project: project.id, server, path, slot },
-    ]);
-    return slot.read();
-  };
-  const gitHead = (server: string, path: string) =>
-    resourceData(
-      (heads || []).find(
-        (row) =>
-          row.project === project.id &&
-          row.server === server &&
-          row.path === path,
-      )?.slot.current || { status: "absent" },
-    )?.gitHead;
-  const change = async (
-    action: "add_location" | "remove_location",
-    server: string,
-    path?: string,
-  ) => {
-    const old = request.current;
-    if (
-      old &&
-      (old.server !== server || old.path !== path || old.action !== action)
-    )
-      throw new Error(
-        "Retry the pending location request before another change.",
-      );
-    request.current ||= { action, server, path, id: randomUUID() };
-    await saveProjectLocation(
-      {
-        action,
-        server,
-        path,
-        project: project.id,
-        request_id: request.current.id,
-      },
-      { post, refreshSession, storage },
-    ).catch((error: unknown) => {
-      if (error instanceof ProjectReceiptRefused) request.current = null;
-      throw error;
-    });
-    request.current = null;
-    if (action === "add_location" && path) {
-      // Read only the folder added by this explicit user action.
-      await readHead(server, path).catch(() => {});
-    }
-  };
   return (
     <div className="project-locations" aria-label="Project folders">
       {(project.locations || []).map((location) => (
@@ -143,8 +85,10 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
               {location.requestedPath && (
                 <small>Selected folder: {location.requestedPath}</small>
               )}
-              {gitHead(location.serverId, location.path) && (
-                <small>HEAD {gitHead(location.serverId, location.path)}</small>
+              {gitHead(project.id, location.serverId, location.path) && (
+                <small>
+                  HEAD {gitHead(project.id, location.serverId, location.path)}
+                </small>
               )}
             </div>
           }
@@ -152,15 +96,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
           <Menu
             opened={openLocationMenu === location.serverId}
             onChange={(nextOpened) => {
-              if (nextOpened)
-                void readHead(location.serverId, location.path).catch(() => {});
-              setOpenLocationMenu((current) =>
-                nextOpened
-                  ? location.serverId
-                  : current === location.serverId
-                    ? null
-                    : current,
-              );
+              form.menu(scope, location.serverId, location.path, nextOpened);
               if (!nextOpened)
                 restoreMenuTriggerFocusAfterClose(
                   locationMenuTriggers.current.get(location.serverId) ?? null,
@@ -191,9 +127,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
                     event,
                     openLocationMenu === location.serverId,
                     () =>
-                      setOpenLocationMenu((current) =>
-                        current === location.serverId ? null : current,
-                      ),
+                      form.menu(scope, location.serverId, location.path, false),
                     suppressNextEscape,
                     clearSuppression,
                   )
@@ -208,13 +142,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
             <Menu.Dropdown data-mantine-stop-propagation="true">
               <Menu.Item
                 disabled={(project.locations?.length || 0) < 2}
-                onClick={() => {
-                  setBusy(true);
-                  setError("");
-                  void change("remove_location", location.serverId)
-                    .catch((failure) => setError(errorText(failure)))
-                    .finally(() => setBusy(false));
-                }}
+                onClick={() => void form.remove(scope, location.serverId)}
               >
                 Remove
               </Menu.Item>
@@ -230,7 +158,9 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
           initialServer={initialServer}
           projectId={project.id}
           submitLabel="Add folder"
-          onSelect={(path, server) => change("add_location", server, path)}
+          onSelect={(path, server) =>
+            flowResult(change(scope, "add_location", server, path))
+          }
         />
       ) : (
         <Button

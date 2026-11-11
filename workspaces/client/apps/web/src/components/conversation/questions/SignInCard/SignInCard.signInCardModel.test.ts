@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BrowserOpenDetails } from "../support/requestData.ts";
+import type { BrowserOpenDetails } from "../../support/requestData.ts";
 import {
   acceptBody,
   currentSignInWindow,
@@ -13,9 +13,9 @@ import {
   timeLeftLabel,
   verificationPage,
   waitingChatsLabel,
-} from "../support/signInCardModel.ts";
+} from "../../support/signInCardModel.ts";
 import { approval, browserOpen } from "../../../../approvalFixtures.ts";
-import { browserOpenDetails } from "../support/requestData.ts";
+import { browserOpenDetails } from "../../support/requestData.ts";
 
 const redirect: BrowserOpenDetails = {
   host: "accounts.example.com",

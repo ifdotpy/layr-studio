@@ -1,6 +1,7 @@
 import {
   flowResult,
   makeAutoObservable,
+  observableRef,
   onBecomeObserved,
   onBecomeUnobserved,
   reaction,
@@ -56,6 +57,29 @@ export function createShellTerminalStore(
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   };
   const state = {
+    binding: { shell, slot, api },
+    bind(
+      shell: TerminalRecord,
+      slot: ResourceSlot<TerminalOutput>,
+      api: Pick<typeof Api, "get" | "post" | "syncPost">,
+    ) {
+      const current = this.binding;
+      if (
+        current.shell === shell &&
+        current.slot === slot &&
+        current.api.get === api.get &&
+        current.api.post === api.post &&
+        current.api.syncPost === api.syncPost
+      )
+        return;
+      const host = io.host;
+      this.unmount();
+      if (io.attempt) this.cancelDownload();
+      this.binding = { shell, slot, api };
+      this.manual = undefined;
+      this.baseline = [];
+      if (host) this.mount(host);
+    },
     failure: "",
     inputFailure: "",
     inputWarning: "",
@@ -66,7 +90,7 @@ export function createShellTerminalStore(
     baseline: [] as readonly unknown[],
 
     get source() {
-      return resourceData(slot.current);
+      return resourceData(this.binding.slot.current);
     },
     get version(): readonly (string | number | undefined)[] {
       const d = this.source;
@@ -78,7 +102,7 @@ export function createShellTerminalStore(
         : this.source;
     },
     get status() {
-      return this.output?.status ?? shell.status;
+      return this.output?.status ?? this.binding.shell.status;
     },
     start() {
       io.stop ??= reaction(
@@ -87,7 +111,9 @@ export function createShellTerminalStore(
           this.output?.offset,
           this.output?.status,
           this.output?.error,
-          "error" in slot.current ? slot.current.error : undefined,
+          "error" in this.binding.slot.current
+            ? this.binding.slot.current.error
+            : undefined,
         ],
         this.paint,
       );
@@ -122,7 +148,10 @@ export function createShellTerminalStore(
         io.offset = value.offset;
         terminal.options.disableStdin = io.blocked || !running(value.status);
       }
-      const error = "error" in slot.current ? slot.current.error : undefined;
+      const error =
+        "error" in this.binding.slot.current
+          ? this.binding.slot.current.error
+          : undefined;
       this.failure = error ? errorText(error) : value?.error || "";
     },
     send(text: string) {
@@ -137,8 +166,8 @@ export function createShellTerminalStore(
       io.pending = true;
       try {
         const result = yield* wait(
-          api.syncPost("/api/terminals/input", {
-            id: shell.id,
+          this.binding.api.syncPost("/api/terminals/input", {
+            id: this.binding.shell.id,
             text,
             request_id: requestId(),
           }),
@@ -161,10 +190,14 @@ export function createShellTerminalStore(
     },
     *reconnect() {
       this.fence();
+      const generation = io.generation;
       try {
         const value = yield* wait(
-          api.get("/api/terminals/output", { query: { id: shell.id } }),
+          this.binding.api.get("/api/terminals/output", {
+            query: { id: this.binding.shell.id },
+          }),
         );
+        if (generation !== io.generation) return;
         this.baseline = this.version;
         this.manual = value;
         this.failure = "";
@@ -172,7 +205,7 @@ export function createShellTerminalStore(
         this.unmount();
         if (host) this.mount(host);
       } catch (error) {
-        this.failure = errorText(error);
+        if (generation === io.generation) this.failure = errorText(error);
       }
     },
     cancelDownload() {
@@ -193,9 +226,9 @@ export function createShellTerminalStore(
         let incomplete = false;
         for (let page = 0; page < 512; page++) {
           const value = yield* wait(
-            api.get("/api/terminals/output", {
+            this.binding.api.get("/api/terminals/output", {
               query: {
-                id: shell.id,
+                id: this.binding.shell.id,
                 history: "1",
                 offset,
                 limit: Math.min(
@@ -229,7 +262,7 @@ export function createShellTerminalStore(
             );
             Object.assign(document.createElement("a"), {
               href: url,
-              download: `terminal-${shell.id}.txt`,
+              download: `terminal-${this.binding.shell.id}.txt`,
             }).click();
             setTimeout(() => URL.revokeObjectURL(url), 60000);
             this.downloadStatus = `Saved output downloaded.${incomplete ? " Earlier output is unavailable." : ""}`;
@@ -322,8 +355,8 @@ export function createShellTerminalStore(
       if (!terminal || !running(this.status)) return;
       try {
         yield* wait(
-          api.post("/api/terminals/resize", {
-            id: shell.id,
+          this.binding.api.post("/api/terminals/resize", {
+            id: this.binding.shell.id,
             cols: terminal.cols,
             rows: terminal.rows,
           }),
@@ -333,7 +366,11 @@ export function createShellTerminalStore(
       }
     },
   };
-  const store = makeAutoObservable(state, {}, { autoBind: true });
+  const store = makeAutoObservable(
+    state,
+    { binding: observableRef },
+    { autoBind: true },
+  );
   onBecomeObserved(store, "status", store.start);
   onBecomeUnobserved(store, "status", store.dispose);
   return store;

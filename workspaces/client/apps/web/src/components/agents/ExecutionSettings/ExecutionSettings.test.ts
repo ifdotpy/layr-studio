@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { reaction } from "mobx";
 import {
   observableFixture,
@@ -51,6 +52,30 @@ const choices = vi.hoisted(() => ({
 }));
 
 const capability = vi.hoisted(() => ({ priority: false }));
+
+test("the default non-lead summary retains inherited worker and review roles", () => {
+  const lead = settingsInput({ id: "lead", isLead: true });
+  const worker = settingsInput({
+    id: "worker",
+    rootId: "lead",
+    model: "gpt-6-luna",
+  });
+  const markup = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(ExecutionSettings, {
+        agentsUi: areas.agentsUi,
+        input: worker,
+        leadInput: lead,
+        team: [lead.summary, worker.summary],
+        catalog: { models: [], loading: false, error: "", retry: vi.fn() },
+      }),
+    ),
+  );
+  expect(markup).toContain('data-role="worker"');
+  expect(markup).toContain('data-role="review"');
+});
 
 test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
   "review settings omit caller-model choices with stored model %s",

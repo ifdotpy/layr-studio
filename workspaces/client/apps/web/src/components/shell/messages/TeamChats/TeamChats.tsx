@@ -10,7 +10,7 @@ import {
   TextInput,
   UnstyledButton,
 } from "@mantine/core";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { ArrowLeft, Inbox, Megaphone, Search, Users } from "lucide-react";
 import "../../../../api.ts";
 
@@ -47,13 +47,7 @@ function RoomDate({ at }: { at?: number | null | undefined }) {
   );
 }
 
-type Props = {
-  owner?: TeamChatsOwner;
-  leadId?: string | undefined;
-  focusRequestId?: string | undefined;
-  focusItemId?: string | undefined;
-  focusRoomId?: string | undefined;
-};
+type Props = { owner?: TeamChatsOwner };
 export default observer(function TeamChats(props: Props) {
   useMessageRenderProbe("team-chats");
   const area = useConversationActions();
@@ -70,7 +64,7 @@ export default observer(function TeamChats(props: Props) {
           aria-label="Messages"
         >
           <RoomList />
-          <TeamDetail {...props} owner={owner} />
+          <TeamDetail owner={owner} />
         </section>
       </div>
     </TeamChatsProvider>
@@ -78,12 +72,16 @@ export default observer(function TeamChats(props: Props) {
 });
 
 const TeamDetail = observer(function TeamDetail({
-  focusItemId,
-  focusRequestId,
-  focusRoomId,
   owner,
-}: Props & { owner: TeamChatsOwner }) {
+}: {
+  owner: TeamChatsOwner;
+}) {
   const chats = useTeamChats();
+  const {
+    id: focusItemId,
+    requestId: focusRequestId,
+    roomId: focusRoomId,
+  } = chats.target ?? {};
   const {
     room,
     selected,
@@ -107,70 +105,11 @@ const TeamDetail = observer(function TeamDetail({
   const { scroll, content, getFollow, setFollow, onScroll } =
     useConversationScroll(scope + ":messages:" + selected, messages.loaded);
   const follow = getFollow();
-  const heights = useRef(new Map<string, number>());
-  const [virtualRange, setVirtualRange] = useState({
-    start: 0,
-    end: 40,
-    top: 0,
-    bottom: 0,
-  });
+  const virtualRange = chats.viewport.range;
   useLayoutEffect(() => {
     const root = scroll.current;
     if (!root || showYou) return;
-    const update = () => {
-      // Newly mounted rows must be measured before changing the window again.
-      // Waiting for ResizeObserver lets estimated and actual heights alternate
-      // during layout commits, moving the scroll position back and forth.
-      const bounds = root.getBoundingClientRect();
-      let seen = 0;
-      for (const node of root.querySelectorAll<HTMLElement>(
-        "[data-room-row]",
-      )) {
-        const rect = node.getBoundingClientRect();
-        const height = Math.ceil(rect.height);
-        if (rect.bottom > bounds.top && rect.top < bounds.bottom)
-          seen = Math.max(seen, Number(node.dataset.roomSeq) || 0);
-        if (height) heights.current.set(node.dataset.roomRow!, height);
-      }
-      chats.markSeen(
-        room,
-        messages.loaded && !messages.notice,
-        detailOpen,
-        seen,
-      );
-      const estimate = (message: (typeof messages.items)[number]) =>
-        heights.current.get(message.id) ||
-        Math.max(112, Math.ceil((message.text?.length || 0) / 78) * 23 + 82);
-      const offsets: number[] = Array.from({
-        length: messages.items.length + 1,
-      });
-      offsets[0] = 0;
-      for (let index = 0; index < messages.items.length; index++)
-        offsets[index + 1] = offsets[index]! + estimate(messages.items[index]!);
-      const top = root.scrollTop;
-      const bottom = top + root.clientHeight;
-      let start = 0;
-      while (start < messages.items.length && offsets[start + 1]! < top)
-        start++;
-      let end = start;
-      while (end < messages.items.length && offsets[end]! < bottom) end++;
-      start = Math.max(0, start - 8);
-      end = Math.min(messages.items.length, Math.max(start + 1, end + 8));
-      const next = {
-        start,
-        end,
-        top: offsets[start]!,
-        bottom: offsets.at(-1)! - offsets[end]!,
-      };
-      setVirtualRange((old) =>
-        old.start === next.start &&
-        old.end === next.end &&
-        old.top === next.top &&
-        old.bottom === next.bottom
-          ? old
-          : next,
-      );
-    };
+    const update = () => chats.measureRoom(root);
     update();
     root.addEventListener("scroll", update, { passive: true });
     const observer = new ResizeObserver(update);
@@ -249,29 +188,26 @@ const TeamDetail = observer(function TeamDetail({
         onScroll={handleScroll}
       >
         <div ref={content}>
-          {!showYou && messages.before != null && (
-            <Button
-              variant="subtle"
-              size="xs"
-              onClick={() => {
-                setFollow(false);
-                void messages.older().catch((error) => notify(String(error)));
-              }}
-            >
-              Earlier messages
-            </Button>
-          )}
-          {!showYou && messages.after != null && (
-            <Button
-              variant="subtle"
-              size="xs"
-              onClick={() => {
-                setFollow(false);
-                void messages.newer().catch((error) => notify(String(error)));
-              }}
-            >
-              Later messages
-            </Button>
+          {(["older", "newer"] as const).map(
+            (direction) =>
+              !showYou &&
+              messages[direction === "older" ? "before" : "after"] != null && (
+                <Button
+                  key={direction}
+                  variant="subtle"
+                  size="xs"
+                  onClick={() => {
+                    setFollow(false);
+                    void messages[direction]().catch((error) =>
+                      notify(String(error)),
+                    );
+                  }}
+                >
+                  {direction === "older"
+                    ? "Earlier messages"
+                    : "Later messages"}
+                </Button>
+              ),
           )}
           {!showYou && !messages.loaded && <Loader size="sm" />}
           {!showYou && messages.notice && (

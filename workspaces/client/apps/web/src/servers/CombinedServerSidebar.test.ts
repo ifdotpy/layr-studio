@@ -1,7 +1,7 @@
 import { stateFromFixture } from "./sidebarSourceFixture.ts";
 import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import type { CombinedSidebarServices } from "./combinedSidebarServices.ts";
-import type { ApiPostPath, PostInput, PostResult } from "../api.ts";
+import { RequestRegistry } from "./RequestRegistry.ts";
 import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type { SidebarCommands } from "../components/sidebar/support/commands.ts";
 // @vitest-environment happy-dom
@@ -398,36 +398,32 @@ it("retains the exact rename across a lost reply and settles without a refresh",
       }),
     ),
   );
-  const values = new Map<string, string>(),
-    requests: unknown[] = [];
-  let transportFailure = true;
+  const dispatch = vi.fn(async (): Promise<void> => {
+    throw new TypeError("Lost reply");
+  });
+  const registry = new RequestRegistry(
+    sessionStorage,
+    dispatch,
+    () => () => {},
+  );
+  const notify = vi.fn();
+  const localRename = vi.fn(async () => {});
+  const rename = vi.fn(async (id: string, name: string) => {
+    const entry = registry.start({
+      key: ["workspace", "rename", id],
+      path: "/api/rename",
+      body: { id, name },
+    });
+    await entry.completion;
+    if (entry.state === "unknown") throw new Error(entry.errorText);
+  });
   const backend: SidebarBackend = {
     ...localSidebarBackend,
     ownerId: "remote",
-    storage: {
-      getItem: (key) => values.get(key) ?? null,
-      setItem: (key, value) => {
-        values.set(key, value);
-      },
-      removeItem: (key) => {
-        values.delete(key);
-      },
-    },
-    saved<T>(key: string, fallback: T): T {
-      const value = values.get(key);
-      return value === undefined ? fallback : JSON.parse(value);
-    },
-    async post<Path extends ApiPostPath>(
-      _path: Path,
-      body: PostInput<Path>,
-    ): Promise<PostResult<Path>> {
-      requests.push(body);
-      if (transportFailure) throw Error("Lost reply");
-      return {} as PostResult<Path>;
-    },
+    rename,
   };
   const backends = new Map([
-    ["local", { ...backend, ownerId: "local" }],
+    ["local", { ...backend, ownerId: "local", rename: localRename }],
     ["remote", backend],
   ]);
   renderToStaticMarkup(
@@ -437,6 +433,7 @@ it("retains the exact rename across a lost reply and settles without a refresh",
       vi.fn(),
       {
         backends,
+        notify,
         refreshOwner: async () => {
           throw Error("Unexpected refresh");
         },
@@ -445,32 +442,28 @@ it("retains the exact rename across a lost reply and settles without a refresh",
   );
   const owner = required(captured.owner),
     id = model.chatKey("remote", "same");
-  await expect(owner.renameChat(id, "Saved name")).rejects.toThrow(
-    "Lost reply",
-  );
-  transportFailure = false;
-  await owner.renameChat(id, "Saved name");
-  expect(requests).toHaveLength(2);
-  expect(requests[1]).toEqual(requests[0]);
-  expect(requests[0]).toMatchObject({ id: "same", name: "Saved name" });
-  expect(requests).toHaveLength(2);
-  expect(values.has("studio-sidebar-rename:same")).toBe(false);
-  const replacementRequests: unknown[] = [];
-  backends.set("remote", {
-    ...backend,
-    async post<Path extends ApiPostPath>(
-      _path: Path,
-      body: PostInput<Path>,
-    ): Promise<PostResult<Path>> {
-      replacementRequests.push(body);
-      return {} as PostResult<Path>;
-    },
-  });
-  await owner.renameChat(id, "Replacement backend");
-  expect(requests).toHaveLength(2);
-  expect(replacementRequests).toHaveLength(1);
-  expect(replacementRequests[0]).toMatchObject({
-    id: "same",
-    name: "Replacement backend",
-  });
+  try {
+    owner.name = "Saved name";
+    await owner.rename(new Event("submit"), id);
+    expect(notify).toHaveBeenCalledTimes(1);
+    const entry = required(registry.latest(["workspace", "rename", "same"]));
+    dispatch.mockResolvedValueOnce(undefined);
+    await registry.retry(entry.requestId);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch.mock.calls[0]).toEqual(dispatch.mock.calls[1]);
+    expect(entry.body).toEqual({ id: "same", name: "Saved name" });
+    expect(rename).toHaveBeenCalledWith("same", "Saved name");
+    expect(localRename).not.toHaveBeenCalled();
+    const replacementRename = vi.fn(async () => {});
+    backends.set("remote", { ...backend, rename: replacementRename });
+    await owner.renameChat(id, "Replacement backend");
+    expect(rename).toHaveBeenCalledOnce();
+    expect(replacementRename).toHaveBeenCalledWith(
+      "same",
+      "Replacement backend",
+    );
+  } finally {
+    registry.dispose();
+    sessionStorage.clear();
+  }
 });

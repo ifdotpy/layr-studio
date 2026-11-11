@@ -1,6 +1,4 @@
-import { ServerStoreProvider } from "../ServerServicesProvider/ServerServicesProvider.tsx";
-import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
-import { ProviderKind } from "../../../generated/providerKind.ts";
+import { MantineProvider } from "@mantine/core";
 import {
   createElement,
   Fragment,
@@ -8,14 +6,19 @@ import {
   type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MantineProvider } from "@mantine/core";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { ActionButtonProps } from "../../ui/ActionButton/ActionButton.tsx";
+import { ProviderKind } from "../../../generated/providerKind.ts";
 import type { ServerAccount } from "../../../servers/navigation.ts";
-import ServerAccountsPanel from "./ServerAccountsPanel.tsx";
-import { accountSources } from "./ServerAccountsPanel.tsx";
 import { serverAccountRows } from "../../../servers/serverAccountRows.ts";
 import { required } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
+import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+import type { ActionButtonProps } from "../../ui/ActionButton/ActionButton.tsx";
+import { ServerStoreProvider } from "../ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  accountRows,
+  type AccountRowInputs,
+} from "../../../servers/AccountsPanelState.ts";
+import ServerAccountsPanel, { accountSources } from "./ServerAccountsPanel.tsx";
 
 const controls = vi.hoisted(() => [] as ActionButtonProps[]);
 vi.mock("../../ui/ActionButton/ActionButton.tsx", async (original) => {
@@ -85,7 +88,9 @@ const account = {
   isDefault: false,
 } satisfies ServerAccount & { accountKey: string };
 const render = (
-  overrides: Partial<ComponentProps<typeof ServerAccountsPanel>> = {},
+  overrides: Partial<
+    ComponentProps<typeof ServerAccountsPanel> & AccountRowInputs
+  > = {},
 ) => {
   const startAccount = vi.fn();
   const fixture = observableFixture();
@@ -97,11 +102,19 @@ const render = (
         ServerStoreProvider,
         { value: fixture.store },
         createElement(ServerAccountsPanel, {
+          rows: accountRows(
+            {
+              servers: [local, remote],
+              accountsByServer: { local: [account] },
+              statuses: { local: "live", remote: "offline" },
+              startAccount,
+              accountAction: () => {},
+              ...overrides,
+            },
+            fixture.store,
+          ),
           servers: [local, remote],
-          accountsByServer: { local: [account] },
-          statuses: { local: "live", remote: "offline" },
           startAccount,
-          accountAction: () => {},
           ...overrides,
         }),
       ),

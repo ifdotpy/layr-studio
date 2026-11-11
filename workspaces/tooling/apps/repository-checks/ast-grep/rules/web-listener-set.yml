@@ -1,0 +1,6 @@
+id: web-listener-set
+language: TypeScript
+message: Use MobX observables and reactions instead of handwritten listener sets.
+severity: warning
+rule:
+  pattern: new Set<() => void>($$$)

@@ -1,0 +1,8 @@
+id: web-run-in-action
+language: TypeScript
+message: Use MobX generator flows for async actions.
+severity: warning
+rule:
+  any:
+    - pattern: runInAction($$$)
+    - pattern: $M.runInAction($$$)

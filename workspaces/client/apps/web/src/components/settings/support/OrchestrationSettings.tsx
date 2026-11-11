@@ -10,8 +10,8 @@ export interface OrchestrationSettingSpec {
   field: Exclude<keyof Settings, "idleCompaction" | "shellPolicy">;
   label: string;
   help: string;
-  ariaLabel: string;
-  tooltip: string;
+  "aria-label": string;
+  title: string;
   min: number;
   max: number;
 }

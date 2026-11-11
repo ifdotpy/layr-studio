@@ -1,3 +1,5 @@
+import { TranscriptProvider } from "../../support/navigation.ts";
+import { TranscriptStore } from "../../support/TurnHistoryStore.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import HistoryWindow from "./HistoryWindow.tsx";
@@ -358,16 +360,27 @@ it.each(["older", "newer"] as const)(
       { before: "m0", after: "m39", nextBefore: null, nextAfter: null },
       anchor,
     );
+    const model = new TranscriptStore(() => ({
+      items: page.items,
+      enabled: false,
+      storageKey: "paging-test",
+    }));
     const html = renderToStaticMarkup(
-      createElement(HistoryWindow, {
-        rows: page.items.map((message) => ({
-          id: message.id,
-          items: [message] as [Message],
-        })),
-        storageKey: "paging-test",
-        render: (row) =>
-          createElement("div", { "data-message": row.id }, row.items[0].text),
-      }),
+      createElement(
+        TranscriptProvider,
+        {
+          value: {
+            renderMessage: (message: Message) =>
+              createElement(
+                "div",
+                { "data-message": message.id },
+                message.text,
+              ),
+            jumpToMessage() {},
+          },
+        },
+        createElement(HistoryWindow, { model }),
+      ),
     );
     assert.match(html, new RegExp(`data-message="${anchor}"`));
   },

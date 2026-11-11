@@ -140,3 +140,139 @@ afterEach(() => {
   renderErrors.mockRestore();
   expect(warnings).toEqual([]);
 });
+
+it("uses the current backend and close callback after a mounted form rerender before its first save", async () => {
+  const f = fixture();
+  const originalPost = vi.fn().mockResolvedValue({ ok: true });
+  const currentPost = vi.fn().mockResolvedValue({ ok: true });
+  const originalClose = vi.fn(),
+    currentClose = vi.fn();
+  const project = { id: "project", path: "/source", peerTeamsRevision: 7 };
+  const team = {
+    id: "team",
+    name: "Draft team",
+    members: ["a", "b"],
+    projectPath: "/source",
+  };
+  const actions: PeerTeamActions = {
+    scope: "scope",
+    closeForm: originalClose,
+    openRoom() {},
+    edit() {},
+    toggle() {},
+    room: () => undefined,
+    disabled: () => false,
+    candidates: () => [],
+  };
+  const render = (post: typeof originalPost, closeForm: typeof originalClose) =>
+    act(async () =>
+      f.root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            SidebarBackendProvider,
+            { value: { ...localSidebarBackend, post } },
+            createElement(
+              PeerTeamActionsProvider,
+              { value: { ...actions, closeForm } },
+              createElement(PeerTeamForm, { project, team, action: "save" }),
+            ),
+          ),
+        ),
+      ),
+    );
+  try {
+    await render(originalPost, originalClose);
+    await render(currentPost, currentClose);
+    await act(async () => {
+      document
+        .querySelector<HTMLFormElement>(".peer-team-form")
+        ?.dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    });
+    expect(originalPost).not.toHaveBeenCalled();
+    expect(currentPost).toHaveBeenCalledTimes(1);
+    expect(currentPost.mock.calls[0]?.[1]).toMatchObject({
+      path: "/source",
+      team_id: "team",
+      expected_revision: 7,
+    });
+    expect(originalClose).not.toHaveBeenCalled();
+    expect(currentClose).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.close();
+  }
+});
+
+it("uses the current close callback after an uncertain save while retrying the pinned request and backend", async () => {
+  const f = fixture();
+  const post = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Lost response"))
+    .mockResolvedValue({ ok: true });
+  const replacementPost = vi.fn();
+  const originalClose = vi.fn(),
+    currentClose = vi.fn();
+  const project = { id: "project", path: "/source", peerTeamsRevision: 7 };
+  const team = {
+    id: "team",
+    name: "Draft",
+    members: ["a", "b"],
+    projectPath: "/source",
+  };
+  const actions: PeerTeamActions = {
+    scope: "scope",
+    closeForm: originalClose,
+    openRoom() {},
+    edit() {},
+    toggle() {},
+    room: () => undefined,
+    disabled: () => false,
+    candidates: () => [],
+  };
+  const render = (send: typeof post, closeForm: typeof originalClose) =>
+    act(async () =>
+      f.root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            SidebarBackendProvider,
+            { value: { ...localSidebarBackend, post: send } },
+            createElement(
+              PeerTeamActionsProvider,
+              { value: { ...actions, closeForm } },
+              createElement(PeerTeamForm, { project, team, action: "save" }),
+            ),
+          ),
+        ),
+      ),
+    );
+  try {
+    await render(post, originalClose);
+    await act(async () =>
+      document
+        .querySelector<HTMLFormElement>(".peer-team-form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(post).toHaveBeenCalledTimes(1);
+    const body = post.mock.calls[0]![1];
+    await render(replacementPost, currentClose);
+    await act(async () =>
+      [...document.querySelectorAll("button")]
+        .find((button) => button.textContent === "Retry")!
+        .click(),
+    );
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[1]![1]).toBe(body);
+    expect(replacementPost).not.toHaveBeenCalled();
+    expect(originalClose).not.toHaveBeenCalled();
+    expect(currentClose).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.close();
+  }
+});

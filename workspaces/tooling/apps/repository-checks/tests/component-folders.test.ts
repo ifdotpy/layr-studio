@@ -49,6 +49,102 @@ test("two exported components in one leaf are rejected", () => {
     /exported components/,
   );
 });
+test("owned view and section wrappers retain their named component identity", () => {
+  assert.deepEqual(
+    check({
+      "Button/Button.tsx":
+        "export default ownedView(() => new State(), function Button() { return <div />; });",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    check({
+      "Button/Button.tsx":
+        "export const Button = section(observer(function Button() { return <div />; }));",
+    }),
+    [],
+  );
+  assert.match(
+    check({
+      "Button/Button.tsx":
+        "export default ownedView(() => new State(), function Icon() { return <div />; });",
+    }).join("\n"),
+    /name.*Button/,
+  );
+});
+for (const wrapper of ["ownedView", "section"]) {
+  test(`default ${wrapper} preserves a component identifier callback`, () => {
+    const call =
+      wrapper === "ownedView"
+        ? "ownedView(() => new State(), Button)"
+        : "section(Button)";
+    assert.deepEqual(
+      check({
+        "Button/Button.tsx": `function Button() { return <div />; } export default ${call};`,
+      }),
+      [],
+    );
+  });
+  for (const [callback, prelude] of [
+    ["render", "function render() { return <div />; }"],
+    ["Hidden", "function render() { return <div />; } const Hidden = render;"],
+    ["Hidden", 'import { Hidden } from "./hidden-view.tsx";'],
+  ])
+    test(`default ${wrapper} retains ownership with ${prelude}`, () => {
+      const call =
+        wrapper === "ownedView"
+          ? `ownedView(() => new State(), ${callback})`
+          : `section(${callback})`;
+      const declaration = `${prelude} export default ${call};`;
+      assert.match(
+        check({ "support/hidden.tsx": declaration }).join("\n"),
+        /support exports a product component/,
+      );
+      assert.match(
+        check({ "../app/hidden.tsx": declaration }).join("\n"),
+        /exported component outside src\/components/,
+      );
+      assert.match(
+        check({ "Button/Button.tsx": view("Button") + declaration }).join("\n"),
+        /exported components/,
+      );
+    });
+  for (const render of [
+    "function render() { return <div />; }",
+    "function Icon() { return <div />; }",
+    "function RENDER() { return <div />; }",
+    "function () { return <div />; }",
+    "() => <div />",
+    "() => { return <div />; }",
+    "() => <><span /></>",
+  ]) {
+    const call =
+      wrapper === "ownedView"
+        ? `ownedView(() => new State(), ${render})`
+        : `section(${render})`;
+    for (const declaration of [
+      `export default ${call};`,
+      `export const hidden = ${call};`,
+    ]) {
+      test(`wrapped view cannot hide ownership: ${declaration}`, () => {
+        assert.match(
+          check({ "support/hidden.tsx": declaration }).join("\n"),
+          /support exports a product component/,
+        );
+        assert.match(
+          check({ "../app/hidden.tsx": declaration }).join("\n"),
+          /exported component outside src\/components/,
+        );
+        assert.match(
+          check({ "Button/Button.tsx": view("Button") + declaration }).join(
+            "\n",
+          ),
+          /exported components/,
+        );
+      });
+    }
+  }
+}
 test("mixed files and subdirectories are rejected", () => {
   assert.match(
     check({

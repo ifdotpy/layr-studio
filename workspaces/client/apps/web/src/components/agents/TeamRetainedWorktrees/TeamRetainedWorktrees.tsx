@@ -1,9 +1,12 @@
 import { WorkspaceMode } from "../../../generated/api.ts";
-import { useState } from "react";
+import { Owned } from "../../ui/Owned/Owned.tsx";
+import { RetainedFolder } from "../support/RetainedFolder.ts";
 import { Button } from "@mantine/core";
-import { errorText } from "../../../api.ts";
 import type { Agent } from "../../../types.ts";
-import { useServerFileDialogs } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  useServerFileDialogs,
+  useServerOwner,
+} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
 import { observer } from "mobx-react-lite";
 
@@ -20,46 +23,58 @@ export const RetainedWorktree = observer(function RetainedWorktree({
   remoteWorker?: Agent["remoteWorker"];
 }) {
   const { canRevealPath, revealPath } = useServerFileDialogs();
-  const [error, setError] = useState("");
+  const owner = useServerOwner();
   const cleanup =
     "cleanup" in agent ? agent.cleanup : agent.workspaceCleanupIntent;
   const canOpen = !remoteWorker && canRevealPath();
   if (!cleanup || !["not_sent", "unknown"].includes(cleanup.phase)) return null;
   return (
-    <section className="retained-worktree" aria-label="Retained worktree">
-      <p>
-        <strong>
-          {cleanup.phase === "unknown"
-            ? "Cleanup outcome unconfirmed"
-            : "cleanup" in agent ||
-                agent.worktree ||
-                agent.workspaceMode === WorkspaceMode.worktree
-              ? "Worktree retained"
-              : "Workspace retained"}
-        </strong>
-      </p>
-      <p>
-        {cleanup.reason ||
-          "Cleanup did not confirm removal. Inspect the folder before another cleanup."}
-      </p>
-      {cleanup.path && <p className="retained-worktree-path">{cleanup.path}</p>}
-      <Button
-        size="compact-sm"
-        disabled={!cleanup.path || !canOpen}
-        onClick={async () => {
-          setError("");
-          try {
-            if (cleanup.path) await revealPath(cleanup.path);
-          } catch (failure) {
-            setError(errorText(failure));
-          }
-        }}
-      >
-        Open folder
-      </Button>
-      {!canOpen && <p>Open this path on the server that owns the worktree.</p>}
-      {error && <p role="alert">{error}</p>}
-    </section>
+    <Owned
+      key={JSON.stringify([
+        owner?.id,
+        owner?.origin,
+        owner?.credentialId,
+        agent.id,
+        cleanup.path,
+      ])}
+      create={() => new RetainedFolder()}
+    >
+      {(folder) => (
+        <section className="retained-worktree" aria-label="Retained worktree">
+          <p>
+            <strong>
+              {cleanup.phase === "unknown"
+                ? "Cleanup outcome unconfirmed"
+                : "cleanup" in agent ||
+                    agent.worktree ||
+                    agent.workspaceMode === WorkspaceMode.worktree
+                  ? "Worktree retained"
+                  : "Workspace retained"}
+            </strong>
+          </p>
+          <p>
+            {cleanup.reason ||
+              "Cleanup did not confirm removal. Inspect the folder before another cleanup."}
+          </p>
+          {cleanup.path && (
+            <p className="retained-worktree-path">{cleanup.path}</p>
+          )}
+          <Button
+            size="compact-sm"
+            disabled={!cleanup.path || !canOpen}
+            onClick={() =>
+              cleanup.path && void folder.open(cleanup.path, revealPath)
+            }
+          >
+            Open folder
+          </Button>
+          {!canOpen && (
+            <p>Open this path on the server that owns the worktree.</p>
+          )}
+          {folder.error && <p role="alert">{folder.error}</p>}
+        </section>
+      )}
+    </Owned>
   );
 });
 

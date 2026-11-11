@@ -22,6 +22,7 @@ import Accounts, {
   frameAccounts,
 } from "../../src/components/accounts/Accounts/Accounts.tsx";
 import ServerAccountsPanel from "../../src/components/servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
+import { accountRows } from "../../src/servers/AccountsPanelState.ts";
 import { Provider as AreasProvider } from "../../src/app/ServerAreasProvider.tsx";
 import ClaudeProfile from "../../src/components/shell/ClaudeProfile/ClaudeProfile.tsx";
 import AccountSignInNotice from "../../src/components/accounts/AccountSignInNotice/AccountSignInNotice.tsx";
@@ -251,19 +252,33 @@ function Fixture() {
                         origin: location.origin,
                       },
                     ]}
-                    accountsByServer={{
-                      fixture: frameAccounts({
-                        accounts: [account],
-                        defaultAccountKey: "claude",
-                      }),
-                    }}
-                    statuses={{ fixture: "live" }}
+                    rows={accountRows(
+                      {
+                        servers: [
+                          {
+                            id: "fixture",
+                            label: "Fixture",
+                            origin: location.origin,
+                          },
+                        ],
+                        accountsByServer: {
+                          fixture: frameAccounts({
+                            accounts: [account],
+                            defaultAccountKey: "claude",
+                          }),
+                        },
+                        statuses: { fixture: "live" },
+                        startAccount: (_server, command) => {
+                          window.signedInAccount = command.accountKey;
+                        },
+                        accountAction: (_server, command) =>
+                          accountAreas.accountsUi.receive(command),
+                      },
+                      accountModels.store,
+                    )}
                     startAccount={(_server, command) => {
                       window.signedInAccount = command.accountKey;
                     }}
-                    accountAction={(_server, command) =>
-                      accountAreas.accountsUi.receive(command)
-                    }
                   />
                 </AreasProvider>
               </accountModels.Provider>

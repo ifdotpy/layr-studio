@@ -1,15 +1,17 @@
+import { textField } from "../../../stores/fields.ts";
 import ClaudeOrganization from "../../accounts/ClaudeOrganization/ClaudeOrganization.tsx";
 import DirectoryField from "../../projects/DirectoryField/DirectoryField.tsx";
 import Disclosure from "../../ui/Disclosure/Disclosure.tsx";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  useServerApi,
+  useServerOwner,
+} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { Button, NumberInput, Stack, Textarea, TextInput } from "@mantine/core";
-import { useRef, useState } from "react";
-import { errorText, type PostBody, type PostResult } from "../../../api.ts";
+import { Owned } from "../../ui/Owned/Owned.tsx";
+import { createClaudeProfile } from "./ClaudeProfileStore.ts";
+import type { PostResult } from "../../../api.ts";
 import type { Account } from "../../accounts/support/Accounts.tsx";
 
-type ClaudeProfileOptions = NonNullable<
-  PostBody<"/api/claude/profiles">["options"]
->;
 type ClaudeProfileResult = PostResult<"/api/claude/profiles">;
 
 export default function ClaudeProfile({
@@ -22,158 +24,109 @@ export default function ClaudeProfile({
   expanded?: boolean;
 }) {
   const { post } = useServerApi();
+  const server = useServerOwner();
 
-  const initial = account?.claudeOptions || {};
-  const [label, setLabel] = useState(account?.label || "Claude Code");
-  const [binaryPath, setBinaryPath] = useState(initial.binaryPath || "");
-  const [configDir, setConfigDir] = useState(initial.configDir || "");
-  const [launchArgs, setLaunchArgs] = useState(initial.launchArgs || "");
-  const [window, setWindow] = useState<string | number>(
-    initial.autoCompactWindow || "",
-  );
-  const [models, setModels] = useState(
-    (initial.customModels || [])
-      .map(
-        (model) =>
-          `${model.id}${model.label && model.label !== model.id ? ` | ${model.label}` : ""}`,
-      )
-      .join("\n"),
-  );
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
-  const lock = useRef(false);
-  const save = async () => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(true);
-    setError("");
-    setSaved(false);
-    try {
-      const options: ClaudeProfileOptions = {
-        ...initial,
-        binaryPath: binaryPath.trim(),
-        configDir: configDir.trim(),
-        launchArgs: launchArgs.trim(),
-        customModels: models
-          .split("\n")
-          .filter((line: string) => line.trim())
-          .map((line: string) => {
-            const [id = "", ...parts] = line
-              .split("|")
-              .map((part) => part.trim());
-            return { id, label: parts.join(" | ") || id };
-          }),
-      };
-      if (window === "") delete options.autoCompactWindow;
-      else options.autoCompactWindow = Number(window);
-      const result = await post("/api/claude/profiles", {
-        options,
-        ...(account ? { account_key: account.id } : { label: label.trim() }),
-      });
-      onSaved?.(result);
-      setSaved(true);
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  };
   return (
-    <Disclosure
-      className="account-register claude-profile"
-      defaultOpen={expanded}
-      summary={
-        expanded ? "Profile settings" : account ? "Configure Claude" : "Claude"
-      }
+    <Owned
+      key={JSON.stringify([server?.id, account?.id])}
+      create={() => createClaudeProfile(account)}
     >
-      <form
-        onChange={() => setSaved(false)}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-      >
-        <Stack gap="sm" w="100%">
-          <small>
-            {account
-              ? "To change these paths, add another profile."
-              : "Sign in to this Claude Code configuration with your subscription before you add it."}
-          </small>
-          {account && <strong>{account.email || account.label}</strong>}
-          <ClaudeOrganization account={account} />
-          {!account && (
-            <TextInput
-              label="Profile name"
-              value={label}
-              maxLength={200}
-              required
-              onChange={(event) => setLabel(event.currentTarget.value)}
-              disabled={busy}
-            />
-          )}
-          <TextInput
-            label="Claude executable"
-            placeholder="Installed Claude Code"
-            value={binaryPath}
-            onChange={(event) => setBinaryPath(event.currentTarget.value)}
-            readOnly={!!account}
-            disabled={busy}
-          />
-          <DirectoryField
-            label="Claude configuration directory"
-            placeholder="Default Claude configuration"
-            value={configDir}
-            onChange={setConfigDir}
-            readOnly={!!account}
-            disabled={busy}
-          />
-          <fieldset className="claude-advanced">
-            <legend>Advanced</legend>
-            <NumberInput
-              label="Automatic compaction threshold (tokens)"
-              placeholder="Claude default"
-              value={window}
-              onChange={setWindow}
-              min={100000}
-              max={1000000}
-              allowDecimal={false}
-              disabled={busy}
-            />
-            <Textarea
-              label="Custom models"
-              description="One model ID per line. Add | and a display name if needed."
-              value={models}
-              onChange={(event) => setModels(event.currentTarget.value)}
-              autosize
-              minRows={2}
-              disabled={busy}
-            />
-            <TextInput
-              label="Launch arguments"
-              placeholder="--add-dir /path/to/project"
-              value={launchArgs}
-              onChange={(event) => setLaunchArgs(event.currentTarget.value)}
-              disabled={busy}
-            />
-          </fieldset>
-          {error && (
-            <p className="account-action-error" role="alert">
-              {error}
-            </p>
-          )}
-          {saved && <p role="status">Claude profile saved.</p>}
-          <Button
-            variant="filled"
-            type="submit"
-            loading={busy}
-            disabled={!label.trim() || busy}
+      {(s) => (
+        <Disclosure
+          className="account-register claude-profile"
+          defaultOpen={expanded}
+          summary={
+            expanded
+              ? "Profile settings"
+              : account
+                ? "Configure Claude"
+                : "Claude"
+          }
+        >
+          <form
+            onChange={s.changed}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void s.save(post, account, onSaved);
+            }}
           >
-            {account ? "Save Claude profile" : "Add Claude profile"}
-          </Button>
-        </Stack>
-      </form>
-    </Disclosure>
+            <Stack gap="sm" w="100%">
+              <small>
+                {account
+                  ? "To change these paths, add another profile."
+                  : "Sign in to this Claude Code configuration with your subscription before you add it."}
+              </small>
+              {account && <strong>{account.email || account.label}</strong>}
+              <ClaudeOrganization account={account} />
+              {!account && (
+                <TextInput
+                  label="Profile name"
+                  {...textField(s, "label")}
+                  maxLength={200}
+                  required
+                  disabled={s.busy}
+                />
+              )}
+              <TextInput
+                label="Claude executable"
+                placeholder="Installed Claude Code"
+                {...textField(s, "binaryPath")}
+                readOnly={!!account}
+                disabled={s.busy}
+              />
+              <DirectoryField
+                label="Claude configuration directory"
+                placeholder="Default Claude configuration"
+                value={s.configDir}
+                onChange={s.setConfigDir}
+                readOnly={!!account}
+                disabled={s.busy}
+              />
+              <fieldset className="claude-advanced">
+                <legend>Advanced</legend>
+                <NumberInput
+                  label="Automatic compaction threshold (tokens)"
+                  placeholder="Claude default"
+                  value={s.window}
+                  onChange={s.setWindow}
+                  min={100000}
+                  max={1000000}
+                  allowDecimal={false}
+                  disabled={s.busy}
+                />
+                <Textarea
+                  label="Custom models"
+                  description="One model ID per line. Add | and a display name if needed."
+                  {...textField(s, "models")}
+                  autosize
+                  minRows={2}
+                  disabled={s.busy}
+                />
+                <TextInput
+                  label="Launch arguments"
+                  placeholder="--add-dir /path/to/project"
+                  {...textField(s, "launchArgs")}
+                  disabled={s.busy}
+                />
+              </fieldset>
+              {s.error && (
+                <p className="account-action-error" role="alert">
+                  {s.error}
+                </p>
+              )}
+              {s.saved && <p role="status">Claude profile saved.</p>}
+              <Button
+                variant="filled"
+                type="submit"
+                loading={s.busy}
+                disabled={!s.label.trim() || s.busy}
+              >
+                {account ? "Save Claude profile" : "Add Claude profile"}
+              </Button>
+            </Stack>
+          </form>
+        </Disclosure>
+      )}
+    </Owned>
   );
 }

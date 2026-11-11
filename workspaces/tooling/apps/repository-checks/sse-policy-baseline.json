@@ -4,12 +4,20 @@
     "callee": "syncGet"
   },
   {
-    "file": "apiStorage.ts",
-    "callee": "localStorage"
+    "file": "apiSchema.test.ts",
+    "callee": "api.syncGet"
+  },
+  {
+    "file": "apiSchema.test.ts",
+    "callee": "api.syncGet"
+  },
+  {
+    "file": "apiSchema.test.ts",
+    "callee": "api.syncGet"
   },
   {
     "file": "apiStorage.ts",
-    "callee": "localStorage"
+    "callee": "localStorage.getItem"
   },
   {
     "file": "apiStorage.ts",
@@ -21,54 +29,46 @@
   },
   {
     "file": "apiStorage.ts",
-    "callee": "localStorage.getItem"
-  },
-  {
-    "file": "apiSchema.test.ts",
-    "callee": "api.syncGet"
-  },
-  {
-    "file": "apiSchema.test.ts",
-    "callee": "api.syncGet"
-  },
-  {
-    "file": "apiSchema.test.ts",
-    "callee": "api.syncGet"
-  },
-  {
-    "file": "chatCreation.ts",
     "callee": "localStorage"
   },
   {
-    "file": "chatCreation.ts",
+    "file": "apiStorage.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/shell/TerminalDock/ShellTerminalStore.ts",
-    "callee": "api.syncPost"
+    "file": "app/conversation/RenameOwner.test.ts",
+    "callee": "localStorage.clear"
+  },
+  {
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "callee": "localStorage"
   },
   {
     "file": "app/projects/newChatSettings.ts",
     "callee": "serverCredentialAdapter().fetch"
   },
   {
-    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "file": "chatCreation.ts",
     "callee": "localStorage"
   },
   {
-    "file": "app/conversation/delivery/removeSendingMessages.ts",
-    "callee": "localStorage"
-  },
-  {
-    "file": "app/conversation/delivery/removeSendingMessages.ts",
-    "callee": "localStorage"
-  },
-  {
-    "file": "app/conversation/delivery/removeSendingMessages.ts",
-    "callee": "localStorage"
-  },
-  {
-    "file": "app/conversation/delivery/removeSendingMessages.ts",
+    "file": "chatCreation.ts",
     "callee": "localStorage"
   },
   {
@@ -86,6 +86,14 @@
   {
     "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.getItem"
+  },
+  {
+    "file": "components/settings/models/ModelWhitelistSettings/ModelWhitelistSettings.scope.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "components/shell/TerminalDock/ShellTerminalStore.ts",
+    "callee": "this.binding.api.syncPost"
   },
   {
     "file": "components/sidebar/support/FleetIndicator.spec.ts",
@@ -120,20 +128,32 @@
     "callee": "localStorage.setItem"
   },
   {
-    "file": "servers/net/queue.ts",
-    "callee": "syncPost"
+    "file": "conversation/historySession.ts",
+    "callee": "this.api.syncGet"
   },
   {
-    "file": "indexedDb.ts",
-    "callee": "indexedDB.deleteDatabase"
+    "file": "conversation/historySession.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/roomHistory.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/roomHistory.ts",
+    "callee": "this.api.syncGet"
+  },
+  {
+    "file": "conversation/roomHistory.ts",
+    "callee": "this.api.syncGet"
   },
   {
     "file": "indexedDb.ts",
     "callee": "indexedDB.open"
   },
   {
-    "file": "native/serverCredentials.test.ts",
-    "callee": "new NativeServerCredentials().fetch"
+    "file": "indexedDb.ts",
+    "callee": "indexedDB.deleteDatabase"
   },
   {
     "file": "native/serverCredentials.test.ts",
@@ -144,8 +164,64 @@
     "callee": "new NativeServerCredentials().fetch"
   },
   {
-    "file": "servers/net/browserCredentials.ts",
-    "callee": "fetch"
+    "file": "native/serverCredentials.test.ts",
+    "callee": "new NativeServerCredentials().fetch"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "localStorage.clear"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "localStorage.clear"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "browser.fetch"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "browser.fetch"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "renameRequest.test.ts",
+    "callee": "localStorage.clear"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "window.localStorage"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "localStorage.clear"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "localStorage"
+  },
+  {
+    "file": "servers/RequestRegistry.test.ts",
+    "callee": "localStorage"
   },
   {
     "file": "servers/desktopCredentials.test.ts",
@@ -172,6 +248,14 @@
     "callee": "globalThis.fetch"
   },
   {
+    "file": "servers/net/browserCredentials.ts",
+    "callee": "fetch"
+  },
+  {
+    "file": "servers/net/queue.ts",
+    "callee": "syncPost"
+  },
+  {
     "file": "servers/net/routes.ts",
     "callee": "fetch"
   },
@@ -186,6 +270,30 @@
   {
     "file": "servers/net/routes.ts",
     "callee": "localStorage.setItem"
+  },
+  {
+    "file": "servers/net/summary.ts",
+    "callee": "fetch"
+  },
+  {
+    "file": "servers/net/summary.ts",
+    "callee": "createServerTransport(server, (owner, request) =>\n            serverCredentialAdapter().fetch(owner, request),\n          ).fetch"
+  },
+  {
+    "file": "servers/net/summary.ts",
+    "callee": "serverCredentialAdapter().fetch"
+  },
+  {
+    "file": "servers/net/transport.ts",
+    "callee": "globalThis.fetch"
+  },
+  {
+    "file": "servers/net/transport.ts",
+    "callee": "globalThis.fetch"
+  },
+  {
+    "file": "servers/net/transport.ts",
+    "callee": "serverCredentialAdapter().fetch"
   },
   {
     "file": "servers/serverServices.ts",
@@ -214,30 +322,6 @@
   {
     "file": "servers/storage.ts",
     "callee": "globalThis.localStorage"
-  },
-  {
-    "file": "servers/net/summary.ts",
-    "callee": "fetch"
-  },
-  {
-    "file": "servers/net/summary.ts",
-    "callee": "createServerTransport(server, (owner, request) =>\n            serverCredentialAdapter().fetch(owner, request),\n          ).fetch"
-  },
-  {
-    "file": "servers/net/summary.ts",
-    "callee": "serverCredentialAdapter().fetch"
-  },
-  {
-    "file": "servers/net/transport.ts",
-    "callee": "globalThis.fetch"
-  },
-  {
-    "file": "servers/net/transport.ts",
-    "callee": "globalThis.fetch"
-  },
-  {
-    "file": "servers/net/transport.ts",
-    "callee": "serverCredentialAdapter().fetch"
   },
   {
     "file": "servers/useServerDiscovery.ts",
@@ -297,15 +381,15 @@
   },
   {
     "file": "sync/localDraft.ts",
-    "callee": "localStorage"
-  },
-  {
-    "file": "sync/localDraft.ts",
     "callee": "localStorage.removeItem"
   },
   {
     "file": "sync/localDraft.ts",
     "callee": "localStorage.setItem"
+  },
+  {
+    "file": "sync/localDraft.ts",
+    "callee": "localStorage"
   },
   {
     "file": "sync/uiPreferenceStore.test.ts",
@@ -318,25 +402,5 @@
   {
     "file": "sync/uploads.ts",
     "callee": "syncPost"
-  },
-  {
-    "file": "conversation/historySession.ts",
-    "callee": "this.api.syncGet"
-  },
-  {
-    "file": "conversation/historySession.ts",
-    "callee": "this.api.syncGet"
-  },
-  {
-    "file": "conversation/roomHistory.ts",
-    "callee": "this.api.syncGet"
-  },
-  {
-    "file": "conversation/roomHistory.ts",
-    "callee": "this.api.syncGet"
-  },
-  {
-    "file": "conversation/roomHistory.ts",
-    "callee": "this.api.syncGet"
   }
 ]

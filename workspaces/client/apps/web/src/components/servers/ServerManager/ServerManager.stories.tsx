@@ -1,14 +1,15 @@
+import { MantineProvider, Tabs } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { MantineProvider, Tabs } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
-import ServerManager from "./ServerManager.tsx";
-import ServerDetailsEditor from "../ServerDetailsEditor/ServerDetailsEditor.tsx";
-import { StudioSettingsLayout } from "../../settings/StudioSettingsLayout/StudioSettingsLayout.tsx";
 import type { DiscoverySnapshot } from "../../../servers/discoveryModel.ts";
 import type { ServerNavigation } from "../../../servers/navigation.ts";
 import type { StudioServer } from "../../../servers/registry.ts";
+import { serverRows } from "../../../servers/serverRows.ts";
 import { theme } from "../../../theme.ts";
+import { StudioSettingsLayout } from "../../settings/StudioSettingsLayout/StudioSettingsLayout.tsx";
+import ServerDetailsEditor from "../ServerDetailsEditor/ServerDetailsEditor.tsx";
+import ServerManager from "./ServerManager.tsx";
 
 const servers = [
   {
@@ -71,26 +72,35 @@ function ServersFixture({ light = false }: { light?: boolean }) {
             localEnabled
             add={() => {}}
             remove={() => {}}
-            statuses={{ local: "live", build: "offline", travel: "connecting" }}
-            lastSeen={{
-              build: Date.now() / 1000 - 7200,
-              travel: Date.now() / 1000 - 600,
-            }}
-            navigation={{
-              local: navigation("Linux", 3),
-              build: navigation("Linux", 0),
-              travel: navigation("Darwin", 0),
-            }}
-            accountsByServer={{
-              local: Array.from({ length: 5 }, (_, i) => ({
-                provider: i < 3 ? "codex" : "claude",
-                label: `Team ${i}`,
-                email: null,
-                plan: "Pro",
-                status: "ready",
-                isDefault: i === 0,
-              })),
-            }}
+            rows={serverRows(
+              servers,
+              [],
+              { local: "live", build: "offline", travel: "connecting" },
+              {
+                snapshot,
+                checkedAt: Date.now() / 1000,
+                localEnabled: true,
+                lastSeen: {
+                  build: Date.now() / 1000 - 7200,
+                  travel: Date.now() / 1000 - 600,
+                },
+                navigation: {
+                  local: navigation("Linux", 3),
+                  build: navigation("Linux", 0),
+                  travel: navigation("Darwin", 0),
+                },
+                accountsByServer: {
+                  local: Array.from({ length: 5 }, (_, i) => ({
+                    provider: i < 3 ? "codex" : "claude",
+                    label: "Team " + i,
+                    email: null,
+                    plan: "Pro",
+                    status: "ready",
+                    isDefault: i === 0,
+                  })),
+                },
+              },
+            )}
             discovery={{
               snapshot: { ...snapshot, aliases: snapshot.aliases },
               checkedAt: Date.now() / 1000,

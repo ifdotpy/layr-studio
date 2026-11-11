@@ -21,6 +21,24 @@ function unwrap(expression: ts.Expression): ts.Expression {
   return expression;
 }
 
+function wrappedView(expression: ts.Expression): boolean {
+  const call = unwrap(expression);
+  if (!ts.isCallExpression(call)) return false;
+  const wrapper = call.expression.getText();
+  const render = /(?:^|\.)ownedView$/.test(wrapper)
+    ? call.arguments[1]
+    : /(?:^|\.)section$/.test(wrapper)
+      ? call.arguments[0]
+      : undefined;
+  if (!render) return false;
+  const containsJsx = (node: ts.Node): boolean =>
+    ts.isJsxElement(node) ||
+    ts.isJsxSelfClosingElement(node) ||
+    ts.isJsxFragment(node) ||
+    !!ts.forEachChild(node, containsJsx);
+  return containsJsx(render);
+}
+
 function componentNames(
   file: string,
   text: string,
@@ -30,6 +48,8 @@ function componentNames(
   const declarations = new Map<string, ts.Node>();
   const aliases = new Map<string, string>();
   const exported = new Set<string>();
+  const wrapped = new Set<string>();
+  let wrappedCallback: ts.Identifier | undefined;
   const isPublic = (node: ts.Node) =>
     ts.canHaveModifiers(node) &&
     ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
@@ -47,6 +67,8 @@ function componentNames(
         if (!ts.isIdentifier(declaration.name)) continue;
         const name = declaration.name.text;
         declarations.set(name, declaration);
+        if (declaration.initializer && wrappedView(declaration.initializer))
+          wrapped.add(name);
         if (isPublic(node)) exported.add(name);
         if (
           declaration.initializer &&
@@ -56,13 +78,28 @@ function componentNames(
       }
     if (ts.isExportAssignment(node)) {
       let expression: ts.Expression = unwrap(node.expression);
-      while (ts.isCallExpression(expression) && expression.arguments[0])
-        expression = unwrap(expression.arguments[0]);
-      if (ts.isIdentifier(expression)) exported.add(expression.text);
+      let wrappedDefault = false;
+      while (ts.isCallExpression(expression) && expression.arguments[0]) {
+        wrappedDefault ||= /(?:^|\.)(?:ownedView|section)$/.test(
+          expression.expression.getText(),
+        );
+        expression = unwrap(
+          /(?:^|\.)ownedView$/.test(expression.expression.getText())
+            ? (expression.arguments[1] ?? expression.arguments[0])
+            : expression.arguments[0],
+        );
+      }
+      if (ts.isIdentifier(expression) && wrappedDefault)
+        wrappedCallback = expression;
+      else if (ts.isIdentifier(expression)) exported.add(expression.text);
       else {
-        const name = ts.isFunctionExpression(expression)
-          ? (expression.name?.text ?? "__default")
-          : "__default";
+        const callback = ts.isFunctionExpression(expression)
+          ? expression.name?.text
+          : undefined;
+        const name =
+          callback && /^[A-Z]/.test(callback) && /[a-z]/.test(callback)
+            ? callback
+            : "__default";
         declarations.set(name, expression);
         exported.add(name);
       }
@@ -76,6 +113,27 @@ function componentNames(
       for (const entry of node.exportClause.elements)
         exported.add(entry.propertyName?.text ?? entry.name.text);
   }
+  if (wrappedCallback) {
+    // A wrapped default keeps the callback's name only when it resolves to a
+    // local PascalCase declaration; otherwise the wrapper itself is the view.
+    let target = wrappedCallback.text;
+    const seen = new Set<string>();
+    while (aliases.has(target) && !seen.has(target)) {
+      seen.add(target);
+      target = aliases.get(target) ?? target;
+    }
+    if (
+      /^[A-Z]/.test(target) &&
+      /[a-z]/.test(target) &&
+      declarations.has(target)
+    )
+      exported.add(wrappedCallback.text);
+    else {
+      declarations.set("__default", wrappedCallback);
+      wrapped.add("__default");
+      exported.add("__default");
+    }
+  }
   if (!exportedOnly) {
     const collect = (node: ts.Node) => {
       if (
@@ -83,8 +141,11 @@ function componentNames(
         node.name
       )
         declarations.set(node.name.text, node);
-      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name))
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
         declarations.set(node.name.text, node);
+        if (node.initializer && wrappedView(node.initializer))
+          wrapped.add(node.name.text);
+      }
       ts.forEachChild(node, collect);
     };
     ts.forEachChild(source, collect);
@@ -96,7 +157,11 @@ function componentNames(
       seen.add(name);
       name = aliases.get(name) ?? name;
     }
-    if (name !== "__default" && (!/^[A-Z]/.test(name) || !/[a-z]/.test(name)))
+    if (
+      name !== "__default" &&
+      !wrapped.has(name) &&
+      (!/^[A-Z]/.test(name) || !/[a-z]/.test(name))
+    )
       continue;
     const declaration = declarations.get(name);
     if (!declaration) continue;
@@ -114,7 +179,8 @@ function componentNames(
       : declaration;
     if (
       value &&
-      (ts.isFunctionDeclaration(value) ||
+      (wrapped.has(name) ||
+        ts.isFunctionDeclaration(value) ||
         ts.isFunctionExpression(value) ||
         ts.isArrowFunction(value) ||
         (ts.isClassExpression(value) &&
@@ -122,9 +188,10 @@ function componentNames(
             /\b(?:Component|PureComponent)\b/.test(clause.getText()),
           )) ||
         (ts.isCallExpression(value) &&
-          /(?:^|\.)(?:observer|memo|forwardRef)$/.test(
-            value.expression.getText(),
-          )))
+          (wrappedView(value) ||
+            /(?:^|\.)(?:observer|memo|forwardRef|section)$/.test(
+              value.expression.getText(),
+            ))))
     )
       names.add(name);
   }

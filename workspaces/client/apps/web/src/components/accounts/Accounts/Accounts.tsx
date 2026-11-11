@@ -167,6 +167,8 @@ const ActiveAccountDialog = observer(function ActiveAccountDialog() {
   const account = ui.dialogAccount,
     kind = ui.dialog?.kind,
     scope = ui.areas.scope.services.owner.id;
+  const SignIn =
+    account?.provider === ProviderKind.Codex ? CodexSignIn : ClaudeSignIn;
   return (
     <>
       {kind === "add" && <AccountAddDialog />}
@@ -184,25 +186,15 @@ const ActiveAccountDialog = observer(function ActiveAccountDialog() {
         </Modal>
       )}
       {kind === "transfer" && <AccountTransferConfirmation />}
-      {kind === "signIn" &&
-        account &&
-        (account.provider === ProviderKind.Codex ? (
-          <CodexSignIn
-            key={account.id}
-            account={account}
-            scope={scope}
-            onClose={ui.close}
-            serverLabel={ui.serverLabel}
-          />
-        ) : (
-          <ClaudeSignIn
-            key={account.id}
-            account={account}
-            scope={scope}
-            onClose={ui.close}
-            serverLabel={ui.serverLabel}
-          />
-        ))}
+      {kind === "signIn" && account && (
+        <SignIn
+          key={account.id}
+          account={account}
+          scope={scope}
+          onClose={ui.close}
+          serverLabel={ui.serverLabel}
+        />
+      )}
     </>
   );
 });

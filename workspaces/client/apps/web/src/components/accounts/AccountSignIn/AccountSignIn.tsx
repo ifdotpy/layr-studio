@@ -25,9 +25,9 @@ export default observer(function AccountSignIn({
   targetAccount,
 }: {
   scope?: string | undefined;
-  targetAccount?: Account;
-  emailHint?: string;
-  label?: string;
+  targetAccount?: Account | undefined;
+  emailHint?: string | undefined;
+  label?: string | undefined;
   onConnected?: (account: Account) => void;
 }) {
   const flow = useServerAreas().accountsUi.codexFlow;

@@ -22,7 +22,7 @@ import {
   timeLeftLabel,
   verificationPage,
   waitingChatsLabel,
-} from "../support/signInCardModel.ts";
+} from "../../support/signInCardModel.ts";
 
 import { now } from "../../../../clock.ts";
 

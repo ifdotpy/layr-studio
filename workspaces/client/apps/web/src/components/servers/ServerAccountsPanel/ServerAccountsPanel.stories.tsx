@@ -1,13 +1,14 @@
-import { ProviderKind, AccountStatus } from "../../../generated/api.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within, waitFor } from "storybook/test";
-import ServerAccountsPanel from "./ServerAccountsPanel.tsx";
-import { createServerServices } from "../../../servers/serverServices.ts";
-import { ServerServicesProvider } from "../ServerServicesProvider/ServerServicesProvider.tsx";
+import { expect, userEvent, waitFor, within } from "storybook/test";
+import { AccountStatus, ProviderKind } from "../../../generated/api.ts";
 import type { ServerAccount } from "../../../servers/navigation.ts";
-import type { Account } from "../../accounts/support/Accounts.tsx";
-import { accountLimitFixtures } from "../../accounts/support/AccountLimits.fixtures.ts";
 import "../../../servers/servers.css";
+import { createServerServices } from "../../../servers/serverServices.ts";
+import { accountLimitFixtures } from "../../accounts/support/AccountLimits.fixtures.ts";
+import type { Account } from "../../accounts/support/Accounts.tsx";
+import { ServerServicesProvider } from "../ServerServicesProvider/ServerServicesProvider.tsx";
+import { accountRows } from "../../../servers/AccountsPanelState.ts";
+import ServerAccountsPanel from "./ServerAccountsPanel.tsx";
 
 const accounts: (Account & {
   isDefault: boolean;
@@ -88,10 +89,28 @@ function ServerAccountsFixture() {
               origin: window.location.origin,
             },
           ]}
-          accountsByServer={{ local: accounts satisfies ServerAccount[] }}
-          statuses={{ local: "live", remote: "offline" }}
+          rows={accountRows(
+            {
+              servers: [
+                {
+                  id: "local",
+                  label: "Workstation",
+                  origin: window.location.origin,
+                },
+                {
+                  id: "remote",
+                  label: "Build server",
+                  origin: window.location.origin,
+                },
+              ],
+              accountsByServer: { local: accounts satisfies ServerAccount[] },
+              statuses: { local: "live", remote: "offline" },
+              startAccount: () => {},
+              accountAction: () => {},
+            },
+            services.store,
+          )}
           startAccount={() => {}}
-          accountAction={() => {}}
         />
       </ServerServicesProvider>
     </div>

@@ -1,6 +1,7 @@
 import { Button, Group, Text } from "@mantine/core";
-import { useState } from "react";
-import { errorText } from "../../../api.ts";
+import { Owned } from "../../ui/Owned/Owned.tsx";
+import { makeAutoObservable } from "mobx";
+import { AsyncFeedback } from "../../../stores/AsyncFeedback.ts";
 import DirectoryField from "../DirectoryField/DirectoryField.tsx";
 
 type Props = {
@@ -11,53 +12,58 @@ type Props = {
   save: (path: string | null) => Promise<void>;
 };
 
-export function LayrStoreDirectory(props: Props) {
-  return <DirectoryForm {...props} key={props.path} />;
+function createDirectoryDraft(value: string) {
+  return makeAutoObservable(
+    {
+      value,
+      feedback: new AsyncFeedback(),
+      setValue(value: string) {
+        this.value = value;
+      },
+    },
+    {},
+    { autoBind: true },
+  );
 }
-
-function DirectoryForm({ label, path, source, overridden, save }: Props) {
-  const [value, setValue] = useState(path ?? "");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const change = async (next: string | null) => {
-    setBusy(true);
-    setError("");
-    try {
-      await save(next);
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      setBusy(false);
-    }
-  };
+export function LayrStoreDirectory({
+  label,
+  path,
+  source,
+  overridden,
+  save,
+}: Props) {
   return (
-    <div>
-      <DirectoryField
-        label={label}
-        value={value}
-        onChange={setValue}
-        disabled={busy}
-      />
-      <Text size="xs" c="dimmed">
-        Source: {source}
-      </Text>
-      <Group justify="flex-end">
-        <Button
-          disabled={busy || !value.trim() || value === path}
-          onClick={() => void change(value.trim())}
-        >
-          Save
-        </Button>
-        <Button
-          variant="subtle"
-          loading={busy}
-          disabled={!overridden}
-          onClick={() => void change(null)}
-        >
-          Reset
-        </Button>
-      </Group>
-      {error && <p role="alert">{error}</p>}
-    </div>
+    <Owned key={path} create={() => createDirectoryDraft(path ?? "")}>
+      {({ value, feedback, setValue }) => (
+        <div>
+          <DirectoryField
+            label={label}
+            value={value}
+            onChange={setValue}
+            disabled={feedback.pending}
+          />
+          <Text size="xs" c="dimmed">
+            Source: {source}
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              disabled={feedback.pending || !value.trim() || value === path}
+              onClick={() => void feedback.run(() => save(value.trim()))}
+            >
+              Save
+            </Button>
+            <Button
+              variant="subtle"
+              loading={feedback.pending}
+              disabled={!overridden}
+              onClick={() => void feedback.run(() => save(null))}
+            >
+              Reset
+            </Button>
+          </Group>
+          {feedback.error && <p role="alert">{feedback.error}</p>}
+        </div>
+      )}
+    </Owned>
   );
 }

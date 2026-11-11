@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
+import { MantineProvider } from "@mantine/core";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
 import { ServerDiscovery } from "../../../servers/useServerDiscovery.ts";
 import ServerManager from "./ServerManager.tsx";
@@ -36,6 +36,7 @@ it.each(["pending", "rejected"])(
             MantineProvider,
             { env: "test" },
             createElement(ServerManager, {
+              rows: [],
               servers: [],
               add() {},
               remove() {},

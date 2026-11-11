@@ -1,16 +1,21 @@
-import { rowArea } from "./actions.fixture.ts";
-import { SidebarRowActionsProvider, useSidebarRowState } from "./actions.ts";
 import { AgentStatus } from "../../../../generated/api.ts";
+import { Owned } from "../../../ui/Owned/Owned.tsx";
+import { rowArea } from "./actions.fixture.ts";
+import {
+  createSidebarRowState,
+  SidebarRowActionsProvider,
+  useSidebarRowActions,
+} from "./actions.ts";
 import type { Summary } from "./testFixture.ts";
 // @vitest-environment happy-dom
-import { act, createElement, Profiler, StrictMode } from "react";
 import { MantineProvider } from "@mantine/core";
 import { observer } from "mobx-react-lite";
+import { act, createElement, Profiler, StrictMode } from "react";
 import { expect, it, vi } from "vitest";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";
-import { ChatTitle } from "../ChatTitle/ChatTitle.tsx";
 import { default as ChatIndicator } from "../../../agents/ChatStatus/ChatStatus.tsx";
 import { default as ChatCopyProgress } from "../../LayrCopyProgress/LayrCopyProgress.tsx";
+import { ChatTitle } from "../ChatTitle/ChatTitle.tsx";
 import { fixture, makeRow } from "./testFixture.ts";
 
 it.each([false, true])(
@@ -258,7 +263,12 @@ it("renders every server unread eligibility and pending-write menu state", async
   }: {
     row: ReturnType<typeof makeRow>;
   }) {
-    return createElement(UnreadAction, { state: useSidebarRowState(row) });
+    const area = useSidebarRowActions();
+    return createElement(Owned<ReturnType<typeof createSidebarRowState>>, {
+      key: area.viewKey,
+      create: () => createSidebarRowState(area, row, false),
+      children: (state) => createElement(UnreadAction, { state }),
+    });
   });
   for (const eligibility of Object.values(MarkUnreadEligibility)) {
     for (const markingRead of [false, true]) {

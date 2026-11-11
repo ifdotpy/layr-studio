@@ -1,19 +1,20 @@
 // @vitest-environment happy-dom
-import { act, createElement, type ReactNode, type ComponentProps } from "react";
 import { MantineProvider } from "@mantine/core";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, expect, it, vi } from "vitest";
-import { WorkspaceResources } from "./WorkspaceResources.ts";
-import Workspace from "./Workspace.tsx";
-import {
-  observableFixture,
-  conversationActionsFixture,
-} from "../integration-support/observableFixture.tsx";
+import { expect, it, vi } from "vitest";
 import { Provider as AreaProvider } from "../../../app/ServerAreasProvider.tsx";
+import {
+  conversationActionsFixture,
+  observableFixture,
+} from "../integration-support/observableFixture.tsx";
+import Workspace from "./Workspace.tsx";
 
 function workspaceFixture(...args: Parameters<typeof observableFixture>) {
   const fixture = observableFixture(...args);
   const areas = conversationActionsFixture(undefined, fixture.store);
+  areas.scope.services.api.get = api.get;
+  areas.scope.services.api.post = api.post;
   return {
     ...fixture,
     Provider: ({ children }: { children?: ReactNode }) =>
@@ -37,15 +38,6 @@ const api = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
   replaceStream: vi.fn(),
-}));
-let workspace: WorkspaceResources;
-beforeEach(() => {
-  workspace?.dispose();
-  workspace = new WorkspaceResources(api);
-});
-vi.mock("../../../app/ServerAreasProvider.tsx", async (original) => ({
-  ...(await original<typeof import("../../../app/ServerAreasProvider.tsx")>()),
-  useServerAreas: () => ({ workspace }),
 }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
@@ -171,12 +163,12 @@ it("deleting a profile reloads the local list without replacing the stream", asy
   }
 });
 
+import type { ApiReadMetadata, GetResult } from "../../../api.ts";
 import {
   AgentSource,
   studio_api__agents__models__AgentRole,
 } from "../../../generated/api.ts";
 import type { Agent } from "../../../types.ts";
-import type { ApiReadMetadata, GetResult } from "../../../api.ts";
 
 async function mountPanel(section: string, agent?: Agent) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -290,6 +282,154 @@ it("the resource status shows a rejected panel read, recovery, refresh errors an
     expect(panel.host.querySelector('[role="alert"]')).toBeNull();
     expect(panel.host.textContent).toContain("No saved worker profiles.");
     expect(api.get).toHaveBeenCalledTimes(4);
+  } finally {
+    await panel.close();
+  }
+});
+
+it("discards a transient comment draft when leaving its section", async () => {
+  const changes: GetResult<"/api/changes"> = {
+    scope: "chat",
+    git: true,
+    patch: "",
+    files: [],
+    diff: "diff --git a/file.ts b/file.ts\n+++ b/file.ts\n@@ -0,0 +1 @@\n+line",
+  };
+  api.get.mockReset().mockResolvedValue(changes);
+  const panel = await mountPanel("changes", {
+    id: "agent",
+    source: AgentSource.managed,
+  });
+  try {
+    const comment = panel.host.querySelector<HTMLButtonElement>(
+      '[aria-label="Comment on file.ts line 1"]',
+    );
+    expect(comment).not.toBeNull();
+    await act(async () => comment?.click());
+    expect(panel.host.querySelector("textarea")).not.toBeNull();
+    const section = (name: string) =>
+      [...panel.host.querySelectorAll("button")].find(
+        (button) => button.textContent === name,
+      )!;
+    await act(async () => section("Plan").click());
+    await act(async () => section("Changes").click());
+    expect(panel.host.querySelector("textarea")).toBeNull();
+  } finally {
+    await panel.close();
+  }
+});
+
+it("a lead-keyed Workspace remount starts on that lead's entry section", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const first: Agent = {
+    id: "first",
+    isLead: true,
+    source: AgentSource.managed,
+  };
+  const second: Agent = {
+    id: "second",
+    isLead: true,
+    source: AgentSource.managed,
+  };
+  api.get.mockReset().mockImplementation(async (path) =>
+    path === "/api/changes"
+      ? { scope: "chat", git: true, patch: "", files: [], diff: "" }
+      : {
+          managed: [],
+          observedNative: [],
+          skills: [],
+          errors: [],
+          mcp: [],
+          servers: [],
+        },
+  );
+  const fixture = workspaceFixture([first, second]);
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const render = (agent: Agent) =>
+    root.render(
+      createElement(
+        MantineProvider,
+        { env: "test" },
+        createElement(
+          fixture.Provider,
+          null,
+          createElement(Workspace, {
+            key: agent.id,
+            opened: true,
+            initialSection: "tools",
+            agent,
+            onClose() {},
+            onSelect() {},
+            notify() {},
+          }),
+        ),
+      ),
+    );
+  try {
+    await act(async () => render(first));
+    const changes = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === "Changes",
+    );
+    await act(async () => changes?.click());
+    expect(host.querySelector('[aria-label="Open a file"]')).not.toBeNull();
+    await act(async () => render(second));
+    expect(host.querySelector('[aria-label="Filter tools"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="Open a file"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    fixture.store.dispose();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("renders one selected-agent rule list and resumes an enabled-state pause", async () => {
+  const rules: GetResult<"/api/rules"> = {
+    rules: [
+      {
+        id: "paused",
+        agent: "agent",
+        name: "Paused rule",
+        kind: "interval",
+        status: "active",
+        enabled: false,
+      },
+      {
+        id: "active",
+        agent: "agent",
+        name: "Active rule",
+        kind: "interval",
+        enabled: true,
+      },
+      {
+        id: "foreign",
+        agent: "other",
+        name: "Other agent rule",
+        kind: "interval",
+      },
+    ],
+  };
+  api.get.mockReset().mockResolvedValue(rules);
+  api.post.mockReset().mockResolvedValue({});
+  const panel = await mountPanel("rules", {
+    id: "agent",
+    source: AgentSource.managed,
+  });
+  try {
+    expect(panel.host.querySelectorAll(".workspace-row")).toHaveLength(2);
+    expect(panel.host.textContent).not.toContain("Other agent rule");
+    const resume = [...panel.host.querySelectorAll("button")].find(
+      (button) => button.textContent === "Resume",
+    );
+    expect(resume).toBeDefined();
+    await act(async () => resume?.click());
+    expect(api.post).toHaveBeenCalledWith("/api/rules", {
+      agent: "agent",
+      id: "paused",
+      action: "resume",
+    });
+    expect(panel.host.textContent).not.toContain("No rules for this agent.");
   } finally {
     await panel.close();
   }

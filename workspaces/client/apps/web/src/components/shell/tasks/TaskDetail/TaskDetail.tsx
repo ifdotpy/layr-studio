@@ -2,14 +2,7 @@ import { resourceData } from "../../../../store/runtime.ts";
 import { BackgroundTaskKind } from "../../../../generated/api.ts";
 import { observer, Observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
-import {
-  ArrowLeft,
-  ArrowUpRight,
-  Square,
-  Activity,
-  Terminal,
-  Wrench,
-} from "lucide-react";
+import * as Icons from "lucide-react";
 import { useServerStore } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { localDateTime } from "../../../../local-time.ts";
 import { activeTask } from "../support/backgroundTaskModel.ts";
@@ -40,7 +33,7 @@ export const TaskDetail = observer(function TaskDetail({ task }: TaskProps) {
           variant="subtle"
           className="task-back"
           size="compact-xs"
-          leftSection={<ArrowLeft size={14} />}
+          leftSection={<Icons.ArrowLeft size={14} />}
           onClick={actions.back}
         >
           Activity
@@ -49,10 +42,10 @@ export const TaskDetail = observer(function TaskDetail({ task }: TaskProps) {
           {() => {
             const Icon =
               task.display.kind === BackgroundTaskKind.monitor
-                ? Activity
+                ? Icons.Activity
                 : task.display.kind === BackgroundTaskKind.command
-                  ? Terminal
-                  : Wrench;
+                  ? Icons.Terminal
+                  : Icons.Wrench;
             return (
               <span>
                 <Icon size={15} />
@@ -77,7 +70,7 @@ export const TaskDetail = observer(function TaskDetail({ task }: TaskProps) {
               variant="subtle"
               size="compact-xs"
               className="task-owner"
-              rightSection={<ArrowUpRight size={13} />}
+              rightSection={<Icons.ArrowUpRight size={13} />}
               onClick={() => actions.open(task)}
             >
               {actions.owner(task.agent)?.name || "Open agent"}
@@ -180,7 +173,7 @@ export const TaskDetail = observer(function TaskDetail({ task }: TaskProps) {
                   variant="light"
                   size="xs"
                   color="red"
-                  leftSection={<Square size={12} />}
+                  leftSection={<Icons.Square size={12} />}
                   loading={actions.controlPending}
                   disabled={actions.controlPending}
                   onClick={actions.stopSelected}

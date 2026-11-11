@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useState } from "react";
 import {
   ChevronRight,
   CircleX,
@@ -29,20 +29,18 @@ export default memo(function FileChangeCard({
   const visualRef = useVisualActivityRef<HTMLDetailsElement>();
   const [open, setOpen] = useState(true);
   const [sourceOpen, setSourceOpen] = useState(false);
-  const files = useMemo(() => {
-    const prefix = cwd ? cwd.replace(/\/$/, "") + "/" : "";
-    const displayPath = (path: string) =>
-      prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
-    return (
-      payload.type === "fileChange"
-        ? fileChanges(payload.changes, payload.arguments)
-        : unifiedDiff(typeof payload.diff === "string" ? payload.diff : "")
-    ).map((file) => ({
-      ...file,
-      path: displayPath(file.path),
-      movePath: file.movePath ? displayPath(file.movePath) : undefined,
-    }));
-  }, [payload, cwd]);
+  const prefix = cwd ? cwd.replace(/\/$/, "") + "/" : "";
+  const displayPath = (path: string) =>
+    prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  const files = (
+    payload.type === "fileChange"
+      ? fileChanges(payload.changes, payload.arguments)
+      : unifiedDiff(typeof payload.diff === "string" ? payload.diff : "")
+  ).map((file) => ({
+    ...file,
+    path: displayPath(file.path),
+    movePath: file.movePath ? displayPath(file.movePath) : undefined,
+  }));
   const label = changeLabel(files, status);
   const error = payload.error;
   return (

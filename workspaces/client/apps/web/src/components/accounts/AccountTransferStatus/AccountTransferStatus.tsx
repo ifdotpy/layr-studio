@@ -40,26 +40,19 @@ export function AccountTransferStatus({
               <small>{transfer.reason}</small>
             )}
             <div className="account-transfer-actions">
-              {active?.actions.includes("retry") && (
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  disabled={!!pending}
-                  onClick={() => onAction("retry")}
-                >
-                  Retry
-                </Button>
-              )}
-              {active?.actions.includes("cancel") && (
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  disabled={!!pending}
-                  onClick={() => onAction("cancel")}
-                >
-                  Cancel remaining
-                </Button>
-              )}
+              {(["retry", "cancel"] as const)
+                .filter((action) => active?.actions.includes(action))
+                .map((action) => (
+                  <Button
+                    key={action}
+                    size="compact-xs"
+                    variant="subtle"
+                    disabled={!!pending}
+                    onClick={() => onAction(action)}
+                  >
+                    {action === "retry" ? "Retry" : "Cancel remaining"}
+                  </Button>
+                ))}
             </div>
           </div>
         </div>

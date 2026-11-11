@@ -119,7 +119,6 @@ it("room content updates isolate siblings and search never renders open detail",
               { value: actions },
               createElement(TeamChats, {
                 owner,
-                leadId: "lead",
               }),
             ),
           ),
@@ -283,7 +282,6 @@ it("can request an older page after selecting another room and returning", async
               { value: conversationActionsFixture() },
               createElement(TeamChats, {
                 owner: messagesOwner(f),
-                leadId: "lead",
               }),
             ),
           ),
@@ -354,7 +352,6 @@ it("failed room history leaves its unread position unacknowledged", async () => 
               { value: conversationActionsFixture() },
               createElement(TeamChats, {
                 owner: messagesOwner(f),
-                leadId: "lead",
               }),
             ),
           ),
@@ -462,7 +459,6 @@ it("acknowledges only loaded rows inside the viewport as the room scrolls", asyn
               { value: conversationActionsFixture() },
               createElement(TeamChats, {
                 owner: messagesOwner(f),
-                leadId: "lead",
               }),
             ),
           ),
@@ -627,5 +623,83 @@ it("renders personal-feed requests and acts through the selected conversation re
     actions.selected.closeConversation();
     actions.scope.services.close();
     f.store.dispose();
+  }
+});
+
+it("honors focus actions and live scope changes through one explicit owner", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const f = observableFixture();
+  const actions = conversationActionsFixture();
+  f.apply(
+    ["a", "b"].map((id) => ({
+      collection: "room",
+      id,
+      value: {
+        id,
+        name: "Room " + id,
+        kind: RoomKind.broadcast,
+        rootId: "lead-" + id,
+      },
+    })),
+  );
+  const scope = observable({ stateDir: "prop-scope", leadId: "lead-a" });
+  const owner = createTeamChatsStore(
+    f.store,
+    {
+      saved: (_key, fallback) => fallback,
+      save() {},
+      syncGet: vi.fn().mockResolvedValue({ room: null, messages: [] }),
+    },
+    "prop-scope",
+    "lead-a",
+    () => scope,
+  );
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const render = () =>
+    act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            f.Provider,
+            null,
+            createElement(
+              ConversationProvider,
+              { value: actions },
+              createElement(TeamChats, { owner }),
+            ),
+          ),
+        ),
+      ),
+    );
+  try {
+    owner.focus("a", undefined, "request-a");
+    await render();
+    expect(owner.selected).toBe("a");
+    expect(
+      host.querySelector('[data-room="a"]')?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    await act(async () =>
+      action(() => {
+        scope.leadId = "lead-b";
+      })(),
+    );
+    await act(async () => owner.focus("b", undefined, "request-b"));
+    expect(owner.filtered.map((room) => room.id)).toEqual(["b"]);
+    expect(owner.selected).toBe("b");
+    expect(host.querySelector('[data-room="a"]')).toBeNull();
+    await act(async () =>
+      owner.focus(undefined, "personal-item", "request-personal"),
+    );
+    expect(owner.selected).toBe("you");
+    expect(owner.detail).toBe(true);
+  } finally {
+    await act(async () => root.unmount());
+    actions.scope.services.close();
+    f.store.dispose();
+    host.remove();
+    vi.unstubAllGlobals();
   }
 });

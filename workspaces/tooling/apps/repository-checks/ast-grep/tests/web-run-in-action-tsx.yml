@@ -1,0 +1,6 @@
+id: web-run-in-action-tsx
+valid:
+  - "flow(function* () { owner.value = yield load(); });"
+invalid:
+  - "runInAction(() => { owner.value = 1; });"
+  - "mobx.runInAction(() => owner.value++);"
