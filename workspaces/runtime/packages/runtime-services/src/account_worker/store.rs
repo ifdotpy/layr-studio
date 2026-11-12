@@ -6,8 +6,8 @@ use crate::continuation_runtime::CapacityStartOutcome;
 use crate::diagnostics::measure_runtime_stage as stage;
 use crate::notification_dispatch::{
     CheckedNotificationDispatch, NotificationAgent, NotificationEffects,
-    NotificationPublicationBatch, PreparedSubmission, ProviderDeliveryIdentity,
-    dispatch_checked_notification, flush_notification_streams,
+    NotificationPendingStreams, NotificationPublicationBatch, PreparedSubmission,
+    ProviderDeliveryIdentity, dispatch_checked_notification, flush_notification_streams,
 };
 use rusqlite::{OptionalExtension, params};
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind};
@@ -17,6 +17,8 @@ use studio_runtime_schema::shared_values::{
 };
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::outbox::{Outbox, OutboxError, OutboxRow, Publication, PublicationClass};
+use studio_runtime_store::peer_update_settings::Canvas;
+use studio_runtime_store::receipt_tables::AccountStateRow;
 use studio_runtime_store::{AgentRecord, NotificationDispatchRepository};
 
 pub(super) const PUBLICATION_DRAIN_LIMIT: usize = 64;
@@ -373,7 +375,37 @@ pub(super) fn invalid(id: &str) -> WorkerError {
 const JOURNAL_FRAME_PAYLOAD_PREFIX: &[u8] = b"{\"frame\":";
 const JOURNAL_FRAME_PAYLOAD_SUFFIX: &[u8] = b"}";
 
+struct PreparedJournalEntry {
+    entry: JournalEntry,
+    encoded_frame: Option<Vec<u8>>,
+    digest: String,
+}
+
+impl PreparedJournalEntry {
+    fn new(entry: JournalEntry, scope: &str) -> Result<Self, WorkerError> {
+        let operation = journal_operation(scope, entry.generation.0, entry.cursor.0);
+        let encoded_frame = match &entry.payload {
+            JournalPayload::Frame(frame) => Some(journal_frame_payload(frame, &operation)?),
+            JournalPayload::RawStdout { .. }
+            | JournalPayload::Stderr(_)
+            | JournalPayload::Exit(_)
+            | JournalPayload::Other { .. } => None,
+        };
+        let digest = match &encoded_frame {
+            Some(bytes) => studio_runtime_store::sha256_hex(bytes),
+            None => journal_digest(&entry, &operation)?,
+        };
+        Ok(Self {
+            entry,
+            encoded_frame,
+            digest,
+        })
+    }
+}
+
 fn journal_frame_payload(frame: &Frame, operation: &str) -> Result<Vec<u8>, WorkerError> {
+    #[cfg(test)]
+    writer_preparation_tests::FRAME_ENCODINGS.with(|count| count.set(count.get() + 1));
     // This persistence boundary retains the canonical object ordering of the
     // earlier stored projection, including receipts replayed after an update.
     let encoded = if crate::notification_dispatch::progress::native(frame).is_some() {
@@ -862,70 +894,97 @@ pub(super) fn expire_preparation_in(
     Ok::<_, WorkerError>(true)
 }
 
+enum ClaimAttempt {
+    Retry,
+    Complete(Option<TurnIntent>),
+}
+
 pub(super) async fn claim(
     store: Arc<RuntimeStore>,
     account: &str,
     agent: &str,
     epoch: i64,
 ) -> Result<Option<TurnIntent>, WorkerError> {
-    let account = account.to_owned();
-    let agent = agent.to_owned();
-    let read_agent = agent.clone();
-    let (snapshot, has_radio_turn) = store
-        .read_async("runtime-services/account_worker_claim_read", move |tx| {
-            let snapshot = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?;
-            let has_radio_turn = tx.query_row_cached(
-                "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND epoch=?2 \
+    loop {
+        let account = account.to_owned();
+        let agent = agent.to_owned();
+        let read_agent = agent.clone();
+        let (snapshot, snapshot_revision, has_radio_turn) = store
+            .read_async("runtime-services/account_worker_claim_read", move |tx| {
+                let snapshot = AgentRepository::get(tx, &AgentId::from(read_agent.as_str()))?;
+                let revision =
+                    studio_runtime_store::TranscriptRepository::revision(tx, &read_agent)?;
+                let has_radio_turn = tx.query_row_cached(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND epoch=?2 \
                  AND status='pending' AND kind='radio_turn')",
-                rusqlite::params![read_agent.as_str(), epoch],
-                |row| row.get::<_, bool>(0),
-            )?;
-            Ok::<_, WorkerError>((snapshot, has_radio_turn))
-        })
-        .await?;
-    let prepared = if has_radio_turn {
-        let prepared = crate::host_project_runtime::PreparedHost::load(&store)
+                    rusqlite::params![read_agent.as_str(), epoch],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                Ok::<_, WorkerError>((snapshot, revision, has_radio_turn))
+            })
+            .await?;
+        let prepared = if has_radio_turn {
+            let prepared = crate::host_project_runtime::PreparedHost::load(&store)
+                .await
+                .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
+            studio_runtime_process::blocking_pool::spawn_blocking(
+                "runtime-services/account_worker_claim_host",
+                move || {
+                    prepared
+                        .recheck_paths()
+                        .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
+                    Ok::<_, WorkerError>(Some(prepared))
+                },
+            )
             .await
-            .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
-        studio_runtime_process::blocking_pool::spawn_blocking(
-            "runtime-services/account_worker_claim_host",
-            move || {
-                prepared
-                    .recheck_paths()
-                    .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
-                Ok::<_, WorkerError>(Some(prepared))
-            },
-        )
-        .await
-        .map_err(|_| WorkerError::TaskFailed)??
-    } else {
-        None
-    };
-    if snapshot.as_ref().is_none_or(|record| {
-        record.epoch != epoch
-            || account_key(record) != account.as_str()
-            || record.move_import_pending_active()
-    }) {
-        return Ok(None);
-    }
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|_| WorkerError::TaskFailed)?;
-    let attempt = studio_runtime_store::sha256_hex(&bytes);
-    scheduler::lifecycle_transaction_with(
+            .map_err(|_| WorkerError::TaskFailed)??
+        } else {
+            None
+        };
+        if snapshot.as_ref().is_none_or(|record| {
+            record.epoch != epoch
+                || account_key(record) != account.as_str()
+                || record.move_import_pending_active()
+        }) {
+            return Ok(None);
+        }
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes).map_err(|_| WorkerError::TaskFailed)?;
+        let attempt = studio_runtime_store::sha256_hex(&bytes);
+        let result = scheduler::lifecycle_transaction_with(
         &store,
-        move |tx| -> Result<Option<TurnIntent>, WorkerError> {
-            let record = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?;
+        move |tx| -> Result<ClaimAttempt, WorkerError> {
+            // The per-agent transcript clock covers the durable record and
+            // volatile fields, including deletion. Never overwrite a newer
+            // agent using the already decoded read snapshot.
+            if studio_runtime_store::TranscriptRepository::revision(tx, &agent)?
+                != snapshot_revision
+            {
+                return Ok(ClaimAttempt::Retry);
+            }
+            let record = {
+                // Observe actual AgentRecord decodes in this outer write section,
+                // independently of which repository call performs them.
+                #[cfg(test)]
+                let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+                let record = snapshot;
+                #[cfg(test)]
+                writer_preparation_tests::CLAIM_DECODES.with(|count| {
+                    count.set(count.get() + studio_runtime_store::agent_volatile::publication_work::take_full_decodes() as u64);
+                });
+                record
+            };
             if record
                 .as_ref()
                 .is_none_or(|a| account_key(a) != account.as_str())
             {
-                return Ok(None);
+                return Ok(ClaimAttempt::Complete(None));
             }
             if record
                 .as_ref()
                 .is_some_and(|a| a.move_import_pending_active())
             {
-                return Ok(None);
+                return Ok(ClaimAttempt::Complete(None));
             }
             if record
                 .as_ref()
@@ -936,7 +995,7 @@ pub(super) async fn claim(
                     &agent,
                     "preparation/claude-frozen-input-recovery-required",
                 )?;
-                return Ok(None);
+                return Ok(ClaimAttempt::Complete(None));
             }
             let guarding = has_pending_thread_start(tx, agent.as_str())?;
             if guarding {
@@ -1039,10 +1098,15 @@ pub(super) async fn claim(
                     tx.execute_batch("ROLLBACK TO supersede_thread; RELEASE supersede_thread")?;
                 }
             }
-            claim
+            claim.map(ClaimAttempt::Complete)
         },
     )
-    .await
+    .await?;
+        match result {
+            ClaimAttempt::Complete(claim) => return Ok(claim),
+            ClaimAttempt::Retry => {}
+        }
+    }
 }
 
 /// Persist a visible fail-closed state for one malformed agent without decoding
@@ -2082,17 +2146,22 @@ pub(super) async fn journal_batch(
     outcome: Option<Box<OutcomeStep>>,
     park_unbound: bool,
 ) -> Result<JournalBatch, WorkerError> {
-    let entries = entries
+    let mut entries = entries
         .into_iter()
-        .map(crate::provider_adapter::project_entry)
-        .collect::<Vec<_>>();
+        .map(|entry| {
+            PreparedJournalEntry::new(
+                crate::provider_adapter::project_entry(entry),
+                journal_scope,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     if entries.is_empty() && outcome.is_none() {
         return Ok(JournalBatch {
             streams: streams.clone(),
             ..JournalBatch::default()
         });
     }
-    let outcome = match outcome {
+    let mut outcome = match outcome {
         Some(mut step) => {
             step.resources = Arc::new(
                 step.resources
@@ -2112,7 +2181,7 @@ pub(super) async fn journal_batch(
     };
     let needs_limits = entries.iter().any(|entry| {
         matches!(
-            &entry.payload,
+            &entry.entry.payload,
             JournalPayload::Frame(Frame::Notification(frame))
                 if frame.method.as_str() == "turn/completed"
         )
@@ -2143,148 +2212,182 @@ pub(super) async fn journal_batch(
             Ok::<_, WorkerError>((publication, limits_observation))
         })
         .await?;
-    let account = account.to_owned();
-    let journal_scope = journal_scope.to_owned();
-    let claude_account_pin = claude_account_pin.clone();
-    let streams = streams.clone();
-    let state_root = store.root().to_path_buf();
-    scheduler::lifecycle_transaction_with(&store, move |tx| {
-        // A background recovery can commit before its cache handoff arrives.
-        // Validate the cached snapshot under the writer, reconstructing only
-        // after a newer commit or rollback invalidated its revision.
-        let streams = current_streams(tx, &account, Some(streams))?;
-        let mut faults = Vec::new();
-        // Before this batch's receipts are counted against their bound.
-        delete_delivered_publications(tx, &delivered)?;
-        // The outcome a reply carries settles before its own journal entry.
-        let settled = match outcome {
-            Some(step) => {
-                if let SessionOutcome::Resolved {
-                    outcome: RequestOutcome::Reply { body, .. },
-                    ..
-                } = &step.outcome
-                    && let crate::provider_callbacks::CallbackBody::Result(value) =
-                        crate::provider_callbacks::CallbackBody::from(body)
-                    && let Some(turn) = value["turn"]["id"].as_str()
-                {
-                    boundary::seed(tx, &step.context, turn, step.reply_boundary_at)?;
-                }
-                let (settled, fault) = settle_outcome_isolated(tx, &state_root, *step)?;
-                faults.extend(fault);
-                Some(settled)
-            }
-            None => None,
-        };
-        let mut next = streams.clone();
-        let mut committed = Vec::with_capacity(entries.len());
-        let mut parked = Vec::new();
-        let mut deferred = Vec::new();
-        let mut deferred_agent = None;
-        let mut refused = Vec::new();
-        let mut outbox = PublicationOutbox::default();
-        let mut entries = entries.into_iter();
-        while let Some(entry) = entries.next() {
-            let stage = journal_stage(&entry);
-            let identity = JournalIdentity {
-                account: &account,
-                journal_scope: &journal_scope,
+    let mut stale_retry = false;
+    loop {
+        let read_account = account.to_owned();
+        let cached = streams.clone();
+        let (streams, pending_row) = store
+            .read_async(
+                "runtime-services/account_worker_journal_streams",
+                move |tx| {
+                    let streams = current_streams(tx, &read_account, Some(cached))?;
+                    let pending = pending_stream_row(tx, &read_account)?;
+                    Ok::<_, WorkerError>((streams, pending))
+                },
+            )
+            .await?;
+        let account = account.to_owned();
+        let journal_scope = journal_scope.to_owned();
+        let claude_account_pin = claude_account_pin.clone();
+        let publication = publication.clone();
+        let limits_observation = limits_observation.clone();
+        let delivered = delivered.clone();
+        let state_root = store.root().to_path_buf();
+        let attempt = scheduler::lifecycle_transaction_with::<_, WorkerError>(&store, move |tx| {
+            // Recovery can commit between the read snapshot and writer admission.
+            // Retry before any delta, receipt deletion, or provider outcome settlement.
+            let (streams, pending_row) = if streams_revision_matches(tx, &account, &streams)? {
+                (streams, pending_row)
+            } else if !stale_retry {
+                return Ok(Err((entries, outcome)));
+            } else {
+                crate::diagnostics::log_stderr(format_args!(
+                    "account worker journal stream revision changed twice; preparing under the writer once"
+                ));
+                (load_streams(tx, &account)?, pending_stream_row(tx, &account)?)
             };
-            let mut subject = None;
-            let faults_before = faults.len();
-            let applied = crate::diagnostics::measure_runtime_stage(stage, || {
-                agent_fault::isolate(
-                    tx,
-                    agent_fault::FaultStage::JournalFrame,
-                    &mut subject,
-                    |subject| {
-                        journal_one(
-                            tx,
-                            identity,
-                            &publication,
-                            &next,
-                            &entry,
-                            &claude_account_pin,
-                            limits_observation.as_ref(),
-                            &mut outbox,
-                            JournalPolicy {
-                                park_unbound,
-                                subject,
-                            },
-                        )
-                    },
-                    // The worker settles the parked entry below.
-                    || Ok(()),
-                )
-            });
-            let applied = match applied {
-                // Backpressure, not a data fault: the entry's savepoint rolled
-                // back, so it and every later entry wait in journal order.
-                Err(error) if stream_capacity_refused(&error) => {
-                    faults.truncate(faults_before);
-                    refused.push(entry);
-                    refused.extend(entries);
-                    break;
-                }
-                applied => applied?,
-            };
-            match applied {
-                Ok(Some(applied)) => {
-                    if let Some(updated) = applied.stream_update {
-                        next = updated;
+            let mut faults = Vec::new();
+            // Before this batch's receipts are counted against their bound.
+            delete_delivered_publications(tx, &delivered)?;
+            // The outcome a reply carries settles before its own journal entry.
+            let settled = match outcome {
+                Some(step) => {
+                    if let SessionOutcome::Resolved {
+                        outcome: RequestOutcome::Reply { body, .. },
+                        ..
+                    } = &step.outcome
+                        && let crate::provider_callbacks::CallbackBody::Result(value) =
+                            crate::provider_callbacks::CallbackBody::from(body)
+                        && let Some(turn) = value["turn"]["id"].as_str()
+                    {
+                        boundary::seed(tx, &step.context, turn, step.reply_boundary_at)?;
                     }
-                    committed.push((entry, applied.effect));
+                    let (settled, fault) = settle_outcome_isolated(tx, &state_root, *step)?;
+                    faults.extend(fault);
+                    Some(settled)
                 }
-                Ok(None) => {
-                    deferred_agent = subject;
-                    deferred.push(entry);
-                    deferred.extend(entries);
-                    break;
-                }
-                Err(fault) => {
-                    // The rolled-back entry settles without its effects, so
-                    // it neither holds the journal nor applies again. The
-                    // outbox only caches the receipt count and invalidation
-                    // row; earlier entries' receipts are rows of this
-                    // transaction and stay. Reload the cache from them.
-                    outbox = PublicationOutbox::default();
-                    park_entry(tx, identity, &entry)?;
-                    faults.push(fault.with_method(journal_method(&entry)));
-                    parked.push(entry);
+                None => None,
+            };
+            let mut next = streams.clone();
+            let mut committed = Vec::with_capacity(entries.len());
+            let mut parked = Vec::new();
+            let mut deferred = Vec::new();
+            let mut deferred_agent = None;
+            let mut refused = Vec::new();
+            let mut outbox = PublicationOutbox::default();
+            let mut entries = entries.into_iter();
+            while let Some(prepared) = entries.next() {
+                let entry = &prepared.entry;
+                let stage = journal_stage(entry);
+                let identity = JournalIdentity {
+                    account: &account,
+                    journal_scope: &journal_scope,
+                };
+                let mut subject = None;
+                let faults_before = faults.len();
+                let applied = crate::diagnostics::measure_runtime_stage(stage, || {
+                    agent_fault::isolate(
+                        tx,
+                        agent_fault::FaultStage::JournalFrame,
+                        &mut subject,
+                        |subject| {
+                            journal_one(
+                                tx,
+                                identity,
+                                &publication,
+                                &next,
+                                &prepared,
+                                &claude_account_pin,
+                                limits_observation.as_ref(),
+                                &mut outbox,
+                                JournalPolicy {
+                                    park_unbound,
+                                    subject,
+                                },
+                            )
+                        },
+                        // The worker settles the parked entry below.
+                        || Ok(()),
+                    )
+                });
+                let applied = match applied {
+                    // Backpressure, not a data fault: the entry's savepoint rolled
+                    // back, so it and every later entry wait in journal order.
+                    Err(error) if stream_capacity_refused(&error) => {
+                        faults.truncate(faults_before);
+                        refused.push(prepared.entry);
+                        refused.extend(entries.map(|prepared| prepared.entry));
+                        break;
+                    }
+                    applied => applied?,
+                };
+                match applied {
+                    Ok(Some(applied)) => {
+                        if let Some(updated) = applied.stream_update {
+                            next = updated;
+                        }
+                        committed.push((prepared.entry, applied.effect));
+                    }
+                    Ok(None) => {
+                        deferred_agent = subject;
+                        deferred.push(prepared.entry);
+                        deferred.extend(entries.map(|prepared| prepared.entry));
+                        break;
+                    }
+                    Err(fault) => {
+                        // The rolled-back entry settles without its effects, so
+                        // it neither holds the journal nor applies again. The
+                        // outbox only caches the receipt count and invalidation
+                        // row; earlier entries' receipts are rows of this
+                        // transaction and stay. Reload the cache from them.
+                        outbox = PublicationOutbox::default();
+                        park_entry(tx, identity, entry, prepared.digest)?;
+                        faults.push(fault.with_method(journal_method(entry)));
+                        parked.push(prepared.entry);
+                    }
                 }
             }
-        }
-        // Entries that left every stream untouched share each allocation
-        // with the batch's input, so the comparison reads no stream text.
-        if next.changed_from(&streams) {
-            crate::diagnostics::measure_runtime_stage("journal.persist_streams", || {
-                persist_streams(tx, &account, &mut next)
+            // Entries that left every stream untouched share each allocation
+            // with the batch's input, so the comparison reads no stream text.
+            if next.changed_from(&streams) {
+                crate::diagnostics::measure_runtime_stage("journal.persist_streams", || {
+                    persist_prepared_streams(tx, &account, &mut next, pending_row)
+                })?;
+            }
+            // One compaction per batch: every entry of a generation shares the checkpoint.
+            let mut generations = committed
+                .iter()
+                .map(|(entry, _)| entry.generation.0)
+                .collect::<Vec<_>>();
+            generations.extend(parked.iter().map(|entry| entry.generation.0));
+            generations.sort_unstable();
+            generations.dedup();
+            crate::diagnostics::measure_runtime_stage("journal.compact", || {
+                generations
+                    .into_iter()
+                    .try_for_each(|generation| compact(tx, &journal_scope, generation))
             })?;
-        }
-        // One compaction per batch: every entry of a generation shares the checkpoint.
-        let mut generations = committed
-            .iter()
-            .map(|(entry, _)| entry.generation.0)
-            .collect::<Vec<_>>();
-        generations.extend(parked.iter().map(|entry| entry.generation.0));
-        generations.sort_unstable();
-        generations.dedup();
-        crate::diagnostics::measure_runtime_stage("journal.compact", || {
-            generations
-                .into_iter()
-                .try_for_each(|generation| compact(tx, &journal_scope, generation))
-        })?;
-        Ok(JournalBatch {
-            streams: next,
-            committed,
-            parked,
-            deferred,
-            deferred_agent,
-            refused,
-            settled,
-            faults,
+            Ok(Ok(JournalBatch {
+                streams: next,
+                committed,
+                parked,
+                deferred,
+                deferred_agent,
+                refused,
+                settled,
+                faults,
+            }))
         })
-    })
-    .await
+        .await?;
+        match attempt {
+            Ok(batch) => return Ok(batch),
+            Err((retry_entries, retry_outcome)) => {
+                stale_retry = true;
+                entries = retry_entries;
+                outcome = retry_outcome;
+            }
+        }
+    }
 }
 
 /// A monitor's durable output queue had no room for an output delta (see
@@ -2304,9 +2407,8 @@ fn park_entry(
     tx: &studio_runtime_store::Transaction<'_>,
     identity: JournalIdentity<'_>,
     entry: &JournalEntry,
+    digest: String,
 ) -> Result<(), WorkerError> {
-    let operation = journal_operation(identity.journal_scope, entry.generation.0, entry.cursor.0);
-    let digest = journal_digest(entry, &operation)?;
     save_journal(tx, identity, entry, digest, true)
 }
 
@@ -2467,7 +2569,7 @@ fn journal_one(
     identity: JournalIdentity<'_>,
     publication: &crate::notification_dispatch::PublicationContext,
     streams: &NotificationStreamBuffer,
-    entry: &JournalEntry,
+    prepared: &PreparedJournalEntry,
     claude_account_pin: &Value,
     limits_observation: Option<&crate::usage_resume::LimitsObservation>,
     outbox: &mut PublicationOutbox,
@@ -2477,18 +2579,12 @@ fn journal_one(
         account,
         journal_scope,
     } = identity;
+    let PreparedJournalEntry {
+        entry,
+        encoded_frame,
+        digest,
+    } = prepared;
     let operation = journal_operation(journal_scope, entry.generation.0, entry.cursor.0);
-    let encoded_frame = match &entry.payload {
-        JournalPayload::Frame(frame) => Some(journal_frame_payload(frame, &operation)?),
-        JournalPayload::RawStdout { .. }
-        | JournalPayload::Stderr(_)
-        | JournalPayload::Exit(_)
-        | JournalPayload::Other { .. } => None,
-    };
-    let digest = match &encoded_frame {
-        Some(bytes) => studio_runtime_store::sha256_hex(bytes),
-        None => journal_digest(entry, &operation)?,
-    };
     let stream_generation = current_stream_generation(tx, journal_scope, entry.generation.0)?;
     if entry.cursor.0 <= checkpoint(tx, journal_scope, stream_generation)? {
         return Ok(Some(JournalApplied {
@@ -2497,7 +2593,7 @@ fn journal_one(
         }));
     }
     if let Some(old) = Outbox::get::<JournalSettlement>(tx, &operation).map_err(outbox_error)? {
-        if !old.payload.digest.is_empty() && old.payload.digest != digest {
+        if !old.payload.digest.is_empty() && old.payload.digest != *digest {
             return Err(invalid(&operation));
         }
         if old.payload.committed {
@@ -2737,7 +2833,7 @@ fn journal_one(
                                     journal_scope,
                                 },
                                 entry,
-                                digest,
+                                digest.clone(),
                                 false,
                             )?;
                             return Ok(None);
@@ -2936,7 +3032,7 @@ fn journal_one(
     // A provider request is accepted with its batch: its record owns the
     // answer, so the cursor settles without waiting for it.
     super::callback_record::accept(tx, account, journal_scope, entry)?;
-    save_journal(tx, identity, entry, digest, true)?;
+    save_journal(tx, identity, entry, digest.clone(), true)?;
     let update = match next {
         std::borrow::Cow::Borrowed(_) => None,
         std::borrow::Cow::Owned(next) => Some(next),
@@ -2951,13 +3047,14 @@ fn journal_one(
 #[cfg(test)]
 pub(super) fn test_journal_dispatch_work(
     tx: &rusqlite::Transaction<'_>,
-    entries: &[JournalEntry],
+    entries: Vec<JournalEntry>,
 ) -> Result<(usize, usize), WorkerError> {
     use studio_runtime_store::agent_volatile::publication_work;
     let _scope = publication_work::scope();
     let mut streams = NotificationStreamBuffer::default();
     let mut outbox = PublicationOutbox::default();
     for entry in entries {
+        let prepared = PreparedJournalEntry::new(entry, "default")?;
         if let Some(JournalApplied {
             stream_update: Some(next),
             ..
@@ -2969,7 +3066,7 @@ pub(super) fn test_journal_dispatch_work(
             },
             &crate::notification_dispatch::PublicationContext::default(),
             &streams,
-            entry,
+            &prepared,
             &Value::Null,
             None,
             &mut outbox,
@@ -4042,15 +4139,12 @@ pub(super) struct AccountStreams {
 fn persist_stream_lane(
     tx: &studio_runtime_store::Transaction<'_>,
     account: &str,
-    scope: &str,
-    actor: Option<&str>,
     revision: &str,
     lane: &NotificationStreamBuffer,
+    old: Option<OutboxRow<NotificationPendingStreams>>,
 ) -> Result<AccountStreams, WorkerError> {
     let (metadata, pending) = lane.persisted_parts();
-    let id = format!("streams:{scope}");
-    let old = Outbox::get::<crate::notification_dispatch::NotificationPendingStreams>(tx, &id)
-        .map_err(outbox_error)?;
+    let id = format!("streams:{account}");
     match pending {
         Some(pending) => {
             let row = if let Some(mut row) = old {
@@ -4061,16 +4155,12 @@ fn persist_stream_lane(
                     signature: studio_runtime_store::sha256_hex(id.as_bytes()),
                     id,
                     kind: OutboxKind::StreamFlush,
-                    owner_kind: if actor.is_some() {
-                        OwnerKind::Agent
-                    } else {
-                        OwnerKind::Account
-                    },
-                    owner_id: actor.unwrap_or(account).to_owned(),
+                    owner_kind: OwnerKind::Account,
+                    owner_id: account.to_owned(),
                     request_id: None,
                     status: OutboxStatus::Pending,
                     account: Some(account.to_owned()),
-                    stream_id: Some(scope.to_owned()),
+                    stream_id: Some(account.to_owned()),
                     generation: None,
                     ordinal: None,
                     next_at: Some(0),
@@ -4081,10 +4171,9 @@ fn persist_stream_lane(
             Outbox::put(tx, &row).map_err(outbox_error)?;
         }
         None => {
-            if let Some(mut row) = old {
-                row.status = OutboxStatus::Committed;
-                row.next_at = None;
-                Outbox::put(tx, &row).map_err(outbox_error)?;
+            if let Some(row) = old {
+                // Deletion and the new stream revision commit atomically;
+                // rewriting the old payload before deleting it adds no proof.
                 Outbox::delete_settled(tx, &row.id, &row.signature).map_err(outbox_error)?;
             }
         }
@@ -4100,8 +4189,20 @@ pub(crate) fn persist_streams(
     account: &str,
     streams: &mut NotificationStreamBuffer,
 ) -> Result<(), WorkerError> {
+    let old = pending_stream_row(tx, account)?;
+    persist_prepared_streams(tx, account, streams, old)
+}
+
+// The account revision was checked before using this row. Keep its immutable
+// request metadata and replace only the prepared stream payload.
+fn persist_prepared_streams(
+    tx: &studio_runtime_store::Transaction<'_>,
+    account: &str,
+    streams: &mut NotificationStreamBuffer,
+    old: Option<OutboxRow<NotificationPendingStreams>>,
+) -> Result<(), WorkerError> {
     let revision = uuid::Uuid::new_v4().to_string();
-    let saved = persist_stream_lane(tx, account, account, None, &revision, streams)?;
+    let saved = persist_stream_lane(tx, account, &revision, streams, old)?;
     studio_runtime_store::account_state::put_streams(
         tx,
         account,
@@ -4117,15 +4218,43 @@ pub(super) fn current_streams(
     cached: Option<NotificationStreamBuffer>,
 ) -> Result<NotificationStreamBuffer, WorkerError> {
     if let Some(cached) = cached
-        && let Some((cached_account, revision)) = &cached.store_revision
-        && cached_account == account
+        && streams_revision_matches(tx, account, &cached)?
     {
-        let current:Option<String>=tx.query_row_cached("SELECT json_extract(streams,'$.revision') FROM runtime_account_state WHERE account=?1",[account],|row|row.get(0)).optional()?.flatten();
-        if current.as_ref() == Some(revision) {
-            return Ok(cached);
-        }
+        return Ok(cached);
     }
     load_streams(tx, account)
+}
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=optional,native,result=Option<String>,
+    tables(accounts=AccountStateRow),
+    columns(account=AccountStateRow::ACCOUNT,streams=AccountStateRow::STREAMS),
+    sql="SELECT json_extract({streams},'$.revision') FROM {accounts} WHERE {account}=?1")]
+struct AccountStreamRevision<'a> {
+    #[db(column=AccountStateRow::ACCOUNT)]
+    account: &'a str,
+}
+
+// Every account stream write installs a new revision in the same transaction
+// as its pending outbox row. This keyed check covers both pieces of the buffer.
+fn streams_revision_matches(
+    db: &rusqlite::Connection,
+    account: &str,
+    streams: &NotificationStreamBuffer,
+) -> Result<bool, WorkerError> {
+    let Some((cached_account, revision)) = &streams.store_revision else {
+        return Ok(false);
+    };
+    if cached_account != account {
+        return Ok(false);
+    }
+    let current = studio_runtime_store::peer_update_settings::canvas_read(db)
+        .named(
+            &AccountStreamRevision::QUERY,
+            &AccountStreamRevision { account },
+        )?
+        .flatten();
+    Ok(current.as_deref().unwrap_or_default() == revision)
 }
 
 fn restore_stream_lane(
@@ -4133,21 +4262,27 @@ fn restore_stream_lane(
     scope: &str,
     mut saved: AccountStreams,
 ) -> Result<AccountStreams, WorkerError> {
-    if let Some(row) = Outbox::get::<crate::notification_dispatch::NotificationPendingStreams>(
-        tx,
-        &format!("streams:{scope}"),
-    )
-    .map_err(outbox_error)?
-    {
+    if let Some(row) = pending_stream_row(tx, scope)? {
         saved.metadata.restore_pending(&row.payload)?;
     }
     Ok(saved)
+}
+
+fn pending_stream_row(
+    db: &rusqlite::Connection,
+    account: &str,
+) -> Result<Option<OutboxRow<NotificationPendingStreams>>, WorkerError> {
+    #[cfg(test)]
+    writer_preparation_tests::PENDING_ROW_DECODES.with(|count| count.set(count.get() + 1));
+    Outbox::get(db, &format!("streams:{account}")).map_err(outbox_error)
 }
 
 pub(super) fn load_streams(
     tx: &studio_runtime_store::Transaction<'_>,
     account: &str,
 ) -> Result<NotificationStreamBuffer, WorkerError> {
+    #[cfg(test)]
+    writer_preparation_tests::STREAM_DECODES.with(|count| count.set(count.get() + 1));
     let saved = studio_runtime_store::account_state::streams(tx, account)?;
     let mut host = if let Some(raw) = saved {
         restore_stream_lane(
@@ -4163,6 +4298,30 @@ pub(super) fn load_streams(
     };
     host.metadata.store_revision = Some((account.to_owned(), host.revision));
     Ok(host.metadata)
+}
+
+#[cfg(test)]
+pub(super) mod writer_preparation_tests {
+    // Each store owns a writer thread. Read-pool work has separate counters,
+    // so these witnesses measure the actual writer rather than elapsed time.
+    thread_local! {
+        pub(super) static FRAME_ENCODINGS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        pub(super) static STREAM_DECODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        pub(super) static CLAIM_DECODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        pub(super) static PENDING_ROW_DECODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    pub(crate) fn take() -> (u64, u64, u64) {
+        (
+            FRAME_ENCODINGS.with(|count| count.replace(0)),
+            STREAM_DECODES.with(|count| count.replace(0)),
+            PENDING_ROW_DECODES.with(|count| count.replace(0)),
+        )
+    }
+
+    pub(crate) fn take_claim_decodes() -> u64 {
+        CLAIM_DECODES.with(|count| count.replace(0))
+    }
 }
 pub(super) async fn restore_streams(
     store: &RuntimeStore,
@@ -4183,37 +4342,58 @@ pub(super) async fn flush_streams(
     account: &str,
     delivered: Vec<DeliveredPublication>,
 ) -> Result<NotificationStreamBuffer, WorkerError> {
-    let publication = crate::notification_dispatch::PublicationContext::default();
-    let account = account.to_owned();
-    scheduler::lifecycle_transaction_with(&store, move |tx| {
-        delete_delivered_publications(tx, &delivered)?;
-        // A failed/cancelled journal job may have moved the live buffer. The
-        // committed pending record, never that possibly empty cache, owns text.
-        let mut streams = load_streams(tx, &account)?;
-        crate::notification_dispatch::prune_inactive_streams(tx, &mut streams, now(), false)?;
-        for (actor, owner, generation, thread) in streams.threads() {
-            let identity = SchedulerRepository::find_attempt_for_actor(
-                tx, &actor, &owner, generation, &thread, None,
-            )?;
-            if let Some(identity) = identity
-                && let Some(next) = flush_notification_streams(
-                    tx,
-                    &identity.agent_id,
-                    &publication,
-                    &streams,
-                    now(),
-                )?
-            {
-                let mut next = next;
-                let batch = next.take_post_commit()?;
-                persist_publication_batch(tx, &account, &batch)?;
-                streams = next;
+    let mut stale_retry = false;
+    loop {
+        let read_account = account.to_owned();
+        let (mut streams, mut pending_row) = store
+            .read_async("runtime-services/account_worker_flush_streams", move |tx| {
+                let streams = load_streams(tx, &read_account)?;
+                let pending = pending_stream_row(tx, &read_account)?;
+                Ok::<_, WorkerError>((streams, pending))
+            })
+            .await?;
+        let publication = crate::notification_dispatch::PublicationContext::default();
+        let account = account.to_owned();
+        let delivered = delivered.clone();
+        let result = scheduler::lifecycle_transaction_with::<_, WorkerError>(&store, move |tx| {
+            if !streams_revision_matches(tx, &account, &streams)? {
+                if !stale_retry { return Ok(None); }
+                crate::diagnostics::log_stderr(format_args!(
+                    "account worker flush stream revision changed twice; preparing under the writer once"
+                ));
+                streams = load_streams(tx, &account)?;
+                pending_row = pending_stream_row(tx, &account)?;
             }
+            delete_delivered_publications(tx, &delivered)?;
+            crate::notification_dispatch::prune_inactive_streams(tx, &mut streams, now(), false)?;
+            for (actor, owner, generation, thread) in streams.threads() {
+                let identity = SchedulerRepository::find_attempt_for_actor(
+                    tx, &actor, &owner, generation, &thread, None,
+                )?;
+                if let Some(identity) = identity
+                    && let Some(next) = flush_notification_streams(
+                        tx,
+                        &identity.agent_id,
+                        &publication,
+                        &streams,
+                        now(),
+                    )?
+                {
+                    let mut next = next;
+                    let batch = next.take_post_commit()?;
+                    persist_publication_batch(tx, &account, &batch)?;
+                    streams = next;
+                }
+            }
+            persist_prepared_streams(tx, &account, &mut streams, pending_row)?;
+            Ok(Some(streams))
+        })
+        .await?;
+        if let Some(streams) = result {
+            return Ok(streams);
         }
-        persist_streams(tx, &account, &mut streams)?;
-        Ok(streams)
-    })
-    .await
+        stale_retry = true;
+    }
 }
 
 /// Durable retry registration survives releasing an unsubmitted claim on restart.

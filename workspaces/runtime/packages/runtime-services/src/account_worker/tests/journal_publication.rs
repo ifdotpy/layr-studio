@@ -29,7 +29,7 @@ async fn journal_dispatch_reuses_the_correlated_agent_without_full_projections()
             })
             .collect::<Vec<_>>();
         let work = store
-            .transaction_with(move |tx| store::test_journal_dispatch_work(tx, &entries))
+            .transaction_with(move |tx| store::test_journal_dispatch_work(tx, entries))
             .await
             .expect("journal dispatch");
         eprintln!(

@@ -216,6 +216,308 @@ async fn journal_writer_work_is_independent_of_idle_account_agents() {
     );
 }
 
+async fn writer_preparation_work(store: &RuntimeStore) -> (u64, u64, u64) {
+    store
+        .transaction(|_| Ok(store::writer_preparation_tests::take()))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn journal_prepares_payload_before_writer() {
+    let (_directory, store) = running_store().await;
+    let streams = journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+    writer_preparation_work(&store).await;
+    let entry = entry(
+        2,
+        json!({"method":"item/agentMessage/delta","params":{
+        "threadId":"thread","turnId":"turn","itemId":"answer","delta":"x".repeat(4096)}}),
+    );
+    journal(&store, streams, vec![entry]).await;
+    assert_eq!(
+        writer_preparation_work(&store).await.0,
+        0,
+        "immutable provider frames must be encoded before writer admission"
+    );
+}
+
+#[tokio::test]
+async fn journal_restores_stale_streams_before_writer() {
+    let (_directory, store) = running_store().await;
+    journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+    writer_preparation_work(&store).await;
+    // A background recovery can commit before its cache handoff arrives.
+    journal(&store, NotificationStreamBuffer::default(), vec![delta(2)]).await;
+    assert_eq!(
+        writer_preparation_work(&store).await.1,
+        0,
+        "reconstruct the committed stream buffer before taking the writer"
+    );
+}
+
+#[tokio::test]
+async fn flush_restores_streams_before_writer() {
+    let (_directory, store) = running_store().await;
+    journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+    writer_preparation_work(&store).await;
+    store::flush_streams(Arc::clone(&store), "default", Vec::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        writer_preparation_work(&store).await.1,
+        0,
+        "flush must reconstruct the committed buffer before writer admission"
+    );
+}
+
+#[tokio::test]
+async fn journal_and_flush_prepare_pending_row_before_writer() {
+    for flush in [false, true] {
+        let (_directory, store) = running_store().await;
+        let streams = journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+        writer_preparation_work(&store).await;
+        if flush {
+            store::flush_streams(Arc::clone(&store), "default", Vec::new())
+                .await
+                .unwrap();
+        } else {
+            journal(&store, streams, vec![delta(2)]).await;
+        }
+        assert_eq!(
+            writer_preparation_work(&store).await.2,
+            0,
+            "preserve outbox metadata from the read snapshot without decoding the old payload on the writer; flush={flush}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn claim_reuses_checked_agent_before_writer() {
+    let state = State::new().await;
+    let id = state.agent.clone();
+    let epoch = state.epoch;
+    state
+        .bridge
+        .worker_run("claim-writer-witness", move |store| async move {
+            store
+                .transaction(|_| Ok(store::writer_preparation_tests::take_claim_decodes()))
+                .await?;
+            assert!(
+                store::claim(Arc::clone(&store), "default", &id, epoch)
+                    .await?
+                    .is_some()
+            );
+            let decodes = store
+                .transaction(|_| Ok(store::writer_preparation_tests::take_claim_decodes()))
+                .await?;
+            assert_eq!(
+                decodes, 0,
+                "the outer claim must reuse its checked agent after a keyed revision check"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn wait_for_writer_admission(store: &RuntimeStore, before: u64) {
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while store.writer_admissions() == before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("prepared read reaches writer admission");
+}
+
+#[tokio::test]
+async fn stale_claim_snapshot_retries_without_losing_eligible_input() {
+    let state = State::new().await;
+    let id = state.agent.clone();
+    let epoch = state.epoch;
+    state
+        .bridge
+        .worker_run("claim-retry-witness", move |store| async move {
+            let (entered, ready) = tokio::sync::oneshot::channel();
+            let (release, held) = std::sync::mpsc::channel();
+            let writer_store = Arc::clone(&store);
+            let writer_id = id.clone();
+            let writer = tokio::spawn(async move {
+                writer_store
+                    .transaction(move |tx| {
+                        entered.send(()).unwrap();
+                        held.recv_timeout(std::time::Duration::from_secs(30))
+                            .unwrap();
+                        let mut agent =
+                            AgentRepository::get(tx, &AgentId::from(writer_id.as_str()))?.unwrap();
+                        agent.name = Some("updated while claim was prepared".into());
+                        AgentRepository::put(tx, &agent)
+                    })
+                    .await
+            });
+            ready.await.unwrap();
+            let before = store.writer_admissions();
+            let claim_store = Arc::clone(&store);
+            let claim_id = id.clone();
+            let claim = tokio::spawn(async move {
+                store::claim(claim_store, "default", &claim_id, epoch).await
+            });
+            wait_for_writer_admission(&store, before).await;
+            release.send(()).unwrap();
+            writer.await.unwrap().unwrap();
+            assert!(
+                claim.await.unwrap()?.is_some(),
+                "a stale snapshot must not consume the wake as Nothing"
+            );
+            let agent =
+                AgentRepository::get(&store.test_reader()?, &AgentId::from(id.as_str()))?.unwrap();
+            assert_eq!(
+                agent.name.as_deref(),
+                Some("updated while claim was prepared")
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn repeated_stream_revision_changes_use_one_logged_fallback() {
+    for flush in [false, true] {
+        let (_directory, store) = running_store().await;
+        let streams = journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+        writer_preparation_work(&store).await;
+        let (first_entered, first_ready) = tokio::sync::oneshot::channel();
+        let (first_release, first_held) = std::sync::mpsc::channel();
+        let first_store = Arc::clone(&store);
+        let mut first_streams = streams.clone();
+        let first = tokio::spawn(async move {
+            first_store
+                .transaction_with(move |tx| {
+                    first_entered.send(()).unwrap();
+                    first_held
+                        .recv_timeout(std::time::Duration::from_secs(30))
+                        .unwrap();
+                    store::persist_streams(tx, "default", &mut first_streams)
+                })
+                .await
+        });
+        first_ready.await.unwrap();
+        let before = store.writer_admissions();
+        let work_store = Arc::clone(&store);
+        let work = tokio::spawn(async move {
+            if flush {
+                store::flush_streams(work_store, "default", Vec::new())
+                    .await
+                    .unwrap();
+            } else {
+                journal(
+                    &work_store,
+                    NotificationStreamBuffer::default(),
+                    vec![delta(2)],
+                )
+                .await;
+            }
+        });
+        wait_for_writer_admission(&store, before).await;
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let writer_store = Arc::clone(&store);
+        let mut streams = streams.clone();
+        let second = tokio::spawn(async move {
+            writer_store
+                .transaction_with(move |tx| {
+                    entered.send(()).unwrap();
+                    held.recv_timeout(std::time::Duration::from_secs(30))
+                        .unwrap();
+                    store::persist_streams(tx, "default", &mut streams)
+                })
+                .await
+        });
+        wait_for_writer_admission(&store, before + 1).await;
+        first_release.send(()).unwrap();
+        first.await.unwrap().unwrap();
+        ready.await.unwrap();
+        wait_for_writer_admission(&store, before + 2).await;
+        release.send(()).unwrap();
+        second.await.unwrap().unwrap();
+        work.await.unwrap();
+        assert_eq!(
+            store.writer_admissions() - before,
+            3,
+            "two worker admissions and one competitor; flush={flush}"
+        );
+        assert_eq!(
+            writer_preparation_work(&store).await.1,
+            1,
+            "the second conflict reconstructs streams under the writer exactly once"
+        );
+    }
+}
+
+#[tokio::test]
+async fn stream_revision_change_retries_before_journal_or_flush_writes() {
+    for flush in [false, true] {
+        let (_directory, store) = running_store().await;
+        let mut streams =
+            journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+        let (entered, ready) = tokio::sync::oneshot::channel();
+        let (release, held) = std::sync::mpsc::channel();
+        let writer_store = Arc::clone(&store);
+        let writer = tokio::spawn(async move {
+            writer_store
+                .transaction_with(move |tx| {
+                    entered.send(()).unwrap();
+                    held.recv_timeout(std::time::Duration::from_secs(30))
+                        .unwrap();
+                    // The pending text is unchanged, but recovery has committed a
+                    // newer revision before its cache handoff reaches the worker.
+                    store::persist_streams(tx, "default", &mut streams)
+                })
+                .await
+        });
+        ready.await.unwrap();
+        let before = store.writer_admissions();
+        let work_store = Arc::clone(&store);
+        let work = tokio::spawn(async move {
+            if flush {
+                store::flush_streams(work_store, "default", Vec::new())
+                    .await
+                    .unwrap();
+            } else {
+                journal(
+                    &work_store,
+                    NotificationStreamBuffer::default(),
+                    vec![delta(2)],
+                )
+                .await;
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while store.writer_admissions() == before {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("read snapshot reaches writer admission");
+        release.send(()).unwrap();
+        writer.await.unwrap().unwrap();
+        work.await.unwrap();
+        assert_eq!(
+            store.writer_admissions() - before,
+            2,
+            "one stale keyed check, then one fresh delta; flush={flush}"
+        );
+        let restored = store
+            .read_async("stream-retry-witness", |tx| {
+                store::load_streams(tx, "default")
+            })
+            .await
+            .unwrap();
+        assert_eq!(restored.pending_bytes(), if flush { 0 } else { 2 });
+    }
+}
+
 /// An unready receipt keeps the checkpoint below it while later
 /// notifications settle. Journal work per batch must not grow with that
 /// backlog, and the backlog must drain once the receipt is ready.
