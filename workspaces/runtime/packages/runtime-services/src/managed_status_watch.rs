@@ -20,7 +20,10 @@ use studio_runtime_schema::agent_limits::{
     MIN_GLOBAL_CONCURRENCY, MIN_SUBAGENT_CONCURRENCY,
 };
 use studio_runtime_schema::persistence::{OutboxKind, OutboxStatus, OwnerKind, RequestIdentity};
+use studio_runtime_schema::studio_errors::MonitorStatus;
+use studio_runtime_store::item_monitor_terminal::MonitorsRow;
 use studio_runtime_store::outbox::{Outbox, OutboxError, OutboxRow};
+use studio_runtime_store::peer_update_settings::{Canvas, canvas_read};
 use studio_runtime_store::request_results::RequestResultError;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, AgentStatus, MonitorRecord, RecordOrder,
@@ -1023,14 +1026,26 @@ pub async fn rules(
     };
     let (read_actor, read_request_id) = (actor_id.to_owned(), request_id.to_owned());
     let (read_signature, read_key) = (signature.clone(), key.clone());
-    let (prepared_actor, old_before, saved_receipt) = store
+    let (prepared_actor, old_before, saved_receipt, monitor_candidates) = store
         .read_async("runtime-services/managed_status_watch", move |connection| {
             let actor =
                 checked_actor(connection, &read_actor, actor_epoch).map_err(status_to_rules)?;
             let saved_receipt =
                 read_rules_request(connection, &read_actor, &read_request_id, &read_signature)?;
             let old = RulesRepository::get(connection, &read_key)?;
-            Ok::<_, RulesServiceError>((actor, old, saved_receipt))
+            let mut monitor_candidates = Vec::new();
+            if saved_receipt.is_none()
+                && matches!(
+                    action,
+                    Some(
+                        crate::rules::RuleActionName::Pause | crate::rules::RuleActionName::Delete
+                    )
+                )
+            {
+                monitor_candidates =
+                    prepare_rule_monitors(connection, &read_key, old.as_ref(), &actor)?;
+            }
+            Ok::<_, RulesServiceError>((actor, old, saved_receipt, monitor_candidates))
         })
         .await?;
     if let Some(saved_receipt) = saved_receipt {
@@ -1144,7 +1159,7 @@ pub async fn rules(
                 action,
                 crate::rules::RuleAction::Pause { .. } | crate::rules::RuleAction::Delete { .. }
             ) {
-                active_rule_monitors(tx, &key)?
+                current_rule_monitors(tx, &key, monitor_candidates)?
             } else {
                 Vec::new()
             };
@@ -1430,17 +1445,125 @@ fn save_rule(
     raw_rule_reply(&record)
 }
 
+// Search the generated status index before reading JSON; terminal history
+// cannot contribute to a cancellation. Ordering is applied to the result in Rust.
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=String,decode=MonitorsRow::ID,
+    tables(monitors=MonitorsRow),indexes(monitors=MonitorsRow::INDEX_RUNTIME_MONITOR_WINDOW_STATUS),
+    columns(id=MonitorsRow::ID,record=MonitorsRow::RECORD,status=MonitorsRow::MONITOR_STATUS),
+    sql="SELECT {id} FROM {monitors} WHERE {status} IN (?2,?3,?4) AND json_extract({record},'$.ruleId')=?1")]
+struct ActiveRuleMonitors<'a> {
+    #[db(column=MonitorsRow::ID)]
+    rule: &'a str,
+    #[db(column=MonitorsRow::MONITOR_STATUS)]
+    first: MonitorStatus,
+    #[db(column=MonitorsRow::MONITOR_STATUS)]
+    second: MonitorStatus,
+    #[db(column=MonitorsRow::MONITOR_STATUS)]
+    third: MonitorStatus,
+}
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=optional,result=String,decode=MonitorsRow::ID,
+    tables(monitors=MonitorsRow),
+    columns(id=MonitorsRow::ID,record=MonitorsRow::RECORD,status=MonitorsRow::MONITOR_STATUS),
+    sql="SELECT {id} FROM {monitors} WHERE {id}=?1 AND json_extract({record},'$.ruleId')=?2 AND {status} IN (?3,?4,?5)")]
+struct CurrentRuleMonitor<'a> {
+    #[db(column=MonitorsRow::ID)]
+    id: &'a str,
+    #[db(column=MonitorsRow::ID)]
+    rule: &'a str,
+    #[db(column=MonitorsRow::MONITOR_STATUS)]
+    first: MonitorStatus,
+    #[db(column=MonitorsRow::MONITOR_STATUS)]
+    second: MonitorStatus,
+    #[db(column=MonitorsRow::MONITOR_STATUS)]
+    third: MonitorStatus,
+}
+
+fn active_rule_statuses() -> Result<[MonitorStatus; 3], rusqlite::Error> {
+    let parse = |value| {
+        MonitorStatus::ALL
+            .iter()
+            .copied()
+            .find(|status| status.as_str() == value)
+            .ok_or(rusqlite::Error::InvalidQuery)
+    };
+    let statuses = studio_runtime_store::startup_recovery::ACTIVE_MONITOR_STATUSES;
+    Ok([
+        parse(statuses[0])?,
+        parse(statuses[1])?,
+        parse(statuses[2])?,
+    ])
+}
+
 fn active_rule_monitors(
     connection: &Connection,
     rule_id: &str,
 ) -> Result<Vec<String>, RulesServiceError> {
-    let mut statement = connection.prepare(
-        "SELECT id FROM runtime_monitors WHERE json_extract(record,'$.ruleId')=?1 \
-         AND json_extract(record,'$.status') IN ('running','starting','approval') ORDER BY id",
-    )?;
-    Ok(statement
-        .query_map([rule_id], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?)
+    let [first, second, third] = active_rule_statuses()?;
+    Ok(canvas_read(connection).collect(
+        &ActiveRuleMonitors::QUERY,
+        &ActiveRuleMonitors {
+            rule: rule_id,
+            first,
+            second,
+            third,
+        },
+    )?)
+}
+
+fn prepare_rule_monitors(
+    connection: &Connection,
+    rule_id: &str,
+    old: Option<&RuleRecord>,
+    actor: &AgentRecord,
+) -> Result<Vec<String>, RulesServiceError> {
+    let mut candidates = active_rule_monitors(connection, rule_id)?;
+    // Admission can persist the current check after this snapshot without
+    // changing the rule. Include its exact ID even when no row exists yet.
+    if let Some(rule) = old.filter(|rule| rule.in_flight) {
+        candidates.push(
+            crate::rules_engine::RuleSnapshot::from_stored(rule, actor.value())?
+                .check()
+                .monitor_id,
+        );
+    }
+    candidates.sort();
+    candidates.dedup();
+    Ok(candidates)
+}
+
+// The caller has compared the sampled rule and actor by primary key. Any new
+// check changes the rule and fails that comparison. Admission of the current
+// check uses its deterministic ID and rechecks launch_allowed in the same writer
+// transaction (monitor_port::persist_rule_monitor), so it is either included
+// here or refused after pause/delete. No scan is needed to close that race.
+fn current_rule_monitors(
+    connection: &Connection,
+    rule_id: &str,
+    candidates: Vec<String>,
+) -> Result<Vec<String>, RulesServiceError> {
+    let [first, second, third] = active_rule_statuses()?;
+    let mut active = Vec::new();
+    for id in candidates {
+        if canvas_read(connection)
+            .named(
+                &CurrentRuleMonitor::QUERY,
+                &CurrentRuleMonitor {
+                    id: &id,
+                    rule: rule_id,
+                    first,
+                    second,
+                    third,
+                },
+            )?
+            .is_some()
+        {
+            active.push(id);
+        }
+    }
+    Ok(active)
 }
 
 fn cwd(agent: &AgentRecord) -> Result<&str, RulesServiceError> {
@@ -1458,8 +1581,10 @@ mod tests {
     };
     use rusqlite::params;
     use studio_json::{Value, json};
+    use studio_runtime_schema::studio_errors::MonitorStatus;
     use studio_runtime_store::{
-        AgentRecord, AgentRepository, RulesRepository, RuntimeStore, StoreError,
+        AgentRecord, AgentRepository, MonitorRecord, RulesRepository, RuntimeStore, StoreError,
+        Table,
     };
     use tempfile::TempDir;
 
@@ -1721,6 +1846,193 @@ mod tests {
         .await
         .expect_err("file preparation fails first");
         assert!(matches!(error, RulesServiceError::FilePath));
+    }
+
+    fn put_rule_monitor(
+        tx: &rusqlite::Transaction<'_>,
+        id: &str,
+        rule: &str,
+        status: MonitorStatus,
+    ) -> Result<(), StoreError> {
+        let mut monitor = Table::<MonitorRecord>::new(tx)
+            .get(&"m-done".to_owned())?
+            .expect("fixture monitor");
+        monitor.id = id.to_owned();
+        monitor.rule_id = Some(rule.to_owned());
+        monitor.status = status;
+        Table::new(tx).put(&monitor)
+    }
+
+    #[tokio::test]
+    async fn rules_pause_writer_work_ignores_unrelated_monitors() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        };
+        let (_directory, store) = fixture().await;
+        rules(
+            &store,
+            ("lead", 3),
+            WatchAction::Save,
+            Some(&json!({"id":"bounded-rule","name":"watch"})),
+            &studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+            100.0,
+            &Files,
+        )
+        .await
+        .expect("save rule");
+        let mut measured = Vec::new();
+        for extra in [0, 1000] {
+            let steps = Arc::new(AtomicU64::new(0));
+            let counter = Arc::clone(&steps);
+            store
+                .transaction_with(move |tx| {
+                    for index in 0..extra {
+                        put_rule_monitor(
+                            tx,
+                            &format!("unrelated-{index}"),
+                            "another-rule",
+                            MonitorStatus::Running,
+                        )?;
+                    }
+                    tx.progress_handler(
+                        1,
+                        Some(move || {
+                            counter.fetch_add(1, Ordering::Relaxed);
+                            false
+                        }),
+                    )?;
+                    Ok::<_, StoreError>(())
+                })
+                .await
+                .expect("measure only writer VM work");
+            steps.store(0, Ordering::Relaxed);
+            let result = rules(
+                &store,
+                ("lead", 3),
+                WatchAction::Pause,
+                Some(&json!({"action":"pause","id":"bounded-rule"})),
+                &studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+                101.0,
+                &Files,
+            )
+            .await;
+            store
+                .transaction_with(|tx| {
+                    tx.progress_handler(0, None::<fn() -> bool>)?;
+                    Ok::<_, StoreError>(())
+                })
+                .await
+                .expect("remove writer counter");
+            result.expect("pause rule");
+            measured.push(steps.load(Ordering::Relaxed));
+        }
+        eprintln!("rule pause writer VM steps: {measured:?}");
+        assert!(
+            measured[1] <= measured[0] + 100,
+            "unrelated monitors must not add writer work: {measured:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rules_cancellation_snapshot_closes_current_admission_and_completion_races() {
+        let (_directory, store) = fixture().await;
+        rules(
+            &store,
+            ("lead", 3),
+            WatchAction::Save,
+            Some(&json!({"id":"race-rule","name":"watch","command":"true"})),
+            &studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+            100.0,
+            &Files,
+        )
+        .await
+        .expect("save rule");
+        store
+            .transaction_with(|tx| {
+                let mut rule = RulesRepository::get(tx, "race-rule")?.expect("rule");
+                rule.in_flight = true;
+                RulesRepository::put(tx, &rule)?;
+                put_rule_monitor(tx, "finishing", "race-rule", MonitorStatus::Running)?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .unwrap();
+        let (candidates, check) = store
+            .read_async("test/rule-cancellation-snapshot", |tx| {
+                let rule = RulesRepository::get(tx, "race-rule")?.unwrap();
+                let actor = AgentRepository::get(tx, &"lead".into())?.unwrap();
+                let check =
+                    crate::rules_engine::RuleSnapshot::from_stored(&rule, actor.value())?.check();
+                let candidates =
+                    super::prepare_rule_monitors(tx, "race-rule", Some(&rule), &actor)?;
+                Ok::<_, RulesServiceError>((candidates, check))
+            })
+            .await
+            .unwrap();
+        assert!(
+            candidates.contains(&check.monitor_id),
+            "include not-yet-admitted identity"
+        );
+        store
+            .transaction_with(move |tx| {
+                // Admission and completion occur between the snapshot and final keyed checks.
+                put_rule_monitor(tx, "finishing", "race-rule", MonitorStatus::Completed)?;
+                put_rule_monitor(tx, &check.monitor_id, "race-rule", MonitorStatus::Starting)?;
+                let active = super::current_rule_monitors(tx, "race-rule", candidates)?;
+                assert_eq!(active, [check.monitor_id]);
+                Ok::<_, RulesServiceError>(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn rules_cancellation_queries_search_indexes_without_sorting() {
+        let (_directory, store) = fixture().await;
+        store
+            .transaction_with(|tx| {
+                for index in 0..100 {
+                    put_rule_monitor(
+                        tx,
+                        &format!("terminal-{index}"),
+                        "rule",
+                        MonitorStatus::Completed,
+                    )?;
+                }
+                put_rule_monitor(tx, "active", "rule", MonitorStatus::Running)?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .unwrap();
+        let db = store.test_reader().unwrap();
+        thread_local! { static WORK: std::cell::Cell<(i32, i32)> = const { std::cell::Cell::new((0, 0)) }; }
+        db.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    WORK.with(|work| {
+                        let (scan, sort) = work.get();
+                        work.set((
+                            scan + statement.get_status(rusqlite::StatementStatus::FullscanStep),
+                            sort + statement.get_status(rusqlite::StatementStatus::Sort),
+                        ));
+                    });
+                }
+            }),
+        );
+        let candidates = super::active_rule_monitors(&db, "rule").unwrap();
+        assert_eq!(candidates, ["active"]);
+        assert_eq!(
+            super::current_rule_monitors(&db, "rule", candidates).unwrap(),
+            ["active"]
+        );
+        db.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+        assert_eq!(
+            WORK.with(|work| work.get()),
+            (0, 0),
+            "no full scan or temporary sort"
+        );
     }
 
     #[tokio::test]

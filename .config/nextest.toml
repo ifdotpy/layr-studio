@@ -81,6 +81,7 @@ inherits = "ci"
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-services) & kind(lib) & (test(limits_commit_decodes_only_its_account_and_preserves_projection) | test(deleted_command_query_tests::) | test(rule_success_query_uses_rule_index))) |
     (package(=studio-runtime-store) & test(system_receipt_writer_reads_do_not_probe_schema)) |
     (package(=studio-runtime-store) & (test(limit_agent_queries::tests::) | test(monitor_window_queries::tests::) | test(consolidated_f1_prefix_receives_writer_indexes_once) | test(writer_queries::tests::) | test(sync_policy_target_scheduler_join_preserves_raw_bytes_and_id_order))) |
@@ -701,6 +702,7 @@ platform = 'cfg(target_os = "linux")'
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
+    (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-services) & kind(lib) & (test(limits_commit_decodes_only_its_account_and_preserves_projection) | test(deleted_command_query_tests::) | test(rule_success_query_uses_rule_index))) |
     (package(=studio-runtime-store) & test(system_receipt_writer_reads_do_not_probe_schema)) |
     (package(=studio-runtime-store) & (test(limit_agent_queries::tests::) | test(monitor_window_queries::tests::) | test(consolidated_f1_prefix_receives_writer_indexes_once) | test(writer_queries::tests::) | test(sync_policy_target_scheduler_join_preserves_raw_bytes_and_id_order))) |
