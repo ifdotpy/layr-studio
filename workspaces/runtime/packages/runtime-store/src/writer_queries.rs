@@ -11,6 +11,18 @@ mod queries {
     use super::*;
 
     #[derive(studio_db_api::DbQuery)]
+    #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,String,String,i64,f64),
+        tables(events=crate::queue_schema::EventsRow,agents=AgentsStorageRow,chats=crate::agent_tables::ChatsStorageRow),
+        columns(id=AgentsStorageRow::ID,record=AgentsStorageRow::RECORD,deleted=AgentsStorageRow::DELETED_AT,
+            chat=crate::agent_tables::ChatsStorageRow::ID,status=crate::agent_tables::ChatsStorageRow::STATUS,
+            owner=crate::queue_schema::EventsRow::AGENT,event_status=crate::queue_schema::EventsRow::STATUS,
+            epoch=crate::queue_schema::EventsRow::EPOCH,created=crate::queue_schema::EventsRow::CREATED),
+        sql="SELECT a.{id},a.{record},c.{status},e.{epoch},e.{created} FROM {events} e
+            JOIN {agents} a ON a.{id}=e.{owner} JOIN {chats} c ON c.{chat}=a.{id}
+            WHERE e.{event_status}='pending' AND a.{deleted} IS NULL")]
+    pub struct SessionWaitCandidates;
+
+    #[derive(studio_db_api::DbQuery)]
     #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,String),
         tables(runs=ExecutionRunsRow,agents=AgentsStorageRow,sessions=SessionsStorageRow),indexes(runs=ExecutionRunsRow::INDEX_RUNTIME_EXECUTION_RUN_TERMINAL),
         columns(id=ExecutionRunsRow::ID,record=ExecutionRunsRow::RECORD,agent=ExecutionRunsRow::AGENT,turn=ExecutionRunsRow::TURN,account=ExecutionRunsRow::ACCOUNT,thread=ExecutionRunsRow::THREAD,created=ExecutionRunsRow::CREATED,
@@ -75,7 +87,41 @@ mod queries {
         pub rule: String,
     }
 }
-pub use queries::{DeletedCommandIds, LastRuleSuccess, TerminalRuns, ThreadAgentIds};
+pub use queries::{
+    DeletedCommandIds, LastRuleSuccess, SessionWaitCandidates, TerminalRuns, ThreadAgentIds,
+};
+
+/// The previous query is retained only as an equivalence oracle for liveness tests.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,String,String,Option<f64>),
+    tables(agents=AgentsStorageRow,chats=crate::agent_tables::ChatsStorageRow,events=crate::queue_schema::EventsRow),
+    columns(id=AgentsStorageRow::ID,record=AgentsStorageRow::RECORD,deleted=AgentsStorageRow::DELETED_AT,
+        chat=crate::agent_tables::ChatsStorageRow::ID,status=crate::agent_tables::ChatsStorageRow::STATUS,
+        owner=crate::queue_schema::EventsRow::AGENT,event_status=crate::queue_schema::EventsRow::STATUS,
+        epoch=crate::queue_schema::EventsRow::EPOCH,created=crate::queue_schema::EventsRow::CREATED),
+    sql="SELECT a.{id},COALESCE(json_extract(a.{record},'$.accountKey'),'default'),COALESCE(json_extract(a.{record},'$.name'),'Agent'),
+        (SELECT MIN(e.{created}) FROM {events} e WHERE e.{owner}=a.{id} AND e.{event_status}='pending' AND e.{epoch}=json_extract(a.{record},'$.epoch'))
+        FROM {agents} a WHERE a.{deleted} IS NULL AND (SELECT {status} FROM {chats} WHERE {chat}=a.{id}) IN ('queued','starting')
+        AND json_extract(a.{record},'$.startWait.reason')='provider_session'
+        AND json_extract(a.{record},'$.startWait.epoch')=json_extract(a.{record},'$.epoch') ORDER BY a.{id}")]
+pub struct LegacySessionWaitRows;
+
+/// Inject retained values that cannot pass current AgentRecord admission.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(agents=AgentsStorageRow),
+    columns(id=AgentsStorageRow::ID,record=AgentsStorageRow::RECORD),
+    sql="UPDATE {agents} SET {record}=CASE {id}
+        WHEN 'big-wait' THEN json_set({record},'$.epoch',9007199254740992,'$.startWait.epoch',9007199254740993)
+        WHEN 'big-event' THEN json_set({record},'$.epoch',9007199254740992,'$.startWait.epoch',9007199254740992)
+        WHEN 'whitespace' THEN json_set({record},'$.epoch',char(160)||'3','$.startWait.epoch',char(160)||'3')
+        WHEN 'ascii-leading' THEN json_set({record},'$.epoch',' 3','$.startWait.epoch',' 3')
+        WHEN 'ascii-trailing' THEN json_set({record},'$.epoch','3 ','$.startWait.epoch','3 ')
+        WHEN 'ascii-controls' THEN json_set({record},'$.epoch',char(9)||'3'||char(13),'$.startWait.epoch',char(9)||'3'||char(13))
+        WHEN 'metadata' THEN json_set({record},'$.epoch',3,'$.startWait.epoch',3,'$.accountKey',json_object('pool','x'),'$.name',json_array('waiting'))
+        END WHERE {id} IN ('big-wait','big-event','whitespace','ascii-leading','ascii-trailing','ascii-controls','metadata')")]
+pub struct SeedRetainedSessionWaitValues;
 
 #[cfg(test)]
 mod tests {

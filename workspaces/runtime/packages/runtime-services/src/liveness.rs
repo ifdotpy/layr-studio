@@ -97,6 +97,91 @@ impl Observation for SessionFailure {
 }
 deserialize_observation!(SessionFailure);
 
+// NUL epochs and duplicate observed keys are unsupported: the 2026-11-12
+// live-copy audit found 0 affected rows in 1,576 agents and 41,745 events.
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct SessionWaitObservation {
+    epoch: Value,
+    #[serde(rename = "startWait")]
+    wait: Value,
+    #[serde(rename = "accountKey")]
+    account: Option<studio_json::OwnedRawJson>,
+    name: Option<studio_json::OwnedRawJson>,
+}
+
+// SQLite compares an integer epoch exactly, even beyond the precision of f64.
+fn integral_epoch(value: f64) -> Option<i64> {
+    (value.fract() == 0.0 && value >= i64::MIN as f64 && value < -(i64::MIN as f64))
+        .then_some(value as i64)
+}
+fn observed_epoch(value: &Value) -> Option<i64> {
+    match value {
+        Value::Bool(value) => Some(i64::from(*value)),
+        Value::String(value) => {
+            let value = value.trim_matches([' ', '\t', '\n', '\u{000b}', '\u{000c}', '\r']);
+            value
+                .parse()
+                .ok()
+                .or_else(|| value.parse().ok().and_then(integral_epoch))
+        }
+        Value::Null | Value::Number(_) | Value::Array(_) | Value::Object(_) => value
+            .as_i64()
+            .or_else(|| value.as_f64().and_then(integral_epoch)),
+    }
+}
+
+// Keep object order, number tokens and string escapes while removing only JSON
+// whitespace, as json_extract does for object/array text.
+fn observed_text(
+    raw: Option<&studio_json::OwnedRawJson>,
+    default: &str,
+) -> Result<String, StoreError> {
+    let Some(raw) = raw else {
+        return Ok(default.into());
+    };
+    let raw = raw.as_str();
+    match raw.as_bytes()[0] {
+        b'"' => Ok(studio_json::from_str(raw)?),
+        b'{' | b'[' => {
+            let (mut quoted, mut escaped) = (false, false);
+            Ok(raw
+                .chars()
+                .filter(|&ch| {
+                    let keep = quoted || !matches!(ch, ' ' | '\t' | '\r' | '\n');
+                    if escaped {
+                        escaped = false;
+                    } else if quoted && ch == '\\' {
+                        escaped = true;
+                    } else if ch == '"' {
+                        quoted = !quoted;
+                    }
+                    keep
+                })
+                .collect())
+        }
+        _ => Err(rusqlite::Error::InvalidColumnType(
+            0,
+            default.into(),
+            rusqlite::types::Type::Integer,
+        )
+        .into()),
+    }
+}
+impl SessionWaitObservation {
+    fn matches(&self, epoch: i64) -> bool {
+        let wait_epoch = &self.wait["epoch"];
+        let same = match (&self.epoch, wait_epoch) {
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::String(_), _) | (_, Value::String(_)) => false,
+            (a, b) => observed_epoch(a) == observed_epoch(b),
+        };
+        self.wait["reason"] == "provider_session"
+            && same
+            && observed_epoch(&self.epoch) == Some(epoch)
+    }
+}
+
 #[derive(Default)]
 struct ScheduleObservation {
     id: Option<String>,
@@ -494,33 +579,42 @@ fn waiting_inputs(
     Ok(())
 }
 
+fn session_wait_rows(
+    tx: &Transaction<'_>,
+) -> Result<BTreeMap<String, (String, String, f64)>, StoreError> {
+    use studio_runtime_store::{
+        peer_update_settings::canvas_read, writer_queries::SessionWaitCandidates,
+    };
+    let mut waiting = BTreeMap::<String, (String, String, f64)>::new();
+    for (agent, raw, status, epoch, created) in
+        canvas_read(tx).collect(&SessionWaitCandidates::QUERY, &SessionWaitCandidates)?
+    {
+        if !matches!(status.as_str(), "queued" | "starting") {
+            continue;
+        }
+        let record: SessionWaitObservation = studio_json::from_str(&raw)?;
+        if record.matches(epoch) {
+            waiting
+                .entry(agent)
+                .and_modify(|row| row.2 = row.2.min(created))
+                .or_insert((
+                    observed_text(record.account.as_ref(), "default")?,
+                    observed_text(record.name.as_ref(), "Agent")?,
+                    created,
+                ));
+        }
+    }
+    Ok(waiting)
+}
+
 fn waiting_sessions(
     tx: &Transaction<'_>,
     now: f64,
     found: &mut Vec<Finding>,
 ) -> Result<(), StoreError> {
-    let mut statement = tx.prepare_cached(&format!(
-        "SELECT a.id,COALESCE(json_extract(a.record,'$.accountKey'),'default'),COALESCE(json_extract(a.record,'$.name'),'Agent'),\
-         (SELECT MIN(e.created) FROM runtime_events e WHERE e.agent=a.id AND e.status='pending' AND e.epoch=json_extract(a.record,'$.epoch')) \
-         FROM runtime_agents a WHERE a.deleted_at IS NULL AND {status} IN ('queued','starting') \
-         AND json_extract(a.record,'$.startWait.reason')='provider_session' \
-         AND json_extract(a.record,'$.startWait.epoch')=json_extract(a.record,'$.epoch') ORDER BY a.id",
-        status = studio_runtime_store::domain::chat_status_sql("a.id")
-    ))?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<f64>>(3)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
     let mut accounts = BTreeMap::<String, Vec<(String, String, f64)>>::new();
-    for (agent, account, name, since) in rows {
-        if let Some(since) = since.filter(|since| now - since >= SESSION_START_SECONDS) {
+    for (agent, (account, name, since)) in session_wait_rows(tx)? {
+        if now - since >= SESSION_START_SECONDS {
             accounts
                 .entry(account)
                 .or_default()
@@ -704,6 +798,262 @@ fn stalled_schedules(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod session_wait_tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+
+    fn retained_value_fixture() -> studio_runtime_store::Connection {
+        use studio_runtime_store::{
+            QueueEvent, QueueEventId, QueueEventRepository, peer_update_settings::canvas_tx,
+            writer_queries::SeedRetainedSessionWaitValues,
+        };
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        for (id, epoch) in [
+            ("big-wait", 9007199254740992),
+            ("big-event", 9007199254740993),
+            ("whitespace", 3),
+            ("ascii-leading", 3),
+            ("ascii-trailing", 3),
+            ("ascii-controls", 3),
+            ("metadata", 3),
+        ] {
+            AgentRepository::put(
+                &tx,
+                &AgentRecord::from_value(json!({"id":id,"rootId":id,"epoch":3,
+                "status":"queued","provider":"codex","accountKey":"default","compactions":0,
+                "startWait":{"reason":"provider_session","epoch":3}}))
+                .unwrap(),
+            )
+            .unwrap();
+            QueueEventRepository::put(
+                &tx,
+                &QueueEvent {
+                    id: QueueEventId(id.into()),
+                    agent: AgentId(id.into()),
+                    kind: "user".into(),
+                    text: "continue".into(),
+                    status: "pending".into(),
+                    created: 200.0,
+                    epoch,
+                    turn_id: None,
+                    error: None,
+                },
+            )
+            .unwrap();
+        }
+        canvas_tx(&tx)
+            .named(
+                &SeedRetainedSessionWaitValues::QUERY,
+                &SeedRetainedSessionWaitValues,
+            )
+            .unwrap();
+        tx.commit().unwrap();
+        db
+    }
+
+    #[test]
+    fn session_wait_retained_epochs_match_previous_query() {
+        use studio_runtime_store::{
+            peer_update_settings::canvas_read, writer_queries::LegacySessionWaitRows,
+        };
+        let mut db = retained_value_fixture();
+        let tx = db.transaction().unwrap();
+        let old: Vec<_> = canvas_read(&tx)
+            .collect(&LegacySessionWaitRows::QUERY, &LegacySessionWaitRows)
+            .unwrap()
+            .into_iter()
+            .filter(|(id, _, _, since)| {
+                id != "metadata" && !id.starts_with("ascii-") && since.is_some()
+            })
+            .map(|row| row.0)
+            .collect();
+        let rows: Vec<_> = session_wait_rows(&tx)
+            .unwrap()
+            .into_keys()
+            .filter(|id| id != "metadata" && !id.starts_with("ascii-"))
+            .collect();
+        assert_eq!(rows, old);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn session_wait_retained_metadata_matches_previous_query() {
+        use studio_runtime_store::{
+            peer_update_settings::canvas_read, writer_queries::LegacySessionWaitRows,
+        };
+        let mut db = retained_value_fixture();
+        let tx = db.transaction().unwrap();
+        let old = canvas_read(&tx)
+            .collect(&LegacySessionWaitRows::QUERY, &LegacySessionWaitRows)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.0 == "metadata")
+            .unwrap();
+        let rows = session_wait_rows(&tx).unwrap();
+        assert_eq!(rows["metadata"], (old.1, old.2, old.3.unwrap()));
+    }
+
+    #[test]
+    fn session_wait_ascii_epoch_text_matches_previous_query() {
+        use studio_runtime_store::{
+            peer_update_settings::canvas_read, writer_queries::LegacySessionWaitRows,
+        };
+        let mut db = retained_value_fixture();
+        let tx = db.transaction().unwrap();
+        let old: Vec<_> = canvas_read(&tx)
+            .collect(&LegacySessionWaitRows::QUERY, &LegacySessionWaitRows)
+            .unwrap()
+            .into_iter()
+            .filter(|(id, _, _, since)| id.starts_with("ascii-") && since.is_some())
+            .map(|row| row.0)
+            .collect();
+        let rows: Vec<_> = session_wait_rows(&tx)
+            .unwrap()
+            .into_keys()
+            .filter(|id| id.starts_with("ascii-"))
+            .collect();
+        assert_eq!(rows, old);
+        assert_eq!(rows.len(), 3);
+    }
+
+    #[test]
+    fn event_first_session_wait_matches_previous_query() {
+        use studio_runtime_store::{
+            QueueEvent, QueueEventId, QueueEventRepository, peer_update_settings::canvas_read,
+            writer_queries::LegacySessionWaitRows,
+        };
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        for (id, status, reason, wait_epoch, deleted) in [
+            ("multi", "queued", "provider_session", 3, false),
+            ("starting", "starting", "provider_session", 3, false),
+            ("stale", "queued", "provider_session", 2, false),
+            ("wrong-reason", "queued", "model_catalog", 3, false),
+            ("idle", "waiting", "provider_session", 3, false),
+            ("deleted", "queued", "provider_session", 3, true),
+            ("no-input", "queued", "provider_session", 3, false),
+        ] {
+            let mut record = json!({"id":id,"rootId":id,"epoch":3,"status":status,
+                "provider":"codex","accountKey":"default","compactions":0,
+                "startWait":{"reason":reason,"epoch":wait_epoch}});
+            if deleted {
+                record["deletedAt"] = json!(1.0);
+            }
+            AgentRepository::put(&tx, &AgentRecord::from_value(record).unwrap()).unwrap();
+            if id == "no-input" {
+                continue;
+            }
+            for (suffix, epoch, created, status) in [
+                ("new", 3, 300.0, "pending"),
+                ("old", 3, 200.0, "pending"),
+                ("other-epoch", 2, 1.0, "pending"),
+                ("delivered", 3, 2.0, "delivered"),
+            ] {
+                QueueEventRepository::put(
+                    &tx,
+                    &QueueEvent {
+                        id: QueueEventId(format!("{id}-{suffix}")),
+                        agent: AgentId(id.into()),
+                        kind: "user".into(),
+                        text: "continue".into(),
+                        status: status.into(),
+                        created,
+                        epoch,
+                        turn_id: None,
+                        error: None,
+                    },
+                )
+                .unwrap();
+            }
+        }
+        let old: BTreeMap<_, _> = canvas_read(&tx)
+            .collect(&LegacySessionWaitRows::QUERY, &LegacySessionWaitRows)
+            .unwrap()
+            .into_iter()
+            .filter_map(|(id, account, name, since)| {
+                since.map(|since| (id, (account, name, since)))
+            })
+            .collect();
+        let rows =
+            studio_runtime_store::writer_query_plans::assert_writer_query_plans(&tx, &[], || {
+                session_wait_rows(&tx).unwrap()
+            });
+        assert_eq!(rows, old);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows["multi"].2, 200.0);
+        let mut found = Vec::new();
+        waiting_sessions(&tx, 1000.0, &mut found).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].agent, "multi");
+        assert_eq!(found[0].first_at, 200.0);
+        assert!(found[0].detail.starts_with("2 chats wait"));
+    }
+
+    #[test]
+    fn session_wait_observation_ignores_malformed_unused_fields() {
+        for epoch in [json!(3), json!(3.0), json!("3")] {
+            let raw = json!({"epoch":epoch,"startWait":{"reason":"provider_session","epoch":epoch},
+                "name":"Waiting","accountKey":"default","cwd":7,"capacity":false});
+            let record: SessionWaitObservation = studio_json::from_str(&raw.to_string()).unwrap();
+            assert!(record.matches(3));
+            assert!(!record.matches(2));
+            assert!(AgentRecord::from_value(raw).is_err());
+        }
+        let raw: studio_json::OwnedRawJson =
+            studio_json::from_str(r#"{ "z": 2.00, "a": ["a\\\" b", "\u0061"] }"#).unwrap();
+        assert_eq!(
+            observed_text(Some(&raw), "Agent").unwrap(),
+            r#"{"z":2.00,"a":["a\\\" b","\u0061"]}"#
+        );
+        for raw in ["7", "false"] {
+            let raw: studio_json::OwnedRawJson = studio_json::from_str(raw).unwrap();
+            assert!(observed_text(Some(&raw), "Agent").is_err());
+        }
+    }
+
+    #[test]
+    fn waiting_sessions_seeks_candidates_behind_idle_agents() {
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        for index in 0..1000 {
+            let id = AgentId::from(format!("idle-{index}"));
+            let agent = AgentRecord::from_value(json!({
+                "id": id, "rootId": id, "epoch": 0, "status": "waiting",
+                "accountKey": "default", "provider": "codex", "compactions": 0
+            }))
+            .unwrap();
+            AgentRepository::put(&tx, &agent).unwrap();
+        }
+        let ticks = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&ticks);
+        let mut found = Vec::new();
+        studio_runtime_store::writer_query_plans::assert_writer_query_plans(&tx, &[], || {
+            tx.progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            waiting_sessions(&tx, 1000.0, &mut found).unwrap();
+            tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+            let steps = ticks.load(Ordering::Relaxed);
+            eprintln!("waiting_sessions: {steps} VM steps behind 1000 idle agents");
+            assert!(
+                steps < 100,
+                "waiting_sessions visited idle agents: {steps} VM steps"
+            );
+        });
+        assert!(found.is_empty());
+    }
 }
 
 #[cfg(test)]

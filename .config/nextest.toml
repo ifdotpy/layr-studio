@@ -81,6 +81,7 @@ inherits = "ci"
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
 # Anonymized live-shaped startup rows and bounded retained monitor recovery.
+# Session-wait witness bounds diagnostics work behind idle agent history.
 default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-http) & (test(snapshot_spooling_and_slow_consumer_release_read_transactions) | test(snapshot_pages_replay_updates_and_tombstones_from_watermark) | test(shutdown_discards_queued_snapshot_frames) | test(delta_pages_reject_pruned_unread_tombstone_before_watermark) | test(projected_pages_replay_main_row_updates_deletes_and_membership))) |
@@ -314,6 +315,7 @@ default-filter = '''
     (package(studio-native-client) & kind(lib) & test(/^profile::tests::/)) |
     (package(studio-runtime-http) & kind(lib) & test(/^routes::workspace_views::tests::/)) |
     (package(studio-runtime-services) & kind(lib) & test(/^shell_policy::receipt_tests::|parent_notifications_preserve_partial_work_and_replay_identity|notification_work_projection_keeps_legacy_shapes_and_duplicate_last_values|notification_reader_skips_rows_with_invalid_unused_json_values|malformed_work_json_remains_a_sql_query_error_without_writes/)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/^liveness::session_wait_tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^liveness::observation_tests::/)) |
     (package(studio-client-domain) & test(/^sync_entity::tests::/)) |
     (package(studio-client-core) & test(/^(file_save|uploads|store_move)::tests::|^server_transport::tests::pairing_|^views::flow_tests::|typed_voice_commands_validate_before_effects_and_preserve_ids/)) |
@@ -713,6 +715,7 @@ platform = 'cfg(target_os = "linux")'
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
+# Session-wait witness bounds diagnostics work behind idle agent history.
 default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-http) & (test(snapshot_spooling_and_slow_consumer_release_read_transactions) | test(snapshot_pages_replay_updates_and_tombstones_from_watermark) | test(shutdown_discards_queued_snapshot_frames) | test(delta_pages_reject_pruned_unread_tombstone_before_watermark) | test(projected_pages_replay_main_row_updates_deletes_and_membership))) |
@@ -946,6 +949,7 @@ default-filter = '''
     (package(studio-native-client) & kind(lib) & test(/^profile::tests::/)) |
     (package(studio-runtime-http) & kind(lib) & test(/^routes::workspace_views::tests::/)) |
     (package(studio-runtime-services) & kind(lib) & test(/^shell_policy::receipt_tests::|parent_notifications_preserve_partial_work_and_replay_identity|notification_work_projection_keeps_legacy_shapes_and_duplicate_last_values|notification_reader_skips_rows_with_invalid_unused_json_values|malformed_work_json_remains_a_sql_query_error_without_writes/)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/^liveness::session_wait_tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^liveness::observation_tests::/)) |
     (package(studio-client-domain) & test(/^sync_entity::tests::/)) |
     (package(studio-client-core) & test(/^(file_save|uploads|store_move)::tests::|^server_transport::tests::pairing_|^views::flow_tests::|typed_voice_commands_validate_before_effects_and_preserve_ids/)) |
