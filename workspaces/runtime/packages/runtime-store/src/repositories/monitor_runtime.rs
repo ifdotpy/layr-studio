@@ -4,6 +4,26 @@ use crate::{MonitorRecord, QueueEvent, StoreResult, Table};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use studio_runtime_schema::approvals::{Approval, ApprovalStateKind, Request, RequestKind};
 
+/// The existing scheduler clock advances on both owner-record and volatile writes.
+pub fn finish_owner_generation(connection: &Connection, id: &str) -> StoreResult<Option<i64>> {
+    let identity = crate::consolidation_codec::nullable_text_identity(&Some(id.to_owned()), 0);
+    Ok(crate::peer_update_settings::canvas_read(connection)
+        .get::<crate::change_schema::SchedulerAgentChanges>(&(identity,))?
+        .map(|row| row.generation))
+}
+
+/// Compare exact monitor source text by primary key without decoding on the writer.
+pub fn finish_monitor_matches(connection: &Connection, id: &str, raw: &str) -> StoreResult<bool> {
+    use crate::item_monitor_terminal::MonitorsRow;
+    let current = studio_db_api::db_query!(
+        crate::peer_update_settings::canvas_read(connection),
+        MonitorsRow,
+        scalar_raw(MonitorsRow::RECORD),
+        filter(MonitorsRow::ID.eq_ref(id))
+    )?;
+    Ok(current.as_deref() == Some(raw))
+}
+
 /// Pending approvals to start the monitor `monitor_id`.
 pub fn pending_approvals(connection: &Connection, monitor_id: &str) -> StoreResult<Vec<Approval>> {
     Ok(crate::approvals::of_kind(

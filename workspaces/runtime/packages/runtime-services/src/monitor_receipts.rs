@@ -138,6 +138,25 @@ pub async fn finish(store: &RuntimeStore, receipt: &ResultReceipt) -> Result<(),
 }
 
 async fn restore(store: &RuntimeStore, receipt: &ResultReceipt) -> Result<(), MonitorError> {
+    let source = receipt.clone();
+    let prepared = store
+        .read_async("runtime-services/monitor_finish", move |tx| {
+            crate::monitor_runtime::prepare_finish(tx, &source)
+        })
+        .await?;
+    let now = receipt.finished;
+    if store
+        .transaction_with(move |tx| crate::monitor_runtime::commit_finish(tx, &prepared, now))
+        .await?
+    {
+        return Ok(());
+    }
+    // Continuous owner output must not starve acknowledgement. The original
+    // serialized path uses the same durable first result and never dispatches.
+    crate::diagnostics::log_stderr(format_args!(
+        "monitor receipt finish source changed; using serialized fallback id={}",
+        receipt.key
+    ));
     let receipt = receipt.clone();
     store
         .transaction_with(move |tx| {
@@ -304,6 +323,269 @@ pub async fn recover_pending(store: &RuntimeStore, limit: usize) -> Result<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn finish_fixture() -> (tempfile::TempDir, RuntimeStore, ResultReceipt) {
+        use studio_runtime_store::{AgentRecord, AgentRepository, Table};
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store.transaction(|tx| {
+            let actor = AgentRecord::from_value(studio_json::json!({
+                "id":"owner", "rootId":"owner", "epoch":3, "status":"running",
+                "provider":"codex", "accountKey":"default", "compactions":0,
+                "autoWake":true, "tail":"output\n".repeat(2000)
+            }))?;
+            AgentRepository::put(tx, &actor)?;
+            let record = crate::monitor_policy::complete_test_monitor(studio_json::json!({
+                "id":"watch", "agent":"owner", "epoch":3, "status":"running",
+                "operation":{"agent":"owner","epoch":3,"accountKey":"default","connectionId":"connection"},
+                "tail":"command output\n".repeat(500)
+            }));
+            let monitor = serde::Deserialize::deserialize(record)?;
+            Table::<studio_runtime_store::MonitorRecord>::new(tx).put(&monitor)
+        }).await.unwrap();
+        let operation = store
+            .read_async("receipt-test/operation", |tx| {
+                Ok::<_, MonitorError>(
+                    studio_runtime_store::MonitorsRepository::get(tx, "watch")?
+                        .unwrap()
+                        .operation,
+                )
+            })
+            .await
+            .unwrap();
+        let receipt = ResultReceipt {
+            version: 1,
+            key: "watch".into(),
+            code: Some(0),
+            error: None,
+            operation,
+            finished: 2.0,
+        };
+        (root, store, receipt)
+    }
+
+    #[tokio::test]
+    async fn receipt_finish_prepares_owner_outside_writer_and_replays_once() {
+        let (root, store, receipt) = finish_fixture().await;
+        // Scopes are thread local: install on the serialized writer and return it
+        // there for teardown, leaving reader-pool preparation uncounted.
+        let scope = store
+            .transaction(|_| Ok(studio_runtime_store::agent_volatile::publication_work::scope()))
+            .await
+            .unwrap();
+        finish(&store, &receipt).await.unwrap();
+        // Recreate the durable first result as after a lost acknowledgement.
+        persist(root.path(), &receipt).unwrap();
+        assert!(recover(&store, &["watch".into()]).await.remove(0).1.is_ok());
+        let decodes = store
+            .transaction(move |tx| {
+                let decodes =
+                    studio_runtime_store::agent_volatile::publication_work::take_full_decodes();
+                drop(scope);
+                assert!(
+                    studio_runtime_store::monitor_runtime::exit_event(tx, "monitor:watch")?
+                        .is_some(),
+                    "retry retains the exact exit identity (a unique event primary key)"
+                );
+                Ok(decodes)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            decodes, 0,
+            "receipt preparation must not decode the full owner under the writer"
+        );
+    }
+
+    #[tokio::test]
+    async fn reattach_loss_prepares_owner_outside_writer() {
+        let (_root, store, _receipt) = finish_fixture().await;
+        assert!(
+            crate::monitor_runtime::reconcile_orphan(&store, "watch", 1.5)
+                .await
+                .unwrap()
+        );
+        let scope = store
+            .transaction(|_| Ok(studio_runtime_store::agent_volatile::publication_work::scope()))
+            .await
+            .unwrap();
+        crate::monitor_runtime::settle_reattach(&store, "watch", "process gone", 2.0)
+            .await
+            .unwrap();
+        crate::monitor_runtime::settle_reattach(&store, "watch", "process gone", 2.0)
+            .await
+            .unwrap();
+        let decodes = store
+            .transaction(move |tx| {
+                let decodes =
+                    studio_runtime_store::agent_volatile::publication_work::take_full_decodes();
+                drop(scope);
+                let monitor = studio_runtime_store::MonitorsRepository::get(tx, "watch")?.unwrap();
+                assert_eq!(monitor.status, crate::monitor_policy::MonitorStatus::Lost);
+                assert!(
+                    studio_runtime_store::monitor_runtime::exit_event(tx, "monitor:watch")?
+                        .is_some()
+                );
+                Ok(decodes)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            decodes, 0,
+            "reattach loss preparation must not decode the owner under the writer"
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_conflict_falls_back_once_without_repeating_effects_or_receipts() {
+        use crate::monitor_runtime::{FINISH_CONFLICT_CHECKS, reconcile_orphan, settle_reattach};
+        for reattach in [false, true] {
+            let (root, store, receipt) = finish_fixture().await;
+            if reattach {
+                assert!(reconcile_orphan(&store, "watch", 1.5).await.unwrap());
+            }
+            store
+                .transaction(|_| {
+                    FINISH_CONFLICT_CHECKS.set(Some(0));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let admissions = store.writer_admissions();
+            if reattach {
+                settle_reattach(&store, "watch", "process gone", 2.0)
+                    .await
+                    .unwrap();
+            } else {
+                finish(&store, &receipt).await.unwrap();
+                assert!(
+                    !path(root.path(), "watch").exists(),
+                    "acknowledged after fallback"
+                );
+            }
+            assert_eq!(
+                store.writer_admissions() - admissions,
+                2,
+                "one conflict plus one fallback"
+            );
+            store
+                .transaction(|tx| {
+                    assert_eq!(FINISH_CONFLICT_CHECKS.replace(None), Some(1));
+                    assert!(
+                        studio_runtime_store::monitor_runtime::exit_event(tx, "monitor:watch")?
+                            .is_some()
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let generation = store.committed_change_generation();
+            if reattach {
+                settle_reattach(&store, "watch", "process gone", 2.0)
+                    .await
+                    .unwrap();
+            } else {
+                // Crash after commit but before acknowledgement: restore the
+                // same first-result file and exercise the recovery caller.
+                persist(root.path(), &receipt).unwrap();
+                assert_eq!(recover_pending(&store, 64).await.unwrap(), 1);
+                assert_eq!(recover_pending(&store, 64).await.unwrap(), 0);
+                assert!(!path(root.path(), "watch").exists());
+            }
+            assert_eq!(
+                store.committed_change_generation(),
+                generation,
+                "retry repeats no durable effects"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn receipt_finish_rechecks_monitor_and_owner_before_writing() {
+        use crate::monitor_runtime::{commit_finish, prepare_finish};
+        use studio_runtime_store::{AgentId, AgentRepository, MonitorsRepository, Table};
+        for changed in ["output", "epoch", "volatile", "operation"] {
+            let (root, store, receipt) = finish_fixture().await;
+            let source = receipt.clone();
+            let prepared = store
+                .read_async("receipt-test/prepare", move |tx| {
+                    prepare_finish(tx, &source)
+                })
+                .await
+                .unwrap();
+            store
+                .transaction(move |tx| {
+                    if changed == "epoch" {
+                        let mut actor = AgentRepository::get(tx, &AgentId::from("owner"))?.unwrap();
+                        actor.epoch += 1;
+                        AgentRepository::put(tx, &actor)?;
+                    } else if changed == "volatile" {
+                        let id = AgentId::from("owner");
+                        let mut actor = AgentRepository::get(tx, &id)?.unwrap();
+                        actor.tail = Some("concurrent owner output".into());
+                        AgentRepository::put(tx, &actor)?;
+                    } else {
+                        let mut monitor = MonitorsRepository::get(tx, "watch")?.unwrap();
+                        if changed == "output" {
+                            monitor.tail =
+                                "concurrent command output".to_owned().try_into().unwrap();
+                        } else {
+                            monitor.operation.as_mut().unwrap().connection_id =
+                                "replacement".to_owned().try_into().unwrap();
+                        }
+                        Table::new(tx).put(&monitor)?;
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            store
+                .transaction_with(move |tx| {
+                    let before = tx.total_changes();
+                    assert!(
+                        !commit_finish(tx, &prepared, receipt.finished)?,
+                        "{changed} must invalidate preparation"
+                    );
+                    assert_eq!(
+                        before,
+                        tx.total_changes(),
+                        "stale preparation writes nothing"
+                    );
+                    Ok::<_, MonitorError>(())
+                })
+                .await
+                .unwrap();
+            // Re-preparation consumes the same receipt, preserving concurrent
+            // output and rejecting a result for a replacement operation.
+            let result = finish(&store, &receipt).await;
+            if changed == "operation" {
+                assert!(result.is_err());
+                assert!(
+                    path(root.path(), "watch").exists(),
+                    "foreign receipt remains durable"
+                );
+            } else {
+                result.unwrap();
+                store
+                    .read_async("receipt-test/final", move |tx| {
+                        let monitor = MonitorsRepository::get(tx, "watch")?.unwrap();
+                        if changed == "output" {
+                            assert_eq!(monitor.tail.as_str(), "concurrent command output");
+                        }
+                        let actor = AgentRepository::get(tx, &AgentId::from("owner"))?.unwrap();
+                        if changed == "epoch" {
+                            assert_eq!(actor.epoch, 4);
+                        }
+                        if changed == "volatile" {
+                            assert_eq!(actor.tail.as_deref(), Some("concurrent owner output"));
+                        }
+                        Ok::<_, MonitorError>(())
+                    })
+                    .await
+                    .unwrap();
+            }
+        }
+    }
 
     #[test]
     fn receipt_iteration_skips_invalid_files_and_keeps_a_cursor() {

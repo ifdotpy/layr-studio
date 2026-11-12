@@ -624,6 +624,104 @@ pub fn finish_in_transaction(
     apply(tx, &snapshot, &actor, &decision, now)
 }
 
+/// Receipt preparation owns full row decoding, output matching and validation.
+/// Only these two source identities must still match when its delta commits.
+pub(crate) struct PreparedFinish {
+    before: MonitorSnapshot,
+    actor: AgentRecord,
+    decision: Decision,
+    after: MonitorSnapshot,
+    raw_monitor: String,
+    owner_generation: Option<i64>,
+}
+
+pub(crate) fn prepare_finish(
+    tx: &Transaction<'_>,
+    receipt: &crate::monitor_receipts::ResultReceipt,
+) -> Result<PreparedFinish, MonitorError> {
+    prepare_finish_decision(tx, &receipt.key, |before| {
+        policy::finish(
+            before,
+            receipt.operation.as_ref(),
+            receipt.code,
+            receipt.error.as_deref(),
+            receipt.finished,
+        )
+    })
+}
+
+fn prepare_finish_decision(
+    tx: &Transaction<'_>,
+    id: &str,
+    decide: impl FnOnce(&MonitorSnapshot) -> Result<Decision, MonitorError>,
+) -> Result<PreparedFinish, MonitorError> {
+    let (record, raw_monitor) = Table::<studio_runtime_store::MonitorRecord>::new(tx)
+        .get_with_raw(&id.to_owned())?
+        .ok_or(MonitorError::Refused("Unknown command watch"))?;
+    let actor = AgentRepository::get(tx, &AgentId::from(record.agent()))?
+        .ok_or(MonitorError::Refused("Unknown agent"))?;
+    let owner_generation = repository::finish_owner_generation(tx, &actor.id.0)?;
+    let before = MonitorSnapshot::checked_agent(record, &actor)?;
+    let decision = decide(&before)?;
+    refuse_unavailable(&decision)?;
+    let after = MonitorSnapshot::checked_agent(decision.record.clone(), &actor)?;
+    Ok(PreparedFinish {
+        before,
+        actor,
+        decision,
+        after,
+        raw_monitor,
+        owner_generation,
+    })
+}
+
+/// False means a concurrent write invalidated preparation; use the original
+/// serialized path once. Both checks are keyed. The owner clock includes volatile updates,
+/// so even a provider output update cannot be overwritten by an old actor.
+pub(crate) fn commit_finish(
+    tx: &Transaction<'_>,
+    prepared: &PreparedFinish,
+    now: f64,
+) -> Result<bool, MonitorError> {
+    #[cfg(test)]
+    FINISH_CONFLICT_CHECKS.with(|checks| -> Result<(), MonitorError> {
+        if let Some(count) = checks.get() {
+            assert_eq!(count, 0, "a conflict must fall back, not prepare again");
+            checks.set(Some(count + 1));
+            let mut actor = AgentRepository::get(tx, &prepared.actor.id)?.unwrap();
+            actor.tail = Some("concurrent output before the finish fence".into());
+            AgentRepository::put(tx, &actor)?;
+        }
+        Ok(())
+    })?;
+    if MonitorsRepository::is_held(tx, prepared.before.id())? {
+        return Err(MonitorError::Refused(
+            "Monitor is held; result receipt retained",
+        ));
+    }
+    if !repository::finish_monitor_matches(tx, prepared.before.id(), &prepared.raw_monitor)?
+        || repository::finish_owner_generation(tx, &prepared.actor.id.0)?
+            != prepared.owner_generation
+    {
+        return Ok(false);
+    }
+    apply_prepared(
+        tx,
+        &prepared.before,
+        &prepared.actor,
+        &prepared.decision,
+        &prepared.after,
+        now,
+        &crate::rules_tick::MonitorRuleFinish,
+    )?;
+    Ok(true)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static FINISH_CONFLICT_CHECKS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
 /// Preserve essential command completion before its provider obligation retires.
 /// The existing stream queue keeps this exit behind already committed output.
 /// False holds a relevant call whose exact completion proof is unavailable.
@@ -893,6 +991,18 @@ pub fn apply_with_rule(
         &decision.record,
         studio_json::to_value(actor).map_err(studio_runtime_store::StoreError::from)?,
     )?;
+    apply_prepared(tx, before, actor, decision, &after, now, rules)
+}
+
+fn apply_prepared(
+    tx: &Transaction<'_>,
+    before: &MonitorSnapshot,
+    actor: &AgentRecord,
+    decision: &Decision,
+    after: &MonitorSnapshot,
+    now: f64,
+    rules: &impl RuleFinish,
+) -> Result<(), MonitorError> {
     for effect in &decision.effects {
         match effect {
             Effect::OutputEvent { id, payload } => {
@@ -945,7 +1055,7 @@ pub fn apply_with_rule(
         } else {
             crate::agent_progress::publish_owner(tx, &actor.id.0)?;
         }
-        crate::sync_policy::publish_monitor_change(tx, Some(before), &after)?;
+        crate::sync_policy::publish_monitor_change(tx, Some(before), after)?;
     }
     Ok(())
 }
@@ -1441,8 +1551,26 @@ pub async fn settle_reattach(
     reason: &str,
     now: f64,
 ) -> Result<(), MonitorError> {
-    let id = id.to_owned();
     let reason: String = reason.chars().take(12000).collect();
+    let source_id = id.to_owned();
+    let source_reason = reason.clone();
+    let prepared = store
+        .read_async("runtime-services/monitor_reattach_loss", move |tx| {
+            prepare_finish_decision(tx, &source_id, |before| {
+                policy::restart_lost(before, &source_reason, now)
+            })
+        })
+        .await?;
+    if store
+        .transaction_with(move |tx| commit_finish(tx, &prepared, now))
+        .await?
+    {
+        return Ok(());
+    }
+    crate::diagnostics::log_stderr(format_args!(
+        "monitor reattach finish source changed; using serialized fallback id={id}"
+    ));
+    let id = id.to_owned();
     store
         .transaction_with(move |tx| {
             let (snapshot, actor) = snapshot(tx, &id)?;
