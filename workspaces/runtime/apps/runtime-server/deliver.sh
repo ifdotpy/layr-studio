@@ -243,7 +243,9 @@ if [ ! -x "$release/$binary" ]; then
   staging=$release.partial
   rm -rf "$staging"
   mkdir -p "$staging/bin"
-  git -C "$repository" archive "$commit" | tar -x -C "$staging"
+  # git archive stamps files with the commit time; -m gives them the extraction
+  # time so the shared target never treats an older commit's sources as fresh.
+  git -C "$repository" archive "$commit" | tar -x -m -C "$staging"
   pnpm --dir "$staging" install --frozen-lockfile \
     --filter codex-agents-web... --filter studio-claude-bridge...
   pnpm --dir "$staging" --filter codex-agents-web run build

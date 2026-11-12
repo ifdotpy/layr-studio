@@ -478,6 +478,16 @@ test("only one retained Claude steer failure can be admitted without changing it
   );
 });
 
+test("Linux release sources get fresh mtimes so the shared target rebuilds them", () => {
+  // git archive stamps files with the commit time; an older commit than the
+  // last release build would otherwise reuse stale crate artifacts.
+  const script = fs.readFileSync(
+    path.join(repository, "workspaces/runtime/apps/runtime-server/deliver.sh"),
+    "utf8",
+  );
+  assert.match(script, /git -C "\$repository" archive "\$commit" \| tar -x -m -C "\$staging"/);
+});
+
 test("Linux keeps its existing delivery owner and exact commit argument", () => {
   const plan = deliveryPlan({
     platform: "linux",
