@@ -265,6 +265,17 @@ fn seed_python_lazy_markers(staging: &Path) -> StoreResult<()> {
     Ok(())
 }
 
+/// Build an already-consolidated fixture before selected owner indexes existed.
+#[cfg(test)]
+pub(crate) fn canvas_before_indexes(path: &Path, excluded: &[&str]) -> StoreResult<Connection> {
+    let mut snapshot: Value = studio_json::from_str(SNAPSHOT)?;
+    snapshot["canvas.sqlite3"]["sqlite_master"]
+        .as_array_mut()
+        .expect("generated Canvas catalog entries")
+        .retain(|entry| !excluded.contains(&entry["name"].as_str().expect("catalog object name")));
+    create_database(path, &snapshot, "canvas.sqlite3")
+}
+
 fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreResult<Connection> {
     let mut connection = Connection::open(path)?;
     crate::sqlite_durability::configure_writer(&connection)?;

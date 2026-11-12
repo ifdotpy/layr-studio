@@ -869,6 +869,7 @@ mod tests {
                     .unwrap();
             typed
                 .upsert(&AgentsStorageRow {
+                    account_key: String::new(),
                     id: "worker".into(),
                     root_id: None,
                     deleted_at: None,
@@ -1003,6 +1004,7 @@ mod tests {
                     .unwrap();
             typed
                 .upsert(&AgentsStorageRow {
+                    account_key: String::new(),
                     id: "worker".into(),
                     root_id: None,
                     deleted_at: None,

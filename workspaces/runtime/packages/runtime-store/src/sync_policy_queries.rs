@@ -72,11 +72,11 @@ struct PublishedTeamCounts<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,result=ChangedAgent,projection=ChangedAgent,
-    tables(agents=AgentsStorageRow,changes=Changes),
+    tables(agents=AgentsStorageRow,changes=Changes),indexes(changes=Changes::INDEX_CHANGES_SCHEDULER_GENERATION),predicates(scheduler=changes),
     columns(rowid=AgentsStorageRow::ROWID,id=AgentsStorageRow::ID,record=AgentsStorageRow::RECORD,
         kind=Changes::KIND,key=Changes::ORIGINAL_KEY,generation=Changes::GENERATION),
-    sql="SELECT a.{rowid},a.{id},a.{record} FROM {agents} a JOIN {changes} c
-        ON c.{key}=a.{id} WHERE c.{kind}=?1 AND c.{generation}>?2 ORDER BY a.{id}")]
+    sql="SELECT a.{rowid},a.{id},a.{record} FROM {agents} a WHERE a.{id} IN
+        (SELECT {key} FROM {changes} WHERE {scheduler} AND {kind}=?1 AND {generation}>?2)")]
 struct AgentsChangedSince {
     #[db(column=Changes::KIND)]
     kind: ChangeKind,
@@ -292,18 +292,22 @@ impl SyncPolicyQueries {
         connection: &studio_db_api::CodecContext,
         generation: i64,
     ) -> rusqlite::Result<Vec<(i64, String, String)>> {
-        Ok(canvas_read(connection)
-            .collect(
-                &AgentsChangedSince::QUERY,
-                &AgentsChangedSince {
-                    kind: ChangeKind::SchedulerAgentChanges,
-                    generation: Some(generation),
-                },
-            )?
+        let mut rows = canvas_read(connection).collect(
+            &AgentsChangedSince::QUERY,
+            &AgentsChangedSince {
+                kind: ChangeKind::SchedulerAgentChanges,
+                generation: Some(generation),
+            },
+        )?;
+        // Only changed rows participate in ordering; never visit every agent
+        // merely to emit an empty lifecycle publication batch.
+        rows.sort_unstable_by(|left, right| left.id.cmp(&right.id));
+        Ok(rows
             .into_iter()
             .map(|row| (row.rowid, row.id, row.record))
             .collect())
     }
+
     pub fn mark_agent_projection(
         transaction: &studio_db_api::rusqlite::Transaction<'_>,
         id: &str,
@@ -711,6 +715,28 @@ mod tests {
 
     #[test]
     fn sync_policy_target_scheduler_join_preserves_raw_bytes_and_id_order() {
+        let plan_db = crate::fresh_state::test_canvas();
+        let params = AgentsChangedSince {
+            kind: ChangeKind::SchedulerAgentChanges,
+            generation: Some(0),
+        };
+        let plan = crate::query_plan_test_support::explain(
+            &plan_db,
+            AgentsChangedSince::QUERY.sql(),
+            &params,
+        )
+        .unwrap();
+        assert!(
+            plan.iter()
+                .all(|step| !step.contains("SCAN ") && !step.contains("TEMP B-TREE")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("changes_scheduler_generation")),
+            "{plan:?}"
+        );
+
         use crate::change_schema::SchedulerAgentChanges;
         let mut db = database();
         crate::agent_tables::AgentsStorageRow::descriptor()

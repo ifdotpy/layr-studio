@@ -84,6 +84,10 @@ pub struct NativeNoticesRow {
 #[derive(DbTable)]
 #[db(table = "runtime_execution_runs", database = Canvas, legacy_ddl = "CREATE TABLE runtime_execution_runs (id TEXT PRIMARY KEY, agent TEXT NOT NULL, account TEXT NOT NULL, epoch INTEGER NOT NULL, thread TEXT, turn TEXT, created REAL NOT NULL, record TEXT NOT NULL, status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.status' END) VIRTUAL CHECK(\"status\" IN ('unsent','pending','accepted','observed','running','unknown','rejected','completed','failed','interrupted','cancelled')))")]
 #[db(state_check = check_runtime_execution_runs)]
+#[db(index(
+    name = "runtime_execution_run_terminal",
+    columns(agent, turn, created, id)
+))]
 #[db(
     legacy_index = "CREATE INDEX runtime_execution_run_agent ON runtime_execution_runs(agent,created DESC)"
 )]

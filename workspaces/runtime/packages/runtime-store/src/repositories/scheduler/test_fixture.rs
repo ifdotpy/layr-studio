@@ -29,6 +29,11 @@ pub(super) fn database() -> Connection {
     connection
         .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
         .expect("volatile agent table creates");
+    crate::queue_schema::install_index::<crate::queue_schema::ExecutionRunsRow>(
+        &connection,
+        "runtime_execution_run_terminal",
+    )
+    .expect("terminal lookup index");
     crate::test_fixtures::canvas::install_canonical(&connection)
         .expect("canonical scheduler storage");
     AgentRepository::put(

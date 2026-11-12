@@ -858,19 +858,20 @@ impl SchedulerRepository {
         thread_id: &str,
         turn_id: Option<&str>,
     ) -> StoreResult<(bool, Option<ThreadAttempt>)> {
-        let mut statement = connection.prepare_cached(
-            "SELECT id,record FROM runtime_agents \
-             WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 AND (?3 IS NULL OR id=?3) ORDER BY rowid LIMIT 2",
+        // Identity discovery needs no record payload or insertion order. More
+        // than one matching ID is ambiguous regardless of which two are returned.
+        let rows = crate::peer_update_settings::canvas_read(connection).collect(
+            &crate::writer_queries::ThreadAgentIds::QUERY,
+            &crate::writer_queries::ThreadAgentIds {
+                thread: thread_id.into(),
+                account: account_key.into(),
+                actor: actor.map(AgentId::from),
+            },
         )?;
-        let rows = statement
-            .query_map(params![thread_id, account_key, actor], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        let [(id, record)] = rows.as_slice() else {
+        let [id] = rows.as_slice() else {
             return Ok((!rows.is_empty(), None));
         };
-        let agent = decode_agent(connection, id, record)?;
+        let agent = load_agent(connection, id)?.ok_or_else(|| invalid_agent(id))?;
         let Some(attempt) = stored_attempt(&agent) else {
             return Ok((true, None));
         };

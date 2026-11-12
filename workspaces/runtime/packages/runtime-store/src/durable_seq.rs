@@ -905,6 +905,7 @@ mod tests {
         );
         canvas_tx(tx)
             .upsert(&crate::agent_tables::AgentsStorageRow {
+                account_key: String::new(),
                 id: id.into(),
                 root_id: None,
                 deleted_at: None,

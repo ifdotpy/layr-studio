@@ -1764,6 +1764,7 @@ mod tests {
                 }
                 canvas_tx(&tx)
                     .insert(&AgentsStorageRow {
+                        account_key: String::new(),
                         id: (*id).into(),
                         root_id: None,
                         deleted_at: None,

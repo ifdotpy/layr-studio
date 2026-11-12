@@ -131,7 +131,11 @@ async fn account_limits_do_not_decode_agent_records() {
 #[tokio::test]
 async fn narrow_agent_reads_validate_consumed_fields() {
     let (_dir, store) = store().await;
-    seed_chat(&store, chat(json!({}))).await;
+    seed_chat(
+        &store,
+        chat(json!({"error":{"codexErrorInfo":"usageLimitExceeded"}})),
+    )
+    .await;
     let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
     let tx = db.transaction().unwrap();
     let page = || {
@@ -825,8 +829,19 @@ async fn agent_projections_decode_accounts_once_with_identical_output() {
 #[tokio::test]
 async fn agent_projections_repair_unreadable_accounts_once_per_batch() {
     let (_dir, store) = store().await;
-    seed_chat(&store, chat(json!({}))).await;
-    seed_chat(&store, chat(json!({"id":"second","rootId":"second"}))).await;
+    seed_chat(
+        &store,
+        chat(json!({"error":{"codexErrorInfo":"usageLimitExceeded"}})),
+    )
+    .await;
+    seed_chat(
+        &store,
+        chat(
+            json!({"id":"second","rootId":"second","error":{"codexErrorInfo":"rateLimitExceeded"}}),
+        ),
+    )
+    .await;
+    seed_chat(&store, chat(json!({"id":"idle","rootId":"idle"}))).await;
     store.transaction_with(|tx| {
         tx.execute_batch(&format!("CREATE TEMP TABLE repairs(id TEXT); CREATE TEMP TRIGGER count_repairs AFTER DELETE ON main.publications WHEN OLD.kind={kind} AND OLD.collection_order='rateLimit' BEGIN INSERT INTO repairs VALUES(OLD.entity_id); END;", kind=studio_runtime_store::consolidation_kinds::CanvasPublicationsKind::DB_CODE_SYNCENTITIES))?;
         let sequences = || -> Result<Vec<(String, i64)>, StoreError> {
@@ -862,6 +877,7 @@ async fn agent_projections_repair_unreadable_accounts_once_per_batch() {
         let (value, unreadable) = studio_runtime_store::account_state::normalized_limits_view("default", payload.as_bytes(), 0.0);
         assert!(!unreadable);
         assert_eq!(value.projection.agents.len(), 2);
+        assert!(!value.projection.agents.contains_key("idle"));
         assert_eq!(sequences()?, expected, "repair keeps individual publication sequence numbers, SQL NULL: {null_payload}");
         tx.execute("DELETE FROM repairs", [])?;
         }

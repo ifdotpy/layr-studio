@@ -126,6 +126,10 @@ pub struct ItemFulltextRow {
 #[db(
     legacy_index = "CREATE INDEX runtime_monitor_rule_success ON runtime_monitors(json_extract(record,'$.ruleId'),json_extract(record,'$.created')) WHERE json_extract(record,'$.status')='completed'"
 )]
+#[db(index(
+    name = "runtime_monitor_window_status",
+    columns(monitor_status, monitor_created)
+))]
 pub struct MonitorsRow {
     #[db(key)]
     pub id: String,
@@ -145,6 +149,10 @@ pub struct MonitorsRow {
     #[db(generated)]
     pub agent: Option<String>,
 }
+impl MonitorsRow {
+    pub const ROWID: studio_db_api::Rowid<Self> = studio_db_api::Rowid::<Self>::COLUMN;
+}
+
 fn check_runtime_monitors(row: &MonitorsRow) -> crate::StoreResult<()> {
     row.record.check_key(&row.id)
 }
@@ -407,6 +415,7 @@ mod tests {
                     "runtime_monitor_idle_account",
                     "runtime_monitor_idle_agent",
                     "runtime_monitor_rule_success",
+                    "runtime_monitor_window_status",
                 ][..],
             ),
             (

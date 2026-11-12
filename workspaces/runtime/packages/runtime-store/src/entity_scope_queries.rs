@@ -613,6 +613,7 @@ mod tests {
         let row: crate::AgentRecord = studio_json::from_str(&raw).unwrap();
         canvas_tx(tx)
             .upsert(&AgentsStorageRow {
+                account_key: String::new(),
                 id: id.into(),
                 root_id: None,
                 deleted_at: None,

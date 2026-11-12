@@ -11,6 +11,7 @@ mod m2026_11_11_retired_agent_keys;
 mod m2026_11_11_strict_native_review;
 mod m2026_11_11_writer_query_indexes;
 mod m2026_11_11_writer_receipt_indexes;
+mod m2026_11_12_writer_window_indexes;
 
 use crate::{StoreError, StoreResult};
 use baseline_manifest::RETIRED;
@@ -173,7 +174,7 @@ static CATALOG: &[SqlMigration] = &[
 #[cfg(test)]
 pub(crate) use m2026_11_11_writer_receipt_indexes::install as install_writer_receipt_indexes;
 
-pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
+fn catalog_through_f1() -> impl Iterator<Item = MigrationDefinition> {
     CATALOG
         .iter()
         .map(SqlMigration::definition)
@@ -181,6 +182,25 @@ pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
             m2026_11_11_remove_account_throttle::REGISTRY_DEFINITION,
         ))
         .chain(std::iter::once(m2026_11_11_consolidate_f1::DEFINITION))
+}
+
+// Append new serving migrations here; the released F1 prefix remains frozen.
+static POST_F1_CATALOG: &[SqlMigration] = &[SqlMigration {
+    definition: MigrationDefinition {
+        id: "2026-11-12-writer-window-indexes",
+        introduced: MigrationDate {
+            year: 2026,
+            month: 11,
+            day: 12,
+        },
+        target: MigrationTarget::Canvas,
+        supported_source: "Consolidated F1 databases without bounded writer window indexes",
+        remove_when: "Supported installations and backups all contain these writer indexes",
+    },
+    apply: m2026_11_12_writer_window_indexes::apply,
+}];
+pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
+    catalog_through_f1().chain(POST_F1_CATALOG.iter().map(SqlMigration::definition))
 }
 
 /// Position in the currently migrating source, measured in SQLite rowids.
@@ -211,13 +231,18 @@ fn catalog_fingerprint(catalog: &[SqlMigration], target: MigrationTarget) -> Str
 /// Canvas catalog marker key; its value is catalog fingerprint plus SQLite schema generation.
 pub(crate) const MIGRATION_CATALOG_KEY: &str = "migration_catalog";
 
-fn current_canvas_fingerprint() -> String {
+fn canvas_catalog_prefix_fingerprint(post_f1_end: usize) -> String {
     let ids = RETIRED
         .iter()
         .filter(|(target, _, receipt)| *target == MigrationTarget::Canvas && !receipt)
         .map(|(_, id, _)| *id)
         .chain(
-            catalog()
+            catalog_through_f1()
+                .chain(
+                    POST_F1_CATALOG[..post_f1_end]
+                        .iter()
+                        .map(SqlMigration::definition),
+                )
                 .filter(|definition| definition.target == MigrationTarget::Canvas)
                 .map(|definition| definition.id),
         )
@@ -225,10 +250,13 @@ fn current_canvas_fingerprint() -> String {
     crate::sha256_hex(ids.join("\0").as_bytes())
 }
 fn write_current_canvas_catalog(tx: &Transaction<'_>) -> StoreResult<()> {
+    write_canvas_catalog_at(tx, POST_F1_CATALOG.len())
+}
+fn write_canvas_catalog_at(tx: &Transaction<'_>, post_f1_end: usize) -> StoreResult<()> {
     crate::clock_schema::SyncEntityMeta::put(
         tx,
         MIGRATION_CATALOG_KEY,
-        &catalog_marker(tx, &current_canvas_fingerprint())?,
+        &catalog_marker(tx, &canvas_catalog_prefix_fingerprint(post_f1_end))?,
     )?;
     Ok(())
 }
@@ -265,23 +293,41 @@ fn current_canvas_authority(db: &Connection) -> StoreResult<bool> {
     Ok(!crate::peer_update_settings::canvas_read(db)
         .table_exists::<crate::settings_schema::PayloadMigrations>()?)
 }
-fn verify_current_canvas_catalog(db: &Connection) -> StoreResult<()> {
+fn current_canvas_catalog_end(db: &Connection) -> StoreResult<usize> {
     let marker = crate::clock_schema::SyncEntityMeta::value(db, MIGRATION_CATALOG_KEY)?
         .ok_or_else(|| too_old("canvas", MIGRATION_CATALOG_KEY))?;
     let current = schema_version(db)?;
-    let valid = marker
-        .split_once(':')
-        .is_some_and(|(fingerprint, version)| {
-            fingerprint == current_canvas_fingerprint()
-                && !version.is_empty()
-                && version.bytes().all(|b| b.is_ascii_digit())
-                && version
-                    .parse::<i64>()
-                    .is_ok_and(|version| version > 0 && version <= current)
-        });
-    if !valid {
+    let Some((fingerprint, version)) = marker.split_once(':') else {
+        return Err(too_old("canvas", MIGRATION_CATALOG_KEY));
+    };
+    if version.is_empty()
+        || !version.bytes().all(|b| b.is_ascii_digit())
+        || !version
+            .parse::<i64>()
+            .is_ok_and(|version| version > 0 && version <= current)
+    {
         return Err(too_old("canvas", MIGRATION_CATALOG_KEY));
     }
+    (0..=POST_F1_CATALOG.len())
+        .find(|end| fingerprint == canvas_catalog_prefix_fingerprint(*end))
+        .ok_or_else(|| too_old("canvas", MIGRATION_CATALOG_KEY))
+}
+fn verify_current_canvas_catalog(db: &Connection) -> StoreResult<()> {
+    current_canvas_catalog_end(db).map(|_| ())
+}
+fn apply_post_f1(tx: &Transaction<'_>, admitted_end: usize) -> StoreResult<()> {
+    for step in &POST_F1_CATALOG[admitted_end..] {
+        (step.apply)(tx)?;
+    }
+    Ok(())
+}
+fn upgrade_current_canvas(db: &mut Connection) -> StoreResult<()> {
+    let admitted_end = current_canvas_catalog_end(db)?;
+    let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    apply_post_f1(&tx, admitted_end)?;
+    prepare_current_canvas(&tx)?;
+    write_current_canvas_catalog(&tx)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -536,12 +582,7 @@ pub(crate) fn run(
     crate::schema::register_python_trigger_functions(&canvas)?;
     crate::sqlite_durability::configure_writer(&canvas)?;
     if current_canvas_authority(&canvas)? {
-        verify_current_canvas_catalog(&canvas)?;
-        let tx = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        prepare_current_canvas(&tx)?;
-        write_current_canvas_catalog(&tx)?;
-        tx.commit()?;
-        return Ok(());
+        return upgrade_current_canvas(&mut canvas);
     }
     let tx = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let marker: Option<String> = tx
@@ -583,6 +624,7 @@ pub(crate) fn run(
     tx.commit()?;
     m2026_11_11_consolidate_f1::run(&mut canvas)?;
     let tx = canvas.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    apply_post_f1(&tx, 0)?;
     prepare_current_canvas(&tx)?;
     write_current_canvas_catalog(&tx)?;
     tx.commit()?;
@@ -615,8 +657,13 @@ pub(crate) fn retire_agent_fixture_keys(tx: &Transaction<'_>) -> crate::StoreRes
 
 /// Canvas catalog fingerprints written by released servers. The catalog is
 /// append-only: each one must stay a prefix fingerprint so those stores open.
+/// Released F1 Canvas catalog SHA-256 fingerprint (abc6f249).
+#[cfg(test)]
+const RELEASED_F1_CANVAS_FINGERPRINT: &str =
+    "18cac9181eff0e01c7010b22e772e9e782d19523076bb3fdfea7a5bc00394f8f";
 #[cfg(test)]
 const RELEASED_CANVAS_CATALOGS: &[&str] = &[
+    RELEASED_F1_CANVAS_FINGERPRINT,
     "561c94aa6bffe48d6de89805793b296560ace24b89a3b914d38635215eae5f53",
     "e07877dd5a4eef610f66b99336716fb9e32515094d81713b45d30ec61d09cd63",
     "85c8d18a41f9de456bfa310c7b4f119d2b78045f6a2dabb8fb2634c7b3c29bc9",
@@ -625,13 +672,63 @@ const RELEASED_CANVAS_CATALOGS: &[&str] = &[
 #[cfg(test)]
 mod released_catalog_tests {
     #[test]
+    fn consolidated_f1_prefix_receives_writer_indexes_once() {
+        use studio_runtime_schema::studio_errors::MigrationTarget;
+        let released = super::RELEASED_F1_CANVAS_FINGERPRINT;
+        assert_eq!(super::canvas_catalog_prefix_fingerprint(0), released);
+        let root = tempfile::tempdir().unwrap();
+        let names = [
+            "runtime_agent_limit_recovery",
+            "runtime_execution_run_terminal",
+            "runtime_monitor_window_status",
+        ];
+        let mut db =
+            crate::fresh_state::canvas_before_indexes(&root.path().join("canvas.sqlite3"), &names)
+                .unwrap();
+        let tx = db.transaction().unwrap();
+        super::write_canvas_catalog_at(&tx, 0).unwrap();
+        tx.commit().unwrap();
+        assert!(super::current_canvas_authority(&db).unwrap());
+        assert_eq!(super::current_canvas_catalog_end(&db).unwrap(), 0);
+        let before = studio_db_api::catalog::export(&db).unwrap();
+        assert!(
+            names
+                .iter()
+                .all(|name| before.iter().all(|entry| entry.name != *name))
+        );
+        super::upgrade_current_canvas(&mut db).unwrap();
+        let after = studio_db_api::catalog::export(&db).unwrap();
+        assert!(
+            names
+                .iter()
+                .all(|name| after.iter().any(|entry| entry.name == *name))
+        );
+        assert_eq!(
+            super::current_canvas_catalog_end(&db).unwrap(),
+            super::POST_F1_CATALOG.len()
+        );
+        let version = super::schema_version(&db).unwrap();
+        let marker =
+            crate::clock_schema::SyncEntityMeta::value(&db, super::MIGRATION_CATALOG_KEY).unwrap();
+        super::upgrade_current_canvas(&mut db).unwrap();
+        assert_eq!(super::schema_version(&db).unwrap(), version);
+        assert_eq!(
+            crate::clock_schema::SyncEntityMeta::value(&db, super::MIGRATION_CATALOG_KEY).unwrap(),
+            marker
+        );
+        assert!(super::catalog_fingerprint(super::CATALOG, MigrationTarget::Canvas) != released);
+    }
+
+    #[test]
     fn released_canvas_catalogs_remain_prefixes() {
         for released in super::RELEASED_CANVAS_CATALOGS {
             assert!(
                 (0..=super::CATALOG.len()).any(|end| super::catalog_fingerprint(
                     &super::CATALOG[..end],
                     super::MigrationTarget::Canvas
-                ) == *released),
+                ) == *released)
+                    || (0..=super::POST_F1_CATALOG.len())
+                        .any(|end| super::canvas_catalog_prefix_fingerprint(end) == *released),
                 "released catalog {released} is no longer a prefix"
             );
         }

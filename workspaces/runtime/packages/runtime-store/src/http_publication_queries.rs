@@ -265,6 +265,7 @@ mod tests {
             let record = crate::AgentRecord::from_value(value).unwrap();
             crate::peer_update_settings::canvas_tx(&tx)
                 .insert(&AgentsStorageRow {
+                    account_key: String::new(),
                     id: id.into(),
                     root_id: None,
                     deleted_at: None,

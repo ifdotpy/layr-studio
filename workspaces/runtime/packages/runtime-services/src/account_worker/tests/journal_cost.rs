@@ -181,6 +181,41 @@ async fn batch_work(
     (streams, ticks.load(std::sync::atomic::Ordering::Relaxed))
 }
 
+#[tokio::test]
+async fn journal_writer_work_is_independent_of_idle_account_agents() {
+    let (_directory, store) = running_store().await;
+    let streams = journal(&store, NotificationStreamBuffer::default(), vec![delta(1)]).await;
+    clear_publications(&store).await;
+    let (streams, small) = batch_work(&store, streams, vec![delta(2)]).await;
+    clear_publications(&store).await;
+    store
+        .transaction(|tx| {
+            for index in 0..1000 {
+                let id = AgentId::from(format!("idle-{index}"));
+                let mut agent = AgentRecord::new(
+                    id.clone(),
+                    id,
+                    0,
+                    studio_runtime_store::AgentStatus::Waiting,
+                    "default".into(),
+                );
+                agent.provider = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_providers::ProviderKind::Codex,
+                );
+                AgentRepository::put(tx, &agent)?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let (_, large) = batch_work(&store, streams, vec![delta(3)]).await;
+    eprintln!("journal writer VM steps: {small} -> {large} with 1000 idle account agents");
+    assert!(
+        large <= small + small / 10,
+        "writer visited unrelated account agents: {small} -> {large}"
+    );
+}
+
 /// An unready receipt keeps the checkpoint below it while later
 /// notifications settle. Journal work per batch must not grow with that
 /// backlog, and the backlog must drain once the receipt is ready.

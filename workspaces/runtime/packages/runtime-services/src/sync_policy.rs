@@ -28,7 +28,6 @@ const MAX_CLOCK_SKEW_MS: i64 = 5 * 60 * 1000;
 // window membership have separate meanings despite sharing a value.
 const MONITOR_TERMINAL_WINDOW: usize = 100;
 const MONITOR_FINAL_WINDOW: usize = 100;
-use studio_runtime_store::startup_recovery::ACTIVE_MONITOR_STATUSES as MONITOR_ACTIVE_STATUSES;
 const MONITOR_TERMINAL_STATUSES: [&str; 4] = ["completed", "failed", "cancelled", "lost"];
 const TASK_RETIRE_BATCH: usize = 100;
 /// Newest finished tasks the renderer task window keeps beside running ones;
@@ -1322,10 +1321,6 @@ pub(crate) fn maintain_task_window(
     transaction: &Transaction<'_>,
     _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    if !table_exists(transaction, "runtime_tasks")? || !table_exists(transaction, "runtime_agents")?
-    {
-        return Ok(());
-    }
     // The live-agent set is a subquery, so the runtime_task_status and
     // runtime_task_history indexes bound both parts and the agent records are
     // read once instead of once per task row.
@@ -1397,7 +1392,6 @@ pub(crate) fn maintain_task_window_after_write(
     let previous_finished = previous.is_some_and(|previous| !running(previous));
     if migration_complete
         && !(task_running && previous_finished)
-        && table_exists(transaction, "runtime_agents")?
         && let Some(projected) = crate::sync_views::project_task_record(task)
         && transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM runtime_agents WHERE id=?1 \
@@ -1585,91 +1579,30 @@ fn maintain_monitor_window(
     transaction: &Transaction<'_>,
     _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    if !table_exists(transaction, "runtime_monitors")? {
-        return Ok(());
-    }
     let mut kept = BTreeMap::<String, studio_runtime_store::MonitorRecord>::new();
-    let has_status_index = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='runtime_monitor_status')",
-        [], |row| row.get::<_, bool>(0),
-    )?;
-    if has_status_index {
-        let placeholders = (1..=MONITOR_ACTIVE_STATUSES.len())
-            .map(|index| format!("?{index}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let mut statement = transaction.prepare(&format!("SELECT id,record FROM runtime_monitors WHERE {} AND json_extract(record,'$.status') IN ({placeholders})", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")))?;
-        let rows = statement
-            .query_map(rusqlite::params_from_iter(MONITOR_ACTIVE_STATUSES), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
+    let rows =
+        studio_runtime_store::monitor_window_queries::MonitorWindowQueries::active(transaction)?;
+    for (id, raw) in rows {
+        if let Some(record) = decode_or_hold_monitor(transaction, &id, &raw)? {
+            kept.insert(id, record);
+        }
+    }
+    let mut terminals = Vec::new();
+    for status in MONITOR_TERMINAL_STATUSES {
+        let rows = studio_runtime_store::monitor_window_queries::MonitorWindowQueries::terminal(
+            transaction,
+            status,
+            MONITOR_TERMINAL_WINDOW as i64,
+        )?;
         for (id, raw) in rows {
             if let Some(record) = decode_or_hold_monitor(transaction, &id, &raw)? {
-                kept.insert(id, record);
+                terminals.push(record);
             }
         }
-        let mut terminals = Vec::new();
-        for status in MONITOR_TERMINAL_STATUSES {
-            let mut statement = transaction.prepare(&format!("SELECT id,record FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')=?1 ORDER BY json_extract(record,'$.created') DESC LIMIT ?2", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")))?;
-            let rows = statement
-                .query_map(
-                    rusqlite::params![status, MONITOR_TERMINAL_WINDOW as i64],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
-            for (id, raw) in rows {
-                if let Some(record) = decode_or_hold_monitor(transaction, &id, &raw)? {
-                    terminals.push(record);
-                }
-            }
-        }
-        terminals.sort_by(compare_created_desc);
-        for record in terminals.into_iter().take(MONITOR_FINAL_WINDOW) {
-            kept.insert(record.id.clone(), record);
-        }
-    } else {
-        let mut statement = transaction.prepare(&format!(
-            "SELECT id,record FROM runtime_monitors WHERE {} ORDER BY rowid",
-            studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")
-        ))?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        let records = rows
-            .into_iter()
-            .map(|(id, raw)| decode_or_hold_monitor(transaction, &id, &raw))
-            .collect::<StoreResult<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        for status in MONITOR_ACTIVE_STATUSES {
-            for record in records
-                .iter()
-                .filter(|record| record.status.as_str() == status)
-            {
-                kept.insert(record.id.clone(), record.clone());
-            }
-        }
-        let mut terminals = Vec::new();
-        for status in MONITOR_TERMINAL_STATUSES {
-            let mut status_rows = records
-                .iter()
-                .filter(|record| record.status.as_str() == status)
-                .cloned()
-                .collect::<Vec<_>>();
-            status_rows.sort_by(compare_created_desc);
-            terminals.extend(status_rows.into_iter().take(MONITOR_TERMINAL_WINDOW));
-        }
-        terminals.sort_by(compare_created_desc);
-        for record in terminals.into_iter().take(MONITOR_FINAL_WINDOW) {
-            kept.insert(record.id.clone(), record);
-        }
+    }
+    terminals.sort_by(compare_created_desc);
+    for record in terminals.into_iter().take(MONITOR_FINAL_WINDOW) {
+        kept.insert(record.id.clone(), record);
     }
 
     let owner_ids = kept
@@ -1746,9 +1679,6 @@ fn maintain_event_window(
     transaction: &Transaction<'_>,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    if !table_exists(transaction, "runtime_events")? {
-        return Ok(());
-    }
     // The generated runtime_events triggers use the same marker fast path as
     // Python's sync_event_window(full=False). Avoid reprojecting the entire
     // window after a trigger has already recorded its current high sequence.
@@ -2508,6 +2438,81 @@ pub async fn push_preferences(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    // The projection deliberately retains corrupt legacy agent evidence.
+    #[derive(studio_db_api::DbTable)]
+    #[db(table="runtime_agents",database=studio_runtime_store::peer_update_settings::Canvas)]
+    struct ProjectionAgentFixture {
+        #[db(key)]
+        id: String,
+        record: String,
+    }
+    fn seed_projection_owners(connection: &mut Connection) {
+        <ProjectionAgentFixture as studio_db_api::Table>::descriptor()
+            .install_if_absent(connection)
+            .unwrap();
+        let tx = connection.transaction().unwrap();
+        for (id, record) in [
+            (
+                "active",
+                r#"{"id":"active","provider":"codex","deletedAt":null}"#,
+            ),
+            (
+                "deleted",
+                r#"{"id":"deleted","provider":"codex","deletedAt":1}"#,
+            ),
+            ("broken", r#"["not an agent object"]"#),
+        ] {
+            studio_runtime_store::peer_update_settings::canvas_tx(&tx)
+                .insert(&ProjectionAgentFixture {
+                    id: id.into(),
+                    record: record.into(),
+                })
+                .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    #[tokio::test]
+    async fn publication_windows_do_not_probe_the_known_schema() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                let reads = Arc::new(AtomicUsize::new(0));
+                let counted = Arc::clone(&reads);
+                tx.authorizer(Some(move |context: rusqlite::hooks::AuthContext<'_>| {
+                    if matches!(
+                        context.action,
+                        rusqlite::hooks::AuthAction::Read {
+                            table_name: "sqlite_master" | "sqlite_schema",
+                            ..
+                        }
+                    ) {
+                        counted.fetch_add(1, Ordering::Relaxed);
+                    }
+                    rusqlite::hooks::Authorization::Allow
+                }))?;
+                maintain_task_window(tx, &|_, _, _, _| true)?;
+                maintain_monitor_window(tx, &|_, _, _, _| true)?;
+                maintain_event_window(tx, &|_, _, _, _| true)?;
+                tx.authorizer(
+                    None::<fn(rusqlite::hooks::AuthContext<'_>) -> rusqlite::hooks::Authorization>,
+                )?;
+                assert_eq!(
+                    reads.load(Ordering::Relaxed),
+                    0,
+                    "publication must use the installed schema without probing it"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn f1_n_canonical_catalog_has_no_source_table() {
         let root = tempfile::tempdir().unwrap();
@@ -3100,25 +3105,11 @@ mod tests {
     #[test]
     fn monitor_window_keeps_active_rows_without_projecting_inactive_owners() {
         let mut connection = Connection::open_in_memory().expect("database");
+        <studio_runtime_store::item_monitor_terminal::MonitorsRow as studio_db_api::Table>::descriptor().install_if_absent(&connection).unwrap();
         studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
             .expect("canonical storage");
         connection.execute_batch(<studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL).unwrap();
-        // Keep a record-only legacy source table so non-object corruption reaches the reader.
-        // The current provider column rejects that corruption at write time.
-        connection
-            .execute_batch(
-                "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
-                 CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-                 
-                 
-                   
-                 
-                 INSERT INTO runtime_agents VALUES
-                     ('active','{\"id\":\"active\",\"provider\":\"codex\",\"deletedAt\":null}'),
-                     ('deleted','{\"id\":\"deleted\",\"provider\":\"codex\",\"deletedAt\":1}'),
-                     ('broken','[\"not an agent object\"]');",
-            )
-            .expect("projection fixture");
+        seed_projection_owners(&mut connection);
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
@@ -3250,43 +3241,16 @@ mod tests {
             .expect("window reads"),
             "invalid owner keeps its window member"
         );
-        transaction
-            .execute(
-                "INSERT INTO runtime_monitors(id,record) VALUES('invalid-monitor','{')",
-                [],
-            )
-            .expect("invalid monitor");
-        maintain_monitor_window(&transaction, &|_, _, _, _| true).expect("malformed rows are held");
-        assert!(
-            studio_runtime_store::MonitorsRepository::is_held(&transaction, "invalid-monitor")
-                .unwrap()
-        );
     }
 
     #[test]
     fn indexed_monitor_window_matches_python_tie_boundary_and_filters_owner_after_selection() {
         let mut connection = Connection::open_in_memory().expect("database");
+        <studio_runtime_store::item_monitor_terminal::MonitorsRow as studio_db_api::Table>::descriptor().install_if_absent(&connection).unwrap();
         studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
             .expect("canonical storage");
         connection.execute_batch(<studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL).unwrap();
-        // Keep a record-only legacy source table so non-object corruption reaches the reader.
-        // The current provider column rejects that corruption at write time.
-        connection
-            .execute_batch(
-                "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
-                 CREATE INDEX runtime_monitor_status ON runtime_monitors(
-                     json_extract(record,'$.status'),json_extract(record,'$.created'));
-                 CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-                 
-                 
-                   
-                 
-                 INSERT INTO runtime_agents VALUES
-                     ('active','{\"id\":\"active\",\"provider\":\"codex\",\"deletedAt\":null}'),
-                     ('deleted','{\"id\":\"deleted\",\"provider\":\"codex\",\"deletedAt\":1}'),
-                     ('broken','[\"not an agent object\"]');",
-            )
-            .expect("indexed projection fixture");
+        seed_projection_owners(&mut connection);
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
@@ -3329,7 +3293,10 @@ mod tests {
         let selectors = TRACED_SQL
             .with_borrow_mut(std::mem::take)
             .into_iter()
-            .filter(|sql| sql.starts_with("SELECT id,record FROM runtime_monitors"))
+            .filter(|sql| {
+                sql.starts_with("SELECT")
+                    && sql.contains("INDEXED BY \"runtime_monitor_window_status\"")
+            })
             .collect::<Vec<_>>();
         assert_eq!(selectors.len(), 1 + MONITOR_TERMINAL_STATUSES.len());
         for sql in selectors {
@@ -3342,7 +3309,7 @@ mod tests {
                 .expect("plan details");
             assert!(
                 plan.iter().any(|line| line
-                    .contains("SEARCH runtime_monitors USING INDEX runtime_monitor_status")),
+                    .contains("SEARCH runtime_monitors USING INDEX runtime_monitor_window_status")),
                 "{sql}: {plan:?}"
             );
         }

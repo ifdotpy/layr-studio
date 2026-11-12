@@ -2229,6 +2229,7 @@ mod f1_cutover_tests {
         ).unwrap();
         canvas_tx(transaction)
             .insert(&crate::agent_tables::AgentsStorageRow {
+                account_key: String::new(),
                 id: id.into(),
                 record,
                 root_id: None,

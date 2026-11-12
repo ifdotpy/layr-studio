@@ -282,6 +282,7 @@ fn commit(
 
 // LimitAgent owns the consumed fields. JSON tokens preserve their stored types;
 // null and absent optional fields both have no value in the limit projection.
+#[cfg(test)]
 const LIMIT_AGENTS_SQL: &str = "SELECT id,json_object(
     'id',record->'$.id','accountKey',record->'$.accountKey','epoch',record->'$.epoch',
     'deletedAt',record->'$.deletedAt','model',record->'$.model','provider',record->'$.provider',
@@ -299,31 +300,29 @@ pub(crate) fn populate_agents(
     // AGENT_COLUMNS in runtime-store/src/agent_columns.rs owns this STORED
     // generated account_key: missing/null becomes default; empty stays empty.
     // Include empty keys for default, matching the projection normalization below.
-    let mut statement = tx.prepare_cached(LIMIT_AGENTS_SQL)?;
-    #[cfg(test)]
-    statement.reset_status(rusqlite::StatementStatus::VmStep);
-    let mut rows = statement.query([limits.account_key()])?;
-    while let Some(row) = rows.next()? {
-        let id: String = row.get(0)?;
-        let raw: String = row.get(1)?;
+    for (id, raw) in studio_runtime_store::limit_agent_queries::LimitAgentQueries::recovery_agents(
+        tx,
+        limits.account_key(),
+    )? {
         let agent = decode_limit_agent(&id, &raw)?;
-        let account = if agent.account_key.is_empty() {
-            "default"
-        } else {
-            &agent.account_key
-        };
-        if account == limits.account_key() && !agent.deleted_at.is_some_and(|at| at != 0.0) {
+        if recovery_candidate(&agent) {
             view.projection.agents.insert(
                 agent.id.to_string(),
                 crate::usage_resume::agent_limit_projection_view(&limits, &agent, now),
             );
         }
     }
-    drop(rows);
-    #[cfg(test)]
-    AGENT_SCAN_STEPS
-        .with(|count| count.set(statement.get_status(rusqlite::StatementStatus::VmStep)));
     Ok(())
+}
+
+// Keep individual agent publications aligned with the indexed account query.
+fn recovery_candidate(agent: &crate::usage_resume::LimitAgent<'_>) -> bool {
+    use studio_runtime_schema::provider_errors::KnownCodexErrorKind;
+    !agent.deleted_at.is_some_and(|at| at != 0.0)
+        && matches!(
+            agent.error.as_ref().and_then(|error| error.known_kind()),
+            Some(KnownCodexErrorKind::UsageLimitExceeded | KnownCodexErrorKind::RateLimitExceeded)
+        )
 }
 
 /// Validate only the stored fields consumed by account-limit projection.
@@ -493,7 +492,7 @@ pub(crate) fn publish_agent_change_with_views(
             } else {
                 &agent.account_key
             };
-            key == account.as_str()
+            key == account.as_str() && recovery_candidate(agent)
         });
         if matches {
             let limits =
@@ -581,12 +580,211 @@ pub(super) async fn read_for_resume(
 #[cfg(test)]
 thread_local! {
     static AGENT_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static AGENT_SCAN_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use studio_json::json;
+
+    #[tokio::test]
+    async fn recovery_projection_matches_the_previous_account_projection() {
+        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, AgentStatus};
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store.transaction(|tx| {
+            for (id, account, deleted, error) in [
+                ("usage", "default", None, json!({"codexErrorInfo":"usageLimitExceeded"})),
+                ("rate", "default", None, json!({"codexErrorInfo":{"rateLimitExceeded":{}}})),
+                ("zero", "default", Some(0.0), json!({"codexErrorInfo":"usageLimitExceeded"})),
+                ("empty", "", None, json!({"codexErrorInfo":"rateLimitExceeded"})),
+                ("deleted", "default", Some(1.0), json!({"codexErrorInfo":"usageLimitExceeded"})),
+                ("other", "other", None, json!({"codexErrorInfo":"usageLimitExceeded"})),
+                ("idle", "default", None, Value::Null),
+                ("auth", "default", None, json!({"codexErrorInfo":"unauthorized"})),
+                ("message", "default", None, json!("failure")),
+                ("ambiguous", "default", None, json!({"codexErrorInfo":{"usageLimitExceeded":{},"rateLimitExceeded":{}}})),
+                ("empty-kind", "default", None, json!({"codexErrorInfo":{}})),
+            ] {
+                let id = AgentId::from(id);
+                let mut agent = AgentRecord::new(id.clone(), id, 0, AgentStatus::Waiting, account.into());
+                agent.provider = studio_runtime_schema::queue_command::Field::Value(studio_runtime_providers::ProviderKind::Codex);
+                agent.error = serde::Deserialize::deserialize(error).unwrap();
+                agent.model = Some("gpt-5".into());
+                agent.thread_id = Some(format!("thread-{}", agent.id.0));
+                agent.last_completed_turn = studio_runtime_schema::queue_command::Field::Value("turn".into());
+                agent.deleted_at = deleted;
+                agent.usage_resume = serde::Deserialize::deserialize(json!({"id":"resume","accountKey":"default","epoch":0,"failedAt":10.0,"cause":"usage_limit","status":"scheduled","resetAt":50.0,"threadId":agent.thread_id,"turnId":"turn"})).unwrap();
+                AgentRepository::put(tx, &agent)?;
+            }
+            let response: UsageLimitsResponse = serde::Deserialize::deserialize(json!({"accountKey":"default","at":100.0,"readAt":100.0,"data":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100.0,"resetsAt":150.0}}}})).unwrap();
+            let limits = crate::usage_resume::LimitsObservation::from_response(response.clone());
+            let mut expected = std::collections::BTreeMap::new();
+            for agent in studio_runtime_store::Table::<AgentRecord>::new(tx).list()? {
+                let account = if agent.account_key.is_empty() { "default" } else { &agent.account_key };
+                let projection = crate::usage_resume::agent_limit_projection(&limits, &agent, 100.0);
+                if account == "default" && !agent.deleted_at.is_some_and(|at| at != 0.0) && projection.recovery.is_some() {
+                    expected.insert(agent.id.0, projection);
+                }
+            }
+            let mut view = RateLimitView::from_observation(response, 100.0);
+            populate_agents(tx, &mut view, 100.0)?;
+            assert_eq!(view.projection.agents.len(), 4);
+            assert_eq!(studio_json::to_string(&view.projection.agents)?, studio_json::to_string(&expected)?);
+            Ok(())
+        }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn agent_change_removes_recovery_when_the_error_clears() {
+        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, AgentStatus};
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                let id = AgentId::from("recovering");
+                let mut agent =
+                    AgentRecord::new(id.clone(), id, 0, AgentStatus::Waiting, "default".into());
+                agent.provider = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_providers::ProviderKind::Codex,
+                );
+                agent.error =
+                    serde::Deserialize::deserialize(json!({"codexErrorInfo":"usageLimitExceeded"}))
+                        .unwrap();
+                AgentRepository::put(tx, &agent)?;
+                let response = UsageLimitsResponse {
+                    account_key: "default".into(),
+                    at: Some(1.0),
+                    ..Default::default()
+                };
+                commit(
+                    tx,
+                    "default",
+                    LimitsWrite::Snapshot(LimitsSnapshot { response }),
+                    1.0,
+                    None,
+                )?;
+                assert!(
+                    publication_views(tx)?[0]
+                        .1
+                        .projection
+                        .agents
+                        .contains_key("recovering")
+                );
+                agent.error = studio_runtime_schema::queue_command::Field::Missing;
+                AgentRepository::put(tx, &agent)?;
+                publish_agent_change(tx, "recovering", false)?;
+                assert!(publication_views(tx)?[0].1.projection.agents.is_empty());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn identical_snapshot_writes_nothing_and_decodes_no_agents() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                let response = UsageLimitsResponse {
+                    account_key: "default".into(),
+                    at: Some(1.0),
+                    ..Default::default()
+                };
+                commit(
+                    tx,
+                    "default",
+                    LimitsWrite::Snapshot(LimitsSnapshot {
+                        response: response.clone(),
+                    }),
+                    1.0,
+                    None,
+                )?;
+                let changes = tx.total_changes();
+                AGENT_DECODES.set(0);
+                let (_, changed) = commit(
+                    tx,
+                    "default",
+                    LimitsWrite::Snapshot(LimitsSnapshot { response }),
+                    1.0,
+                    None,
+                )?;
+                assert!(!changed);
+                assert_eq!(tx.total_changes(), changes);
+                assert_eq!(AGENT_DECODES.get(), 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn limits_writer_decodes_only_recovery_candidates() {
+        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, AgentStatus};
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store
+            .transaction(|tx| {
+                for index in 0..1000 {
+                    let id = AgentId::from(format!("idle-{index}"));
+                    let mut agent =
+                        AgentRecord::new(id.clone(), id, 0, AgentStatus::Waiting, "default".into());
+                    agent.provider = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_providers::ProviderKind::Codex,
+                    );
+                    AgentRepository::put(tx, &agent)?;
+                }
+                AGENT_DECODES.set(0);
+                let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                let counter = Arc::clone(&ticks);
+                tx.progress_handler(
+                    1,
+                    Some(move || {
+                        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        false
+                    }),
+                )?;
+                let response = UsageLimitsResponse {
+                    account_key: "default".into(),
+                    at: Some(1.0),
+                    ..Default::default()
+                };
+                commit(
+                    tx,
+                    "default",
+                    LimitsWrite::Snapshot(LimitsSnapshot { response }),
+                    1.0,
+                    None,
+                )?;
+                tx.progress_handler(0, None::<fn() -> bool>)?;
+                let steps = ticks.load(std::sync::atomic::Ordering::Relaxed);
+                eprintln!(
+                    "limits idle-account decodes={} writer_vm_steps={steps}",
+                    AGENT_DECODES.get()
+                );
+                assert_eq!(
+                    AGENT_DECODES.get(),
+                    0,
+                    "idle agents have no recovery to publish"
+                );
+                assert!(
+                    steps < 6000,
+                    "writer work must not grow with idle account agents: {steps}"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
 
     #[tokio::test]
     async fn indexed_account_projection_follows_production_agent_updates()
@@ -603,6 +801,10 @@ mod tests {
                     agent.provider = studio_runtime_schema::queue_command::Field::Value(
                         studio_runtime_providers::ProviderKind::Codex,
                     );
+                    agent.error = serde::Deserialize::deserialize(
+                        json!({"codexErrorInfo":"usageLimitExceeded"}),
+                    )
+                    .unwrap();
                     AgentRepository::put(tx, &agent)?;
                     for account in [initial, "destination", initial] {
                         agent.account_key = account.into();
@@ -658,10 +860,10 @@ mod tests {
                 ("deleted", "default", Some(1.0)),
                 ("other", "other", None),
             ] {
-                let raw = studio_json::json!({"id":id,"accountKey":account,"epoch":0,"provider":"codex","deletedAt":deleted,"unrelated":"x".repeat(100_000)}).to_string();
+                let raw = studio_json::json!({"id":id,"accountKey":account,"epoch":0,"provider":"codex","error":{"codexErrorInfo":"usageLimitExceeded"},"deletedAt":deleted,"unrelated":"x".repeat(100_000)}).to_string();
                 tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id,raw])?;
             }
-            for (account, expected_decodes) in [("default", 4), ("other", 1), ("missing", 0)] {
+            for (account, expected_decodes) in [("default", 3), ("other", 1), ("missing", 0)] {
                 let response = UsageLimitsResponse { account_key: account.into(), at: Some(1.0), ..Default::default() };
                 let mut expected = RateLimitView::from_observation(response.clone(), 1.0);
                 let limits = crate::usage_resume::LimitsObservation::from_response(response.clone());
@@ -684,14 +886,12 @@ mod tests {
                 AGENT_DECODES.set(0);
                 commit(tx, account, LimitsWrite::Snapshot(LimitsSnapshot { response }), 1.0, None)?;
                 let decodes = AGENT_DECODES.get();
-                let steps = AGENT_SCAN_STEPS.get();
                 let payload = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "rateLimit", account, false)?.expect("published limits");
                 let (published, unreadable) = account_state::normalized_limits_view(account, payload.as_bytes(), 1.0);
                 assert!(!unreadable);
                 assert_eq!(studio_json::to_string(&published)?, studio_json::to_string(&expected)?);
-                eprintln!("limits account={account} decodes={before_decodes}->{decodes} vm_steps={before_steps}->{steps}");
+                eprintln!("limits account={account} decodes={before_decodes}->{decodes} baseline_vm_steps={before_steps}");
                 assert_eq!(decodes, expected_decodes, "must decode only the selected account");
-                assert!(steps < 200, "account lookup must use its index: {steps} VM steps");
             }
             Ok(())
         }).await?;

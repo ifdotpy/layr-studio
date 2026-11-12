@@ -491,7 +491,7 @@ fn finish_authority(
             )?;
         }
     }
-    super::write_current_canvas_catalog(transaction)?;
+    super::write_canvas_catalog_at(transaction, 0)?;
     Ok(())
 }
 
