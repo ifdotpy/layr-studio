@@ -7021,6 +7021,7 @@ dependencies = [
  "rustix",
  "serde",
  "sha2 0.11.1",
+ "studio-db-api",
  "studio-json",
  "studio-runtime-http",
  "studio-runtime-process",

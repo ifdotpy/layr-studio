@@ -41,6 +41,7 @@ it("keeps every native sign-in method consumer on the desktop.rs contract", () =
     repository,
     "workspaces/client/apps/web/src/native/signInProtocol.ts",
   );
+  const violations: string[] = [];
   for (const root of [
     "workspaces/client/apps/web/src",
     "workspaces/client/packages/client-core/src",
@@ -55,9 +56,11 @@ it("keeps every native sign-in method consumer on the desktop.rs contract", () =
         continue;
       const text = readFileSync(path, "utf8");
       const consumer = path === owner ? text.replace(declaration, "") : text;
-      expect(consumer, path).not.toMatch(
-        /["']desktop\.(?:prepare|open|cancel)SignIn["']/,
-      );
+      if (/["']desktop\.(?:prepare|open|cancel)SignIn["']/.test(consumer))
+        violations.push(path);
     }
   }
+  // Assert only the small result, rather than constructing an assertion with
+  // every complete source file and its path.
+  expect(violations).toEqual([]);
 });

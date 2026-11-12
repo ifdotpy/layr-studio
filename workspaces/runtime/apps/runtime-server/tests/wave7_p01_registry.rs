@@ -256,6 +256,56 @@ async fn wait_for_durable_agent_status(fixture: &Fixture, agent_id: &str, expect
 
 /// File-backed provider observations wake the fixture without polling.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+fn changes_file(event: &notify::Event, path: &std::path::Path) -> bool {
+    // Readiness predicates read this file and SQLite. Their access events must
+    // not feed back into the wait, nor may unrelated directory activity.
+    event.need_rescan()
+        || (event.kind.is_other() && event.paths.is_empty())
+        || (event.kind.is_create() || event.kind.is_modify() || event.kind.is_remove())
+            && event
+                .paths
+                .iter()
+                .any(|changed| changed.file_name() == path.file_name())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn restart_provider_requests_wakes_only_for_its_own_changes() {
+    use notify::event::{AccessKind, AccessMode, ModifyKind};
+    let path = Path::new("fixture/requests.jsonl");
+    let read = notify::Event::new(notify::EventKind::Access(AccessKind::Open(
+        AccessMode::Read,
+    )))
+    .add_path(path.to_owned());
+    assert!(
+        !changes_file(&read, path),
+        "reading the predicate must not wake itself"
+    );
+    let unrelated = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any))
+        .add_path(PathBuf::from("fixture/canvas.db"));
+    assert!(
+        !changes_file(&unrelated, path),
+        "store reads and writes have their own signal"
+    );
+    let changed =
+        notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(path.to_owned());
+    assert!(changes_file(&changed, path));
+    let created = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::File))
+        .add_path(path.to_owned());
+    assert!(changes_file(&created, path));
+    let rescan = notify::Event::new(notify::EventKind::Other).set_flag(notify::event::Flag::Rescan);
+    assert!(
+        changes_file(&rescan, path),
+        "overflow requires rechecking the predicate"
+    );
+    let other = notify::Event::new(notify::EventKind::Other);
+    assert!(
+        changes_file(&other, path),
+        "pathless changes require a rescan"
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn watch_file_changes(
     path: &std::path::Path,
 ) -> (
@@ -264,11 +314,15 @@ fn watch_file_changes(
 ) {
     use notify::Watcher;
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-    let mut watcher = notify::recommended_watcher(
-        move |_: notify::Result<notify::Event>| {
-            if let Ok(()) = sender.send(()) {}
-        },
-    )
+    let watched = path.to_owned();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        if event
+            .as_ref()
+            .is_ok_and(|event| changes_file(event, &watched))
+        {
+            let _result = sender.send(());
+        }
+    })
     .expect("file watcher starts");
     watcher
         .watch(
@@ -5012,16 +5066,25 @@ fn restart_provider_count(root: &std::path::Path, method: &str, thread: &str) ->
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn restart_agent(store: &RuntimeStore, id: &str) -> Value {
-    let raw: String = store
-        .test_reader()
-        .unwrap()
-        .query_row(
-            "SELECT record FROM runtime_agents WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )
-        .unwrap();
+mod restart_queries {
+    use studio_db_api::DbQuery;
+    use studio_runtime_store::{peer_update_settings::Canvas, queue_schema::EventsRow};
+
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=read,cardinality=one,native,result=i64,
+        tables(events=EventsRow),columns(text=EventsRow::TEXT),
+        sql="SELECT COUNT(*) FROM {events} WHERE {text} LIKE '%disconnected%'")]
+    pub struct DisconnectCount;
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn restart_agent(reader: &rusqlite::Connection, id: &str) -> Value {
+    let raw = studio_runtime_store::AgentRepository::get_raw(
+        reader,
+        &studio_runtime_store::AgentId(id.to_owned()),
+    )
+    .unwrap()
+    .unwrap();
     studio_json::from_str(&raw).unwrap()
 }
 
@@ -5181,11 +5244,14 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
     )
     .await
     .unwrap();
-    let state_text = |store: &RuntimeStore, root: &std::path::Path, a: &str, b: &str| {
+    // Each query ends its read transaction; reuse the connection instead of
+    // reopening and reparsing the complete schema on every committed change.
+    let reader = store.test_reader().unwrap();
+    let state_text = |root: &std::path::Path, a: &str, b: &str| {
         format!(
             "A: {}\nB: {}\nrequests: {:?}",
-            restart_summary(&restart_agent(store, a)),
-            restart_summary(&restart_agent(store, b)),
+            restart_summary(&restart_agent(&reader, a)),
+            restart_summary(&restart_agent(&reader, b)),
             restart_provider_requests(root)
                 .iter()
                 .map(|request| format!("{} {}", request["method"], request["params"]["threadId"]))
@@ -5219,10 +5285,10 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
         || {
             restart_provider_count(&root, "turn/start", "fake-thread-0") == 1
                 && restart_provider_count(&root, "turn/start", "fake-thread-1") == 1
-                && restart_agent(&store, &a)["status"] == "running"
-                && restart_agent(&store, &b)["status"] == "running"
+                && restart_agent(&reader, &a)["status"] == "running"
+                && restart_agent(&reader, &b)["status"] == "running"
         },
-        || state_text(&store, &root, &a, &b),
+        || state_text(&root, &a, &b),
     )
     .await;
     let now = studio_runtime_services::event_write::unix_time().unwrap();
@@ -5268,7 +5334,7 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
         )
         .await
         .unwrap();
-    assert_eq!(restart_agent(&store, &b)["status"], "paused");
+    assert_eq!(restart_agent(&reader, &b)["status"], "paused");
 
     // A new backend process attaches to the same provider generation.
     let runtime = start_host(
@@ -5291,10 +5357,10 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
                     "fake-thread-1",
                 ) >= 1
         },
-        || state_text(&store, &root, &a, &b),
+        || state_text(&root, &a, &b),
     )
     .await;
-    let live = restart_agent(&store, &a);
+    let live = restart_agent(&reader, &a);
     assert_eq!(live["status"], "running", "A's turn keeps running: {live}");
     assert!(live["error"].is_null(), "no false disconnect: {live}");
 
@@ -5302,8 +5368,8 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
     restart_wait(
         "A's continued turn completes",
         &fixture,
-        || restart_agent(&store, &a)["lastCompletedTurn"] == "turn-fake-thread-0",
-        || state_text(&store, &root, &a, &b),
+        || restart_agent(&reader, &a)["lastCompletedTurn"] == "turn-fake-thread-0",
+        || state_text(&root, &a, &b),
     )
     .await;
 
@@ -5326,13 +5392,10 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
         restart_provider_count(&root, "turn/interrupt", "fake-thread-0"),
         0
     );
-    let disconnects: i64 = store
-        .test_reader()
-        .unwrap()
-        .query_row(
-            "SELECT COUNT(*) FROM runtime_events WHERE text LIKE '%disconnected%'",
-            [],
-            |row| row.get(0),
+    let disconnects = studio_runtime_store::peer_update_settings::canvas_read(&reader)
+        .named(
+            &restart_queries::DisconnectCount::QUERY,
+            &restart_queries::DisconnectCount,
         )
         .unwrap();
     assert_eq!(disconnects, 0, "no parent notice of a false disconnect");
@@ -5343,6 +5406,7 @@ async fn backend_restart_keeps_live_work_and_ends_the_stopped_turn_once() {
     )
     .await
     .unwrap();
+    drop(reader);
     drop(fixture);
     eprintln!("restart witness ran in {:?}", started.elapsed());
 }

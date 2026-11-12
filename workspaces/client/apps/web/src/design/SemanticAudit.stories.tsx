@@ -206,11 +206,11 @@ async function verifyPrimary(canvasElement: HTMLElement) {
     getComputedStyle(canvasElement.querySelector("[data-audit-quiet]")!).color,
   ).not.toBe(expected);
 }
-export const PrimaryLight: Story = {
+export const PrimaryLight = {
   render: () => <PrimaryAudit />,
   globals: { colorScheme: "light" },
   play: ({ canvasElement }) => verifyPrimary(canvasElement),
-};
+} satisfies Story;
 export const PrimaryDark: Story = {
   render: () => <PrimaryAudit />,
   globals: { colorScheme: "dark" },

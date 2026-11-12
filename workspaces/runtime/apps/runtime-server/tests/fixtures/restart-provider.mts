@@ -83,7 +83,7 @@ function exists(name: string) {
   return fs.existsSync(path.join(root, name));
 }
 
-setInterval(() => {
+function flushReleasedWork() {
   if (exists("release-exec")) {
     for (const [id, processId] of pendingExec) {
       pendingExec.delete(id);
@@ -113,7 +113,10 @@ setInterval(() => {
       turn: { id: turnId, status: "completed", items: [] },
     });
   }
-}, 25);
+}
+// The parent releases work by creating marker files. Subscribe before reading
+// requests and recheck after admission, so either ordering observes the marker.
+fs.watch(root, flushReleasedWork);
 
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const request = parseFixtureRequest(line);
@@ -124,6 +127,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
   if (method === "command/exec") {
     pendingExec.set(request.id, request.params.processId);
+    flushReleasedWork();
     return;
   }
   let result: unknown = {};
@@ -148,6 +152,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       threadId,
       turn: { id: turnId, status: "inProgress", items: [] },
     });
+    flushReleasedWork();
     return;
   } else if (method === "turn/interrupt") {
     const { threadId, turnId } = request.params;

@@ -6,6 +6,8 @@ import type { Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { RequestAreaOwner } from "../RequestArea/RequestArea.tsx";
 import { requestTestEnvironment } from "./requestTestFixture.ts";
+import * as semanticAudit from "../../../../design/SemanticAudit.stories.tsx";
+import * as requestStories from "./Requests.stories.tsx";
 const capture = vi.hoisted(() => ({
   owners: [] as RequestAreaOwner[],
   roots: [] as Root[],
@@ -49,29 +51,35 @@ afterEach(async () => {
 const callers = [
   {
     name: "semantic audit stories",
-    load: async () => {
-      const story =
-        await import("../../../../design/SemanticAudit.stories.tsx");
-      const { composeStories } = await import("@storybook/react-vite");
-      capture.cleanups.push(story.default.beforeEach());
-      const { PrimaryLight } = composeStories(story);
+    load: () => {
+      capture.cleanups.push(semanticAudit.default.beforeEach());
+      // This story has no args or decorators. Exercise its actual render and
+      // owner setup without loading the Storybook runner in a component test.
       createRoot(document.getElementById("root")!).render(
-        createElement(MantineProvider, null, createElement(PrimaryLight)),
+        createElement(
+          MantineProvider,
+          null,
+          semanticAudit.PrimaryLight.render(),
+        ),
       );
     },
   },
   {
     name: "request stories",
-    load: async () => {
-      const story = await import("./Requests.stories.tsx");
+    load: () => {
       capture.cleanups.push(
-        story.default.beforeEach({ args: story.default.args }),
+        requestStories.default.beforeEach({
+          args: requestStories.default.args,
+        }),
       );
       createRoot(document.getElementById("root")!).render(
         createElement(
           MantineProvider,
           null,
-          createElement(story.default.component, story.default.args),
+          createElement(
+            requestStories.default.component,
+            requestStories.default.args,
+          ),
         ),
       );
     },
