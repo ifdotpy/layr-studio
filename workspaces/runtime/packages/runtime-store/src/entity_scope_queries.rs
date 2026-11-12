@@ -26,9 +26,11 @@ pub type WorkHistoryChangeRow = (
 // Owner: EntityScopeQueries. Unit: durable sequence numbers in a narrow catch-up interval.
 const SEQ_INDEX_RANGE_MAX: i64 = 1024;
 
+// The label-first index reads only the rows of one direct source; the sequence index
+// scanned every durable change in the interval on each snapshot page.
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64),
-    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_IDENTITY),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID),
     sql="SELECT {id},{seq},{deleted} FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) WHERE {label}=?1 AND {seq}>?2 AND {seq}<=?3 AND ({deleted}=0 OR {seq}>?4) AND (?5 IS NULL OR {id}=?5) ORDER BY {seq},{rowid} LIMIT ?6")]
 struct DirectChanges<'a> {
