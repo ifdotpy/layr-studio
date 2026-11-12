@@ -176,6 +176,7 @@ pub mod capability;
 mod git_guard;
 pub mod mapping;
 pub mod settings;
+mod tool_index;
 pub mod versions;
 #[cfg(test)]
 mod warm_store_tests;

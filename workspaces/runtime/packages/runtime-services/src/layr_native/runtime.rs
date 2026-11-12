@@ -726,6 +726,12 @@ pub(super) fn prepare_files_reporting(
             NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
         })?;
         super::git_guard::ensure(state_dir, &binary)?;
+        // The tool links only speed up searches: a failure leaves the real tools in place.
+        if let Some(bin) = super::binary_path(state_dir).parent() {
+            if let Err(error) = super::tool_index::ensure_links(bin, &binary) {
+                eprintln!("Native Layr warning: the rg and find links are not updated: {error}");
+            }
+        }
     }
     let version_warning = super::versions::verify(state_dir, &root)?;
     fs::create_dir_all(&metadata)?;
@@ -872,6 +878,7 @@ pub(super) fn prepare_files_reporting(
         )?;
     }
     super::git_guard::install_hook(state_dir, &cwd)?;
+    super::tool_index::warm(state_dir, &cwd);
     let state = run(state_dir, &cwd, &["rev-parse", "head"])?;
     let mut result = json!({"cwd":cwd,"layrProjectId":project,"layrLine":line,"layrStateId":state,"layrReady":true,"layrStoreRoot":root});
     if let Some(warning) = &version_warning {
