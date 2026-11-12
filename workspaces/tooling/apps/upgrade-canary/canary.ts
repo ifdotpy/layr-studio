@@ -21,7 +21,7 @@
 // Keychain stays denied unless --claude-keychain or CANARY_CLAUDE_KEYCHAIN=1 is explicit.
 
 import { createHash, randomBytes } from "node:crypto";
-import { requestId as randomUUID } from "../../../providers/apps/claude-bridge/request-id.ts";
+import { requestId as randomUUID } from "../../../integrations/providers/claude/bridge/request-id.ts";
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import fs from "node:fs";

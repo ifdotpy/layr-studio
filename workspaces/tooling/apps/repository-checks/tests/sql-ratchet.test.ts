@@ -571,7 +571,7 @@ test("generated Codex open-JSON fields keep imports, calls and SQL visible to th
   try {
     const vendor = path.join(
       directory,
-      "workspaces/runtime/packages/codex-protocol/src/generated/mod.rs",
+      "workspaces/integrations/providers/codex/vendor/codex-protocol/src/generated/mod.rs",
     );
     const sibling = path.join(path.dirname(vendor), "storage.rs");
     const ordinary = path.join(directory, "ordinary.rs");

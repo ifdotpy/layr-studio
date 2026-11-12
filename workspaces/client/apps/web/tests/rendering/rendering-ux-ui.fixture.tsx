@@ -20,7 +20,9 @@ import StreamingText from "../../src/components/conversation/transcript/Streamin
 import Activity, {
   ToolCard,
 } from "../../src/components/conversation/transcript/Activity/Activity.tsx";
-import progressFixtures from "../../../../../providers/fixtures/native-progress.json";
+import codexProgressFixtures from "../../../../../integrations/providers/codex/tests/fixtures/native-progress.json";
+import claudeProgressFixtures from "../../../../../integrations/providers/claude/tests/fixtures/native-progress.json";
+const progressFixtures = [...codexProgressFixtures, ...claudeProgressFixtures];
 import History from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
 function TurnHistory(props: ComponentProps<typeof History>) {
   return (

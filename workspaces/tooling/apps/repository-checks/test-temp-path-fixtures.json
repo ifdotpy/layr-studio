@@ -49,10 +49,10 @@
     "\"file://localhost/tmp/a.md#L4-L8\",",
     "json!({\"path\":\"/tmp/a.md\",\"line\":4}),"
   ],
-  "workspaces/providers/apps/claude-bridge/disk-full.test.ts": [
+  "workspaces/integrations/providers/claude/bridge/disk-full.test.ts": [
     "cwd: \"/tmp/work\","
   ],
-  "workspaces/providers/apps/claude-bridge/session-store.test.ts": [
+  "workspaces/integrations/providers/claude/bridge/session-store.test.ts": [
     "cwd: \"/tmp/work\",",
     "cwd: \"/tmp/title\","
   ],

@@ -2836,9 +2836,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let frames: Vec<Value> = studio_json::from_str(include_str!(
-            "../../runtime-schema/src/fixtures/claude-usage-notifications.json"
-        ))
+        let frames: Vec<Value> = studio_json::from_str(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../integrations/providers/claude/tests/fixtures/claude-usage-notifications.json")).expect("Claude fixture"))
         .unwrap();
         for (index, params) in frames.into_iter().enumerate() {
             store
@@ -5412,12 +5410,16 @@ mod tests {
 
     #[test]
     fn native_progress_fixture_matches_the_ui_render_input() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../providers/fixtures/native-progress.json");
-        let fixtures: Value =
-            studio_json::from_str(&std::fs::read_to_string(path).expect("shared fixture"))
-                .expect("JSON");
-        for fixture in fixtures.as_array().expect("cases") {
+        let fixtures = ["codex", "claude"].map(|provider| {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "../../../integrations/providers/{provider}/tests/fixtures/native-progress.json"
+            ));
+            studio_json::from_str::<Vec<Value>>(
+                &std::fs::read_to_string(path).expect("provider fixture"),
+            )
+            .expect("JSON")
+        });
+        for fixture in fixtures.iter().flatten() {
             let dispatch_event = if fixture["provider"] == "codex" {
                 dispatch_native
             } else {

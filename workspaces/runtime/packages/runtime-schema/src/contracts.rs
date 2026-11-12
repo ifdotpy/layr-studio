@@ -1062,7 +1062,7 @@ fn task_tool_schema_ts(
     run_node(
         root,
         "node_modules/oxfmt/bin/oxfmt",
-        "--stdin-filepath=workspaces/providers/apps/claude-bridge/task-command-tool.generated.ts",
+        "--stdin-filepath=workspaces/integrations/providers/claude/bridge/task-command-tool.generated.ts",
         &text,
     )
 }
@@ -1834,21 +1834,21 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: workspace_modes_ts(),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/claude-failure.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/claude-failure.generated.ts".into(),
             text: format!(
                 "// {HEADER}\nexport const claudeFailureSchema = {} as const;\n",
                 studio_json::to_string(&crate::claude_failure::schema()).expect("failure schema"),
             ),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/session-policy.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/session-policy.generated.ts".into(),
             text: format!(
                 "// {HEADER}\nexport const MCP_AUTO_BACKGROUND_MS = {};\n",
                 values::CLAUDE_MCP_AUTO_BACKGROUND_MS
             ),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/task-command-tool.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/task-command-tool.generated.ts".into(),
             text: task_tool_schema_ts(root, &task_tool)?,
         },
         Rendered {
@@ -1856,7 +1856,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: provider_kind_ts(),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/provider-method-policy.generated.ts"
+            path: "workspaces/integrations/providers/claude/bridge/provider-method-policy.generated.ts"
                 .into(),
             text: provider_method_policy_ts(),
         },
@@ -1890,7 +1890,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             ),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/input-origin.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/input-origin.generated.ts".into(),
             text: format!(
                 "// {HEADER}\nexport const HUMAN_INPUT = {};\nexport const STUDIO_EVENT_INPUT = {};\n",
                 json_string(crate::provider_input::ProviderInputOrigin::Human.as_str()),
@@ -1898,7 +1898,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             ),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/lifecycle-capabilities.generated.ts"
+            path: "workspaces/integrations/providers/claude/bridge/lifecycle-capabilities.generated.ts"
                 .into(),
             text: format!(
                 "// {HEADER}\nexport const CLAUDE_STEER_COMPLETION_RECEIPTS = {};\n",
@@ -1906,7 +1906,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             ),
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/shell-policy.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/shell-policy.generated.ts".into(),
             text: format!(
                 "// {HEADER}\nexport const QUIET_MIN_MS = {};\nexport const PRESSURE_IDLE_MS = {};\nexport const PRESSURE_RESTART_GUARD_MS = {};\n",
                 crate::shell_policy::QUIET_MIN_MS,
@@ -1919,8 +1919,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             text: studio_json::to_string_pretty(&openapi).map_err(|error| error.to_string())? + "\n",
         },
         Rendered {
-            path: "workspaces/providers/apps/claude-bridge/settings-policy.generated.ts".into(),
-            text: format!("// {HEADER}\nexport const PERSISTENT_UNSUPPORTED_REASON = {};\n",json_string(crate::settings_scope::PERSISTENT_UNSUPPORTED_REASON)),
+            path: "workspaces/integrations/providers/claude/bridge/settings-policy.generated.ts".into(),
+            text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/integrations/providers/claude/bridge/settings-policy.generated.ts", &format!("// {HEADER}\nexport const PERSISTENT_UNSUPPORTED_REASON = {};\n",json_string(crate::settings_scope::PERSISTENT_UNSUPPORTED_REASON)))?,
         },
         Rendered {
             path: web("deliveryMoment.ts"),
@@ -2158,7 +2158,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "paths":{}, "components":{"schemas":schemas}
         });
         rendered.push(Rendered {
-            path: "workspaces/providers/apps/claude-bridge/bridge-wire.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/bridge-wire.generated.ts".into(),
             text: api_types(root, &document, "--rust-owned")?,
         });
         let schema = document["components"]["schemas"]
@@ -2168,7 +2168,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "// {HEADER}\nimport type {{ core }} from \"zod\";\nexport const bridgeWireDefinitions = {schema} satisfies Record<string, core.JSONSchema.JSONSchema>;\n"
         );
         rendered.push(Rendered {
-            path: "workspaces/providers/apps/claude-bridge/bridge-wire-schema.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/bridge-wire-schema.generated.ts"
+                .into(),
             text: run_node(
                 root,
                 "node_modules/oxfmt/bin/oxfmt",
@@ -2217,7 +2218,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "paths":{}, "components":{"schemas":schemas}
         });
         rendered.push(Rendered {
-            path: "workspaces/providers/apps/claude-bridge/runtime-contract.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/runtime-contract.generated.ts"
+                .into(),
             text: api_types(root, &document, "--rust-owned")?,
         });
     }
@@ -2252,7 +2254,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         }
         text.push_str("] as const;\n");
         rendered.push(Rendered {
-            path: "workspaces/providers/apps/claude-bridge/provider-errors.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/provider-errors.generated.ts"
+                .into(),
             text,
         });
     }
@@ -2267,7 +2270,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             "paths":{}, "components":{"schemas":usage_generator.take_definitions(true)}
         });
         rendered.push(Rendered {
-            path: "workspaces/providers/apps/claude-bridge/usage-contract.generated.ts".into(),
+            path: "workspaces/integrations/providers/claude/bridge/usage-contract.generated.ts"
+                .into(),
             text: api_types(root, &usage_document, "--rust-owned")?,
         });
     }
@@ -2600,7 +2604,7 @@ mod tests {
     #[test]
     fn provider_method_policy_matches_generated_bridge_for_parameter_shapes() {
         let root = repository_root();
-        let script = r#"import { isThreadSerialized } from './workspaces/providers/apps/claude-bridge/provider-method-policy.generated.ts';
+        let script = r#"import { isThreadSerialized } from './workspaces/integrations/providers/claude/bridge/provider-method-policy.generated.ts';
 let input = ''; for await (const chunk of process.stdin) input += chunk;
 process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => isThreadSerialized(method, params))));"#;
         let mut cases = Vec::new();

@@ -8,7 +8,7 @@ import {
   handleEntitySyncFixtureRequest,
   syncIdentityFixture,
 } from "../playwright.ts";
-import { prepareClaudeImage } from "../../../../../providers/apps/claude-bridge/images.ts";
+import { prepareClaudeImage } from "../../../../../integrations/providers/claude/bridge/images.ts";
 
 test("Claude image refusal remains visible and preserves the draft", async ({
   browser,

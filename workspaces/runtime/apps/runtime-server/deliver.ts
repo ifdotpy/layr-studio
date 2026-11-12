@@ -1,6 +1,6 @@
 // Platform router for the single operator delivery command.
 import { execFileSync } from "node:child_process";
-import { requestId as randomUUID } from "../../../providers/apps/claude-bridge/request-id.ts";
+import { requestId as randomUUID } from "../../../integrations/providers/claude/bridge/request-id.ts";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

@@ -2,6 +2,9 @@ packages:
   - "."
   - "workspaces/*/apps/*"
   - "workspaces/*/packages/*"
+  - "workspaces/integrations/common"
+  - "workspaces/integrations/providers/*"
+  - "workspaces/integrations/providers/*/bridge"
 
 overrides:
   "@modelcontextprotocol/sdk": 1.32.1

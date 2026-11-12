@@ -3666,11 +3666,19 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             PathBuf::from(
                 std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
             )
-            .join("../../../providers/apps/claude-bridge/node_modules"),
+            .join("../../../integrations/providers/claude/bridge/node_modules"),
         )
         .unwrap();
         std::os::unix::fs::symlink(bridge_node_modules, temp.path().join("node_modules")).unwrap();
-        std::fs::write(&sdk, include_str!("fixtures/claude-sdk.mts")).unwrap();
+        std::fs::write(
+            &sdk,
+            std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../integrations/providers/claude/bridge/fixtures/claude-sdk.mts"),
+            )
+            .expect("Claude fixture"),
+        )
+        .unwrap();
         std::fs::write(
             temp.path().join("package.json"),
             r#"{"version":"0.0.0-fixture"}"#,
@@ -3904,8 +3912,13 @@ async fn rust_direct_claude_launch_runs_the_scripted_bridge_turn() {
             .collect::<Vec<_>>()
     };
     eprintln!("STAGE transcript-read");
-    let mut expected: Vec<Value> =
-        studio_json::from_str(include_str!("fixtures/claude-stream-items.json")).unwrap();
+    let mut expected: Vec<Value> = studio_json::from_str(
+        &std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../../integrations/providers/claude/tests/fixtures/claude-stream-items.json",
+        ))
+        .expect("Claude fixture"),
+    )
+    .unwrap();
     // The input includes runtime instructions; compare its complete persisted text.
     expected[0]["text"] = transcript["items"][0]["text"].clone();
     expected[0]["id"] = json!(message_id);

@@ -1,4 +1,4 @@
-workspaces/providers/apps/claude-bridge/node_modules/
+workspaces/integrations/providers/claude/bridge/node_modules/
 node_modules/
 dist/
 coverage/

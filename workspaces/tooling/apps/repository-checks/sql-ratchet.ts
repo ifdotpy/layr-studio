@@ -911,7 +911,7 @@ export function scanRustNodes(paths: string[], directory = root): Node[] {
           path
             .relative(directory, path.resolve(root, node.file))
             .replaceAll(path.sep, "/") ===
-            "workspaces/runtime/packages/codex-protocol/src/generated/mod.rs",
+            "workspaces/integrations/providers/codex/vendor/codex-protocol/src/generated/mod.rs",
       )
       .map(key),
   );
@@ -930,7 +930,7 @@ export function scanRustNodes(paths: string[], directory = root): Node[] {
         owner.start <= node.start &&
         owner.end >= node.end &&
         ((file ===
-          "workspaces/runtime/packages/codex-protocol/src/generated/mod.rs" &&
+          "workspaces/integrations/providers/codex/vendor/codex-protocol/src/generated/mod.rs" &&
           /^impl<'de> serde::Deserialize<'de> for Unknown[A-Z][A-Za-z0-9_]*\s*\{/.test(
             owner.text,
           )) ||

@@ -1,0 +1,55 @@
+[
+  {
+    "provider": "claude",
+    "events": [
+      {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "thinking",
+          "delta": "Check the event"
+        }
+      },
+      {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "item": {
+            "id": "tool",
+            "type": "mcpToolCall",
+            "server": "claude",
+            "tool": "search",
+            "arguments": {},
+            "status": "inProgress",
+            "elapsedSeconds": 3
+          }
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": "agent:thinking",
+        "kind": "text",
+        "text": "Check the event",
+        "payload": null
+      },
+      {
+        "id": "agent:tool",
+        "kind": "tool",
+        "text": "",
+        "payload": {
+          "id": "tool",
+          "type": "mcpToolCall",
+          "server": "claude",
+          "tool": "search",
+          "arguments": {},
+          "status": "inProgress",
+          "elapsedSeconds": 3,
+          "progressMessage": "Running for 3s"
+        }
+      }
+    ]
+  }
+]

@@ -58,7 +58,7 @@ consumer. Numerically equal values with different purposes or units remain
 distinct contracts.
 
 Provider identity and dispatch follow the
-[provider extensibility contract](workspaces/providers/README.md#provider-extensibility).
+[provider extensibility contract](workspaces/integrations/README.md#provider-extensibility).
 
 Write code, tests, scripts, and tool configuration in TypeScript.
 [docs/typescript.md](docs/typescript.md) owns the rules for type sources,

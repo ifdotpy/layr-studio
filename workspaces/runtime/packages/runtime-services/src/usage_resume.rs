@@ -345,7 +345,8 @@ fn claude_policy() -> &'static ClaudeUsagePolicy {
     POLICY.get_or_init(|| {
         // The JavaScript module exports a JSON string so both runtimes consume
         // one contract, and the existing bridge source hash includes it.
-        let source = include_str!("../../../../providers/apps/claude-bridge/usage-policy.ts");
+        let source =
+            include_str!("../../../../integrations/providers/claude/bridge/usage-policy.ts");
         let (_, json) = source
             .split_once("export default `")
             .expect("usage policy export");

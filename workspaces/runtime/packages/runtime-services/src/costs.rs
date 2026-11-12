@@ -1663,7 +1663,7 @@ fn valid_session_id(value: &str) -> bool {
 /// is read from the bridge source instead of being copied here.
 fn claude_session_format() -> &'static str {
     static FORMAT: LazyLock<&'static str> = LazyLock::new(|| {
-        include_str!("../../../../providers/apps/claude-bridge/session-store.ts")
+        include_str!("../../../../integrations/providers/claude/bridge/session-store.ts")
             .split_once("const FORMAT = \"")
             .and_then(|(_, rest)| rest.split_once('"'))
             .map(|(format, _)| format)
@@ -2093,9 +2093,12 @@ mod tests {
     async fn typed_usage_ledger_journal_incremental_group_prices() {
         let temp = tempdir().expect("state");
         let store = RuntimeStore::open(Some(temp.path())).await.expect("store");
-        let runs: Value = studio_json::from_str(include_str!(
-            "../../runtime-schema/src/fixtures/claude-cache-write-1h.json"
-        ))
+        let runs: Value = studio_json::from_str(
+            &std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+                "../../../integrations/providers/claude/tests/fixtures/claude-cache-write-1h.json",
+            ))
+            .expect("Claude fixture"),
+        )
         .expect("native counts");
         fs::create_dir_all(temp.path().join("model-pricing")).expect("pricing directory");
         fs::write(temp.path().join("model-pricing/models-dev-v1.json"),json!({"version":1,"catalog":{"providers":{

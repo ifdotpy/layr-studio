@@ -125,7 +125,7 @@ target
 workspaces/client/apps/desktop/node_modules
 workspaces/client/apps/native/node_modules
 workspaces/client/apps/web/node_modules
-workspaces/providers/apps/claude-bridge/node_modules
+workspaces/integrations/providers/claude/bridge/node_modules
 ```
 
 Before the save, those folders showed `plain folder (run layr cache repair)` in main.

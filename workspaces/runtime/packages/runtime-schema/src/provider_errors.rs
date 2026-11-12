@@ -311,7 +311,7 @@ impl AgentError {
     }
 }
 
-pub const CODEX_ERROR_SCHEMA: &str = include_str!("schemas/codex/CodexErrorInfo.json");
+pub const CODEX_ERROR_SCHEMA: &str = include_str!(concat!(env!("OUT_DIR"), "/codex-errors.json"));
 
 pub use crate::codex_generated::KnownCodexErrorKind;
 

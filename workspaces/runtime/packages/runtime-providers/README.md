@@ -45,7 +45,7 @@ is required to release that owner's reservation.
 
 The [provider session task](../runtime-services/src/provider_session_task.rs)
 drives these actions. The [process adapters](../runtime-process/README.md) own
-stdio and supervisor transport. The [Claude bridge](../../../providers/apps/claude-bridge/README.md)
+stdio and supervisor transport. The [Claude bridge](../../../integrations/providers/claude/bridge/README.md)
 owns SDK translation.
 
 [`tests/codec.rs`](tests/codec.rs) covers journal records, malformed envelopes,

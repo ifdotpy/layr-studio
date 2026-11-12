@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "contracts:vendor-errors": "node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --refresh --write",
+    "contracts:vendor-errors": "node workspaces/integrations/common/tooling/contracts.ts --refresh --write",
     "contracts:generate": "pnpm run contracts:vendor:generate && cargo run --quiet --locked -p studio-runtime-schema --bin studio-contracts -- --write",
     "contracts:check": "pnpm run contracts:vendor:check && cargo run --quiet --locked -p studio-runtime-schema --bin studio-contracts -- --check",
     "test:client": "pnpm run typecheck:client-helper && pnpm --filter codex-agents-web test",
@@ -27,11 +27,11 @@
     "test:tooling:js": "node --test workspaces/tooling/apps/repository-checks/tests/gate-lock.test.ts workspaces/tooling/apps/repository-checks/tests/compiler-policy.test.ts workspaces/tooling/apps/repository-checks/tests/layr-sweep-parity.test.ts workspaces/tooling/apps/repository-checks/tests/session-receipt-contract.test.ts workspaces/tooling/apps/repository-checks/tests/gates.test.ts workspaces/tooling/apps/repository-checks/tests/facade.test.ts workspaces/tooling/apps/repository-checks/tests/release-binaries.test.ts workspaces/tooling/apps/repository-checks/tests/scale-verifier-teardown.test.ts workspaces/tooling/apps/repository-checks/tests/native-style-policy.test.ts workspaces/tooling/apps/repository-checks/tests/generate-api-types.test.ts workspaces/tooling/apps/installed-smoke/tests/smoke.test.ts workspaces/tooling/apps/installed-smoke/tests/approvals.test.ts workspaces/tooling/apps/repository-checks/tests/delivery.test.ts workspaces/tooling/apps/repository-checks/tests/test-result-cache.test.ts workspaces/tooling/apps/upgrade-canary/tests/canary.test.ts workspaces/tooling/apps/repository-checks/tests/ast-grep.test.ts workspaces/tooling/apps/repository-checks/tests/clippy-ratchet.test.ts workspaces/tooling/apps/repository-checks/tests/conventional-commit.test.ts workspaces/tooling/apps/repository-checks/tests/network-boundary.test.ts workspaces/tooling/apps/repository-checks/tests/component-folders.test.ts workspaces/tooling/apps/repository-checks/tests/storage-map.test.ts",
     "layout:generate": "node workspaces/client/apps/web/scripts/generate-layout-contract.ts",
     "layout:check": "node workspaces/client/apps/web/scripts/check-layout-contract.ts",
-    "contracts:vendor:generate": "node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --write",
-    "contracts:vendor:check": "node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --check",
-    "contracts:vendor:refresh": "node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --refresh --write",
-    "contracts:vendor:verify-source": "node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --refresh --check",
-    "test:provider-contracts": "node --test workspaces/tooling/apps/repository-checks/tests/provider-contracts.test.ts workspaces/tooling/apps/repository-checks/tests/provider-cargo-mutations.test.ts",
+    "contracts:vendor:generate": "node workspaces/integrations/common/tooling/contracts.ts --write",
+    "contracts:vendor:check": "node workspaces/integrations/common/tooling/contracts.ts --check",
+    "contracts:vendor:refresh": "node workspaces/integrations/common/tooling/contracts.ts --refresh --write",
+    "contracts:vendor:verify-source": "node workspaces/integrations/common/tooling/contracts.ts --refresh --check",
+    "test:provider-contracts": "node workspaces/integrations/common/tooling/test.ts",
     "check:ast-grep": "node workspaces/tooling/apps/repository-checks/ast-grep.ts"
   },
   "devDependencies": {
@@ -41,7 +41,6 @@
     "openapi-typescript": "7.13.0",
     "oxfmt": "0.74.0",
     "oxlint": "1.89.0",
-    "studio-claude-bridge": "workspace:*",
     "stylelint": "18.0.0",
     "stylelint-config-standard": "41.0.0",
     "typescript": "5.9.3"

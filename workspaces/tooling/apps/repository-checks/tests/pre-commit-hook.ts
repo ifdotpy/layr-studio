@@ -578,7 +578,7 @@ try {
       0,
       ambientAccepted.stdout + ambientAccepted.stderr,
     );
-    const bridgeRoot = "workspaces/providers/apps/fixture-bridge";
+    const bridgeRoot = "workspaces/integrations/apps/fixture-bridge";
     stage(
       root,
       `${bridgeRoot}/package.json`,

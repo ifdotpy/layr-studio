@@ -284,8 +284,7 @@ fn handled_dispositions_reference_production_handlers() {
         .ancestors()
         .nth(4)
         .expect("workspace root");
-    let test =
-        root.join("workspaces/tooling/apps/repository-checks/tests/provider-contracts.test.ts");
+    let test = root.join("workspaces/integrations/providers/codex/tests/contracts.test.ts");
     crate::bounded_child::run(crate::bounded_child::Request {
         program: std::ffi::OsStr::new("node"),
         git_directory: None,

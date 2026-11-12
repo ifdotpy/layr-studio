@@ -1166,8 +1166,11 @@ mod tests {
 
     #[test]
     fn claude_rate_info_matches_bridge_owned_schema() {
-        let owner: Value =
-            studio_json::from_str(include_str!("schemas/claude-rate-limit.schema.json")).unwrap();
+        let owner: Value = studio_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/claude-rate-limit.json"
+        )))
+        .unwrap();
         let rust = schemars::schema_for!(ClaudeRateInfo).to_value();
         assert_eq!(
             owner["properties"]

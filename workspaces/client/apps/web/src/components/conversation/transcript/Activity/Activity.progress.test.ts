@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../../../../types.ts";
 import { ToolCard } from "./Activity.tsx";
 import NativeMarkdown from "../../markdown/NativeMarkdown/NativeMarkdown.tsx";
-import fixtures from "../../../../../../../../providers/fixtures/native-progress.json";
+import codexProgressFixtures from "../../../../../../../../integrations/providers/codex/tests/fixtures/native-progress.json";
+import claudeProgressFixtures from "../../../../../../../../integrations/providers/claude/tests/fixtures/native-progress.json";
+const fixtures = [...codexProgressFixtures, ...claudeProgressFixtures];
 
 describe("native tool progress", () => {
   for (const provider of ["codex", "claude"]) {

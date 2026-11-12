@@ -1139,7 +1139,8 @@ test("collector waits for a matching final-turn cost publication through SSE", a
 
 test("supervisor account identity admits a retained bridge across backend replacement", async () => {
   const { bridgeProcessMatches } = await import("../usage.ts");
-  const bridge = "/release/workspaces/providers/apps/claude-bridge/bridge.mjs";
+  const bridge =
+    "/release/workspaces/integrations/providers/claude/bridge/bridge.mjs";
   const processes = [
     {
       pid: 40,
@@ -1560,7 +1561,8 @@ test("permission verification rejects object bypass policies, unknown policies a
 
 test("supervisor ownership rejects unregistered backend descendants and reused PIDs", async () => {
   const { bridgeProcessMatches } = await import("../usage.ts");
-  const bridge = "/release/workspaces/providers/apps/claude-bridge/bridge.mjs";
+  const bridge =
+    "/release/workspaces/integrations/providers/claude/bridge/bridge.mjs";
   const row = {
     pid: 40,
     ppid: 10,
@@ -2135,7 +2137,7 @@ test("saved Claude runs reprice native one-hour truth and display the CLI estima
   }[] = JSON.parse(
     fs.readFileSync(
       new URL(
-        "../../../../runtime/packages/runtime-schema/src/fixtures/claude-cache-write-1h.json",
+        "../../../../integrations/providers/claude/tests/fixtures/claude-cache-write-1h.json",
         import.meta.url,
       ),
       "utf8",
@@ -2285,4 +2287,72 @@ test("native usage boundaries accept sparse numeric fields and nested JSON docum
     [true, true],
     "the boundary views must accept the numeric and nested object values the journal stores",
   );
+});
+
+test("retained bridge layouts keep authoritative ownership and their original release root", async () => {
+  const { bridgeCandidates, bridgeReleaseRoot, bridgeProcessMatches } =
+    await import("../usage.ts");
+  const releases = ["/releases/previous release", "/releases/current"];
+  const bridges = bridgeCandidates(releases);
+  const root = "/state/account-servers/c";
+  for (const relative of [
+    "workspaces/providers/apps/claude-bridge/bridge.mjs",
+    "workspaces/integrations/providers/claude/bridge/bridge.mjs",
+    "scripts/claude_bridge/bridge.mjs",
+  ]) {
+    const bridge = path.join(releases[0]!, relative);
+    const processes = [
+      {
+        pid: 40,
+        ppid: 5,
+        startTime: "identity",
+        command: `/usr/bin/node ${bridge} ${root}`,
+      },
+    ];
+    const supervisor: Supervisor = {
+      enabled: true,
+      accountKey: "c",
+      stateDir: "/state",
+      health: {
+        stateDir: "/state",
+        handles: [
+          {
+            id: "account:c",
+            pid: 40,
+            signature: "launch",
+            startTime: "identity",
+            stdoutReaderAlive: true,
+          },
+        ],
+      },
+    };
+    const [observed] = bridgeProcessMatches(
+      processes,
+      bridges,
+      root,
+      11,
+      supervisor,
+    );
+    assert.ok(observed, relative);
+    assert.equal(observed.bridge, bridge);
+    assert.equal(bridgeReleaseRoot(observed.bridge), releases[0]);
+    assert.equal(observed.ownership.kind, "supervisor");
+    assert.deepEqual(
+      bridgeProcessMatches(processes, bridges, root, 11, {
+        ...supervisor,
+        accountKey: "other",
+      }),
+      [],
+    );
+    assert.deepEqual(
+      bridgeProcessMatches(
+        [{ ...processes[0]!, startTime: "reused" }],
+        bridges,
+        root,
+        11,
+        supervisor,
+      ),
+      [],
+    );
+  }
 });

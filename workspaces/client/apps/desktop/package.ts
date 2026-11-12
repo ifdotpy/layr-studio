@@ -26,7 +26,7 @@ const rendererDist = path.join(
 );
 const bridgeSource = path.join(
   repositoryRoot,
-  "workspaces/providers/apps/claude-bridge",
+  "workspaces/integrations/providers/claude/bridge",
 );
 await access(path.join(rendererDist, "index.html"));
 // With CODEX_RELEASE_TARGET_DIR set, reuse release binaries that were built for
@@ -121,7 +121,7 @@ try {
     });
     await cp(
       bridgeSource,
-      path.join(resources, "workspaces/providers/apps/claude-bridge"),
+      path.join(resources, "workspaces/integrations/providers/claude/bridge"),
       {
         recursive: true,
         filter: (source) =>

@@ -12,7 +12,7 @@
 // contract.
 
 import { createHash, randomBytes } from "node:crypto";
-import { requestId as randomUUID } from "../../../providers/apps/claude-bridge/request-id.ts";
+import { requestId as randomUUID } from "../../../integrations/providers/claude/bridge/request-id.ts";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -32,6 +32,8 @@ import {
   scenarioEvidence,
   publicationReady,
   bridgeProcessMatches,
+  bridgeCandidates,
+  bridgeReleaseRoot,
   validateSteer,
   atomicWriteJson,
   preserveProvenance,
@@ -841,14 +843,7 @@ export class Smoke {
       for (const entry of fs.readdirSync(parent, { withFileTypes: true }))
         if (entry.isDirectory()) releases.push(path.join(parent, entry.name));
     }
-    const bridges = [
-      ...new Set(
-        releases.flatMap((root) => [
-          path.join(root, "workspaces/providers/apps/claude-bridge/bridge.mjs"),
-          path.join(root, "scripts/claude_bridge/bridge.mjs"),
-        ]),
-      ),
-    ];
+    const bridges = bridgeCandidates(releases);
     const accountRoot =
       accountKey === "default"
         ? this.state
@@ -907,12 +902,7 @@ export class Smoke {
     return matches.map((row) => ({
       ...row,
       observedAt: new Date().toISOString(),
-      release: row.bridge.endsWith("/scripts/claude_bridge/bridge.mjs")
-        ? row.bridge.slice(0, -"/scripts/claude_bridge/bridge.mjs".length)
-        : row.bridge.slice(
-            0,
-            -"/workspaces/providers/apps/claude-bridge/bridge.mjs".length,
-          ),
+      release: bridgeReleaseRoot(row.bridge),
       sha256: sha256File(row.bridge),
     }));
   }

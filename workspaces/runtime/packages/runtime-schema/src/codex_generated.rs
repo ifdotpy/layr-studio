@@ -1,5 +1,5 @@
 // Generated from Codex CLI 0.167.1 selected JSON Schema; do not edit.
-// Source: provider-contract-sources.ts; SHA-256: acb9acd2555517068f6dc36db243b0f1fbf1dbe5205434b421149ba91a38550f
+// Source: workspaces/integrations/providers/codex/vendor/source.ts; SHA-256: fc7eadd637d5439b828305b3a1bc347dd033ba2dddb7910ad04c691d61e5c31c
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,

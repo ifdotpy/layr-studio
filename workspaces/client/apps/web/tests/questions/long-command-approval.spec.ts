@@ -1,4 +1,4 @@
-import type { CommandExecutionRequestApprovalParams } from "../../../../../providers/apps/claude-bridge/codex-generated/protocol.ts";
+import type { CommandExecutionRequestApprovalParams } from "../../../../../integrations/providers/claude/bridge/codex-generated/protocol.ts";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

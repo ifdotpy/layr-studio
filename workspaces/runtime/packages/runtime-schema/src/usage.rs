@@ -242,8 +242,7 @@ impl From<studio_json::Error> for UsageParseError {
 }
 
 /// Codex CLI 0.164.0 generated notification schema; native compatibility owner.
-pub const CODEX_USAGE_SCHEMA: &str =
-    include_str!("schemas/codex/ThreadTokenUsageUpdatedNotification.json");
+pub const CODEX_USAGE_SCHEMA: &str = include_str!(concat!(env!("OUT_DIR"), "/codex-usage.json"));
 /// Whether a generated Codex schema preserves the fields our serde mirror reads.
 /// Documentation, format hints and additions outside the token breakdown are harmless.
 /// New breakdown properties may be billable categories and require an accounting update.

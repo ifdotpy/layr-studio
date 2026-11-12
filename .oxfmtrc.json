@@ -19,7 +19,7 @@
     "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-budget-state.schema.json",
     "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-budget-state-write.schema.json",
     "workspaces/runtime/packages/runtime-schema/src/schemas/budget-capture.schema.json",
-    "workspaces/providers/apps/claude-bridge/claude-failure.generated.ts",
-    "workspaces/runtime/packages/runtime-schema/src/codex_protocol.schema.json"
+    "workspaces/integrations/providers/claude/bridge/claude-failure.generated.ts",
+    "workspaces/integrations/providers/codex/vendor/schemas/codex_protocol.schema.json"
   ]
 }

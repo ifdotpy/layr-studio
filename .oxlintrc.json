@@ -15,7 +15,9 @@
   },
   "overrides": [
     {
-      "files": ["workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts"],
+      "files": [
+        "workspaces/integrations/providers/claude/bridge/sdk-contract-gaps.ts"
+      ],
       "rules": {
         "typescript/ban-ts-comment": [
           "error",

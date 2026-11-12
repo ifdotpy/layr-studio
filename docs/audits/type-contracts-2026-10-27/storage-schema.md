@@ -56,15 +56,15 @@ README material was read as task context. Generator files were consulted narrowl
 Fully generated artifacts, counted separately and mechanically scanned:
 
 - `workspaces/runtime/packages/runtime-schema/src/codex_generated.rs`
-- `workspaces/runtime/packages/runtime-schema/src/schemas/claude-rate-limit.provenance.json`
-- `workspaces/runtime/packages/runtime-schema/src/schemas/claude-rate-limit.schema.json`
+- `workspaces/integrations/providers/claude/vendor/schemas/claude-rate-limit.provenance.json`
+- `workspaces/integrations/providers/claude/vendor/schemas/claude-rate-limit.schema.json`
 - `workspaces/runtime/packages/runtime-schema/src/schemas/usage-observation.schema.json`
 
 Vendor artifacts, counted separately and mechanically scanned:
 
-- `workspaces/runtime/packages/runtime-schema/src/schemas/codex/CodexErrorInfo.json`
-- `workspaces/runtime/packages/runtime-schema/src/schemas/codex/ThreadTokenUsageUpdatedNotification.json`
-- `workspaces/runtime/packages/runtime-schema/src/schemas/codex/lifecycle.schema.json`
+- `workspaces/integrations/providers/codex/vendor/schemas/selected/CodexErrorInfo.json`
+- `workspaces/integrations/providers/codex/vendor/schemas/selected/ThreadTokenUsageUpdatedNotification.json`
+- `workspaces/integrations/providers/codex/vendor/schemas/selected/lifecycle.schema.json`
 
 The 71 JSON production documents are committed source/contract documents, including mixed documents with generated leaves. They are not presented as 71 wholly handwritten JSON files. Claude rate-limit provenance explicitly names generate-provider-contracts.ts; UsageObservation schema is fully rendered by contracts.rs:1453. runtime-state-schema.json is the store-owned committed catalog source consumed by bootstrap. The two SQL owners are supervisor_schema.sql and sync_schema.sql.
 

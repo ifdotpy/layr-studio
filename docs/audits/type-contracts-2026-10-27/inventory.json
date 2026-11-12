@@ -61,7 +61,7 @@
     },
     "providers-process": {
       "roots": [
-        "workspaces/providers/apps/claude-bridge",
+        "workspaces/integrations/providers/claude/bridge",
         "workspaces/runtime/apps/diagnostics",
         "workspaces/runtime/apps/peer-link",
         "workspaces/runtime/apps/process-supervisor",

@@ -301,7 +301,7 @@ const BOUNDARY_ALLOWLIST = [
   {
     importer: "studio-claude-bridge",
     file: "vitest.config.ts",
-    specifier: "../../../tooling/apps/repository-checks/gate-config.ts",
+    specifier: "../../../../tooling/apps/repository-checks/gate-config.ts",
     reason:
       "Bridge test configuration consumes the repository's ambient-agent environment policy.",
   },
@@ -1112,7 +1112,7 @@ export function gateSteps(root: string, name: string): GateStep[] {
           inputs:
             packageName === "studio-claude-bridge"
               ? [
-                  "workspaces/providers",
+                  "workspaces/integrations",
                   "workspaces/client/contracts",
                   "workspaces/runtime",
                   "workspaces/tooling",

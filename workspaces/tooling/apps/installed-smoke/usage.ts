@@ -9,7 +9,7 @@ import {
   isProviderKind,
 } from "../../../client/apps/web/src/generated/providerKind.ts";
 
-import type { Session } from "../../../providers/apps/claude-bridge/session-state.ts";
+import type { Session } from "../../../integrations/providers/claude/bridge/session-state.ts";
 import type { components } from "../../../client/apps/web/src/generated/api.ts";
 import type {
   PricingArtifact,
@@ -205,7 +205,7 @@ export const TOKEN_CATEGORIES = [
 ] as const;
 
 type ClaudeUsage = Parameters<
-  typeof import("../../../providers/apps/claude-bridge/usage.ts").responseTokens
+  typeof import("../../../integrations/providers/claude/bridge/usage.ts").responseTokens
 >[0];
 type NativeUsageDocument = Partial<Omit<ClaudeUsage, "cache_creation">> & {
   cache_creation?: Partial<NonNullable<ClaudeUsage["cache_creation"]>> | null;
@@ -957,6 +957,31 @@ export function publicationReady(
     (analytics.usageGeneration == null ||
       analytics.usageGeneration === current.generation),
   );
+}
+
+// Source layouts of current and retained releases, plus the installed package layout.
+// Keep retained release paths readable until their authoritative processes exit.
+const CLAUDE_BRIDGE_RELATIVE_PATHS = [
+  "workspaces/integrations/providers/claude/bridge/bridge.mjs",
+  "workspaces/providers/apps/claude-bridge/bridge.mjs",
+  "scripts/claude_bridge/bridge.mjs",
+] as const;
+export function bridgeCandidates(releases: string[]): string[] {
+  return [
+    ...new Set(
+      releases.flatMap((root) =>
+        CLAUDE_BRIDGE_RELATIVE_PATHS.map((relative) =>
+          path.join(root, relative),
+        ),
+      ),
+    ),
+  ];
+}
+export function bridgeReleaseRoot(bridge: string): string {
+  for (const relative of CLAUDE_BRIDGE_RELATIVE_PATHS)
+    if (bridge.endsWith("/" + relative))
+      return bridge.slice(0, -relative.length - 1);
+  throw new Error("Unrecognized bridge release path");
 }
 
 /** Match known argv suffixes instead of splitting paths containing spaces. */

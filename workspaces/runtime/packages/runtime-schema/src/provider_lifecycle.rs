@@ -231,9 +231,11 @@ mod tests {
                 .into_root_schema_for::<T>()
                 .to_value()
         }
-        let vendor: Value =
-            studio_json::from_str(include_str!("schemas/codex/lifecycle.schema.json"))
-                .expect("vendor leaves");
+        let vendor: Value = studio_json::from_str(include_str!(concat!(
+            env!("OUT_DIR"),
+            "/codex-lifecycle.json"
+        )))
+        .expect("vendor leaves");
         for (name, mut generated) in [
             ("TurnStatus", schema::<CodexTurnStatus>()),
             ("ThreadStatus", schema::<CodexThreadStatus>()),

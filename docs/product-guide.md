@@ -120,7 +120,7 @@ The desktop package currently targets macOS on Apple silicon.
 Install dependencies once from the repository root. The root and app manifests
 own their commands: see the [root manifest](../package.json), [web manifest](../workspaces/client/apps/web/package.json),
 [desktop manifest](../workspaces/client/apps/desktop/package.json), and
-[bridge manifest](../workspaces/providers/apps/claude-bridge/package.json).
+[bridge manifest](../workspaces/integrations/providers/claude/bridge/package.json).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -466,7 +466,7 @@ start voice again after their current work finishes.
 ## Navigation
 
 Workspace guides own the current source map: [runtime](../workspaces/runtime/README.md),
-[providers](../workspaces/providers/README.md), [client](../workspaces/client/README.md),
+[providers](../workspaces/integrations/README.md), [client](../workspaces/client/README.md),
 and [tooling](../workspaces/tooling/README.md). See [orchestration](orchestration.md),
 [CLI usage](cli.md), [accounts](accounts.md), [time awareness](time-awareness.md),
 [analytics](analytics.md), and the [extraction record](extraction.md) for focused guidance.

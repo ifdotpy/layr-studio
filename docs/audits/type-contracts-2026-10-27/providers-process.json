@@ -114,7 +114,7 @@
       "sha256": "c9f6c0538dd8279843304aa62427d0ef2e32a051615a8454728aa959f5b2ef16"
     },
     "byRoot": {
-      "workspaces/providers/apps/claude-bridge": {
+      "workspaces/integrations/providers/claude/bridge": {
         "generated": {
           "files": 14,
           "lines": 1016,
@@ -830,865 +830,917 @@
     ],
     "trackedManifest": [
       [
-        "workspaces/providers/apps/claude-bridge/README.md",
+        "workspaces/integrations/providers/claude/bridge/README.md",
         "non-source",
         false
       ],
       [
-        "workspaces/providers/apps/claude-bridge/account-identity.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/account-identity.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/account-identity.test.ts",
+        "workspaces/integrations/providers/claude/bridge/account-identity.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/account-identity.ts",
+        "workspaces/integrations/providers/claude/bridge/account-identity.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/bridge-output.type-test.ts",
+        "workspaces/integrations/providers/claude/bridge/bridge-output.type-test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/bridge-protocol.ts",
+        "workspaces/integrations/providers/claude/bridge/bridge-protocol.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/bridge-protocol.type-test.ts",
+        "workspaces/integrations/providers/claude/bridge/bridge-protocol.type-test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/bridge.mjs",
-        "production",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/bridge.ts", "production", true],
-      [
-        "workspaces/providers/apps/claude-bridge/browser-environment.test.ts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/browser-environment.ts",
+        "workspaces/integrations/providers/claude/bridge/bridge.mjs",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/callback.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/catalog-cache.test.ts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/catalog-cache.ts",
+        "workspaces/integrations/providers/claude/bridge/bridge.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/claude-failure.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/browser-environment.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/browser-environment.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/callback.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/catalog-cache.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/catalog-cache.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/claude-failure.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/codex-catalog-proof.ts",
+        "workspaces/integrations/providers/claude/bridge/codex-catalog-proof.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/codex-generated/ThreadActiveFlag.ts",
+        "workspaces/integrations/providers/claude/bridge/codex-generated/ThreadActiveFlag.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/codex-generated/ThreadStatus.ts",
+        "workspaces/integrations/providers/claude/bridge/codex-generated/ThreadStatus.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/codex-generated/TurnItemsView.ts",
+        "workspaces/integrations/providers/claude/bridge/codex-generated/TurnItemsView.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/codex-generated/TurnStatus.ts",
+        "workspaces/integrations/providers/claude/bridge/codex-generated/TurnStatus.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/command-background.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/command-background.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/command-background.test.ts",
+        "workspaces/integrations/providers/claude/bridge/command-background.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/command-background.ts",
+        "workspaces/integrations/providers/claude/bridge/command-background.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/commands.ts",
+        "workspaces/integrations/providers/claude/bridge/commands.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/controls.test.ts",
+        "workspaces/integrations/providers/claude/bridge/controls.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/controls.ts",
+        "workspaces/integrations/providers/claude/bridge/controls.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/disk-full.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/disk-full.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/disk-full.test.ts",
+        "workspaces/integrations/providers/claude/bridge/disk-full.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/failure-causes.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/failure-causes.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/failure-causes.test.ts",
+        "workspaces/integrations/providers/claude/bridge/failure-causes.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/failure-causes.ts",
+        "workspaces/integrations/providers/claude/bridge/failure-causes.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/features.test.ts",
+        "workspaces/integrations/providers/claude/bridge/features.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/features.ts",
+        "workspaces/integrations/providers/claude/bridge/features.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-checkpoints.sdk.ts",
+        "workspaces/integrations/providers/claude/bridge/file-checkpoints.sdk.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-checkpoints.test.ts",
+        "workspaces/integrations/providers/claude/bridge/file-checkpoints.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-checkpoints.ts",
+        "workspaces/integrations/providers/claude/bridge/file-checkpoints.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-restore.test.ts",
+        "workspaces/integrations/providers/claude/bridge/file-restore.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-restore.ts",
+        "workspaces/integrations/providers/claude/bridge/file-restore.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-signals.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/file-signals.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/file-signals.test.ts",
+        "workspaces/integrations/providers/claude/bridge/file-signals.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/fork-active-sdk.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/fork-active-sdk.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/history-readonly-sdk.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/history-readonly-sdk.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/history-recovery-sdk.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/history-recovery-sdk.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/idle-compaction-sdk.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/idle-compaction-sdk.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/session-identity-sdk.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/session-identity-sdk.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/session-sdk-types.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/session-sdk-types.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fixtures/session-sdk-types.type-test.ts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/session-sdk-types.type-test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/fork-active.test.ts",
+        "workspaces/integrations/providers/claude/bridge/fork-active.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/historical-bash-receipts.test.ts",
+        "workspaces/integrations/providers/claude/bridge/historical-bash-receipts.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/historical-bash-receipts.ts",
+        "workspaces/integrations/providers/claude/bridge/historical-bash-receipts.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/history-index.test.ts",
+        "workspaces/integrations/providers/claude/bridge/history-index.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/history-index.ts",
+        "workspaces/integrations/providers/claude/bridge/history-index.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/history-records.ts",
+        "workspaces/integrations/providers/claude/bridge/history-records.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/history-recovery.test.ts",
+        "workspaces/integrations/providers/claude/bridge/history-recovery.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/idle-compaction.test.ts",
+        "workspaces/integrations/providers/claude/bridge/idle-compaction.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/idle-compaction.ts",
+        "workspaces/integrations/providers/claude/bridge/idle-compaction.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/images-bridge.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/images-bridge.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/images-bridge.test.ts",
-        "test",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/images.test.ts", "test", true],
-      ["workspaces/providers/apps/claude-bridge/images.ts", "production", true],
-      [
-        "workspaces/providers/apps/claude-bridge/input-messages.test.ts",
+        "workspaces/integrations/providers/claude/bridge/images-bridge.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/input-messages.ts",
+        "workspaces/integrations/providers/claude/bridge/images.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/images.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/input-origin.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/input-messages.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/input-messages.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/input-origin.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/journal-repair.test.ts",
+        "workspaces/integrations/providers/claude/bridge/journal-repair.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/journal-repair.ts",
+        "workspaces/integrations/providers/claude/bridge/journal-repair.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/launcher.test.ts",
+        "workspaces/integrations/providers/claude/bridge/launcher.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-capabilities.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-capabilities.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-close-failure.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-close-failure.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-executor.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-executor.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-final-save.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-final-save.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-no-query.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-no-query.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-result-boundary.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-result-boundary.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/lifecycle-safety.test.ts",
+        "workspaces/integrations/providers/claude/bridge/lifecycle-safety.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/live-permissions.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/live-permissions.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/live-permissions.test.ts",
+        "workspaces/integrations/providers/claude/bridge/live-permissions.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/mcp-background.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/mcp-background.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/mcp-background.test.ts",
+        "workspaces/integrations/providers/claude/bridge/mcp-background.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/mcp-status.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/mcp-status.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/mcp-status.test.ts",
+        "workspaces/integrations/providers/claude/bridge/mcp-status.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/move-external.fixture.ts",
+        "workspaces/integrations/providers/claude/bridge/move-external.fixture.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/move-external.test.ts",
+        "workspaces/integrations/providers/claude/bridge/move-external.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/move-external.ts",
-        "production",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/move.test.ts", "test", true],
-      ["workspaces/providers/apps/claude-bridge/move.ts", "production", true],
-      [
-        "workspaces/providers/apps/claude-bridge/native-background-tasks.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/native-background-tasks.test.ts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/native-history.ts",
+        "workspaces/integrations/providers/claude/bridge/move-external.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/native-session-recovery-cli.test.ts",
+        "workspaces/integrations/providers/claude/bridge/move.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/native-session-recovery-cli.ts",
+        "workspaces/integrations/providers/claude/bridge/move.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/native-session-recovery.test.ts",
+        "workspaces/integrations/providers/claude/bridge/native-background-tasks.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/native-session-recovery.ts",
+        "workspaces/integrations/providers/claude/bridge/native-background-tasks.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/native-history.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/package.json",
+        "workspaces/integrations/providers/claude/bridge/native-session-recovery-cli.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/native-session-recovery-cli.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/native-session-recovery.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/native-session-recovery.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/package.json",
         "non-source",
         false
       ],
       [
-        "workspaces/providers/apps/claude-bridge/protocol-output.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/protocol-output.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/protocol-output.test.ts",
+        "workspaces/integrations/providers/claude/bridge/protocol-output.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-errors.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-errors.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-errors.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-errors.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-errors.type-test.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-errors.type-test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-lifecycle-boundary.test.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-lifecycle-boundary.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-lifecycle.test.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-lifecycle.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-lifecycle.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-lifecycle.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-lifecycle.type-test.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-lifecycle.type-test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/provider-method-policy.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/provider-method-policy.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/question-input.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/question-input.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/question-input.test.ts",
+        "workspaces/integrations/providers/claude/bridge/question-input.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/question-input.ts",
+        "workspaces/integrations/providers/claude/bridge/question-input.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/rate-limit-input.test.ts",
+        "workspaces/integrations/providers/claude/bridge/rate-limit-input.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/rate-limit-input.ts",
+        "workspaces/integrations/providers/claude/bridge/rate-limit-input.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/refresh-auth.ts",
+        "workspaces/integrations/providers/claude/bridge/refresh-auth.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/request-regressions.test.ts",
+        "workspaces/integrations/providers/claude/bridge/request-regressions.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/restart-reconcile.test.ts",
+        "workspaces/integrations/providers/claude/bridge/restart-reconcile.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/restart-reconcile.ts",
+        "workspaces/integrations/providers/claude/bridge/restart-reconcile.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/runtime-contract.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/runtime-contract.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/sdk-contract-gaps.test.ts",
+        "workspaces/integrations/providers/claude/bridge/sdk-contract-gaps.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts",
+        "workspaces/integrations/providers/claude/bridge/sdk-contract-gaps.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/sdk-drift.test.ts",
-        "test",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/sdk-fixtures.ts", "test", true],
-      [
-        "workspaces/providers/apps/claude-bridge/sdk-message-policy.ts",
-        "production",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/session-identity.test.ts",
+        "workspaces/integrations/providers/claude/bridge/sdk-drift.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/session-identity.ts",
+        "workspaces/integrations/providers/claude/bridge/sdk-fixtures.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/sdk-message-policy.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/session-policy.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/session-identity.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/session-identity.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/session-policy.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/session-policy.ts",
+        "workspaces/integrations/providers/claude/bridge/session-policy.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/session-state.ts",
+        "workspaces/integrations/providers/claude/bridge/session-state.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/session-store.test.ts",
+        "workspaces/integrations/providers/claude/bridge/session-store.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/session-store.ts",
+        "workspaces/integrations/providers/claude/bridge/session-store.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/shell-policy.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/shell-policy.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/shell-policy.test.ts",
+        "workspaces/integrations/providers/claude/bridge/shell-policy.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/shell-policy.ts",
-        "production",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/skills.test.ts", "test", true],
-      ["workspaces/providers/apps/claude-bridge/skills.ts", "production", true],
-      [
-        "workspaces/providers/apps/claude-bridge/stall-stream.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/stall-watch.test.ts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/stall-watch.ts",
+        "workspaces/integrations/providers/claude/bridge/shell-policy.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/stall.fixture.mts",
-        "test",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/stall.test.ts", "test", true],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-backpressure.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/skills.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/steer-blocked-save.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-consumed-clear.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-grace-close.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-history-all.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-history-empty.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-history-partial.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-rejected-start.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-rejected-steer.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer-throw-close.fixture.mts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/steer.fixture.mts",
-        "test",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/steer.test.ts", "test", true],
-      [
-        "workspaces/providers/apps/claude-bridge/stop-inputs.test.ts",
-        "test",
-        true
-      ],
-      [
-        "workspaces/providers/apps/claude-bridge/stop-inputs.ts",
+        "workspaces/integrations/providers/claude/bridge/skills.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/stop-receipts.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/stall-stream.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/stop-receipts.test.ts",
+        "workspaces/integrations/providers/claude/bridge/stall-watch.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/streaming.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/stall-watch.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/stall.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/streaming.test.ts",
+        "workspaces/integrations/providers/claude/bridge/stall.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/task-command-tool.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/steer-backpressure.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-blocked-save.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-consumed-clear.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-grace-close.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-history-all.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-history-empty.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-history-partial.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-rejected-start.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-rejected-steer.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer-throw-close.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/steer.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/stop-inputs.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/stop-inputs.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/stop-receipts.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/stop-receipts.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/streaming.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/streaming.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/task-command-tool.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/bridge-harness.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/bridge-harness.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/cli-history-compatibility-witness.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/cli-history-compatibility-witness.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/cli-history-witness.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/cli-history-witness.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/control-fixture.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/control-fixture.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/file-signals.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/file-signals.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/history-fixture.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/history-fixture.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/image-codec-witness.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/image-codec-witness.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/sdk-typecheck.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/sdk-typecheck.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/testing/virtual-time.ts",
+        "workspaces/integrations/providers/claude/bridge/testing/virtual-time.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/thinking.test.ts",
+        "workspaces/integrations/providers/claude/bridge/thinking.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/thinking.ts",
+        "workspaces/integrations/providers/claude/bridge/thinking.ts",
         "production",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/tsconfig.json",
+        "workspaces/integrations/providers/claude/bridge/tsconfig.json",
         "non-source",
         false
       ],
       [
-        "workspaces/providers/apps/claude-bridge/unload-dialog.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/unload-dialog.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/unload.fixture.mts",
-        "test",
-        true
-      ],
-      ["workspaces/providers/apps/claude-bridge/unload.test.ts", "test", true],
-      [
-        "workspaces/providers/apps/claude-bridge/usage-bridge.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/unload.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-bridge.test.ts",
+        "workspaces/integrations/providers/claude/bridge/unload.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-contract.generated.ts",
+        "workspaces/integrations/providers/claude/bridge/usage-bridge.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/usage-bridge.test.ts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/usage-contract.generated.ts",
         "generated",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-events.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/usage-events.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-events.test.ts",
+        "workspaces/integrations/providers/claude/bridge/usage-events.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-fixtures.ts",
+        "workspaces/integrations/providers/claude/bridge/usage-fixtures.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-limit.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/usage-limit.fixture.mts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-limit.test.ts",
+        "workspaces/integrations/providers/claude/bridge/usage-limit.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/usage-policy.ts",
+        "workspaces/integrations/providers/claude/bridge/usage-policy.ts",
         "production",
         true
       ],
-      ["workspaces/providers/apps/claude-bridge/usage.test.ts", "test", true],
-      ["workspaces/providers/apps/claude-bridge/usage.ts", "production", true],
       [
-        "workspaces/providers/apps/claude-bridge/vitest.config.ts",
+        "workspaces/integrations/providers/claude/bridge/usage.test.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/vitest.fast.config.ts",
+        "workspaces/integrations/providers/claude/bridge/usage.ts",
+        "production",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/vitest.config.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/workspace-fence.fixture.mts",
+        "workspaces/integrations/providers/claude/bridge/vitest.fast.config.ts",
         "test",
         true
       ],
       [
-        "workspaces/providers/apps/claude-bridge/workspace-fence.test.ts",
+        "workspaces/integrations/providers/claude/bridge/workspace-fence.fixture.mts",
+        "test",
+        true
+      ],
+      [
+        "workspaces/integrations/providers/claude/bridge/workspace-fence.test.ts",
         "test",
         true
       ],
@@ -1891,12 +1943,12 @@
         true
       ],
       [
-        "workspaces/runtime/apps/runtime-server/tests/fixtures/claude-sdk.mts",
+        "workspaces/integrations/providers/claude/bridge/fixtures/claude-sdk.mts",
         "test",
         true
       ],
       [
-        "workspaces/runtime/apps/runtime-server/tests/fixtures/claude-stream-items.json",
+        "workspaces/integrations/providers/claude/tests/fixtures/claude-stream-items.json",
         "test",
         false
       ],
@@ -2341,7 +2393,7 @@
     "Tables include cross-root source references only where needed to follow an assigned-root boundary. Other agents own full censuses of those packages."
   ],
   "pathAliases": {
-    "CB": "workspaces/providers/apps/claude-bridge",
+    "CB": "workspaces/integrations/providers/claude/bridge",
     "DEL": "workspaces/runtime/apps/runtime-server",
     "DG": "workspaces/runtime/apps/diagnostics/src",
     "PL": "workspaces/runtime/apps/peer-link/src",
@@ -2367,31 +2419,31 @@
       "classification": "already typed / no additional raw-JSON boundary identified by lexical triage",
       "depth": "Mechanical scan plus selective hit-context triage; not a complete manual file or caller review.",
       "hitLines": [],
-      "path": "workspaces/providers/apps/claude-bridge/bridge.mjs"
+      "path": "workspaces/integrations/providers/claude/bridge/bridge.mjs"
     },
     {
       "classification": "already typed / no additional raw-JSON boundary identified by lexical triage",
       "depth": "Mechanical scan plus selective hit-context triage; not a complete manual file or caller review.",
       "hitLines": [37, 74],
-      "path": "workspaces/providers/apps/claude-bridge/idle-compaction.ts"
+      "path": "workspaces/integrations/providers/claude/bridge/idle-compaction.ts"
     },
     {
       "classification": "already typed / no additional raw-JSON boundary identified by lexical triage",
       "depth": "Mechanical scan plus selective hit-context triage; not a complete manual file or caller review.",
       "hitLines": [72, 187],
-      "path": "workspaces/providers/apps/claude-bridge/images.ts"
+      "path": "workspaces/integrations/providers/claude/bridge/images.ts"
     },
     {
       "classification": "already typed / no additional raw-JSON boundary identified by lexical triage",
       "depth": "Mechanical scan plus selective hit-context triage; not a complete manual file or caller review.",
       "hitLines": [13],
-      "path": "workspaces/providers/apps/claude-bridge/sdk-contract-gaps.ts"
+      "path": "workspaces/integrations/providers/claude/bridge/sdk-contract-gaps.ts"
     },
     {
       "classification": "already typed / no additional raw-JSON boundary identified by lexical triage",
       "depth": "Mechanical scan plus selective hit-context triage; not a complete manual file or caller review.",
       "hitLines": [7],
-      "path": "workspaces/providers/apps/claude-bridge/session-policy.ts"
+      "path": "workspaces/integrations/providers/claude/bridge/session-policy.ts"
     },
     {
       "classification": "already typed / no additional raw-JSON boundary identified by lexical triage",

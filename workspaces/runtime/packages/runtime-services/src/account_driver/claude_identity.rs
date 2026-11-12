@@ -196,8 +196,13 @@ mod tests {
 
     #[test]
     fn shared_claude_identity_contract() {
-        let cases: Value = studio_json::from_str(include_str!("claude_identity_cases.json"))
-            .expect("identity cases parse");
+        let cases: Value = studio_json::from_str(
+            &std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+                "../../../integrations/providers/claude/tests/fixtures/claude_identity_cases.json",
+            ))
+            .expect("Claude fixture"),
+        )
+        .expect("identity cases parse");
         let identities = cases["identities"]
             .as_array()
             .expect("identity cases are an array");

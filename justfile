@@ -70,7 +70,7 @@ deny-bans:
 
 [doc("Compare the installed Codex protocol and vendor request/result links with the pinned contract. Requires access to the vendor source for the installed release.")]
 provider-drift:
-    @node workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts --drift
+    @node workspaces/integrations/common/tooling/drift.ts codex --drift
 
 [doc("Check generated API and persisted-state contracts in read-only drift mode.")]
 contracts-check:
@@ -262,8 +262,8 @@ test-quarantine:
 
 [doc("Report Claude SDK export drift against the latest published SDK or a supplied sdk.d.ts, without changing dependencies.")]
 claude-sdk-drift *args:
-    @node {{quote(justfile_directory() / "workspaces/providers/apps/claude-bridge/sdk-drift.ts")}} {{args}}
+    @node {{quote(justfile_directory() / "workspaces/integrations/common/tooling/drift.ts")}} claude {{args}}
 
 [doc("Review a candidate Codex schema or update provider contracts using existing generation and drift checks.")]
 provider-update provider version *args:
-    @node {{quote(justfile_directory() / "workspaces/tooling/apps/repository-checks/provider-update.ts")}} {{quote(provider)}} {{quote(version)}} {{args}}
+    @node {{quote(justfile_directory() / "workspaces/integrations/common/tooling/update.ts")}} {{quote(provider)}} {{quote(version)}} {{args}}

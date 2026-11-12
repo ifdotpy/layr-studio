@@ -37,7 +37,7 @@ const _: () = assert!(
     studio_runtime_process::provider_task::SUPERVISOR_DETACH_TIMEOUT.as_millis()
         < HOST_RUNTIME_SHUTDOWN_WAIT.as_millis()
 );
-const CLAUDE_BRIDGE_RELATIVE: &str = "workspaces/providers/apps/claude-bridge";
+const CLAUDE_BRIDGE_RELATIVE: &str = "workspaces/integrations/providers/claude/bridge";
 /// Installed root shared by host-side runtime components.
 #[derive(Clone, Debug)]
 pub struct InstallRoot(PathBuf);
@@ -66,7 +66,7 @@ fn resolve_install_root_from_executable(
 ) -> Result<InstallRoot, WorkerError> {
     let located = || {
         WorkerError::PreparationRefused(
-            "runtime-server/install-root: expected the Claude bridge directory (scripts/claude_bridge when installed, workspaces/providers/apps/claude-bridge in a source checkout) beside the executable or under the source checkout".into(),
+            "runtime-server/install-root: expected the Claude bridge directory (scripts/claude_bridge when installed, workspaces/integrations/providers/claude/bridge in a source checkout) beside the executable or under the source checkout".into(),
         )
     };
     let is_root = |path: &Path| {

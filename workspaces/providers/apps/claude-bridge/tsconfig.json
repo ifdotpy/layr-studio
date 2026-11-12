@@ -1,8 +1,0 @@
-{
-  "extends": "../../../../tsconfig.base.json",
-  "compilerOptions": {
-    "allowJs": true,
-    "types": ["node"]
-  },
-  "include": ["**/*.ts", "**/*.mts", "bridge.mjs"]
-}

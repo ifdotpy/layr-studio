@@ -4,7 +4,7 @@ import type {
   ClientRequestResults,
   ServerNotification,
   ThreadResumeResponse,
-} from "../../../../../providers/apps/claude-bridge/codex-generated/protocol.ts";
+} from "../../../../../integrations/providers/claude/bridge/codex-generated/protocol.ts";
 
 import type { JsonValue } from "../../../../../client/apps/web/src/generated/api.ts";
 import net from "node:net";

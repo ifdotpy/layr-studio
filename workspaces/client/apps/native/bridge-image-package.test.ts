@@ -9,7 +9,10 @@ import { pruneBridgeImageCodecs } from "./bridge-image-package.ts";
 
 const run = promisify(execFile);
 const repository = path.resolve(import.meta.dirname, "../../../..");
-const source = path.join(repository, "workspaces/providers/apps/claude-bridge");
+const source = path.join(
+  repository,
+  "workspaces/integrations/providers/claude/bridge",
+);
 
 test("the Mac stage retains only its ARM64 codec pair and preserves guest manifests", async () => {
   const directory = await fs.mkdtemp(

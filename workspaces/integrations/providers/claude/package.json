@@ -1,0 +1,17 @@
+{
+  "name": "studio-integration-claude-tools",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "studio-claude-bridge": "workspace:*"
+  },
+  "studioIntegration": {
+    "id": "claude",
+    "contracts": "tooling/generate.ts",
+    "update": "tooling/update.ts",
+    "drift": "bridge/sdk-drift.ts",
+    "contractTests": [
+      "tests/contracts.test.ts"
+    ]
+  }
+}

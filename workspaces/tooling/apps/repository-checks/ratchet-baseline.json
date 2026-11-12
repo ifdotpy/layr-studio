@@ -2767,7 +2767,7 @@
       "fingerprint": "6801d3aa864c79655aa03b4457261c1029e1f4e7b20d6b37e6c740d3cd4436d7:0"
     },
     {
-      "file": "workspaces/providers/apps/claude-bridge/file-signals.test.ts",
+      "file": "workspaces/integrations/providers/claude/bridge/file-signals.test.ts",
       "fingerprint": "d04d4e2da88a000a246881d3159c28eb4760baf7dcebcc57303be02fc3af187a:0"
     }
   ],

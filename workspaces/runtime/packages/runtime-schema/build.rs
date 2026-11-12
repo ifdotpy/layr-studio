@@ -11,12 +11,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(4)
         .ok_or("invalid manifest directory")?;
     let relative_root = "../../../..";
-    let generator = "workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts";
+    let generator = "workspaces/integrations/common/tooling/contracts.ts";
     for file in [
         generator,
-        "workspaces/tooling/apps/repository-checks/provider-contract-sources.ts",
+        "workspaces/integrations/providers/codex/vendor/source.ts",
         "workspaces/runtime/packages/runtime-schema/src/codex_generated.rs",
-        "workspaces/runtime/packages/runtime-schema/src/schemas/codex",
+        "workspaces/integrations/providers/codex/vendor/schemas/selected",
     ] {
         println!("cargo:rerun-if-changed={relative_root}/{file}");
     }
@@ -67,6 +67,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(
             "Provider wire contracts are stale; run pnpm run contracts:vendor:generate".into(),
         );
+    }
+    for (source, target) in [
+        (
+            "workspaces/integrations/providers/codex/vendor/schemas/selected/ThreadTokenUsageUpdatedNotification.json",
+            "codex-usage.json",
+        ),
+        (
+            "workspaces/integrations/providers/codex/vendor/schemas/selected/CodexErrorInfo.json",
+            "codex-errors.json",
+        ),
+        (
+            "workspaces/integrations/providers/codex/vendor/schemas/selected/lifecycle.schema.json",
+            "codex-lifecycle.json",
+        ),
+        (
+            "workspaces/integrations/providers/claude/vendor/schemas/claude-rate-limit.schema.json",
+            "claude-rate-limit.json",
+        ),
+    ] {
+        println!("cargo:rerun-if-changed={relative_root}/{source}");
+        std::fs::copy(
+            root.join(source),
+            std::path::PathBuf::from(std::env::var("OUT_DIR")?).join(target),
+        )?;
     }
     openapi_build::generate()?;
     Ok(())

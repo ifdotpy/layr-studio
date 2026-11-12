@@ -4,7 +4,7 @@
     "purpose": "Sandboxed Electron preload has no TypeScript loader."
   },
   {
-    "file": "workspaces/providers/apps/claude-bridge/bridge.mjs",
+    "file": "workspaces/integrations/providers/claude/bridge/bridge.mjs",
     "purpose": "Stable launcher checks Node TypeScript support before loading the bridge."
   },
   {

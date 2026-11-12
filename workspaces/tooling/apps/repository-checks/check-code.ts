@@ -152,7 +152,7 @@ function checkTypeGuards(
       (file.startsWith("workspaces/client/apps/web/src/generated/") ||
         (file.startsWith("workspaces/client/apps/web/src/") &&
           file.endsWith(".generated.ts")) ||
-        (file.startsWith("workspaces/providers/") &&
+        (file.startsWith("workspaces/integrations/") &&
           (file.includes("/codex-generated/") ||
             file.endsWith(".generated.ts")))) &&
       !file.endsWith(".type-test.ts"),

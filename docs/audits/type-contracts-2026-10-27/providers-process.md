@@ -6,7 +6,7 @@ Pinned source report; classifications and evidence limits are in the [complete r
 
 All paths and line numbers refer to the pinned revision. Prefixes expand as follows:
 
-- `CB`: `workspaces/providers/apps/claude-bridge`
+- `CB`: `workspaces/integrations/providers/claude/bridge`
 - `DEL`: `workspaces/runtime/apps/runtime-server`
 - `DG`: `workspaces/runtime/apps/diagnostics/src`
 - `PL`: `workspaces/runtime/apps/peer-link/src`

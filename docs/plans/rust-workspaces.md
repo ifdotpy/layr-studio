@@ -31,7 +31,7 @@ The relocation keeps Python module names and moves source roots as follows:
 | Former path                           | Current path                                                         |
 | ------------------------------------- | -------------------------------------------------------------------- |
 | `scripts/` implementation             | `workspaces/runtime/apps/server/src/`                                |
-| `scripts/claude_bridge/`              | `workspaces/providers/apps/claude-bridge/`                           |
+| `scripts/claude_bridge/`              | `workspaces/integrations/providers/claude/bridge/`                   |
 | `tests/` server and runtime contracts | `workspaces/runtime/apps/server/tests/`                              |
 | `tests/client/`                       | `workspaces/client/apps/web/tests/`                                  |
 | `web/`                                | `workspaces/client/apps/web/`                                        |

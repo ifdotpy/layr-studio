@@ -2491,8 +2491,8 @@
     "external_support_sources": [
       "workspaces/runtime/packages/runtime-http/src/routes/account_transfer.rs:101,178",
       "workspaces/runtime/packages/runtime-http/src/routes/claude_controls.rs:188,196,200",
-      "workspaces/providers/apps/claude-bridge/bridge-protocol.ts:285,312,329,333,421",
-      "workspaces/providers/apps/claude-bridge/bridge.ts:3135,3180,3247,4001",
+      "workspaces/integrations/providers/claude/bridge/bridge-protocol.ts:285,312,329,333,421",
+      "workspaces/integrations/providers/claude/bridge/bridge.ts:3135,3180,3247,4001",
       "Existing runtime-schema/runtime-store/provider/process owners referenced by the cited production imports and prior task35 source traces."
     ],
     "hashes": "List SHA256 is UTF-8 full repo paths in ASCII/byte sort order, each ending LF including final entry. Relative paths in file table are prefixed by scope. Individual source-content SHA256 also attached.",
