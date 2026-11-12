@@ -906,6 +906,8 @@ mod tests {
         );
         canvas_tx(tx)
             .upsert(&crate::agent_tables::AgentsStorageRow {
+                hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
+                parent_id: None,
                 account_key: String::new(),
                 id: id.into(),
                 root_id: None,

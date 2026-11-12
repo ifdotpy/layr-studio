@@ -14,6 +14,7 @@ mod m2026_11_11_writer_receipt_indexes;
 mod m2026_11_12_changes_label_sequence;
 mod m2026_11_12_direct_durable_keys;
 mod m2026_11_12_event_publication_members;
+mod m2026_11_12_scheduler_wake_indexes;
 mod m2026_11_12_writer_window_indexes;
 
 use crate::{StoreError, StoreResult};
@@ -234,6 +235,10 @@ static POST_F1_CATALOG: &[SqlMigration] = &[
             remove_when: "Supported installations and backups all contain the ordered collection member index",
         },
         apply: m2026_11_12_event_publication_members::apply,
+    },
+    SqlMigration {
+        definition: m2026_11_12_scheduler_wake_indexes::DEFINITION,
+        apply: m2026_11_12_scheduler_wake_indexes::apply,
     },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
@@ -711,6 +716,58 @@ const RELEASED_CANVAS_CATALOGS: &[&str] = &[
 
 #[cfg(test)]
 mod released_catalog_tests {
+    #[test]
+    fn wake_eligibility_indexes_upgrade_once_and_rollback_after_publication_members() {
+        let names = [
+            "runtime_agent_wake_recovery",
+            "chats_wake_queued",
+            "turns_wake_submitted",
+        ];
+        let root = tempfile::tempdir().unwrap();
+        let mut db =
+            crate::fresh_state::canvas_before_indexes(&root.path().join("canvas.sqlite3"), &names)
+                .unwrap();
+        let position = super::POST_F1_CATALOG
+            .iter()
+            .position(|step| {
+                step.definition.id == super::m2026_11_12_scheduler_wake_indexes::DEFINITION.id
+            })
+            .unwrap();
+        assert_eq!(
+            super::POST_F1_CATALOG[position - 1].definition.id,
+            "2026-11-12-event-publication-members"
+        );
+        assert!(super::canvas_catalog_prefix_fingerprint(position).starts_with("7d472d70"));
+        let tx = db.transaction().unwrap();
+        super::write_canvas_catalog_at(&tx, position).unwrap();
+        tx.commit().unwrap();
+        let version = super::schema_version(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        super::m2026_11_12_scheduler_wake_indexes::apply(&tx).unwrap();
+        tx.rollback().unwrap();
+        assert_eq!(super::schema_version(&db).unwrap(), version);
+        for name in names {
+            assert!(
+                !studio_db_api::catalog::export(&db)
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry.name == name)
+            );
+        }
+        super::upgrade_current_canvas(&mut db).unwrap();
+        let version = super::schema_version(&db).unwrap();
+        for name in names {
+            assert!(
+                studio_db_api::catalog::export(&db)
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry.name == name)
+            );
+        }
+        super::upgrade_current_canvas(&mut db).unwrap();
+        assert_eq!(super::schema_version(&db).unwrap(), version);
+    }
+
     #[test]
     fn event_publication_member_index_upgrades_once_without_changing_triggers() {
         let root = tempfile::tempdir().unwrap();

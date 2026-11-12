@@ -163,6 +163,9 @@ pub use lifecycle::START_RETURN_LIMIT;
 pub(crate) use lifecycle::{StartSubmission, ValidatedAttempt};
 mod selection;
 mod steer;
+mod wake_eligibility;
+#[cfg(test)]
+mod wake_oracle;
 use lifecycle::*;
 use selection::*;
 pub use steer::{AcknowledgedSteer, ClaimedSteer, STEER_UNCONFIRMED_ERROR};
@@ -255,6 +258,8 @@ mod tests {
             .expect("candidate-index transaction begins");
         SchedulerRepository::prepare_account_wake_index(&transaction)
             .expect("account wake candidate index prepares");
+        SchedulerRepository::prepare_wake_eligibility_indexes(&transaction)
+            .expect("sparse wake indexes prepare");
         transaction
             .commit()
             .expect("candidate-index transaction commits");

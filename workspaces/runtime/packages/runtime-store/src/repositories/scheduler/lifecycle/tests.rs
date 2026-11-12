@@ -91,6 +91,8 @@ fn database() -> Connection {
         .expect("canonical scheduler storage");
     let transaction = connection.transaction().expect("index transaction begins");
     SchedulerRepository::prepare_account_wake_index(&transaction).expect("wake index prepares");
+    SchedulerRepository::prepare_wake_eligibility_indexes(&transaction)
+        .expect("sparse wake indexes prepare");
     transaction.commit().expect("index commits");
     connection
 }

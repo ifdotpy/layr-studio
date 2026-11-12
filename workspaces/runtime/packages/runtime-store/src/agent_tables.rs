@@ -4,6 +4,13 @@ use crate::json_record_codec::{ExactJson, ExactJsonCodec, JsonRecordCodec, RawJs
 use crate::peer_update_settings::Canvas;
 use studio_db_api::DbTable;
 
+/// Sparse recovery owners; idle rows without a retained recovery object are absent.
+const WAKE_RECOVERY: &str = "has_disconnect_recovery=1 OR has_restart_recovery=1";
+/// Native reviews can wake a queued chat without a pending event.
+const WAKE_QUEUED: &str = "status='queued'";
+/// Submitted turns can need recovery without a pending event.
+const WAKE_SUBMITTED: &str = "attempt_submitted=1 AND attempt_connection_generation IS NOT NULL";
+
 // Live recovery candidates, matching AgentError::known_kind for text and
 // single-key structured tags. Empty and ambiguous tag objects do not classify.
 const LIMIT_RECOVERY: &str = "(deleted_at IS NULL OR deleted_at=0) AND (
@@ -61,8 +68,15 @@ const LIMIT_RECOVERY: &str = "(deleted_at IS NULL OR deleted_at=0) AND (
 #[db(
     legacy_index = "CREATE INDEX runtime_idle_compaction_deadline ON runtime_agents(idle_episode_type,idle_episode_fire_at,id,idle_episode_id) WHERE idle_episode_type='object'"
 )]
+#[db(index(name="runtime_agent_wake_recovery",columns(id),predicate=WAKE_RECOVERY))]
 #[db(state_check = crate::state_check::check_legacy_json::<crate::AgentRecord>)]
 pub struct AgentsStorageRow {
+    /// Existing quarantine column; writes remain owned by AgentRepository::hold.
+    #[db(generated, codec=crate::queue_payloads::LegacyTextCodec<studio_runtime_schema::persistence::HoldStatus>)]
+    pub hold_status: studio_runtime_schema::persistence::HoldStatus,
+    /// Existing generated parent selector, used for keyed sibling checks.
+    #[db(generated)]
+    pub parent_id: Option<String>,
     /// Stored account selector, generated from the record.
     #[db(generated)]
     pub account_key: String,
@@ -159,6 +173,7 @@ pub struct SessionsStorageRow {
     legacy_index = "CREATE UNIQUE INDEX turns_one_unfinished\n            ON turns(chat) WHERE state IN ('starting','running')"
 )]
 #[db(legacy_index = "CREATE INDEX turns_provider_turn ON turns(chat,provider_turn)")]
+#[db(index(name="turns_wake_submitted",columns(chat),predicate=WAKE_SUBMITTED))]
 #[db(state_check = crate::state_check::count_legacy_rows::<TurnsStorageRow>)]
 pub struct TurnsStorageRow {
     #[db(key)]
@@ -193,6 +208,7 @@ pub struct TurnsStorageRow {
     legacy_index = "CREATE INDEX chats_capacity_status ON chats(status) WHERE status IN ('starting','running','waiting','paused','approval')"
 )]
 #[db(legacy_index = "CREATE INDEX chats_vm ON chats(id) WHERE execution_mode='vm'")]
+#[db(index(name="chats_wake_queued",columns(id),predicate=WAKE_QUEUED))]
 #[db(state_check = crate::state_check::count_legacy_rows::<ChatsStorageRow>)]
 pub struct ChatsStorageRow {
     #[db(key)]
@@ -367,6 +383,8 @@ mod tests {
         let transaction = db.unchecked_transaction().unwrap();
         crate::peer_update_settings::canvas_tx(&transaction)
             .insert(&super::AgentsStorageRow {
+                hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
+                parent_id: None,
                 account_key: String::new(),
                 id: "worker".into(),
                 record,
@@ -537,19 +555,19 @@ mod tests {
             .into_iter()
             .find(|entry| entry.descriptor.name == "turns")
             .expect("turns descriptor");
-        assert_eq!(
+        assert!(
             entry
                 .descriptor
                 .indexes
                 .iter()
                 .map(|index| index.name)
-                .collect::<Vec<_>>(),
-            [
-                "turns_one_attempt",
-                "turns_callback_context",
-                "turns_one_unfinished",
-                "turns_provider_turn"
-            ]
+                .collect::<Vec<_>>()
+                .starts_with(&[
+                    "turns_one_attempt",
+                    "turns_callback_context",
+                    "turns_one_unfinished",
+                    "turns_provider_turn"
+                ])
         );
     }
 

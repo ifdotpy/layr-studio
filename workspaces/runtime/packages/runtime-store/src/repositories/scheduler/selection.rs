@@ -1,6 +1,8 @@
 use super::*;
 use crate::CachedSql;
-use crate::domain::{chat_busy_sql, chat_status_sql, unfinished_provider_turn_sql};
+#[cfg(test)]
+use crate::domain::unfinished_provider_turn_sql;
+use crate::domain::{chat_busy_sql, chat_status_sql};
 use std::sync::LazyLock;
 
 #[derive(serde::Serialize, serde::Deserialize, PartialEq)]
@@ -139,16 +141,19 @@ fn agent_id(a: &str) -> String {
 }
 
 /// SQL: the chat status of the agent row `a`, read from the chat row.
-fn agent_chat_status(a: &str) -> String {
+#[cfg(test)]
+pub(super) fn agent_chat_status(a: &str) -> String {
     chat_status_sql(&agent_id(a))
 }
 
 /// SQL: the provider turn of the unfinished turn of the agent row `a`.
-fn agent_provider_turn(a: &str) -> String {
+#[cfg(test)]
+pub(super) fn agent_provider_turn(a: &str) -> String {
     unfinished_provider_turn_sql(&agent_id(a))
 }
 
-fn account_wake_queued_candidate(a: &str) -> String {
+#[cfg(test)]
+pub(super) fn account_wake_queued_candidate(a: &str) -> String {
     format!(
         "({status}='queued' \
          AND {auto_wake} \
@@ -162,7 +167,8 @@ fn account_wake_queued_candidate(a: &str) -> String {
 
 /// A running turn that may receive queued user input by `turn/steer`.
 /// `SchedulerRepository::claim_steer` owns the exact eligibility check.
-fn account_wake_steer_candidate(a: &str) -> String {
+#[cfg(test)]
+pub(super) fn account_wake_steer_candidate(a: &str) -> String {
     let turn = agent_provider_turn(a);
     format!(
         "({status}='running' \
@@ -227,14 +233,16 @@ fn deliverable_pending(agent: &str, epoch: &str, held_after: &str) -> String {
 
 /// A queued native review child whose first turn is its stored review. Python
 /// `codex_agent_review.claim` starts it without a queued input event.
-fn account_wake_native_review(a: &str) -> String {
+#[cfg(test)]
+pub(super) fn account_wake_native_review(a: &str) -> String {
     format!(
         "({} AND json_extract({a}record,'$.nativeReview.status')='pending')",
         account_wake_queued_candidate(a)
     )
 }
 
-fn account_wake_pending(a: &str, held_after: &str) -> String {
+#[cfg(test)]
+pub(super) fn account_wake_pending(a: &str, held_after: &str) -> String {
     let dedicated_kinds = DEDICATED_TURN_EVENT_KINDS
         .iter()
         .map(|kind| format!("'{kind}'"))
@@ -259,7 +267,8 @@ fn account_wake_pending(a: &str, held_after: &str) -> String {
 
 /// The recovery candidate. The start attempt lives on the owner turn row, and
 /// the status on the chat row; the index does not read either.
-fn account_wake_recovery(a: &str) -> String {
+#[cfg(test)]
+pub(super) fn account_wake_recovery(a: &str) -> String {
     let status = agent_chat_status(a);
     format!(
         "(({a}provider='codex' \
@@ -276,7 +285,8 @@ fn account_wake_recovery(a: &str) -> String {
     )
 }
 
-fn account_wake_target_filter(a: &str, held_after: &str) -> String {
+#[cfg(test)]
+pub(super) fn account_wake_target_filter(a: &str, held_after: &str) -> String {
     let eligibility = account_wake_index_eligibility(a);
     let pending = account_wake_pending(a, held_after);
     let recovery = account_wake_recovery(a);
@@ -287,7 +297,8 @@ fn account_wake_target_filter(a: &str, held_after: &str) -> String {
     )
 }
 
-fn account_wake_invalid_target_query() -> String {
+#[cfg(test)]
+pub(super) fn account_wake_invalid_target_query() -> String {
     let target_filter = account_wake_target_filter("a.", "?2");
     format!(
         "SELECT a.id FROM runtime_agents AS a INDEXED BY {ACCOUNT_WAKE_INDEX} \
@@ -297,71 +308,10 @@ fn account_wake_invalid_target_query() -> String {
 }
 
 /// The wake and hold queries, built once per process (they read no setting).
-static ACCOUNT_WAKE_INVALID_TARGET_SQL: LazyLock<String> =
-    LazyLock::new(account_wake_invalid_target_query);
-static ACCOUNT_WAKE_ACCOUNTS_SQL: LazyLock<String> = LazyLock::new(account_wake_accounts_query);
-static ACCOUNT_WAKE_ACCOUNT_TARGET_SQL: LazyLock<String> =
-    LazyLock::new(account_wake_account_target_query);
-static ACCOUNT_WAKE_PENDING_AGENTS_SQL: LazyLock<String> =
-    LazyLock::new(account_wake_pending_agents_query);
 static CHILD_RESULT_RELEASE_SQL: LazyLock<String> = LazyLock::new(child_result_release_query);
 
-fn wake_candidate(
-    connection: &Connection,
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<WakeCandidate> {
-    let agent_id: String = row.get(0)?;
-    let epoch = row.get(1)?;
-    let raw: rusqlite::types::Value = row.get(2)?;
-    let mode = match raw {
-        rusqlite::types::Value::Null => Some(None),
-        rusqlite::types::Value::Text(value) => serde::Deserialize::deserialize(
-            serde::de::value::StrDeserializer::<studio_json::Error>::new(&value),
-        )
-        .ok()
-        .map(Some),
-        rusqlite::types::Value::Integer(_)
-        | rusqlite::types::Value::Real(_)
-        | rusqlite::types::Value::Blob(_) => None,
-    };
-    let workspace_mode = mode.ok_or_else(|| {
-        // The agent reader owns the located diagnostic for malformed projections.
-        let error = match AgentRepository::get(connection, &AgentId::from(agent_id.as_str())) {
-            Err(error) => error,
-            Ok(_) => StoreError::RecordContract(
-                "workspaceMode projection disagrees with its generated owner",
-            ),
-        };
-        std::sync::Arc::new(error)
-    });
-    Ok(WakeCandidate {
-        agent_id,
-        epoch,
-        workspace_mode,
-    })
-}
-
-fn validate_account_wake_targets(connection: &Connection, held_after: f64) -> StoreResult<()> {
-    if let Some(id) = connection
-        .query_row_cached(
-            &ACCOUNT_WAKE_INVALID_TARGET_SQL,
-            rusqlite::params![
-                studio_runtime_schema::persistence::HoldStatus::Clear,
-                held_after
-            ],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-    {
-        return Err(crate::StoreError::InvalidStoredObject {
-            table: "runtime_agents",
-            id,
-        });
-    }
-    Ok(())
-}
-
-fn account_wake_accounts_query() -> String {
+#[cfg(test)]
+pub(super) fn account_wake_accounts_query() -> String {
     let target_filter = account_wake_target_filter("a.", "?4");
     let account = "a.account_key";
     format!(
@@ -371,7 +321,8 @@ fn account_wake_accounts_query() -> String {
     )
 }
 
-fn account_wake_account_target_query() -> String {
+#[cfg(test)]
+pub(super) fn account_wake_account_target_query() -> String {
     let target_filter = account_wake_target_filter("a.", "?3");
     let account = "a.account_key";
     format!(
@@ -380,7 +331,8 @@ fn account_wake_account_target_query() -> String {
     )
 }
 
-fn account_wake_pending_agents_query() -> String {
+#[cfg(test)]
+pub(super) fn account_wake_pending_agents_query() -> String {
     let pending = account_wake_pending("a.", "?5");
     let eligibility = account_wake_index_eligibility("a.");
     let account = "a.account_key";
@@ -607,6 +559,12 @@ impl SchedulerRepository {
         Ok(())
     }
 
+    pub(crate) fn prepare_wake_eligibility_indexes(
+        transaction: &Transaction<'_>,
+    ) -> StoreResult<()> {
+        super::wake_eligibility::prepare_indexes(transaction)
+    }
+
     /// Canonical DDL for the repository-owned account wake candidate index.
     #[doc(hidden)]
     pub fn account_wake_index_definition() -> crate::OwnedRuntimeIndexDefinition {
@@ -621,9 +579,7 @@ impl SchedulerRepository {
         }
     }
 
-    /// Return one bounded account/agent page for worker startup and recovery.
-    /// The account cursor wraps when it reaches the final account; per-account
-    /// agent cursors are supplied by the caller and wrap at the final agent.
+    /// Return account/agent pages from sparse candidates, with the existing wrap rules.
     pub fn account_wake_page(
         connection: &Connection,
         after_account: &str,
@@ -632,99 +588,17 @@ impl SchedulerRepository {
         agent_limit: usize,
         now: f64,
     ) -> StoreResult<AccountWakePage> {
-        let held_after = child_result_held_after(connection, now)?;
-        validate_account_wake_targets(connection, held_after)?;
-
-        let mut account_statement = connection.prepare_cached(&ACCOUNT_WAKE_ACCOUNTS_SQL)?;
-        let mut read_accounts = |after: &str| -> rusqlite::Result<Vec<String>> {
-            account_statement
-                .query_map(
-                    rusqlite::params![
-                        studio_runtime_schema::persistence::HoldStatus::Clear,
-                        after,
-                        account_limit as i64,
-                        held_after
-                    ],
-                    |row| row.get(0),
-                )?
-                .collect()
-        };
-        let mut selected_accounts = read_accounts(after_account)?;
-        if selected_accounts.is_empty() && !after_account.is_empty() {
-            selected_accounts = read_accounts("")?;
-        }
-        drop(account_statement);
-
-        let mut agent_statement = connection.prepare_cached(&ACCOUNT_WAKE_PENDING_AGENTS_SQL)?;
-        let mut result = BTreeMap::new();
-        for account in selected_accounts {
-            let after = after_agents.get(&account).map(String::as_str).unwrap_or("");
-            let mut read_agents = |after: &str| -> rusqlite::Result<Vec<WakeCandidate>> {
-                agent_statement
-                    .query_map(
-                        rusqlite::params![
-                            account,
-                            after,
-                            studio_runtime_schema::persistence::HoldStatus::Clear,
-                            agent_limit as i64,
-                            held_after
-                        ],
-                        |row| wake_candidate(connection, row),
-                    )?
-                    .collect()
-            };
-            let mut agents = read_agents(after)?;
-            if agents.is_empty() && !after.is_empty() {
-                agents = read_agents("")?;
-            }
-            result.insert(account, agents);
-        }
-        Ok(result)
+        Self::wake_page(
+            connection,
+            after_account,
+            after_agents,
+            account_limit,
+            agent_limit,
+            now,
+            true,
+        )
     }
 
-    /// Return the wake page of only the named accounts: an account is present when it
-    /// still has a pending or recovery target, with its first bounded page of pending
-    /// agents. Cost depends on the named accounts, not on the number of accounts.
-    pub fn account_wake_for_accounts<'a>(
-        connection: &Connection,
-        accounts: impl IntoIterator<Item = &'a str>,
-        agent_limit: usize,
-        now: f64,
-    ) -> StoreResult<AccountWakePage> {
-        let held_after = child_result_held_after(connection, now)?;
-        validate_account_wake_targets(connection, held_after)?;
-        let mut target_statement = connection.prepare_cached(&ACCOUNT_WAKE_ACCOUNT_TARGET_SQL)?;
-        let mut agent_statement = connection.prepare_cached(&ACCOUNT_WAKE_PENDING_AGENTS_SQL)?;
-        let mut result = BTreeMap::new();
-        for account in accounts {
-            let has_target = target_statement.exists(rusqlite::params![
-                studio_runtime_schema::persistence::HoldStatus::Clear,
-                account,
-                held_after
-            ])?;
-            if !has_target {
-                continue;
-            }
-            let agents = agent_statement
-                .query_map(
-                    rusqlite::params![
-                        account,
-                        "",
-                        studio_runtime_schema::persistence::HoldStatus::Clear,
-                        agent_limit as i64,
-                        held_after
-                    ],
-                    |row| wake_candidate(connection, row),
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            result.insert(account.to_owned(), agents);
-        }
-        Ok(result)
-    }
-
-    /// Return a bounded account page strictly after the account cursor. Agent
-    /// cursors retain their ordinary wrap behavior; only the account cursor is
-    /// strict so callers can drain a real wake without cycling over its prefix.
     pub fn account_wake_page_after(
         connection: &Connection,
         after_account: &str,
@@ -733,53 +607,77 @@ impl SchedulerRepository {
         agent_limit: usize,
         now: f64,
     ) -> StoreResult<AccountWakePage> {
-        let held_after = child_result_held_after(connection, now)?;
-        validate_account_wake_targets(connection, held_after)?;
-
-        let mut account_statement = connection.prepare_cached(&ACCOUNT_WAKE_ACCOUNTS_SQL)?;
-        let accounts = account_statement
-            .query_map(
-                rusqlite::params![
-                    studio_runtime_schema::persistence::HoldStatus::Clear,
-                    after_account,
-                    account_limit as i64,
-                    held_after
-                ],
-                |row| row.get::<_, String>(0),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(account_statement);
-
-        let mut agent_statement = connection.prepare_cached(&ACCOUNT_WAKE_PENDING_AGENTS_SQL)?;
-        let mut result = BTreeMap::new();
-        for account in accounts {
-            let after = after_agents.get(&account).map(String::as_str).unwrap_or("");
-            let mut read_agents = |after: &str| -> rusqlite::Result<Vec<WakeCandidate>> {
-                agent_statement
-                    .query_map(
-                        rusqlite::params![
-                            account,
-                            after,
-                            studio_runtime_schema::persistence::HoldStatus::Clear,
-                            agent_limit as i64,
-                            held_after
-                        ],
-                        |row| wake_candidate(connection, row),
-                    )?
-                    .collect()
-            };
-            let mut agents = read_agents(after)?;
-            if agents.is_empty() && !after.is_empty() {
-                agents = read_agents("")?;
-            }
-            result.insert(account, agents);
-        }
-        Ok(result)
+        Self::wake_page(
+            connection,
+            after_account,
+            after_agents,
+            account_limit,
+            agent_limit,
+            now,
+            false,
+        )
     }
 
-    /// Return a bounded page for one account strictly after the supplied agent
-    /// cursor. Unlike `account_wake_page`, this continuation never wraps; the
-    /// caller uses it only to drain a page already selected by a real wake.
+    fn wake_page(
+        connection: &Connection,
+        after_account: &str,
+        after_agents: &BTreeMap<String, String>,
+        account_limit: usize,
+        agent_limit: usize,
+        now: f64,
+        wrap: bool,
+    ) -> StoreResult<AccountWakePage> {
+        let sources = super::wake_eligibility::sources(
+            connection,
+            child_result_held_after(connection, now)?,
+        )?;
+        let mut selected = sources
+            .iter()
+            .filter(|(account, _)| account.as_str() > after_account)
+            .take(account_limit)
+            .collect::<Vec<_>>();
+        if wrap && selected.is_empty() && !after_account.is_empty() {
+            selected = sources.iter().take(account_limit).collect();
+        }
+        selected
+            .into_iter()
+            .map(|(account, rows)| {
+                let after = after_agents.get(account).map_or("", String::as_str);
+                let mut agents =
+                    super::wake_eligibility::candidates(connection, rows, after, agent_limit)?;
+                if agents.is_empty() && !after.is_empty() {
+                    agents =
+                        super::wake_eligibility::candidates(connection, rows, "", agent_limit)?;
+                }
+                Ok((account.clone(), agents))
+            })
+            .collect()
+    }
+
+    /// Exact-account wakes retain global invalid-target validation, without a global SQL scan.
+    pub fn account_wake_for_accounts<'a>(
+        connection: &Connection,
+        accounts: impl IntoIterator<Item = &'a str>,
+        agent_limit: usize,
+        now: f64,
+    ) -> StoreResult<AccountWakePage> {
+        let sources = super::wake_eligibility::sources(
+            connection,
+            child_result_held_after(connection, now)?,
+        )?;
+        accounts
+            .into_iter()
+            .filter_map(|account| sources.get(account).map(|rows| (account, rows)))
+            .map(|(account, rows)| {
+                Ok((
+                    account.to_owned(),
+                    super::wake_eligibility::candidates(connection, rows, "", agent_limit)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// A continuation never wraps its agent cursor.
     pub fn account_wake_agents_after(
         connection: &Connection,
         account: &str,
@@ -787,22 +685,16 @@ impl SchedulerRepository {
         agent_limit: usize,
         now: f64,
     ) -> StoreResult<Vec<WakeCandidate>> {
-        let held_after = child_result_held_after(connection, now)?;
-        validate_account_wake_targets(connection, held_after)?;
-        let mut statement = connection.prepare_cached(&ACCOUNT_WAKE_PENDING_AGENTS_SQL)?;
-        let rows = statement
-            .query_map(
-                rusqlite::params![
-                    account,
-                    after_agent,
-                    studio_runtime_schema::persistence::HoldStatus::Clear,
-                    agent_limit as i64,
-                    held_after
-                ],
-                |row| wake_candidate(connection, row),
-            )?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
+        let sources = super::wake_eligibility::sources(
+            connection,
+            child_result_held_after(connection, now)?,
+        )?;
+        super::wake_eligibility::candidates(
+            connection,
+            sources.get(account).map_or(&[], Vec::as_slice),
+            after_agent,
+            agent_limit,
+        )
     }
 
     /// The Unix time at which the earliest held `child_result` stops waiting
@@ -1960,6 +1852,91 @@ pub(super) fn select_turn_batch(
 
 #[cfg(test)]
 mod account_wake_index_tests {
+    use super::super::wake_oracle;
+    use crate::peer_update_settings::{Canvas, canvas_read, canvas_tx};
+    use studio_db_api::{DbQuery, DbTable};
+    use studio_runtime_schema::persistence::HoldStatus;
+
+    /// Test-only physical bytes admit historical malformed records without a production codec.
+    #[derive(DbTable)]
+    #[db(table="runtime_agents",database=Canvas)]
+    struct HistoricalAgent {
+        #[db(key)]
+        id: String,
+        record: String,
+    }
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(rows=HistoricalAgent),
+        columns(id=HistoricalAgent::ID,record=HistoricalAgent::RECORD),sql="UPDATE {rows} SET {record}=?1 WHERE {id}=?2")]
+    struct HistoricalRecord<'a> {
+        #[db(column=HistoricalAgent::RECORD)]
+        record: &'a str,
+        #[db(column=HistoricalAgent::ID)]
+        id: &'a str,
+    }
+    fn historical_record(db: &Connection, id: &str, record: &str) {
+        let tx = db.unchecked_transaction().unwrap();
+        canvas_tx(&tx)
+            .named(&HistoricalRecord::QUERY, &HistoricalRecord { record, id })
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(rows=crate::agent_tables::TurnsStorageRow),
+        columns(chat=crate::agent_tables::TurnsStorageRow::CHAT,turn=crate::agent_tables::TurnsStorageRow::PROVIDER_TURN),
+        sql="UPDATE {rows} SET {turn}=?1 WHERE {chat}=?2")]
+    struct ProviderTurn<'a> {
+        #[db(column=crate::agent_tables::TurnsStorageRow::PROVIDER_TURN)]
+        turn: Option<&'a str>,
+        #[db(column=crate::agent_tables::TurnsStorageRow::CHAT)]
+        chat: &'a str,
+    }
+    fn provider_turn(db: &Connection, chat: &str, turn: &str) {
+        let tx = db.unchecked_transaction().unwrap();
+        canvas_tx(&tx)
+            .named(
+                &ProviderTurn::QUERY,
+                &ProviderTurn {
+                    turn: Some(turn),
+                    chat,
+                },
+            )
+            .unwrap();
+        tx.commit().unwrap();
+    }
+    fn event(db: &Connection, id: &str, agent: &str, kind: &str, created: f64) {
+        crate::QueueEventRepository::put(
+            db,
+            &crate::QueueEvent {
+                id: id.into(),
+                agent: agent.into(),
+                kind: kind.parse().unwrap(),
+                text: "input".into(),
+                status: "pending".into(),
+                created,
+                epoch: 1,
+                turn_id: None,
+                error: None,
+            },
+        )
+        .unwrap();
+    }
+    fn old_validate(db: &Connection, held_after: f64) -> crate::StoreResult<()> {
+        if let Some(id) = canvas_read(db).named(
+            &wake_oracle::Invalid::QUERY,
+            &wake_oracle::Invalid {
+                hold: HoldStatus::Clear,
+                held_after,
+            },
+        )? {
+            return Err(crate::StoreError::InvalidStoredObject {
+                table: "runtime_agents",
+                id,
+            });
+        }
+        Ok(())
+    }
+
     use super::{
         ACCOUNT_WAKE_INDEX, SchedulerRepository, account_wake_account_target_query,
         account_wake_accounts_query, account_wake_index_eligibility,
@@ -1968,6 +1945,498 @@ mod account_wake_index_tests {
     use rusqlite::Connection;
     use std::collections::BTreeMap;
     use studio_json::json;
+
+    type WakeView = BTreeMap<String, Vec<(String, i64, String)>>;
+
+    fn wake_view(page: crate::StoreResult<crate::AccountWakePage>) -> Result<WakeView, String> {
+        page.map(|page| {
+            page.into_iter()
+                .map(|(account, rows)| {
+                    (
+                        account,
+                        rows.into_iter()
+                            .map(|row| {
+                                (row.agent_id, row.epoch, format!("{:?}", row.workspace_mode))
+                            })
+                            .collect(),
+                    )
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+    }
+
+    fn old_agents(
+        db: &Connection,
+        account: &str,
+        after: &str,
+        limit: usize,
+        held_after: f64,
+    ) -> crate::StoreResult<Vec<crate::WakeCandidate>> {
+        canvas_read(db)
+            .collect(
+                &wake_oracle::Agents::QUERY,
+                &wake_oracle::Agents {
+                    account,
+                    after,
+                    hold: HoldStatus::Clear,
+                    limit: limit as i64,
+                    held_after,
+                },
+            )?
+            .into_iter()
+            .map(|(id, epoch, mode)| {
+                let workspace_mode = studio_json::from_str::<Option<super::WorkspaceMode>>(&mode)
+                    .map_err(|_| {
+                        std::sync::Arc::new(
+                            match crate::AgentRepository::get(
+                                db,
+                                &crate::AgentId::from(id.as_str()),
+                            ) {
+                                Err(error) => error,
+                                Ok(_) => crate::StoreError::RecordContract(
+                                    "workspaceMode projection disagrees with its generated owner",
+                                ),
+                            },
+                        )
+                    });
+                Ok(crate::WakeCandidate {
+                    agent_id: id,
+                    epoch,
+                    workspace_mode,
+                })
+            })
+            .collect()
+    }
+    fn old_page(
+        db: &Connection,
+        after: &str,
+        cursors: &BTreeMap<String, String>,
+        account_limit: usize,
+        agent_limit: usize,
+        now: f64,
+        wrap: bool,
+    ) -> crate::StoreResult<crate::AccountWakePage> {
+        let held_after = super::child_result_held_after(db, now)?;
+        old_validate(db, held_after)?;
+        let read = |after| {
+            canvas_read(db).collect(
+                &wake_oracle::Accounts::QUERY,
+                &wake_oracle::Accounts {
+                    hold: HoldStatus::Clear,
+                    after,
+                    limit: account_limit as i64,
+                    held_after,
+                },
+            )
+        };
+        let mut accounts = read(after)?;
+        if wrap && accounts.is_empty() && !after.is_empty() {
+            accounts = read("")?;
+        }
+        accounts
+            .into_iter()
+            .map(|account| {
+                let after = cursors.get(&account).map_or("", String::as_str);
+                let mut rows = old_agents(db, &account, after, agent_limit, held_after)?;
+                if rows.is_empty() && !after.is_empty() {
+                    rows = old_agents(db, &account, "", agent_limit, held_after)?;
+                }
+                Ok((account, rows))
+            })
+            .collect()
+    }
+    fn old_targeted(
+        db: &Connection,
+        accounts: &[&str],
+        agent_limit: usize,
+        now: f64,
+    ) -> crate::StoreResult<crate::AccountWakePage> {
+        let held_after = super::child_result_held_after(db, now)?;
+        old_validate(db, held_after)?;
+        let mut result = BTreeMap::new();
+        for account in accounts {
+            if canvas_read(db)
+                .named(
+                    &wake_oracle::Target::QUERY,
+                    &wake_oracle::Target {
+                        hold: HoldStatus::Clear,
+                        account,
+                        held_after,
+                    },
+                )?
+                .is_some()
+            {
+                result.insert(
+                    (*account).to_owned(),
+                    old_agents(db, account, "", agent_limit, held_after)?,
+                );
+            }
+        }
+        Ok(result)
+    }
+
+    #[test]
+    fn wake_eligibility_empty_ids_match_old_account_selection_and_validation() {
+        for (status, extra) in [
+            ("idle", json!({"disconnectRecovery":{}})),
+            ("idle", json!({"restartRecovery":{}})),
+            (
+                "starting",
+                json!({"inFlight":true,"startAttempt":{"submitted":true,"connectionGeneration":1}}),
+            ),
+            ("queued", json!({"nativeReview":{"status":"pending"}})),
+        ] {
+            let mut db = old_schema();
+            let mut record = json!({"provider":"codex","epoch":1,"status":status,"autoWake":true});
+            for (key, value) in extra.as_object().unwrap() {
+                record[key] = value.clone();
+            }
+            put_agent(&db, "", record.clone());
+            install_index(&mut db);
+            assert_eq!(
+                wake_view(SchedulerRepository::account_wake_page(
+                    &db,
+                    "",
+                    &BTreeMap::new(),
+                    10,
+                    10,
+                    100.0
+                )),
+                wake_view(old_page(&db, "", &BTreeMap::new(), 10, 10, 100.0, true)),
+                "{extra}"
+            );
+            assert_eq!(
+                wake_view(SchedulerRepository::account_wake_for_accounts(
+                    &db,
+                    ["default"],
+                    10,
+                    100.0
+                )),
+                wake_view(old_targeted(&db, &["default"], 10, 100.0)),
+                "target {extra}"
+            );
+            record["accountKey"] = json!({"invalid":true});
+            historical_record(&db, "", &record.to_string());
+            assert!(
+                old_validate(&db, super::child_result_held_after(&db, 100.0).unwrap()).is_err()
+            );
+            assert!(
+                SchedulerRepository::account_wake_page(&db, "", &BTreeMap::new(), 10, 10, 100.0)
+                    .is_err(),
+                "invalid {extra}"
+            );
+        }
+    }
+
+    #[test]
+    fn wake_eligibility_matches_old_sql_recovery_steering_holds_and_paging() {
+        let mut db = old_schema();
+        let cases = [
+            ("a-queued", "account-a", "queued", json!({})),
+            (
+                "b-review",
+                "account-a",
+                "queued",
+                json!({"nativeReview":{"status":"pending"}}),
+            ),
+            (
+                "c-radio",
+                "account-b",
+                "running",
+                json!({"turnId":"live","inFlight":true}),
+            ),
+            (
+                "d-steer",
+                "account-b",
+                "running",
+                json!({"turnId":"live","inFlight":true}),
+            ),
+            (
+                "e-rejected",
+                "account-b",
+                "running",
+                json!({"turnId":"live","inFlight":true,"steerRejectedTurnId":"live"}),
+            ),
+            (
+                "f-vm",
+                "account-b",
+                "running",
+                json!({"turnId":"live","inFlight":true,"executionMode":"vm"}),
+            ),
+            (
+                "g-disconnected",
+                "account-c",
+                "completed",
+                json!({"disconnectRecovery":{"stage":"pending"}}),
+            ),
+            (
+                "h-restarted",
+                "account-c",
+                "parked",
+                json!({"restartRecovery":{"stage":"pending"}}),
+            ),
+            (
+                "i-settled",
+                "account-c",
+                "completed",
+                json!({"restartRecovery":{"stage":"finished"}}),
+            ),
+            (
+                "j-submitted",
+                "account-d",
+                "starting",
+                json!({"inFlight":true,"startAttempt":{"submitted":true,"connectionGeneration":1}}),
+            ),
+            ("k-child-held", "account-e", "queued", json!({})),
+            ("l-child-expired", "account-e", "queued", json!({})),
+            (
+                "m-held",
+                "account-e",
+                "queued",
+                json!({"nativeFailureHold":true}),
+            ),
+            ("n-deleted", "account-e", "queued", json!({"deletedAt":0})),
+            (
+                "o-remote",
+                "account-e",
+                "queued",
+                json!({"remoteWorker":true}),
+            ),
+            (
+                "p-invalid-mode",
+                "account-f",
+                "queued",
+                json!({"workspaceMode":17}),
+            ),
+        ];
+        for (id, account, status, extra) in cases {
+            let mut value = json!({"provider":"codex","accountKey":account,"epoch":1,"status":status,"autoWake":true});
+            for (key, item) in extra.as_object().unwrap() {
+                value[key] = item.clone();
+            }
+            // Domain projection accepts the unrelated malformed mode as historical evidence.
+            let mut projected = value.clone();
+            if projected["workspaceMode"] == 17 {
+                projected.as_object_mut().unwrap().remove("workspaceMode");
+            }
+            put_agent(&db, id, projected);
+            historical_record(&db, id, &value.to_string());
+            let kind = if id.contains("child-") {
+                "child_result"
+            } else if id == "c-radio" {
+                "radio_turn"
+            } else {
+                "user"
+            };
+            let created = if id == "l-child-expired" { 1.0 } else { 99.0 };
+            if !matches!(
+                id,
+                "b-review" | "g-disconnected" | "h-restarted" | "i-settled" | "j-submitted"
+            ) {
+                event(&db, &format!("event-{id}"), id, kind, created);
+            }
+            if matches!(status, "running") {
+                provider_turn(&db, id, "live");
+            }
+        }
+        for parent in ["k-child-held", "l-child-expired"] {
+            put_agent(
+                &db,
+                &format!("child-{parent}"),
+                json!({"provider":"codex","accountKey":"account-e","epoch":1,"status":"running","parentId":parent}),
+            );
+        }
+        install_index(&mut db);
+        let cursors = BTreeMap::from([
+            ("account-a".into(), "a-queued".into()),
+            ("account-b".into(), "zz".into()),
+        ]);
+        for now in [100.0, 200.0] {
+            for account in ["", "account-a", "account-z"] {
+                for limit in [0, 1, 3, 99] {
+                    assert_eq!(
+                        wake_view(SchedulerRepository::account_wake_page(
+                            &db, account, &cursors, limit, 1, now
+                        )),
+                        wake_view(old_page(&db, account, &cursors, limit, 1, now, true)),
+                        "wrapped {account}/{limit}/{now}"
+                    );
+                    assert_eq!(
+                        wake_view(SchedulerRepository::account_wake_page_after(
+                            &db, account, &cursors, limit, 1, now
+                        )),
+                        wake_view(old_page(&db, account, &cursors, limit, 1, now, false)),
+                        "strict {account}/{limit}/{now}"
+                    );
+                }
+            }
+            let accounts = [
+                "account-a",
+                "account-b",
+                "account-c",
+                "account-d",
+                "missing",
+            ];
+            assert_eq!(
+                wake_view(SchedulerRepository::account_wake_for_accounts(
+                    &db, accounts, 2, now
+                )),
+                wake_view(old_targeted(&db, &accounts, 2, now))
+            );
+            for account in accounts {
+                let expected = old_agents(
+                    &db,
+                    account,
+                    "b",
+                    2,
+                    super::child_result_held_after(&db, now).unwrap(),
+                );
+                let actual =
+                    SchedulerRepository::account_wake_agents_after(&db, account, "b", 2, now);
+                assert_eq!(
+                    wake_view(actual.map(|rows| BTreeMap::from([(account.to_owned(), rows)]))),
+                    wake_view(expected.map(|rows| BTreeMap::from([(account.to_owned(), rows)])))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wake_eligibility_matches_old_sql_malformed_accounts_only_when_eligible() {
+        for account in [
+            json!(null),
+            json!(""),
+            json!(false),
+            json!(17),
+            json!([]),
+            json!({"invalid":true}),
+            json!("account"),
+        ] {
+            for pending in [false, true] {
+                let mut db = old_schema();
+                put_agent(
+                    &db,
+                    "candidate",
+                    json!({"provider":"codex","accountKey":"default","epoch":1,"status":"queued","autoWake":true}),
+                );
+                let value = json!({"provider":"codex","accountKey":account,"epoch":1,"status":"queued","autoWake":true});
+                historical_record(&db, "candidate", &value.to_string());
+                if pending {
+                    event(&db, "event", "candidate", "user", 1.0);
+                }
+                install_index(&mut db);
+                assert_eq!(
+                    wake_view(SchedulerRepository::account_wake_page(
+                        &db,
+                        "",
+                        &BTreeMap::new(),
+                        8,
+                        8,
+                        0.0
+                    )),
+                    wake_view(old_page(&db, "", &BTreeMap::new(), 8, 8, 0.0, true)),
+                    "{account}/{pending}"
+                );
+                assert_eq!(
+                    wake_view(SchedulerRepository::account_wake_for_accounts(
+                        &db,
+                        ["unrelated"],
+                        8,
+                        0.0
+                    )),
+                    wake_view(old_targeted(&db, &["unrelated"], 8, 0.0)),
+                    "targeted {account}/{pending}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wake_eligibility_matches_old_sql_epoch_and_selector_affinity() {
+        for epoch in [
+            json!(1),
+            json!(1.0),
+            json!("1"),
+            json!(true),
+            json!(false),
+            json!(null),
+            json!([]),
+        ] {
+            let mut db = old_schema();
+            put_agent(
+                &db,
+                "candidate",
+                json!({"provider":"codex","accountKey":"default","epoch":1,"status":"queued","autoWake":true}),
+            );
+            let raw = json!({"provider":"codex","accountKey":"default","epoch":epoch,"status":"queued","autoWake":true});
+            historical_record(&db, "candidate", &raw.to_string());
+            event(&db, "event", "candidate", "user", 1.0);
+            install_index(&mut db);
+            assert_eq!(
+                wake_view(SchedulerRepository::account_wake_page(
+                    &db,
+                    "",
+                    &BTreeMap::new(),
+                    8,
+                    8,
+                    0.0
+                )),
+                wake_view(old_page(&db, "", &BTreeMap::new(), 8, 8, 0.0, true)),
+                "epoch {epoch}"
+            );
+        }
+        let mut db = old_schema();
+        put_agent(
+            &db,
+            "steer",
+            json!({"provider":"codex","accountKey":"default","epoch":1,"status":"running","autoWake":true,"inFlight":true,"steerRejectedTurnId":1}),
+        );
+        provider_turn(&db, "steer", "1");
+        event(&db, "event", "steer", "user", 1.0);
+        install_index(&mut db);
+        assert_eq!(
+            wake_view(SchedulerRepository::account_wake_page(
+                &db,
+                "",
+                &BTreeMap::new(),
+                8,
+                8,
+                0.0
+            )),
+            wake_view(old_page(&db, "", &BTreeMap::new(), 8, 8, 0.0, true))
+        );
+    }
+
+    #[test]
+    fn wake_eligibility_oracle_retains_original_statement_text() {
+        let normalize = |sql: &str| {
+            sql.replace('"', "")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        assert_eq!(
+            normalize(wake_oracle::Invalid::QUERY.sql()),
+            normalize(&account_wake_invalid_target_query())
+        );
+        assert_eq!(
+            normalize(wake_oracle::Accounts::QUERY.sql()),
+            normalize(&account_wake_accounts_query())
+        );
+        assert_eq!(
+            normalize(wake_oracle::Target::QUERY.sql()),
+            normalize(&account_wake_account_target_query())
+        );
+        let expected = account_wake_pending_agents_query().replace(
+            "json_extract(a.record,'$.workspaceMode')",
+            "json_quote(json_extract(a.record,'$.workspaceMode'))",
+        );
+        assert_eq!(
+            normalize(wake_oracle::Agents::QUERY.sql()),
+            normalize(&expected)
+        );
+    }
 
     #[test]
     fn thread_preparation_receipt_requires_typed_scope() {
@@ -2054,9 +2523,68 @@ mod account_wake_index_tests {
             .expect("candidate-index transaction begins");
         SchedulerRepository::prepare_account_wake_index(&transaction)
             .expect("candidate index prepares on existing schema");
+        SchedulerRepository::prepare_child_result_hold_indexes(&transaction).unwrap();
+        for name in [
+            "runtime_event_queue",
+            "runtime_events_agent_epoch_status_created",
+        ] {
+            crate::queue_schema::install_index::<crate::queue_schema::EventsRow>(
+                &transaction,
+                name,
+            )
+            .unwrap();
+        }
+        SchedulerRepository::prepare_wake_eligibility_indexes(&transaction).unwrap();
         transaction
             .commit()
             .expect("candidate-index transaction commits");
+    }
+
+    #[test]
+    fn wake_eligibility_ranges_skip_idle_and_invalid_agents() {
+        let mut connection = old_schema();
+        for index in 0..512 {
+            put_agent(
+                &connection,
+                &format!("idle-{index}"),
+                json!({
+                    "provider":"codex", "accountKey":"default", "epoch":1, "status":"idle"
+                }),
+            );
+            put_agent(
+                &connection,
+                &format!("invalid-{index}"),
+                json!({
+                    "provider":"codex", "accountKey":"default", "epoch":1, "status":"idle"
+                }),
+            );
+            historical_record(
+                &connection,
+                &format!("invalid-{index}"),
+                &json!({"provider":"codex", "accountKey":{"invalid":true}, "epoch":1, "status":"idle"}).to_string(),
+            );
+        }
+        install_index(&mut connection);
+        let (page, steps) =
+            crate::query_plan_test_support::vm_steps(&connection, || {
+                Ok(SchedulerRepository::account_wake_page(
+                    &connection,
+                    "",
+                    &BTreeMap::new(),
+                    8,
+                    8,
+                    0.0,
+                )
+                .unwrap())
+            })
+            .unwrap();
+        assert!(page.is_empty());
+        eprintln!("wake eligibility: {steps} VM steps");
+        assert!(
+            steps < 1500,
+            "wake selection visited idle or invalid agents: {steps}"
+        );
+        super::super::wake_eligibility::assert_candidate_plans(&connection);
     }
 
     #[test]
