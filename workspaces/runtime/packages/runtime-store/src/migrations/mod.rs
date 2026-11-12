@@ -16,6 +16,7 @@ mod m2026_11_12_direct_durable_keys;
 mod m2026_11_12_durable_tombstone_expiry;
 mod m2026_11_12_event_publication_members;
 mod m2026_11_12_scheduler_wake_indexes;
+mod m2026_11_12_workspace_cwd_index;
 mod m2026_11_12_writer_window_indexes;
 
 use crate::{StoreError, StoreResult};
@@ -244,6 +245,10 @@ static POST_F1_CATALOG: &[SqlMigration] = &[
     SqlMigration {
         definition: m2026_11_12_durable_tombstone_expiry::DEFINITION,
         apply: m2026_11_12_durable_tombstone_expiry::apply,
+    },
+    SqlMigration {
+        definition: m2026_11_12_workspace_cwd_index::DEFINITION,
+        apply: m2026_11_12_workspace_cwd_index::apply,
     },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {

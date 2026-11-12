@@ -86,6 +86,7 @@ inherits = "ci"
 default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(wake_eligibility_)) |
     (package(=studio-runtime-store) & kind(lib) & test(durable_expiry_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(workspace_cwd_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-http) & (test(snapshot_spooling_and_slow_consumer_release_read_transactions) | test(snapshot_pages_replay_updates_and_tombstones_from_watermark) | test(shutdown_discards_queued_snapshot_frames) | test(delta_pages_reject_pruned_unread_tombstone_before_watermark) | test(projected_pages_replay_main_row_updates_deletes_and_membership))) |
     (package(=studio-runtime-services) & (test(receipt_finish_prepares_owner_outside_writer_and_replays_once) | test(receipt_finish_rechecks_monitor_and_owner_before_writing) | test(reattach_loss_prepares_owner_outside_writer) | test(finish_conflict_falls_back_once_without_repeating_effects_or_receipts))) |
@@ -723,6 +724,7 @@ platform = 'cfg(target_os = "linux")'
 default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(wake_eligibility_)) |
     (package(=studio-runtime-store) & kind(lib) & test(durable_expiry_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(workspace_cwd_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-http) & (test(snapshot_spooling_and_slow_consumer_release_read_transactions) | test(snapshot_pages_replay_updates_and_tombstones_from_watermark) | test(shutdown_discards_queued_snapshot_frames) | test(delta_pages_reject_pruned_unread_tombstone_before_watermark) | test(projected_pages_replay_main_row_updates_deletes_and_membership))) |
     (package(=studio-runtime-services) & (test(receipt_finish_prepares_owner_outside_writer_and_replays_once) | test(receipt_finish_rechecks_monitor_and_owner_before_writing) | test(reattach_loss_prepares_owner_outside_writer) | test(finish_conflict_falls_back_once_without_repeating_effects_or_receipts))) |

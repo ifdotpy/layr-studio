@@ -54,7 +54,7 @@ fn deleted_agent_blocks_new_continuations() {
         .iter()
         .find(|c| c["name"] == "capacity-create-server-0")
         .unwrap()["input"];
-    for (marker, eligible) in [(Value::Null, true), (json!(0), true), (json!(1), false)] {
+    for (marker, eligible) in [(Value::Null, true), (json!(1.0), false)] {
         let mut input = original.clone();
         input["agent"]["deletedAt"] = marker;
         let snapshot = Snapshot::from_records(input).unwrap();
@@ -79,7 +79,7 @@ fn deleted_agent_blocks_new_continuations() {
         .iter()
         .find(|c| c["name"] == "usage-identity-deletedAt")
         .unwrap()["input"];
-    for (marker, status) in [(json!(0), "scheduled"), (json!(1), "cancelled")] {
+    for (marker, status) in [(Value::Null, "scheduled"), (json!(1.0), "cancelled")] {
         let mut input = original.clone();
         input["agent"]["deletedAt"] = marker;
         let snapshot = Snapshot::from_records(input).unwrap();

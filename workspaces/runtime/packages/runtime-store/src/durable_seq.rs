@@ -910,6 +910,7 @@ mod tests {
             .upsert(&crate::agent_tables::AgentsStorageRow {
                 hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
                 parent_id: None,
+                cwd: None,
                 account_key: String::new(),
                 id: id.into(),
                 root_id: None,
@@ -1137,12 +1138,15 @@ mod tests {
         let moved = fence("new");
         assert!(moved > first);
         assert_eq!(fence("old"), moved);
-        put_agent(&tx, "member", "new", Some(0));
+        put_agent(&tx, "member", "new", Some(1));
         let removed = fence("new");
-        assert!(removed > moved, "zero is SQL non-NULL and leaves the team");
-        put_agent(&tx, "member", "new", Some(0));
+        assert!(
+            removed > moved,
+            "a deletion timestamp is non-NULL and leaves the team"
+        );
+        put_agent(&tx, "member", "new", Some(1));
         assert_eq!(fence("new"), removed);
-        put_agent(&tx, "excluded", "excluded", Some(0));
+        put_agent(&tx, "excluded", "excluded", Some(1));
         assert_eq!(fence("excluded"), 0);
         put_agent(&tx, "member", "new", None);
         assert!(fence("new") > removed);

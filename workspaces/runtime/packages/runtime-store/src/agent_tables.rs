@@ -13,6 +13,8 @@ const WAKE_SUBMITTED: &str = "attempt_submitted=1 AND attempt_connection_generat
 
 // Live recovery candidates, matching AgentError::known_kind for text and
 // single-key structured tags. Empty and ambiguous tag objects do not classify.
+const WORKSPACE_LIVE: &str = "deleted_at IS NULL";
+
 const LIMIT_RECOVERY: &str = "(deleted_at IS NULL OR deleted_at=0) AND (
     record->>'$.error.codexErrorInfo' IN ('usageLimitExceeded','rateLimitExceeded')
     OR (json_type(record,'$.error.codexErrorInfo.usageLimitExceeded') IS NOT NULL
@@ -69,6 +71,7 @@ const LIMIT_RECOVERY: &str = "(deleted_at IS NULL OR deleted_at=0) AND (
     legacy_index = "CREATE INDEX runtime_idle_compaction_deadline ON runtime_agents(idle_episode_type,idle_episode_fire_at,id,idle_episode_id) WHERE idle_episode_type='object'"
 )]
 #[db(index(name="runtime_agent_wake_recovery",columns(id),predicate=WAKE_RECOVERY))]
+#[db(index(name="runtime_agent_workspace_cwd",columns(cwd),predicate=WORKSPACE_LIVE))]
 #[db(state_check = crate::state_check::check_legacy_json::<crate::AgentRecord>)]
 pub struct AgentsStorageRow {
     /// Existing quarantine column; writes remain owned by AgentRepository::hold.
@@ -77,6 +80,9 @@ pub struct AgentsStorageRow {
     /// Existing generated parent selector, used for keyed sibling checks.
     #[db(generated)]
     pub parent_id: Option<String>,
+    /// Existing working-directory selector; writes follow the record.
+    #[db(generated)]
+    pub cwd: Option<String>,
     /// Stored account selector, generated from the record.
     #[db(generated)]
     pub account_key: String,
@@ -385,6 +391,7 @@ mod tests {
             .insert(&super::AgentsStorageRow {
                 hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
                 parent_id: None,
+                cwd: None,
                 account_key: String::new(),
                 id: "worker".into(),
                 record,

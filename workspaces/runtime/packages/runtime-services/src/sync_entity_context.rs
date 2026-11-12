@@ -606,8 +606,6 @@ mod room_preparation_tests {
         let db = studio_runtime_store::test_canvas();
         let mut agent = AgentRecord::from_value(json!({"id":"lead","rootId":"lead","epoch":0,"status":"idle","accountKey":"default","compactions":0,"isLead":true})).unwrap();
         assert!(agent_view_context(&db, &agent, None).unwrap().empty_lead);
-        agent.deleted_at = Some(0.0);
-        assert!(agent_view_context(&db, &agent, None).unwrap().empty_lead);
         agent.thread_id = Some("thread".into());
         assert!(!agent_view_context(&db, &agent, None).unwrap().empty_lead);
         agent.thread_id = None;

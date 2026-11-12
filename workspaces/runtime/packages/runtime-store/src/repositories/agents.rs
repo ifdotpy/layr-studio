@@ -42,6 +42,10 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
 #[serde(rename_all = "camelCase")]
 struct AgentDeletion {
     id: AgentId,
+    #[serde(
+        default,
+        deserialize_with = "crate::agent_columns::typed::record::deserialize_deleted_at"
+    )]
     deleted_at: Option<f64>,
 }
 
@@ -65,7 +69,7 @@ impl AgentRepository {
         )?)
     }
 
-    /// Missing, live (including a zero deletion time), or deleted, by primary key.
+    /// Missing, live, or deleted, by primary key.
     pub fn deletion_status(connection: &Connection, id: &str) -> StoreResult<Option<bool>> {
         studio_db_api::db_query!(
             canvas_read(connection),
@@ -83,7 +87,7 @@ impl AgentRepository {
                     None,
                 ));
             }
-            Ok(agent.deleted_at.is_some_and(|at| at != 0.0))
+            Ok(agent.deleted_at.is_some())
         })
         .transpose()
     }
@@ -250,18 +254,15 @@ mod invalid_agent_repair_tests {
     }
 
     #[test]
-    fn agent_liveness_reads_distinguish_zero_deleted_and_missing_rows() {
+    fn agent_liveness_reads_distinguish_live_deleted_and_missing_rows() {
         let db = crate::fresh_state::test_canvas();
         assert!(!AgentRepository::exists(&db, "missing").unwrap());
         assert_eq!(
             AgentRepository::deletion_status(&db, "missing").unwrap(),
             None
         );
-        for (id, deletion, deleted) in [
-            ("live", json!(null), false),
-            ("zero", json!(0), false),
-            ("deleted", json!(1.5), true),
-        ] {
+        for (id, deletion, deleted) in [("live", json!(null), false), ("deleted", json!(1.5), true)]
+        {
             let mut agent = AgentRecord::from_value(json!({
                 "compactions":0,"accountKey":"default","id":id,"rootId":id,
                 "provider":"codex","epoch":1,"status":"idle","deletedAt":deletion

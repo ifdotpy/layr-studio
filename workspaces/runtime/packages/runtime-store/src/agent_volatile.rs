@@ -466,7 +466,11 @@ impl Serialize for StoredRecord<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(None)?;
         for (key, value) in self.0 {
-            if !is_volatile_field(key) {
+            if key == "deletedAt" {
+                let timestamp = crate::agent_columns::typed::record::deserialize_deleted_at(value)
+                    .map_err(serde::ser::Error::custom)?;
+                map.serialize_entry(key, &timestamp)?;
+            } else if !is_volatile_field(key) {
                 map.serialize_entry(key, value)?;
             }
         }

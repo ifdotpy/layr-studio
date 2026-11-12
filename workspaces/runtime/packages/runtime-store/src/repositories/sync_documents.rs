@@ -2231,6 +2231,7 @@ mod f1_cutover_tests {
             .insert(&crate::agent_tables::AgentsStorageRow {
                 hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
                 parent_id: None,
+                cwd: None,
                 account_key: String::new(),
                 id: id.into(),
                 record,

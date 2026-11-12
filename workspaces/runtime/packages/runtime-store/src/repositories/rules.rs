@@ -174,7 +174,7 @@ mod tests {
         let db = crate::fresh_state::test_canvas();
         for fields in [
             studio_json::json!({}),
-            studio_json::json!({"deletedAt":0,"archived":true,"autoWake":false}),
+            studio_json::json!({"archived":true,"autoWake":false}),
             studio_json::json!({"deletedAt":1.5,"archived":false,"autoWake":true}),
             studio_json::json!({"threadId":null,"deletedAt":null,"sandbox":null,"restartRecovery":null}),
             studio_json::json!({"restartRecovery":{"epoch":1,"stage":"pending","autoWake":true,"threadId":null}}),

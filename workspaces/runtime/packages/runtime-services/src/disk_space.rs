@@ -431,11 +431,12 @@ fn filesystem_path(path: &Path) -> Option<(PathBuf, String)> {
 pub(crate) fn workspace_paths(
     connection: &rusqlite::Connection,
 ) -> Result<Vec<PathBuf>, studio_runtime_store::StoreError> {
-    let mut statement = connection.prepare_cached("SELECT DISTINCT cwd FROM runtime_agents WHERE cwd IS NOT NULL AND cwd<>'' AND (deleted_at IS NULL OR deleted_at IN (0,'')) ORDER BY cwd")?;
-    Ok(statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .map(|path| path.map(PathBuf::from))
-        .collect::<Result<Vec<_>, _>>()?)
+    Ok(
+        studio_runtime_store::AgentIndexedReads::workspace_paths(connection)?
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+    )
 }
 
 /// All status and admission callers use the installed gate and its startup config.

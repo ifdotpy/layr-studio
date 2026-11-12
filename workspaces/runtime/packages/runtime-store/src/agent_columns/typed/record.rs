@@ -38,7 +38,13 @@ pub struct AgentRecord {
     pub status: AgentStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// None is live; Some is a finite, nonzero deletion timestamp in seconds.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_deleted_at",
+        serialize_with = "serialize_deleted_at"
+    )]
     pub deleted_at: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_archive: Option<AgentArchive>,
@@ -1537,5 +1543,34 @@ impl
                 .transpose()?
                 .unwrap_or_default(),
         })
+    }
+}
+
+/// Single timestamp contract for agent persistence, in seconds.
+pub(crate) fn valid_deleted_at(value: f64) -> bool {
+    value.is_finite() && value != 0.0
+}
+pub(crate) fn deserialize_deleted_at<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<f64>, D::Error> {
+    let value = Option::<f64>::deserialize(d)?;
+    if value.is_none_or(valid_deleted_at) {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom(
+            "deletedAt must be a nonzero finite timestamp",
+        ))
+    }
+}
+fn serialize_deleted_at<S: serde::Serializer>(
+    value: &Option<f64>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    if value.is_none_or(valid_deleted_at) {
+        value.serialize(s)
+    } else {
+        Err(serde::ser::Error::custom(
+            "deletedAt must be a nonzero finite timestamp",
+        ))
     }
 }

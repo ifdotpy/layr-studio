@@ -2657,12 +2657,9 @@ mod team_progress_delivery_tests {
                     ("busy", "running"),
                     ("waiting", "queued"),
                 ] {
-                    let mut child = json!({"compactions":0,"id":id,"rootId":"lead","parentId":"lead","epoch":1,
+                    let child = json!({"compactions":0,"id":id,"rootId":"lead","parentId":"lead","epoch":1,
                         "status":status,"autoWake":true,"name":id,"cwd":"/work",
                         "provider":provider,"accountKey":"default"});
-                    if id == "busy" {
-                        child["deletedAt"] = json!(0);
-                    }
                     AgentRepository::put(tx, &AgentRecord::from_value(child).expect("child"))?;
                 }
                 for (index, id) in ["done", "failed"].into_iter().enumerate() {

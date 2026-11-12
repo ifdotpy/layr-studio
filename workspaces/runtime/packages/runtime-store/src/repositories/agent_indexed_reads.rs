@@ -61,6 +61,16 @@ macro_rules! holds_workspace_operation {
 pub struct AgentIndexedReads;
 
 impl AgentIndexedReads {
+    /// Host-wide worker folders, excluding archived workspaces and repeated paths.
+    pub fn workspace_paths(connection: &Connection) -> StoreResult<Vec<String>> {
+        let mut paths = crate::peer_update_settings::canvas_read(connection).collect(
+            &workspace_queries::Range::QUERY,
+            &workspace_queries::Range { after: Some("") },
+        )?;
+        paths.dedup();
+        Ok(paths)
+    }
+
     /// Read only changed episodes for named thread clocks through sessions_thread.
     pub fn thread_idle_deadline_changes(
         connection: &Connection,
@@ -355,6 +365,132 @@ mod tests {
     use super::*;
     use crate::domain::{ACTIVE_STATUS_INDEX, CAPACITY_STATUS_INDEX, ONE_UNFINISHED_TURN_INDEX};
     use studio_json::{Value, json};
+
+    fn workspace_database() -> Connection {
+        let db = database();
+        crate::queue_schema::install_index::<crate::agent_tables::AgentsStorageRow>(
+            &db,
+            studio_db_api::query_index::<
+                crate::peer_update_settings::Canvas,
+                crate::agent_tables::AgentsStorageRow,
+            >(&crate::agent_tables::AgentsStorageRow::INDEX_RUNTIME_AGENT_WORKSPACE_CWD),
+        )
+        .unwrap();
+        db
+    }
+    #[test]
+    fn workspace_cwd_writer_rejects_zero_deletion_timestamp() {
+        let db = crate::fresh_state::test_canvas();
+        let mut agent=crate::AgentRecord::from_value(json!({"id":"canonical","rootId":"canonical","epoch":1,"status":"idle","accountKey":"default","provider":"codex","compactions":0,"deletedAt":1.5})).unwrap();
+        crate::AgentRepository::put(&db, &agent).unwrap();
+        let storage_type = || {
+            crate::peer_update_settings::canvas_read(&db)
+                .named(
+                    &super::workspace_queries::StorageType::QUERY,
+                    &super::workspace_queries::StorageType { id: "canonical" },
+                )
+                .unwrap()
+        };
+        assert_eq!(storage_type(), "real");
+        let mut raw = agent.value();
+        raw["deletedAt"] = json!(1);
+        crate::agent_volatile::put(&db, "canonical", &raw, false).unwrap();
+        assert_eq!(storage_type(), "real");
+        for invalid in [json!(0), json!(0.0), json!(""), json!("1")] {
+            raw["deletedAt"] = invalid;
+            assert!(crate::agent_volatile::put(&db, "canonical", &raw, false).is_err());
+        }
+        agent.deleted_at = Some(0.0);
+        assert!(crate::AgentRepository::put(&db, &agent).is_err());
+        agent.deleted_at = None;
+        crate::AgentRepository::put(&db, &agent).unwrap();
+        assert_eq!(storage_type(), "null");
+    }
+    #[test]
+    fn workspace_cwd_range_skips_empty_history() {
+        let db = workspace_database();
+        for i in 0..1024 {
+            insert(
+                &db,
+                json!({"id":format!("empty-{i}"),"provider":"codex","cwd":""}),
+            );
+        }
+        for i in 0..1024 {
+            insert(
+                &db,
+                json!({"id":format!("archived-{i}"),"provider":"codex","cwd":"/archived","deletedAt":1.5}),
+            );
+        }
+        insert(
+            &db,
+            json!({"id":"worker","provider":"codex","cwd":"/workspace"}),
+        );
+        let (paths, steps) = crate::query_plan_test_support::vm_steps(&db, || {
+            Ok(AgentIndexedReads::workspace_paths(&db).unwrap())
+        })
+        .unwrap();
+        let plan = crate::query_plan_test_support::explain(
+            &db,
+            super::workspace_queries::Range::QUERY.sql(),
+            &super::workspace_queries::Range { after: Some("") },
+        )
+        .unwrap();
+        eprintln!("workspace cwd: {steps} VM; {plan:?}");
+        assert_eq!(paths, vec!["/workspace"]);
+        assert!(steps <= 250, "{steps} VM exceeds 250; {plan:?}");
+        assert!(
+            plan.iter()
+                .all(|line| !line.contains("SCAN ") && !line.contains("TEMP B-TREE")),
+            "{plan:?}"
+        );
+    }
+    #[test]
+    fn workspace_cwd_matches_old_distinct_deletion_and_ordering() {
+        let db = workspace_database();
+        let deletions = [json!(null), json!(1.5), json!(2000.0)];
+        for (i, deleted) in deletions.into_iter().enumerate() {
+            insert(
+                &db,
+                json!({"id":format!("row-{i}"),"provider":"codex","cwd":format!("/path-{i}"),"deletedAt":deleted}),
+            );
+            insert(
+                &db,
+                json!({"id":format!("copy-{i}"),"provider":"codex","cwd":"/shared","deletedAt":deleted}),
+            );
+        }
+        for (i, cwd) in [
+            json!(null),
+            json!(""),
+            json!("/A"),
+            json!("/a"),
+            json!("/é"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            insert(
+                &db,
+                json!({"id":format!("cwd-{i}"),"provider":"codex","cwd":cwd}),
+            );
+        }
+        let expected = crate::peer_update_settings::canvas_read(&db)
+            .collect(
+                &super::workspace_queries::Legacy::QUERY,
+                &super::workspace_queries::Legacy {},
+            )
+            .unwrap();
+        assert_eq!(AgentIndexedReads::workspace_paths(&db).unwrap(), expected);
+        assert!(expected.contains(&"/path-0".to_owned()));
+        assert!(!expected.contains(&"/path-1".to_owned()));
+        assert!(!expected.contains(&"/path-2".to_owned()));
+        assert_eq!(
+            expected
+                .iter()
+                .filter(|path| path.as_str() == "/shared")
+                .count(),
+            1
+        );
+    }
 
     /// The agents table of the column format with this module's indexes.
     fn database() -> Connection {
@@ -690,5 +826,35 @@ mod tests {
                 "{sql}: {details}"
             );
         }
+    }
+}
+
+mod workspace_queries {
+    use crate::agent_tables::AgentsStorageRow;
+    use crate::peer_update_settings::Canvas;
+    use studio_db_api::DbQuery;
+    #[cfg(test)]
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=read,cardinality=many,native,result=String,
+        tables(rows=AgentsStorageRow),columns(cwd=AgentsStorageRow::CWD,deleted=AgentsStorageRow::DELETED_AT),
+        sql="SELECT DISTINCT {cwd} FROM {rows} WHERE {cwd} IS NOT NULL AND {cwd}<>'' AND ({deleted} IS NULL OR {deleted} IN (0,'')) ORDER BY {cwd}")]
+    pub(super) struct Legacy {}
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=read,cardinality=many,native,result=String,
+        tables(rows=AgentsStorageRow),indexes(rows=AgentsStorageRow::INDEX_RUNTIME_AGENT_WORKSPACE_CWD),predicates(live=rows),
+        columns(cwd=AgentsStorageRow::CWD),
+        sql="SELECT {cwd} FROM {rows} WHERE {live} AND {cwd}>?1 ORDER BY {cwd}")]
+    pub(super) struct Range<'a> {
+        #[db(column=AgentsStorageRow::CWD)]
+        pub after: Option<&'a str>,
+    }
+    #[cfg(test)]
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=read,cardinality=one,native,result=String,
+        tables(rows=AgentsStorageRow),columns(id=AgentsStorageRow::ID,deleted=AgentsStorageRow::DELETED_AT),
+        sql="SELECT typeof({deleted}) FROM {rows} WHERE {id}=?1")]
+    pub(super) struct StorageType<'a> {
+        #[db(column=AgentsStorageRow::ID)]
+        pub id: &'a str,
     }
 }

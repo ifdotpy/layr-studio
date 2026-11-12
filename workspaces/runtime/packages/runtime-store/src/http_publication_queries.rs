@@ -260,13 +260,14 @@ mod tests {
         ] {
             let mut value = studio_json::json!({"compactions":0,"accountKey":"default","provider":"codex","id":id,"rootId":id,"epoch":0,"status":"idle","isLead":lead});
             if deleted {
-                value["deletedAt"] = studio_json::json!(0);
+                value["deletedAt"] = studio_json::json!(1.5);
             }
             let record = crate::AgentRecord::from_value(value).unwrap();
             crate::peer_update_settings::canvas_tx(&tx)
                 .insert(&AgentsStorageRow {
                     hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
                     parent_id: None,
+                    cwd: None,
                     account_key: String::new(),
                     id: id.into(),
                     root_id: None,

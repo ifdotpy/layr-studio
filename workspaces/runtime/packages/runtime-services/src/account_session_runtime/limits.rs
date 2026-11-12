@@ -600,7 +600,6 @@ mod tests {
             for (id, account, deleted, error) in [
                 ("usage", "default", None, json!({"codexErrorInfo":"usageLimitExceeded"})),
                 ("rate", "default", None, json!({"codexErrorInfo":{"rateLimitExceeded":{}}})),
-                ("zero", "default", Some(0.0), json!({"codexErrorInfo":"usageLimitExceeded"})),
                 ("empty", "", None, json!({"codexErrorInfo":"rateLimitExceeded"})),
                 ("deleted", "default", Some(1.0), json!({"codexErrorInfo":"usageLimitExceeded"})),
                 ("other", "other", None, json!({"codexErrorInfo":"usageLimitExceeded"})),
@@ -633,7 +632,7 @@ mod tests {
             }
             let mut view = RateLimitView::from_observation(response, 100.0);
             populate_agents(tx, &mut view, 100.0)?;
-            assert_eq!(view.projection.agents.len(), 4);
+            assert_eq!(view.projection.agents.len(), 3);
             assert_eq!(studio_json::to_string(&view.projection.agents)?, studio_json::to_string(&expected)?);
             Ok(())
         }).await.unwrap();

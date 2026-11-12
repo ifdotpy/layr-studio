@@ -871,6 +871,7 @@ mod tests {
                 .upsert(&AgentsStorageRow {
                     hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
                     parent_id: None,
+                    cwd: None,
                     account_key: String::new(),
                     id: "worker".into(),
                     root_id: None,
@@ -1008,6 +1009,7 @@ mod tests {
                 .upsert(&AgentsStorageRow {
                     hold_status: studio_runtime_schema::persistence::HoldStatus::Clear,
                     parent_id: None,
+                    cwd: None,
                     account_key: String::new(),
                     id: "worker".into(),
                     root_id: None,

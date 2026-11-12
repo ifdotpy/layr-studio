@@ -562,7 +562,7 @@ impl AgentRecord {
         Ok(())
     }
     pub fn is_deleted(&self) -> bool {
-        self.deleted_at.is_some_and(|at| at != 0.0)
+        self.deleted_at.is_some()
     }
 
     /// Start an agent record with its required identity and lifecycle state.

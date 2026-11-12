@@ -1413,7 +1413,7 @@ mod typed_conversion_tests {
             actor.auto_wake = auto_wake;
             cases.push(actor);
         }
-        for deleted_at in [0.0, 1.0, -1.0, f64::NAN, f64::INFINITY] {
+        for deleted_at in [1.0, -1.0] {
             let mut actor = base.clone();
             actor.deleted_at = Some(deleted_at);
             cases.push(actor);
