@@ -13,6 +13,7 @@ mod m2026_11_11_writer_query_indexes;
 mod m2026_11_11_writer_receipt_indexes;
 mod m2026_11_12_changes_label_sequence;
 mod m2026_11_12_direct_durable_keys;
+mod m2026_11_12_durable_tombstone_expiry;
 mod m2026_11_12_event_publication_members;
 mod m2026_11_12_scheduler_wake_indexes;
 mod m2026_11_12_writer_window_indexes;
@@ -239,6 +240,10 @@ static POST_F1_CATALOG: &[SqlMigration] = &[
     SqlMigration {
         definition: m2026_11_12_scheduler_wake_indexes::DEFINITION,
         apply: m2026_11_12_scheduler_wake_indexes::apply,
+    },
+    SqlMigration {
+        definition: m2026_11_12_durable_tombstone_expiry::DEFINITION,
+        apply: m2026_11_12_durable_tombstone_expiry::apply,
     },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {

@@ -152,6 +152,8 @@ pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> S
     let meta_value = Metadata::__DB_COLUMN_META_VALUE;
     let now = "CAST(strftime('%s','now') AS INTEGER)";
     let cutoff = format!("{now}-{TOMBSTONE_RETENTION_SECONDS}");
+    let expiry_index =
+        studio_db_api::query_index::<Canvas, Changes>(&Changes::INDEX_CHANGES_DURABLE_TOMBSTONE_AT);
     let scope =
         crate::entity_scopes::deleted_scope_sql(table, "OLD").unwrap_or_else(|| "NULL".into());
     let rowid_high =
@@ -235,9 +237,9 @@ pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> S
          CREATE TRIGGER durable_{table}_delete AFTER DELETE ON {table} BEGIN
            {require_singletons}
            UPDATE {metadata} SET {generation}=MAX({generation},{high}) WHERE {kind}={generation_kind} AND {integer_key}=1;
-           UPDATE {metadata} SET {floor}=MAX({floor},(SELECT MAX({seq}) FROM {changes} WHERE {kind}={durable_kind} AND {deleted}=1 AND {at}<{cutoff}))
-             WHERE {kind}={floor_kind} AND {integer_key}=1 AND EXISTS(SELECT 1 FROM {changes} WHERE {kind}={durable_kind} AND {deleted}=1 AND {at}<{cutoff});
-           DELETE FROM {changes} WHERE {kind}={durable_kind} AND {deleted}=1 AND {at}<{cutoff};
+           UPDATE {metadata} SET {floor}=MAX({floor},(SELECT MAX({seq}) FROM {changes} INDEXED BY {expiry_index} WHERE {kind}={durable_kind} AND {deleted}=1 AND {at}<{cutoff}))
+             WHERE {kind}={floor_kind} AND {integer_key}=1 AND EXISTS(SELECT 1 FROM {changes} INDEXED BY {expiry_index} WHERE {kind}={durable_kind} AND {deleted}=1 AND {at}<{cutoff});
+           DELETE FROM {changes} WHERE {kind}={durable_kind} AND {identity} IN (SELECT {identity} FROM {changes} INDEXED BY {expiry_index} WHERE {kind}={durable_kind} AND {deleted}=1 AND {at}<{cutoff});
            {tombstone} {delete_fence}
          END;"
     )
@@ -1744,5 +1746,256 @@ mod tests {
             removed,
             "another conversation's delete does not advance this cursor"
         );
+    }
+    // Physical fixture rows exercise the installed producers without domain projection.
+    #[derive(studio_db_api::DbTable)]
+    #[db(table="runtime_rules",database=Canvas)]
+    struct ExpiryRule {
+        #[db(key)]
+        id: String,
+        record: String,
+    }
+    #[derive(studio_db_api::DbTable)]
+    #[db(table="runtime_monitors",database=Canvas)]
+    struct ExpiryMonitor {
+        #[db(key)]
+        id: String,
+        record: String,
+    }
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(rows=ExpiryRule),columns(id=ExpiryRule::ID),sql="DELETE FROM {rows} WHERE {id}=?1")]
+    struct ExpiryDeleteRule<'a> {
+        #[db(column=ExpiryRule::ID)]
+        id: &'a str,
+    }
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(rows=ExpiryMonitor),columns(id=ExpiryMonitor::ID),sql="DELETE FROM {rows} WHERE {id}=?1")]
+    struct ExpiryDeleteMonitor<'a> {
+        #[db(column=ExpiryMonitor::ID)]
+        id: &'a str,
+    }
+
+    // Frozen predecessor producer: parity must retain its floor, cutoff and scope semantics.
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),sql="DROP TRIGGER durable_runtime_rules_delete")]
+    struct ExpiryDropRule {}
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),sql=r#"CREATE TRIGGER durable_runtime_rules_delete AFTER DELETE ON runtime_rules BEGIN
+           SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM metadata WHERE kind=14 AND integer_key=1)
+          OR NOT EXISTS(SELECT 1 FROM metadata WHERE kind=2 AND integer_key=1)
+          THEN RAISE(ABORT,'missing durable clock singleton') END;
+           UPDATE metadata SET sync_generation=MAX(sync_generation,(SELECT MAX((SELECT COALESCE(MAX("publication_seq"),0) FROM "publications"),
+            (SELECT COALESCE(MAX("sync_generation"),0) FROM "metadata" WHERE "kind"=14 AND "integer_key"=1),
+            (SELECT COALESCE(MAX("sequence"),0) FROM "changes" INDEXED BY "changes_durable_sequence" WHERE kind = 1)) AS "publication_seq")) WHERE kind=14 AND integer_key=1;
+           UPDATE metadata SET durable_floor=MAX(durable_floor,(SELECT MAX(sequence) FROM changes WHERE kind=1 AND deleted=1 AND deleted_at<CAST(strftime('%s','now') AS INTEGER)-7776000))
+             WHERE kind=2 AND integer_key=1 AND EXISTS(SELECT 1 FROM changes WHERE kind=1 AND deleted=1 AND deleted_at<CAST(strftime('%s','now') AS INTEGER)-7776000);
+           DELETE FROM changes WHERE kind=1 AND deleted=1 AND deleted_at<CAST(strftime('%s','now') AS INTEGER)-7776000;
+           INSERT INTO changes(kind,identity,source_rowid,source_label,durable_id,sequence,deleted,deleted_at,scope)
+             SELECT 1,CAST((CASE typeof('runtime_rules') WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST('runtime_rules' AS BLOB)),0)) || hex(CAST('runtime_rules' AS BLOB))) || (CASE typeof(OLD.id) WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST(OLD.id AS BLOB)),0)) || hex(CAST(OLD.id AS BLOB))) AS BLOB),
+               COALESCE((SELECT source_rowid FROM changes WHERE kind=1 AND identity=CAST((CASE typeof('runtime_rules') WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST('runtime_rules' AS BLOB)),0)) || hex(CAST('runtime_rules' AS BLOB))) || (CASE typeof(OLD.id) WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST(OLD.id AS BLOB)),0)) || hex(CAST(OLD.id AS BLOB))) AS BLOB)),
+                 CASE WHEN typeof((SELECT COALESCE(MAX(source_rowid),0) FROM changes WHERE kind=1)+1)='integer' THEN (SELECT COALESCE(MAX(source_rowid),0) FROM changes WHERE kind=1)+1 ELSE RAISE(ABORT,'durable source rowid exhausted') END),
+               'runtime_rules',OLD.id,CASE WHEN typeof((SELECT MAX((SELECT COALESCE(MAX("publication_seq"),0) FROM "publications"),
+            (SELECT COALESCE(MAX("sync_generation"),0) FROM "metadata" WHERE "kind"=14 AND "integer_key"=1),
+            (SELECT COALESCE(MAX("sequence"),0) FROM "changes" INDEXED BY "changes_durable_sequence" WHERE kind = 1)) AS "publication_seq")+1)='integer' THEN (SELECT MAX((SELECT COALESCE(MAX("publication_seq"),0) FROM "publications"),
+            (SELECT COALESCE(MAX("sync_generation"),0) FROM "metadata" WHERE "kind"=14 AND "integer_key"=1),
+            (SELECT COALESCE(MAX("sequence"),0) FROM "changes" INDEXED BY "changes_durable_sequence" WHERE kind = 1)) AS "publication_seq")+1 ELSE RAISE(ABORT,'durable sequence exhausted') END,1,CAST(strftime('%s','now') AS INTEGER),CASE WHEN json_valid(OLD.record) THEN json_object('rootId',json((SELECT json_quote(value) FROM json_each(OLD.record) WHERE key='rootId' ORDER BY id DESC LIMIT 1)),'agent',json((SELECT json_quote(value) FROM json_each(OLD.record) WHERE key='agent' ORDER BY id DESC LIMIT 1))) END
+             WHERE 1
+             ON CONFLICT(kind,identity) DO UPDATE SET sequence=excluded.sequence,deleted=excluded.deleted,deleted_at=excluded.deleted_at,scope=excluded.scope; 
+         END"#)]
+    struct ExpiryLegacyRule {}
+
+    // Frozen predecessor producer: parity must retain its floor, cutoff and scope semantics.
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),sql="DROP TRIGGER durable_runtime_monitors_delete")]
+    struct ExpiryDropMonitor {}
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),sql=r#"CREATE TRIGGER durable_runtime_monitors_delete AFTER DELETE ON runtime_monitors BEGIN
+           SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM metadata WHERE kind=14 AND integer_key=1)
+          OR NOT EXISTS(SELECT 1 FROM metadata WHERE kind=2 AND integer_key=1)
+          THEN RAISE(ABORT,'missing durable clock singleton') END;
+           UPDATE metadata SET sync_generation=MAX(sync_generation,(SELECT MAX((SELECT COALESCE(MAX("publication_seq"),0) FROM "publications"),
+            (SELECT COALESCE(MAX("sync_generation"),0) FROM "metadata" WHERE "kind"=14 AND "integer_key"=1),
+            (SELECT COALESCE(MAX("sequence"),0) FROM "changes" INDEXED BY "changes_durable_sequence" WHERE kind = 1)) AS "publication_seq")) WHERE kind=14 AND integer_key=1;
+           UPDATE metadata SET durable_floor=MAX(durable_floor,(SELECT MAX(sequence) FROM changes WHERE kind=1 AND deleted=1 AND deleted_at<CAST(strftime('%s','now') AS INTEGER)-7776000))
+             WHERE kind=2 AND integer_key=1 AND EXISTS(SELECT 1 FROM changes WHERE kind=1 AND deleted=1 AND deleted_at<CAST(strftime('%s','now') AS INTEGER)-7776000);
+           DELETE FROM changes WHERE kind=1 AND deleted=1 AND deleted_at<CAST(strftime('%s','now') AS INTEGER)-7776000;
+           INSERT INTO changes(kind,identity,source_rowid,source_label,durable_id,sequence,deleted,deleted_at,scope)
+             SELECT 1,CAST((CASE typeof('runtime_monitors') WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST('runtime_monitors' AS BLOB)),0)) || hex(CAST('runtime_monitors' AS BLOB))) || (CASE typeof(OLD.id) WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST(OLD.id AS BLOB)),0)) || hex(CAST(OLD.id AS BLOB))) AS BLOB),
+               COALESCE((SELECT source_rowid FROM changes WHERE kind=1 AND identity=CAST((CASE typeof('runtime_monitors') WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST('runtime_monitors' AS BLOB)),0)) || hex(CAST('runtime_monitors' AS BLOB))) || (CASE typeof(OLD.id) WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST(OLD.id AS BLOB)),0)) || hex(CAST(OLD.id AS BLOB))) AS BLOB)),
+                 CASE WHEN typeof((SELECT COALESCE(MAX(source_rowid),0) FROM changes WHERE kind=1)+1)='integer' THEN (SELECT COALESCE(MAX(source_rowid),0) FROM changes WHERE kind=1)+1 ELSE RAISE(ABORT,'durable source rowid exhausted') END),
+               'runtime_monitors',OLD.id,CASE WHEN typeof((SELECT MAX((SELECT COALESCE(MAX("publication_seq"),0) FROM "publications"),
+            (SELECT COALESCE(MAX("sync_generation"),0) FROM "metadata" WHERE "kind"=14 AND "integer_key"=1),
+            (SELECT COALESCE(MAX("sequence"),0) FROM "changes" INDEXED BY "changes_durable_sequence" WHERE kind = 1)) AS "publication_seq")+1)='integer' THEN (SELECT MAX((SELECT COALESCE(MAX("publication_seq"),0) FROM "publications"),
+            (SELECT COALESCE(MAX("sync_generation"),0) FROM "metadata" WHERE "kind"=14 AND "integer_key"=1),
+            (SELECT COALESCE(MAX("sequence"),0) FROM "changes" INDEXED BY "changes_durable_sequence" WHERE kind = 1)) AS "publication_seq")+1 ELSE RAISE(ABORT,'durable sequence exhausted') END,1,CAST(strftime('%s','now') AS INTEGER),CASE WHEN json_valid(OLD.record) THEN json_object('agent',json((SELECT json_quote(value) FROM json_each(OLD.record) WHERE key='agent' ORDER BY id DESC LIMIT 1))) END
+             WHERE 1
+             ON CONFLICT(kind,identity) DO UPDATE SET sequence=excluded.sequence,deleted=excluded.deleted,deleted_at=excluded.deleted_at,scope=excluded.scope; 
+         END"#)]
+    struct ExpiryLegacyMonitor {}
+
+    const EXPIRY_NOW_SECONDS: i64 = 20_000_000;
+    fn expiry_fixture(legacy: bool, background: i64) -> Connection {
+        let mut db = canonical_canvas();
+        crate::item_monitor_terminal::MonitorsRow::descriptor()
+            .install_if_absent(&db)
+            .unwrap();
+        db.create_scalar_function(
+            "strftime",
+            2,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            |_| Ok(EXPIRY_NOW_SECONDS.to_string()),
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        install(&tx).unwrap();
+        let mut write = canvas_tx(&tx);
+        write
+            .insert(&ExpiryRule {
+                id: "rule".into(),
+                record: r#"{"id":"rule","agent":"owner"}"#.into(),
+            })
+            .unwrap();
+        write
+            .insert(&ExpiryMonitor {
+                id: "monitor".into(),
+                record: r#"{"id":"monitor","agent":"owner","status":"completed"}"#.into(),
+            })
+            .unwrap();
+        if legacy {
+            write
+                .named(&ExpiryDropRule::QUERY, &ExpiryDropRule {})
+                .unwrap();
+            write
+                .named(&ExpiryLegacyRule::QUERY, &ExpiryLegacyRule {})
+                .unwrap();
+            write
+                .named(&ExpiryDropMonitor::QUERY, &ExpiryDropMonitor {})
+                .unwrap();
+            write
+                .named(&ExpiryLegacyMonitor::QUERY, &ExpiryLegacyMonitor {})
+                .unwrap();
+        }
+        for index in 0..background {
+            seed_durable(
+                &tx,
+                "runtime_rules",
+                &format!("background-{index}"),
+                1000 + index,
+                0,
+            );
+        }
+        tx.commit().unwrap();
+        db
+    }
+    fn expiry_delete(db: &Connection, monitor: bool) -> (Vec<String>, u64) {
+        db.set_db_config(
+            rusqlite::config::DbConfig::SQLITE_DBCONFIG_TRIGGER_EQP,
+            true,
+        )
+        .unwrap();
+        let tx = db.unchecked_transaction().unwrap();
+        let plan = if monitor {
+            crate::query_plan_test_support::explain(
+                &tx,
+                ExpiryDeleteMonitor::QUERY.sql(),
+                &ExpiryDeleteMonitor { id: "monitor" },
+            )
+            .unwrap()
+        } else {
+            crate::query_plan_test_support::explain(
+                &tx,
+                ExpiryDeleteRule::QUERY.sql(),
+                &ExpiryDeleteRule { id: "rule" },
+            )
+            .unwrap()
+        };
+        let (_, steps) = crate::query_plan_test_support::vm_steps(&tx, || {
+            if monitor {
+                canvas_tx(&tx).named(
+                    &ExpiryDeleteMonitor::QUERY,
+                    &ExpiryDeleteMonitor { id: "monitor" },
+                )
+            } else {
+                canvas_tx(&tx).named(&ExpiryDeleteRule::QUERY, &ExpiryDeleteRule { id: "rule" })
+            }
+        })
+        .unwrap();
+        tx.commit().unwrap();
+        (plan, steps)
+    }
+    fn expiry_assert_delete_budget(monitor: bool) {
+        let db = expiry_fixture(false, 4096);
+        let (plan, steps) = expiry_delete(&db, monitor);
+        eprintln!("monitor={monitor}: {steps} VM; {plan:?}");
+        assert!(
+            steps <= 2500,
+            "monitor={monitor}: {steps} VM exceeds 2500; {plan:?}"
+        );
+        let expiry_ranges = plan
+            .iter()
+            .filter(|line| {
+                line.contains("changes_durable_tombstone_at") && line.contains("deleted_at<?")
+            })
+            .count();
+        assert_eq!(
+            expiry_ranges, 3,
+            "all expiry operations use the existing partial range index: {plan:?}"
+        );
+    }
+    #[test]
+    fn durable_expiry_rule_delete_skips_live_history() {
+        expiry_assert_delete_budget(false);
+    }
+    #[test]
+    fn durable_expiry_monitor_delete_skips_live_history() {
+        expiry_assert_delete_budget(true);
+    }
+    #[test]
+    fn durable_expiry_trigger_parity_preserves_boundary_scope_and_floor() {
+        let old = expiry_fixture(true, 0);
+        let new = expiry_fixture(false, 0);
+        let cutoff = EXPIRY_NOW_SECONDS - TOMBSTONE_RETENTION_SECONDS;
+        for db in [&old, &new] {
+            let tx = db.unchecked_transaction().unwrap();
+            for (id, seq, at, deleted) in [
+                ("expired-low", 50, cutoff - 1, 1),
+                ("expired-high", 150, cutoff - 10, 1),
+                ("boundary", 80, cutoff, 1),
+                ("unexpired", 100, cutoff + 1, 1),
+                ("live", 200, cutoff - 1, 0),
+            ] {
+                let row = DurableRows {
+                    identity: encode_key(&("runtime_rules".to_owned(), id.to_owned())),
+                    source_rowid: seq,
+                    source_label: DurableSource::from_stored("runtime_rules".into()),
+                    durable_id: id.into(),
+                    sequence: seq,
+                    deleted: StoredBoolean::from_stored(deleted),
+                    deleted_at: at,
+                    scope: None,
+                };
+                canvas_tx(&tx).partition::<DurableRows>().put(&row).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        for monitor in [false, true] {
+            expiry_delete(&old, monitor);
+            expiry_delete(&new, monitor);
+            assert_eq!(
+                crate::test_fixtures::canvas::changes(&old).unwrap(),
+                crate::test_fixtures::canvas::changes(&new).unwrap()
+            );
+            assert_eq!(high_and_floor(&old).unwrap(), high_and_floor(&new).unwrap());
+            assert_eq!(high_and_floor(&new).unwrap().1, 150);
+            let changes = crate::test_fixtures::canvas::changes(&new).unwrap();
+            for id in ["boundary", "unexpired", "live"] {
+                assert!(changes.iter().any(|row| row.durable_id == id), "{id}");
+            }
+            assert!(
+                !changes
+                    .iter()
+                    .any(|row| row.durable_id.starts_with("expired-"))
+            );
+        }
     }
 }
