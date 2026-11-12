@@ -263,3 +263,7 @@ test-quarantine:
 [doc("Report Claude SDK export drift against the latest published SDK or a supplied sdk.d.ts, without changing dependencies.")]
 claude-sdk-drift *args:
     @node {{quote(justfile_directory() / "workspaces/providers/apps/claude-bridge/sdk-drift.ts")}} {{args}}
+
+[doc("Review a candidate Codex schema or update provider contracts using existing generation and drift checks.")]
+provider-update provider version *args:
+    @node {{quote(justfile_directory() / "workspaces/tooling/apps/repository-checks/provider-update.ts")}} {{quote(provider)}} {{quote(version)}} {{args}}

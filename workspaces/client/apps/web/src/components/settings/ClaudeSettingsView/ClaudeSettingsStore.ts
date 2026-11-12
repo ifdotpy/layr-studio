@@ -161,7 +161,12 @@ export class ClaudeSettingsStore {
     const saved: boolean = yield flowResult(
       this.run(() =>
         flowResult(
-          this.mutate({ id: this.id, action: "settings", settings: next }),
+          this.mutate({
+            id: this.id,
+            action: "settings",
+            scope: { scope: "session" },
+            settings: next,
+          }),
         ),
       ),
     );

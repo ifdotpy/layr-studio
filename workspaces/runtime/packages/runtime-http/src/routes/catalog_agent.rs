@@ -12,11 +12,11 @@ use serde::Deserialize;
 use std::time::{Duration, Instant as StdInstant};
 use studio_json::{Value, json};
 use studio_runtime_services::catalog_reads::{
-    CapabilityAgentSnapshot, ProviderRequest, append_capability_error, apply_capability_result,
-    capabilities_base, host_finder_view, skills_for_cwd,
+    CapabilityAgentSnapshot, CatalogRequest, CatalogResult, ProviderRequest,
+    append_capability_error, capabilities_base, host_finder_view, skills_for_cwd,
 };
+use studio_runtime_services::provider_adapter::{apply_capability_result, catalog_requests};
 use studio_runtime_store::WorkspaceViewsRepository;
-use tokio::time::Instant;
 
 use crate::error::ApiError;
 use crate::router::HttpState;
@@ -69,7 +69,6 @@ struct CapabilitiesQuery {
     agent: Option<String>,
     #[serde(rename = "serversCursor")]
     servers_cursor: Option<studio_runtime_schema::bounded_text::BoundedText<1, { usize::MAX }>>,
-    fresh: Option<bool>,
 }
 async fn finder_view(
     State(state): State<HttpState>,
@@ -101,30 +100,23 @@ async fn account_provider_exchange(
         std::sync::Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>,
     >,
     account: AccountContext,
-    requests: Vec<ProviderRequest>,
+    requests: Vec<CatalogRequest>,
     timeout: Duration,
-) -> Result<
-    Vec<Result<Value, studio_runtime_services::catalog_reads::CatalogReadError>>,
-    studio_runtime_services::catalog_reads::CatalogReadError,
-> {
-    use studio_runtime_services::catalog_reads::CatalogReadError;
-    if !account.known || !account.available {
-        return Err(CatalogReadError::ProviderExchangeFailed);
+) -> Vec<CatalogResult> {
+    if account.known
+        && account.available
+        && let Some(session) = session
+        && session.ensure_session(&account.key).await.is_ok()
+    {
+        return studio_runtime_services::catalog_reads::account_session_exchange(
+            session.as_ref(),
+            &account.key,
+            requests,
+            timeout,
+        )
+        .await;
     }
-    // Both providers answer catalog reads over the account's retained session;
-    // no read launches a provider process of its own.
-    let session = session.ok_or(CatalogReadError::ProviderExchangeFailed)?;
-    session
-        .ensure_session(&account.key)
-        .await
-        .map_err(|_| CatalogReadError::ProviderExchangeFailed)?;
-    studio_runtime_services::catalog_reads::account_session_exchange(
-        session.as_ref(),
-        &account.key,
-        requests,
-        timeout,
-    )
-    .await
+    requests.into_iter().map(|(label,_)|(label,Err(studio_runtime_services::catalog_reads::CatalogReadError::ProviderExchangeFailed))).collect()
 }
 
 async fn skills(
@@ -139,23 +131,21 @@ async fn skills(
     let responses = account_provider_exchange(
         state.account_session.clone(),
         account,
-        // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
-        vec![ProviderRequest {
-            method: "skills/list".to_owned(),
-            params: json!({"cwds":[cwd],"forceReload":false}),
-        }],
+        vec![(
+            "skills",
+            // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
+            ProviderRequest {
+                method: "skills/list".to_owned(),
+                params: json!({"cwds":[cwd],"forceReload":false}),
+            },
+        )],
         DISCOVERY_TIMEOUT,
     )
     .await;
-    let result = match responses {
-        Ok(mut responses) => match responses.pop().unwrap_or(Err(
-            studio_runtime_services::catalog_reads::CatalogReadError::ProviderExchangeFailed,
-        )) {
-            Ok(response) => skills_for_cwd(cwd, &response)
-                .unwrap_or_else(|message| json!({"skills":[],"errors":[message]})),
-            Err(_) => json!({"skills":[],"errors":["Provider request failed"]}),
-        },
-        Err(_) => json!({"skills":[],"errors":["Provider request failed"]}),
+    let result = match responses.into_iter().next().map(|(_, result)| result) {
+        Some(Ok(response)) => skills_for_cwd(cwd, &response)
+            .unwrap_or_else(|message| json!({"skills":[],"errors":[message]})),
+        _ => json!({"skills":[],"errors":["Provider request failed"]}),
     };
     Ok(Json(super::generated_json::<
         crate::generated::SkillsResponse,
@@ -178,16 +168,6 @@ async fn capabilities(
         .get("cwd")
         .and_then(Value::as_str)
         .ok_or_else(invalid_stored_agent)?;
-    let cursor = params
-        .servers_cursor
-        .as_ref()
-        .map(|value| value.as_str().to_owned());
-    let fresh = cursor.is_some() || params.fresh == Some(true);
-    if !fresh && let Some(cached) = state.capabilities_cache.get(agent_id, Instant::now()) {
-        return Ok(Json(super::generated_json::<
-            crate::generated::CapabilitiesResponse,
-        >(cached)?));
-    }
     let capability_agent =
         CapabilityAgentSnapshot::from_record(&agent).map_err(|_| invalid_stored_agent())?;
     let managed = studio_runtime_services::catalog_reads::managed_tool_catalog(catalog)
@@ -210,74 +190,69 @@ async fn capabilities(
         .map_err(|_| ApiError::internal())?
         .as_secs_f64();
     let mut result = capabilities_base(agent_id, &capability_agent, managed, observed, at);
-    let cache = std::sync::Arc::clone(&state.capabilities_cache);
-    let session = state.account_session.clone();
-    let cwd = cwd.to_owned();
-    let thread_id = record.thread_id.clone();
-    let fetch = || async move {
-        let scope = match &session {
-            Some(port) => port.ensure_session(&account.key).await.ok(),
-            None => None,
-        };
-        result["mcpSession"] = scope
-            .as_ref()
-            .and_then(|scope| super::mcp_reconnect::binding(&record, scope))
-            .unwrap_or(Value::Null);
-        let mut server_params =
-            json!({"threadId":thread_id,"limit":NATIVE_TERMINAL_ITEMS_PER_PAGE});
-        if let Some(cursor) = cursor {
-            server_params["cursor"] = json!(cursor);
-        }
-        let responses = account_provider_exchange(
-            session.clone(),
-            account.clone(),
-            vec![
-                // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
-                ProviderRequest {
-                    method: "skills/list".to_owned(),
-                    params: json!({"cwds":[cwd],"forceReload":true}),
-                },
-                // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
-                ProviderRequest {
-                    method: "mcpServerStatus/list".to_owned(),
-                    params: server_params,
-                },
-            ],
-            DISCOVERY_TIMEOUT,
-        )
-        .await;
-        match responses {
-            Ok(responses) => {
-                for (index, label) in ["skills", "servers"].into_iter().enumerate() {
-                    match responses.get(index) {
-                        Some(Ok(response)) => apply_capability_result(&mut result, label, response),
-                        _ => append_capability_error(&mut result, label, "Provider request failed"),
-                    }
-                }
-            }
-            Err(_) => {
-                append_capability_error(&mut result, "skills", "Provider request failed");
-                append_capability_error(&mut result, "servers", "Provider request failed");
-            }
-        }
-        if scope.as_ref()
-            != session
-                .as_ref()
-                .and_then(|port| port.current_scope(&account.key))
-                .as_ref()
+    let session = &state.account_session;
+    let scope = match session {
+        Some(port) => port.ensure_session(&account.key).await.ok(),
+        None => None,
+    };
+    result["mcpSession"] = scope
+        .as_ref()
+        .and_then(|scope| super::mcp_reconnect::binding(&record, scope))
+        .unwrap_or(Value::Null);
+    let mut server_params =
+        json!({"threadId":record.thread_id,"limit":NATIVE_TERMINAL_ITEMS_PER_PAGE});
+    if let Some(cursor) = params.servers_cursor {
+        server_params["cursor"] = json!(cursor.as_str());
+    }
+    let mut requests = vec![
+        (
+            "skills",
+            // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
+            ProviderRequest {
+                method: "skills/list".to_owned(),
+                params: json!({"cwds":[cwd],"forceReload":true}),
+            },
+        ),
+        (
+            "servers",
+            // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
+            ProviderRequest {
+                method: "mcpServerStatus/list".to_owned(),
+                params: server_params,
+            },
+        ),
+    ];
+    requests.extend(catalog_requests(
+        account.provider,
+        cwd,
+        record.thread_id.as_deref(),
+    ));
+    for (label, response) in account_provider_exchange(
+        session.clone(),
+        account.clone(),
+        requests,
+        DISCOVERY_TIMEOUT,
+    )
+    .await
+    {
+        if let Err(error) = response
+            .map_err(|_| "Provider request failed")
+            .and_then(|response| {
+                apply_capability_result(account.provider, &mut result, label, &response)
+            })
         {
-            result["mcpSession"] = Value::Null;
+            append_capability_error(&mut result, label, error);
         }
-        result
-    };
-    let result = if fresh {
-        fetch().await
-    } else {
-        cache
-            .get_or_fetch(agent_id, fetch)
-            .await
-            .map_err(|_| ApiError::internal())?
-    };
+    }
+
+    if scope.as_ref()
+        != session
+            .as_ref()
+            .and_then(|port| port.current_scope(&account.key))
+            .as_ref()
+    {
+        result["mcpSession"] = Value::Null;
+    }
     Ok(Json(super::generated_json::<
         crate::generated::CapabilitiesResponse,
     >(result)?))
@@ -801,6 +776,7 @@ struct AccountContext {
     /// The registry has this account with a known provider.
     known: bool,
     available: bool,
+    provider: Option<studio_runtime_schema::ProviderKind>,
 }
 
 fn account_context(state: &HttpState, key: &str) -> Result<AccountContext, ApiError> {
@@ -819,6 +795,7 @@ fn account_context(state: &HttpState, key: &str) -> Result<AccountContext, ApiEr
     Ok(AccountContext {
         key: key.to_owned(),
         known: account.is_some_and(|row| row.provider_kind().is_some()),
+        provider: account.and_then(|row| row.provider_kind()),
         available: account.is_some_and(|row| {
             row.disconnected.as_bool() != Some(true) && row.deleted.as_bool() != Some(true)
         }),
@@ -1238,7 +1215,8 @@ mod typed_query_contract_tests {
             let uri: axum::http::Uri = format!("/?{query}").parse().unwrap();
             axum::extract::Query::<CapabilitiesQuery>::try_from_uri(&uri).is_ok()
         }
-        assert!(decode("agent=x&fresh=true"));
+        assert!(decode("agent=x"));
+        assert!(!decode("agent=x&fresh=true"));
         assert!(!decode("serversCursor="));
         assert!(!decode("extra=x"));
     }

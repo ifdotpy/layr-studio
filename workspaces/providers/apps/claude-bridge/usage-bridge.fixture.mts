@@ -1,3 +1,7 @@
+import type {
+  SDKCommandsChangedMessage,
+  SlashCommand,
+} from "@anthropic-ai/claude-agent-sdk";
 export { resolveSettings } from "./sdk-fixtures.ts";
 import { inputText, waitForFile } from "./sdk-fixtures.ts";
 import type { FixtureQuery } from "./sdk-fixtures.ts";
@@ -19,6 +23,7 @@ import {
 } from "./usage-fixtures.ts";
 export function query({ prompt, options }: FixtureQuery) {
   const abort = new AbortController();
+  let commands: SlashCommand[] = [];
   let delayedClose = false,
     stuckClose = false,
     reportCloseTiming = false;
@@ -58,6 +63,7 @@ export function query({ prompt, options }: FixtureQuery) {
       apiProvider: "firstParty",
     }),
     initializationResult: async () => ({ commands: [] }),
+    supportedCommands: async () => commands,
     setModel: async () => {},
     setPermissionMode: async () => {},
     applyFlagSettings: async () => {},
@@ -86,6 +92,22 @@ export function query({ prompt, options }: FixtureQuery) {
           subtype: "init",
           session_id: options.resume || options.sessionId,
         };
+        if (text === "catalog-change") {
+          commands = [
+            {
+              name: "fresh-skill",
+              description: "Discovered skill",
+              argumentHint: "",
+            },
+          ];
+          yield {
+            type: "system",
+            subtype: "commands_changed",
+            commands,
+            uuid: "11111111-1111-4111-8111-111111111111",
+            session_id: options.resume || options.sessionId || "fixture",
+          } satisfies SDKCommandsChangedMessage;
+        }
         if (
           text === "shutdown-watchdog" ||
           text === "shutdown-watchdog-inflight"

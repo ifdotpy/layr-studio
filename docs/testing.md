@@ -1055,3 +1055,20 @@ the Claude codec. Supervisor operation-status reads must settle through the
 supervisor owner without a vendor write. These worker witnesses explicitly
 select the production codec. Existing generic journal fixtures retain their
 protocol so legacy or deliberately incomplete incoming payloads stay testable.
+
+### Native catalog invalidation
+
+`native-catalog` is an account-scoped, passive SSE resource. The existing
+`ResourceNotifications` service owns its in-memory revision; there is no catalog
+revision table or second counter. Committed Codex `skills/changed` and
+`app/list/updated` notifications, and Claude `commands_changed` translated by the
+bridge to `skills/changed`, invalidate that account's catalogs. The observed skills
+read and Workspace Tools capabilities read use `watchResourceReads`; no catalog
+poller or new timer is involved. Equal revisions share the existing read dedupe.
+
+A reconnect receives the resource baseline with its latest revision, so a missed
+native change triggers a fresh HTTP read. A server restart changes the stream
+epoch; the same helper rereads even when the process-local revision returns to
+zero. A baseline is always read on first observation. Native app discovery shows
+one page (up to `native_catalog::APPS_PER_PAGE` entries) and preserves `appsCursor`
+in the capabilities response. Plugin discovery includes all returned marketplaces.

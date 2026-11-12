@@ -9,7 +9,6 @@ import {
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -1111,6 +1110,8 @@ export function codexDrift(
 export async function checkInstalledCodexDrift(
   directory = root,
   executable = process.env.CODEX_BIN || "codex",
+  candidateVersion?: string,
+  reviewedSha?: string,
 ): Promise<boolean> {
   const actual = execFileSync(executable, ["--version"], {
     encoding: "utf8",
@@ -1119,6 +1120,10 @@ export async function checkInstalledCodexDrift(
     actual,
   )?.[1];
   if (!version) throw new Error(`Invalid Codex CLI version: ${actual}`);
+  if (candidateVersion && version !== candidateVersion)
+    throw new Error(
+      `Expected codex-cli ${candidateVersion}; received ${actual}`,
+    );
   const temporary = mkdtempSync(path.join(tmpdir(), "studio-provider-drift-"));
   try {
     execFileSync(executable, [
@@ -1128,9 +1133,10 @@ export async function checkInstalledCodexDrift(
       "--out",
       temporary,
     ]);
-    const installed = codexDefinitions(
-      read(path.join(temporary, "codex_app_server_protocol.schemas.json")),
+    const schema = read(
+      path.join(temporary, "codex_app_server_protocol.schemas.json"),
     );
+    const installed = codexDefinitions(schema);
     const responseUrl = source.responseSource.url.replace(
       `rust-v${source.version}/`,
       `rust-v${version}/`,
@@ -1160,6 +1166,32 @@ export async function checkInstalledCodexDrift(
       process.stdout.write(
         "Contract drift requires explicit dispositions and review; removals or changes are potentially breaking.\n",
       );
+    if (candidateVersion) {
+      const schemaSha = sha256(schema);
+      process.stdout.write(
+        `Candidate schema SHA-256: ${schemaSha}\nResponse provenance: ${responseUrl}\nResponse SHA-256: ${sha256(vendor)}\nReview, then rerun with --reviewed-sha ${schemaSha}\n`,
+      );
+      if (reviewedSha) {
+        if (reviewedSha !== schemaSha)
+          throw new Error("Reviewed SHA differs from candidate schema");
+        const owner = path.join(
+          directory,
+          "workspaces/tooling/apps/repository-checks/provider-contract-sources.ts",
+        );
+        writeGenerated(
+          owner,
+          read(owner)
+            .replace(JSON.stringify(source.version), JSON.stringify(version))
+            .replace(source.schemaSha256, schemaSha)
+            .replace(source.responseSource.url, responseUrl)
+            .replace(source.responseSource.sha256, sha256(vendor))
+            .replace(
+              /responseTypes: \{[\s\S]*?\n  \},/,
+              `responseTypes: ${JSON.stringify(results, null, 2)},`,
+            ),
+        );
+      }
+    }
     return !report.changed;
   } finally {
     rmSync(temporary, { recursive: true, force: true });
@@ -1200,12 +1232,15 @@ export function checkClaudeRateFingerprint(directory = root): void {
       "Stale Claude rate provenance; run pnpm run contracts:vendor:generate",
     );
 }
-function renderClaudeProvenance(directory: string, schema: Rendered): Rendered {
-  const require = createRequire(
-    path.join(directory, claudeBridge, "package.json"),
-  );
-  const sdkDirectory = path.dirname(
-    require.resolve("@anthropic-ai/claude-agent-sdk"),
+function renderClaudeProvenance(
+  directory: string,
+  schema: Rendered,
+  reader = read,
+): Rendered {
+  const sdkDirectory = path.join(
+    directory,
+    claudeBridge,
+    "node_modules/@anthropic-ai/claude-agent-sdk",
   );
   const version = claudeVersion(directory);
   if (parse(read(path.join(sdkDirectory, "package.json"))).version !== version)
@@ -1221,7 +1256,7 @@ function renderClaudeProvenance(directory: string, schema: Rendered): Rendered {
           sdk: {
             version,
             declarationsSha256: sha256(
-              read(path.join(sdkDirectory, "sdk.d.ts")),
+              reader(path.join(sdkDirectory, "sdk.d.ts")),
             ),
           },
           schemaSha256: sha256(schema.text),
@@ -1273,7 +1308,7 @@ export async function checkClaudeRateContract(
     throw new Error(
       `Stale Claude rate contract: ${entry.path}; run pnpm run contracts:vendor:generate`,
     );
-  const provenance = renderClaudeProvenance(directory, entry);
+  const provenance = renderClaudeProvenance(directory, entry, reader);
   if (reader(path.join(directory, provenance.path)) !== provenance.text)
     throw new Error(
       "Stale Claude rate provenance; run pnpm run contracts:vendor:generate",

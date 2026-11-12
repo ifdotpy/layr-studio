@@ -951,3 +951,20 @@ test("non-Cargo output may quote nextest installation guidance without failing t
   assert.equal(result.exitCode, 0);
   assert.equal(result.executed, 1);
 });
+
+test("native catalog vendor semantics stay in the provider adapter", () => {
+  for (const file of [
+    "runtime-http/src/routes/catalog_agent.rs",
+    "runtime-services/src/catalog_reads.rs",
+    "runtime-services/src/account_worker.rs",
+  ]) {
+    const source = readFileSync(
+      path.join(process.cwd(), "workspaces/runtime/packages", file),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      source,
+      /codex::(?:AppsListParams|PluginListParams|AppsListResponse|PluginListResponse|ServerNotification::(?:SkillsChanged|AppListUpdated))/,
+    );
+  }
+});

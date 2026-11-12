@@ -69,6 +69,7 @@ pub enum ResourceKind {
     Tasks,
     Workspace,
     MultiServer,
+    NativeCatalog,
     #[cfg_attr(any(test, feature = "test-support"), serde(other))]
     Other,
 }
@@ -453,7 +454,7 @@ impl ResourceNotifications {
             let version = match kind {
                 // Discovery reads refresh volatile access timestamps; only its
                 // explicit publications may advance this semantic cursor.
-                ResourceKind::MultiServer => explicit,
+                ResourceKind::MultiServer | ResourceKind::NativeCatalog => explicit,
                 ResourceKind::RetainedWorktrees
                 | ResourceKind::AgentDetail
                 | ResourceKind::Costs

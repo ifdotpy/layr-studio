@@ -145,6 +145,13 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
             Some(studio_runtime_store::StoredTransferValue::Known(true))
         );
     let actor_identity = common_identity && agent_record.epoch == actor.epoch;
+    if call.method == Method::TurnSettingsUpdate
+        && (agent_record.provider.value() != Some(&studio_runtime_providers::ProviderKind::Codex)
+            || agent_record.in_flight != Some(true)
+            || agent_record.turn_id.as_deref() != call.params["turnId"].as_str())
+    {
+        return Ok(false);
+    }
     if call.method == Method::ClaudeShellPolicy {
         let settings = studio_runtime_store::OrchestrationSettingsRepository::shell_policy(tx)?;
         if call.params["settings"] != studio_json::to_value(settings).map_err(StoreError::from)?
@@ -574,6 +581,13 @@ pub(super) fn replay_in_transaction(
     tx: &rusqlite::Transaction<'_>,
     call: &Call,
 ) -> Result<Result<Replay, PortError>, WorkerError> {
+    if call.method == Method::TurnSettingsUpdate {
+        let replay = replay_recorded(tx, call)?;
+        if matches!(&replay, Ok(Replay::Return(receipt)) if matches!(receipt.result,RequestResult::Reply(_) | RequestResult::Rejected(_)))
+        {
+            return Ok(replay);
+        }
+    }
     if authorize(tx, call)? {
         return replay_recorded(tx, call);
     }

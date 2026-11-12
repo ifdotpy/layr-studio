@@ -1127,7 +1127,11 @@ mod codex_protocol_tests {
         );
         assert_eq!(
             frame.codex_incoming_method().unwrap().disposition(),
-            Some(crate::codex_disposition::Disposition::Handled)
+            Some(crate::codex_disposition::Disposition::Handled(
+                crate::codex_disposition::HandlerKey::Callback(
+                    crate::codex_disposition::CallbackHandler::CurrentTimeRead
+                )
+            ))
         );
     }
 }

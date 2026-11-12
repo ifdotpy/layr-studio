@@ -8,7 +8,7 @@ export function fileCheckpointOptions<T extends Pick<Options, "env">>(
     ...options,
     enableFileCheckpointing: true,
     env: { ...options.env, CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: "true" },
-  };
+  } satisfies Options;
 }
 
 export function checkpointSourceMatches(

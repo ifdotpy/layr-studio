@@ -120,7 +120,16 @@ export function createServerServices(
               byte.toString(16).padStart(2, "0"),
             ).join(""),
     });
-    runtime = { sync, resources, store: createServerStore(resources) };
+    runtime = {
+      sync,
+      resources,
+      store: createServerStore(resources, (refs, read, failed, options) =>
+        watchResourceReads(refs, read, failed, {
+          ...options,
+          events: resources,
+        }),
+      ),
+    };
     stopConnection = resources.watchResourceConnection((health) =>
       netStatus.receive(health),
     );

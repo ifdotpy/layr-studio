@@ -102,7 +102,9 @@ export function projectExecution(props: ScopedSettingsProps, sources: Sources) {
   const [unconfirmed] = ui.cell(
     formScope,
     "unconfirmed",
-    savedRequest?.id === agent.id && savedRequest.next_turn === true
+    savedRequest?.id === agent.id &&
+      (savedRequest.next_turn === true ||
+        savedRequest.settings_scope?.scope === "current_turn")
       ? savedRequest
       : null,
   );

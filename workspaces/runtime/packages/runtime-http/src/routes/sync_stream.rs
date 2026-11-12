@@ -122,6 +122,7 @@ impl ResourceIdentity for SubscribedResource {
             ResourceRef::TasksResource(_) => ResourceKind::Tasks,
             ResourceRef::WorkspaceResource(_) => ResourceKind::Workspace,
             ResourceRef::MultiServerResource(_) => ResourceKind::MultiServer,
+            ResourceRef::NativeCatalogResource(_) => ResourceKind::NativeCatalog,
             ResourceRef::NativeLayrSettingsResource(_) => ResourceKind::Other,
             ResourceRef::AccountsResource(_)
             | ResourceRef::AuthProgressResource(_)
@@ -171,6 +172,7 @@ fn authorize_resource(
         | ResourceRef::DesktopResource(_)
         | ResourceRef::DraftsResource(_)
         | ResourceRef::LimitsResource(_)
+        | ResourceRef::NativeCatalogResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
         | ResourceRef::NativeLayrSettingsResource(_)
@@ -583,6 +585,7 @@ async fn sync_stream(
             | ResourceRef::CostsResource(_)
             | ResourceRef::DesktopResource(_)
             | ResourceRef::LimitsResource(_)
+            | ResourceRef::NativeCatalogResource(_)
             | ResourceRef::ModelsResource(_)
             | ResourceRef::MultiServerResource(_)
             | ResourceRef::NativeLayrSettingsResource(_)
@@ -796,6 +799,7 @@ pub(super) async fn append_progress_frames(
             | ResourceRef::DesktopResource(_)
             | ResourceRef::DraftsResource(_)
             | ResourceRef::LimitsResource(_)
+            | ResourceRef::NativeCatalogResource(_)
             | ResourceRef::ModelsResource(_)
             | ResourceRef::MultiServerResource(_)
             | ResourceRef::NativeLayrSettingsResource(_)
@@ -1595,6 +1599,7 @@ async fn attach_transient_snapshots(
             | ResourceRef::DesktopResource(_)
             | ResourceRef::DraftsResource(_)
             | ResourceRef::LimitsResource(_)
+            | ResourceRef::NativeCatalogResource(_)
             | ResourceRef::ModelsResource(_)
             | ResourceRef::MultiServerResource(_)
             | ResourceRef::QueueResource(_)

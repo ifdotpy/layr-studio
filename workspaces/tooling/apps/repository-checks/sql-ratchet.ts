@@ -383,6 +383,17 @@ const REVIEWED_LIVE_RESTART_FIXTURE_ALLOWANCES: readonly Allowance[] = [
     fingerprint: "487a2e54d94a467c",
   },
 ];
+// Exact generated settings-schema boundary reviewed for wave D/E; no SQL.
+export const REVIEWED_WAVE_DE_JSON_ALLOWANCES = [
+  {
+    file: "workspaces/runtime/packages/runtime-schema/src/settings_scope.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "1a584168e760734a",
+    reason:
+      "Settings scope renders JSON Schema through the JSON facade; no SQLite executor.",
+  },
+] satisfies (Allowance & { reason: string })[];
+
 // Exact wave C port approved against the consolidated-storage scanner; no path/API exemptions.
 export const REVIEWED_WAVE_C_SQL_ALLOWANCES = [
   {
@@ -612,6 +623,7 @@ export function checkSqlRatchet(
     ...WRITER_PLAN_WITNESS_SQL_ALLOWANCES,
     ...REVIEWED_LIVE_RESTART_FIXTURE_ALLOWANCES,
     ...REVIEWED_WAVE_C_SQL_ALLOWANCES,
+    ...REVIEWED_WAVE_DE_JSON_ALLOWANCES,
   ]);
   return actual
     .filter((site) => !consume(remaining, site) && !consume(reviewed, site))

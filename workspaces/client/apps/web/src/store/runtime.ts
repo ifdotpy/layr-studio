@@ -40,6 +40,7 @@ export interface ResourceSlot<T> {
 export interface ReadIntent<T> {
   key: string;
   read(): Promise<T>;
+  watch?(read: () => Promise<void>): () => void;
 }
 export interface ReadSlot<T> extends ResourceSlot<T> {
   read(): Promise<T>;
@@ -217,8 +218,15 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
           trim();
         });
     });
+    const watched = !!ref || ("watch" in definition && !!definition.watch);
     const interest = observeInterest(() => {
-      if (!ref) return () => {};
+      if (!ref)
+        return "watch" in definition
+          ? (definition.watch?.(async () => {
+              if (request) await request.catch(() => {});
+              await read();
+            }) ?? (() => {}))
+          : () => {};
       const stop = subscriptions.subscribe(ref, () => schedule(update));
       schedule(update);
       return stop;
@@ -229,10 +237,10 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       entry.observed = true;
       releaseAfterRead = false;
       touch(key);
-      if (ref) interest.observed();
+      if (watched) interest.observed();
       else if (current.status !== "live") void read().catch(() => {});
     });
-    onBecomeUnobserved(atom, ref ? interest.unobserved : inactive);
+    onBecomeUnobserved(atom, watched ? interest.unobserved : inactive);
     // Metadata has separate observers so identical data publications stay cheap.
     const versionAtom = createAtom(`${key}:applied-version`);
     const entry: Entry = {
@@ -241,7 +249,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       keyed: remove !== undefined,
       isReading: () => request !== undefined,
       dispose() {
-        if (ref) interest.dispose();
+        if (watched) interest.dispose();
       },
       evict: action(() => {
         generation++;
@@ -255,7 +263,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
         if (remove && !entry.observed) {
           entries.delete(key);
           remove();
-          if (ref) interest.dispose();
+          if (watched) interest.dispose();
         }
       }),
     };

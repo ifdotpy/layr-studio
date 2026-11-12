@@ -22,13 +22,23 @@ export function sdkDiagnostics(
   file: string | string[],
   mutation?: (source: string) => string,
   owner: "sdk" | "tools" = "sdk",
+  productionMutation?: (source: string) => string,
 ) {
   const host = ts.createCompilerHost(options);
   const read = host.readFile.bind(host);
-  host.readFile = (name) =>
-    mutation && name === (owner === "sdk" ? declarations : toolDeclarations)
-      ? mutation(owner === "sdk" ? sdk : tools)
-      : read(name);
+  host.readFile = (name) => {
+    if (
+      mutation &&
+      name === (owner === "sdk" ? declarations : toolDeclarations)
+    )
+      return mutation(owner === "sdk" ? sdk : tools);
+    const source = read(name);
+    return productionMutation &&
+      source !== undefined &&
+      name === directory + (Array.isArray(file) ? file[0] : file)
+      ? productionMutation(source)
+      : source;
+  };
   const program = ts.createProgram(
     (Array.isArray(file) ? file : [file]).map((file) => directory + file),
     options,

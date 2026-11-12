@@ -65,6 +65,8 @@ provider_reads! {
     ClaudeMoveVersions,
     McpServerStatusList,
     SkillsList,
+    AppList,
+    PluginList,
     OperationStatus,
     ClaudeCommands,
     ClaudeMoveIdentity,
@@ -329,6 +331,7 @@ pub(crate) fn validate(request: &SessionRequest) -> Result<(), PortError> {
                 | Method::ThreadCompactStart
                 | Method::ReviewStart
                 | Method::ThreadSettingsUpdate
+                | Method::TurnSettingsUpdate
                 | Method::McpServerReconnect
                 | Method::ClaudeState
                 | Method::ClaudeRepairReport
@@ -661,6 +664,25 @@ pub(crate) fn valid_actorless_request_shape(
         }
         Method::AccountRead => {
             only(&["refreshToken"], &[]) && params.get("refreshToken") == Some(&json!(false))
+        }
+        Method::AppList => {
+            only(&["forceRefetch", "limit", "threadId"], &[])
+                && params.get("forceRefetch") == Some(&json!(true))
+                && params.get("limit")
+                    == Some(&json!(studio_runtime_schema::native_catalog::APPS_PER_PAGE))
+                && params.get("threadId").is_some_and(|value| {
+                    value.is_null() || value.as_str().is_some_and(|id| !id.is_empty())
+                })
+        }
+        Method::PluginList => {
+            only(&["cwds", "forceRefetch"], &[])
+                && params.get("forceRefetch") == Some(&json!(true))
+                && params
+                    .get("cwds")
+                    .and_then(Value::as_array)
+                    .is_some_and(|cwds| {
+                        cwds.len() == 1 && cwds[0].as_str().is_some_and(|cwd| !cwd.is_empty())
+                    })
         }
         Method::SkillsList => {
             only(&["cwds", "forceReload"], &[])

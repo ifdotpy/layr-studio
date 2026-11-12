@@ -170,9 +170,6 @@ importers:
 
   .:
     devDependencies:
-      '@anthropic-ai/claude-agent-sdk':
-        specifier: 0.3.308
-        version: 0.3.308(@anthropic-ai/sdk@0.127.0(zod@4.6.7))(@modelcontextprotocol/sdk@1.32.1(supports-color@10.2.2)(zod@4.6.7))(zod@4.6.7)
       '@ast-grep/cli':
         specifier: 0.51.0
         version: 0.51.0

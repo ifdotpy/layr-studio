@@ -492,6 +492,7 @@ class AgentDetailEntityDtoModel {
     | NonNullable<AgentDetailEntityDtoDto["tokensUsed"]>
     | null
     | undefined;
+  turnId: NonNullable<AgentDetailEntityDtoDto["turnId"]> | null | undefined;
   turnStatus:
     | NonNullable<AgentDetailEntityDtoDto["turnStatus"]>
     | null
@@ -871,6 +872,12 @@ class AgentDetailEntityDtoModel {
         : dto.tokensUsed === null
           ? null
           : dto.tokensUsed;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
     this.turnStatus =
       dto.turnStatus === undefined
         ? undefined
@@ -992,6 +999,7 @@ class AgentDetailEntityDtoModel {
       tail: observableRef,
       taskDefaultGate: observableRef,
       tokensUsed: observableRef,
+      turnId: observableRef,
       turnStatus: observableRef,
       usageResume: observableRef,
       voiceState: observableRef,
@@ -1959,6 +1967,21 @@ class AgentDetailEntityDtoModel {
                 ? dto.tokensUsed
                 : dto.tokensUsed;
       if (this.tokensUsed !== next) this.tokensUsed = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
     }
     {
       const next =

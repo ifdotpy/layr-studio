@@ -118,6 +118,8 @@ bridge_methods! {
 #[derive(Serialize, JsonSchema)]
 #[schemars(rename = "BridgeNotifications")]
 pub struct BridgeNotifications {
+    #[serde(rename = "skills/changed")]
+    pub skills_changed: BridgeEmpty,
     #[serde(rename = "item/modelOutput/firstDelta")]
     pub first_model_output: FirstModelOutput,
     #[serde(rename = "item/started")]
@@ -152,6 +154,8 @@ pub struct BridgeNotifications {
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "method", content = "params")]
 pub enum BridgeNotification {
+    #[serde(rename = "skills/changed")]
+    SkillsChanged(BridgeEmpty),
     #[serde(rename = "item/modelOutput/firstDelta")]
     FirstModelOutput(FirstModelOutput),
     #[serde(rename = "item/started")]

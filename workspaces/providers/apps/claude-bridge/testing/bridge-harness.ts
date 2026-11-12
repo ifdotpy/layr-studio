@@ -168,9 +168,9 @@ export async function startBridge(
     path.join(BRIDGE, "node_modules"),
     path.join(root, "node_modules"),
   );
-  await fs.writeFile(
+  await fs.copyFile(
+    path.join(BRIDGE, "package.json"),
     path.join(root, "package.json"),
-    JSON.stringify({ type: "module" }),
   );
   const launch = () =>
     spawn(

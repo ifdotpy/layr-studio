@@ -1,3 +1,6 @@
+import type { GetResult } from "../../../api.ts";
+import { watchResourceReads } from "../../../sync/subscriptions/reads.ts";
+import type { ResourceVersion } from "../../../sync/subscriptions/contracts.ts";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -151,4 +154,93 @@ it("loads only while observed and aborts when its last observer leaves", async (
   pending.resolve({ value: "late" });
   await pending.promise;
   expect(state.data).toBeNull();
+});
+
+it("capabilities retry a failed native catalog revision after the same reconnect baseline", async () => {
+  vi.useFakeTimers();
+  let notify: (version?: ResourceVersion) => void = () => {
+    throw new Error("Missing watcher");
+  };
+  const stopWatch = vi.fn();
+  const watch = vi.fn<
+    NonNullable<ConstructorParameters<typeof WorkspaceResources>[2]>
+  >((refs, read, failed, options) =>
+    watchResourceReads(refs, read, failed, {
+      ...options,
+      events: {
+        watchResourceChanges: (_ref, receive) => {
+          notify = receive;
+          return stopWatch;
+        },
+        watchResourceConnection: () => () => {},
+      },
+    }),
+  );
+  const catalog = {
+    skills: [],
+    mcp: [{ name: "files", status: "failed" }],
+    mcpSession: {
+      account: "account",
+      thread: "thread",
+      epoch: 1,
+      connection: "connection",
+      generation: 1,
+    },
+    managed: [],
+    observedNative: [],
+    errors: [],
+  } satisfies Pick<
+    GetResult<"/api/capabilities">,
+    "skills" | "mcp" | "mcpSession" | "managed" | "observedNative" | "errors"
+  >;
+  const held = deferred<typeof catalog>();
+  api.get
+    .mockReset()
+    .mockRejectedValueOnce(new Error("Disconnected"))
+    .mockResolvedValueOnce(catalog)
+    .mockReturnValueOnce(held.promise)
+    .mockResolvedValue(catalog);
+  api.post
+    .mockReset()
+    .mockResolvedValue({ status: "completed", message: "Reconnected" });
+  workspace = new WorkspaceResources(api, "server", watch);
+  const { state, inventory } = workspace.capabilities("agent", "account");
+  const stop = autorun(() => void state.data);
+  const stopSecondObserver = autorun(() => void state.data);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    const baseline = { epoch: "server", revision: 5 };
+    notify(baseline);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.error).toBe("Disconnected");
+    expect(api.get).toHaveBeenCalledTimes(1);
+    notify(baseline); // Reconnected stream repeats the same native catalog baseline.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(state.error).toBe("");
+    const invalidation = { ...baseline, revision: 6 };
+    notify(invalidation);
+    notify(invalidation);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.get).toHaveBeenCalledTimes(3);
+    await flowResult(inventory.reconnectServer("files"));
+    expect(inventory.pageError).toBe("");
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(Object.values(inventory.feedback)).toEqual([
+      { busy: false, message: "Reconnected" },
+    ]);
+    expect(api.get).toHaveBeenCalledTimes(3); // No concurrent discovery while the older read is held.
+    held.resolve(catalog);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.get).toHaveBeenCalledTimes(4); // Exactly one sequential read after reconnect completed.
+    expect(workspace.capabilities("agent", "other").state).not.toBe(state);
+  } finally {
+    held.resolve(catalog);
+    stopSecondObserver();
+    stop();
+    await vi.advanceTimersByTimeAsync(0);
+    workspace.dispose();
+    vi.useRealTimers();
+  }
+  expect(stopWatch).toHaveBeenCalledTimes(1);
 });

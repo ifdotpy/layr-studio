@@ -102,19 +102,18 @@ export async function writeFileAtomic(
   }
 }
 
-export function ephemeralSessionOptions(
-  session?: Pick<Session, "ephemeral">,
-): Partial<Options> {
-  if (session?.ephemeral !== true) return {};
-  return {
-    persistSession: false,
-    permissionMode: "dontAsk",
-    tools: [],
-    allowedTools: [],
-    settingSources: [],
-    strictMcpConfig: true,
-    mcpServers: {},
-  };
+export function ephemeralSessionOptions(session?: Pick<Session, "ephemeral">) {
+  return session?.ephemeral === true
+    ? ({
+        persistSession: false,
+        permissionMode: "dontAsk",
+        tools: [],
+        allowedTools: [],
+        settingSources: [],
+        strictMcpConfig: true,
+        mcpServers: {},
+      } satisfies Options)
+    : {};
 }
 
 function copy<T>(value: T): T {

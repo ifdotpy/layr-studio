@@ -467,26 +467,20 @@ impl ClaudeCliAuthReader {
             .and_then(|value| value.get("binaryPath"))
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty());
-        let path = environment
-            .get("PATH")
-            .map(OsStr::new)
-            .map(OsStr::to_os_string)
-            .or_else(|| env::var_os("PATH"));
-        let home = environment
-            .get("HOME")
-            .map(OsStr::new)
-            .map(OsStr::to_os_string)
-            .or_else(|| env::var_os("HOME"));
-        let Some(binary) = resolve_claude_binary(
-            configured_binary,
-            environment.get(CLAUDE_BIN_OVERRIDE).map(String::as_str),
-            path.as_deref(),
-            home.as_deref(),
-        ) else {
+        let environment = ["PATH", "HOME"]
+            .into_iter()
+            .filter_map(|key| env::var_os(key).map(|value| (key.into(), value)))
+            .chain(
+                environment
+                    .iter()
+                    .map(|(key, value)| (key.into(), value.into())),
+            )
+            .collect();
+        let Some(binary) = claude::resolve_login_binary(configured_binary, &environment) else {
             return AuthMetadata::signed_out();
         };
         auth_cache::shared().read(&claude_location(profile), || {
-            match run_claude_status(&binary, options) {
+            match run_claude_status(&binary.to_string_lossy(), options) {
                 Ok((stdout, succeeded)) => {
                     let metadata = parse_claude_status(&stdout, succeeded);
                     let location = claude_location(profile);
@@ -3372,13 +3366,9 @@ mod tests {
             OsStr::new(CLAUDE_BIN_OVERRIDE).to_owned(),
             override_binary.as_os_str().to_owned(),
         )]);
-        let profile = studio_json::json!({
-            "claudeOptions": {"binaryPath": profile_binary.to_string_lossy()}
-        });
-
         assert_eq!(
-            claude::resolve_claude_binary_with_environment(&profile, &environment),
-            Some(profile_binary.to_string_lossy().into_owned()),
+            claude::resolve_login_binary(profile_binary.to_str(), &environment),
+            Some(profile_binary),
         );
     }
 

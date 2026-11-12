@@ -558,6 +558,14 @@ export const bridgeWireDefinitions = {
     oneOf: [
       {
         properties: {
+          method: { const: "skills/changed", type: "string" },
+          params: { $ref: "#/$defs/BridgeEmpty" },
+        },
+        required: ["method", "params"],
+        type: "object",
+      },
+      {
+        properties: {
           method: { const: "item/modelOutput/firstDelta", type: "string" },
           params: { $ref: "#/$defs/FirstModelOutput" },
         },
@@ -694,6 +702,7 @@ export const bridgeWireDefinitions = {
       "serverRequest/resolved": {
         $ref: "#/$defs/NotificationServerRequestResolved",
       },
+      "skills/changed": { $ref: "#/$defs/BridgeEmpty" },
       "thread/contextUsage/updated": {
         $ref: "#/$defs/NotificationThreadContextUsageUpdated",
       },
@@ -711,6 +720,7 @@ export const bridgeWireDefinitions = {
       "turn/started": { $ref: "#/$defs/NotificationTurnStarted" },
     },
     required: [
+      "skills/changed",
       "item/modelOutput/firstDelta",
       "item/started",
       "item/completed",

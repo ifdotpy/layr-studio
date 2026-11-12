@@ -34,6 +34,7 @@ pub(super) fn selection(
         ResourceRef::AccountsResource(_)
         | ResourceRef::DraftsResource(_)
         | ResourceRef::LimitsResource(_)
+        | ResourceRef::NativeCatalogResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
         | ResourceRef::NativeLayrSettingsResource(_)

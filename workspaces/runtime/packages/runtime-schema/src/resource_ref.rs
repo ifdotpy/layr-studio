@@ -124,6 +124,8 @@ pub enum ResourceRef {
     LimitsResource(AccountResource),
     #[serde(rename = "models")]
     ModelsResource(EmptyResource),
+    #[serde(rename = "native-catalog")]
+    NativeCatalogResource(AccountResource),
     #[serde(rename = "native-layr-settings")]
     NativeLayrSettingsResource(EmptyResource),
     #[serde(rename = "multi-server")]
@@ -201,6 +203,10 @@ impl Serialize for ResourceRef {
                 kind!("limits");
             }
             Self::ModelsResource(_) => kind!("models"),
+            Self::NativeCatalogResource(v) => {
+                map.serialize_entry("accountKey", &v.account_key)?;
+                kind!("native-catalog");
+            }
             Self::MultiServerResource(_) => kind!("multi-server"),
             Self::NativeLayrSettingsResource(_) => kind!("native-layr-settings"),
             Self::QueueResource(v) => agent!(v, "queue"),

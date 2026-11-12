@@ -252,7 +252,18 @@ pub(crate) async fn dispatch_with_managed_tools(
     if !now.is_finite() || now < 0.0 {
         return Err(CallbackError::Invalid("Invalid callback clock"));
     }
-    if request.method == "item/tool/call" {
+    use studio_runtime_providers::codex_disposition::{
+        self, CallbackHandler as H, Disposition, HandlerKey,
+    };
+    let handler = studio_runtime_providers::codex::ServerRequestMethod::from_wire(&request.method)
+        .and_then(|method| match codex_disposition::server_request(method) {
+            Disposition::Handled(HandlerKey::Callback(key)) => Some(key),
+            Disposition::Ignored { .. } => None,
+            Disposition::Handled(
+                HandlerKey::Sender(_) | HandlerKey::Notification(_) | HandlerKey::Initialized,
+            ) => unreachable!("callback policy owns callback keys"),
+        });
+    if handler == Some(H::ItemToolCall) {
         return tools::dispatch_with_ports(store, context, &request, now, ports).await;
     }
     let context = context.clone();
@@ -261,10 +272,9 @@ pub(crate) async fn dispatch_with_managed_tools(
         if let Some(decision) = storage::saved_decision(tx, &identity, &request)? {
             return Ok(decision);
         }
-        let result = match request.method.as_str() {
-            "currentTime/read" => Some(ResponseBody::Result(json!({"currentTimeAt":now.trunc() as u64}))),
-            "account/chatgptAuthTokens/refresh" => Some(ResponseBody::Error(json!({"code":-32601,"message":"Not implemented; use the host account authentication flow"}))),
-            method if cards::interactive(method) => {
+        let result = match handler {
+            Some(H::CurrentTimeRead) => Some(ResponseBody::Result(json!({"currentTimeAt":now.trunc() as u64}))),
+            Some(H::ItemCommandExecutionRequestApproval | H::ItemFileChangeRequestApproval | H::ItemToolRequestUserInput | H::McpServerElicitationRequest | H::ItemPermissionsRequestApproval) => {
                 let snapshot = storage::snapshot(tx, &context)?;
                 if let Some(body) = cards::immediate(&snapshot, &request)? {
                     Some(body)
@@ -272,7 +282,9 @@ pub(crate) async fn dispatch_with_managed_tools(
                     return cards::admit(tx, &context, &snapshot, &request, now);
                 }
             }
-            _ => None,
+            Some(H::ItemToolCall) => unreachable!("tool dispatch precedes the callback transaction"),
+            None if request.method == "account/chatgptAuthTokens/refresh" => Some(ResponseBody::Error(json!({"code":-32601,"message":"Not implemented; use the host account authentication flow"}))),
+            None => None,
         };
         let Some(body) = result else {
             return Ok(CallbackDecision::Unsupported);

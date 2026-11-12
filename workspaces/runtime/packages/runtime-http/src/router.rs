@@ -161,7 +161,6 @@ pub struct HttpState {
         Option<Arc<studio_runtime_services::account_policy::AccountPolicyState>>,
     pub(crate) tool_catalog: Option<Arc<studio_runtime_services::thread_prepare::CatalogSnapshot>>,
     pub(crate) model_catalog: studio_runtime_services::model_catalog::ModelCatalogService,
-    pub(crate) capabilities_cache: Arc<studio_runtime_services::catalog_reads::CapabilitiesCache>,
     pub(crate) resource_notifications:
         Arc<studio_runtime_services::resource_notify::ResourceNotifications>,
     pub(crate) sync_sessions: Arc<routes::SyncSessions>,
@@ -292,7 +291,6 @@ impl HttpState {
             account_policy,
             tool_catalog: None,
             model_catalog,
-            capabilities_cache: Arc::new(Default::default()),
             resource_notifications,
             sync_sessions: Arc::new(Default::default()),
             sync_changes: Arc::clone(&sync_changes),

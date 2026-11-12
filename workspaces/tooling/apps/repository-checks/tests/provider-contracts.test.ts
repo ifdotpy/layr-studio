@@ -41,6 +41,22 @@ test("committed Rust and TypeScript consume the same vendor schema", () => {
   assert.doesNotThrow(() => checkCodexContracts(root));
 });
 
+test("an optional SDK field change fails declaration freshness offline", async () => {
+  await assert.rejects(
+    () =>
+      checkClaudeRateContract(root, (file) => {
+        const text = readFileSync(file, "utf8");
+        return file.endsWith("sdk.d.ts")
+          ? text.replace(
+              "abortController?: AbortController;",
+              "abortController?: never;",
+            )
+          : text;
+      }),
+    /Stale Claude rate provenance/,
+  );
+});
+
 test("a vendor refresh fails explicitly when the pinned CLI is absent", () => {
   const directory = mkdtempSync(path.join(tmpdir(), "studio-no-provider-"));
   try {
@@ -169,6 +185,41 @@ test("a synthetic vendor method fails the actual exhaustive disposition at compi
         "use crate::studio_codex_protocol::",
       )
       .replaceAll("//!", "//");
+    const kinds = readFileSync(
+      path.join(
+        root,
+        "workspaces/runtime/packages/runtime-services/src/notification_dispatch/kinds.rs",
+      ),
+      "utf8",
+    );
+    const binding = kinds.slice(
+      kinds.indexOf("fn projection("),
+      kinds.indexOf("\nfn native_binding("),
+    );
+    assert.ok(binding.includes("H::TurnDiffUpdated =>"));
+    const effects = readFileSync(
+      path.join(
+        root,
+        "workspaces/runtime/packages/runtime-services/src/notification_dispatch/effects.rs",
+      ),
+      "utf8",
+    );
+    const dependency = effects.match(
+      /pub enum NotificationDependency \{[\s\S]*?\n\}/,
+    )?.[0];
+    assert.ok(dependency);
+    // Compile the actual branch selector. Only unrelated handler bodies are
+    // stubs; neither an incidental method string nor a forwarding arm can fill it.
+    const consumer = `
+${dependency.replace(/^\s*#\[serde[^\n]*\n/gm, "")}
+type Apply = fn(ApplyInput);
+struct ApplyInput;
+impl ApplyInput {
+    fn write_plan_diff(self, _: &str) {} fn plan(self) {} fn reasoning(self) {}
+    fn command_output(self) {} fn resolved(self) {} fn unload(self) {}
+}
+enum Projection { Apply(Apply), Buffered, AccountLimits, Requires(NotificationDependency) }
+${binding}`;
     // The gate supplies its workspace target. This dependency-free witness must
     // use its own temporary target, so it never waits behind the workspace build.
     const env: NodeJS.ProcessEnv = {
@@ -176,7 +227,7 @@ test("a synthetic vendor method fails the actual exhaustive disposition at compi
       CARGO_HOME: path.join(copy, "cargo-home"),
     };
     delete env.CARGO_TARGET_DIR;
-    const check = () => {
+    const check = (policy = disposition, dispatcher = consumer) => {
       const generated = renderFullCodexDefinitions(definitions, true).find(
         (entry) => entry.path.endsWith("/src/generated/mod.rs"),
       )?.text;
@@ -192,12 +243,15 @@ test("a synthetic vendor method fails the actual exhaustive disposition at compi
             new RegExp(`pub enum ${name} \\{[\\s\\S]*?\\n\\}`),
           )?.[0];
           assert.ok(body);
-          return body.replace(/^\s*#\[serde[^\n]*\n/gm, "");
+          return (
+            "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n" +
+            body.replace(/^\s*#\[serde[^\n]*\n/gm, "")
+          );
         })
         .join("\n");
       writeFileSync(
         path.join(copy, "src/lib.rs"),
-        `pub mod studio_codex_protocol {\n${enums}\n}\n${disposition}`,
+        `pub mod studio_codex_protocol {\n${enums}\n}\n${policy}\n${dispatcher}`,
       );
       const result = spawnSync(
         "cargo",
@@ -215,6 +269,25 @@ test("a synthetic vendor method fails the actual exhaustive disposition at compi
     };
     const baseline = check();
     assert.equal(baseline.status, 0, baseline.stderr);
+    const removed = check(
+      disposition,
+      consumer.replace(
+        /\s*H::TurnDiffUpdated => Projection::Apply\([^\n]+\),/,
+        "",
+      ),
+    );
+    assert.notEqual(removed.status, 0);
+    assert.match(removed.stderr, /non-exhaustive patterns.*TurnDiffUpdated/);
+    const ignored = check(
+      disposition
+        .replace("            TurnDiffUpdated => TurnDiffUpdated,", "")
+        .replace(
+          "    ignored {\n        ThreadStarted",
+          '    ignored {\n        TurnDiffUpdated => "mutation",\n        ThreadStarted',
+        ),
+    );
+    assert.notEqual(ignored.status, 0);
+    assert.match(ignored.stderr, /no variant.*TurnDiffUpdated/);
     for (const family of [
       "ServerNotification",
       "ClientNotification",
@@ -236,6 +309,19 @@ test("a synthetic vendor method fails the actual exhaustive disposition at compi
       const mutation = check();
       assert.notEqual(mutation.status, 0);
       assert.match(mutation.stderr, /SyntheticCompileFailure.*not covered/);
+      const method = `${family}Method`;
+      const decided = check(
+        family === "ServerNotification"
+          ? disposition.replace(
+              "    ignored {\n        ThreadStarted",
+              '    ignored {\n        SyntheticCompileFailure => "Offline witness only.",\n        ThreadStarted',
+            )
+          : disposition.replace(
+              `match method {\n        ${method}::`,
+              `match method {\n        ${method}::SyntheticCompileFailure => Disposition::Ignored { reason: "Offline witness only." },\n        ${method}::`,
+            ),
+      );
+      assert.equal(decided.status, 0, decided.stderr);
       notification.oneOf.pop();
     }
   } finally {
@@ -300,8 +386,8 @@ test("the drift recipe exits one on a breaking payload-field change", () => {
       readFileSync(path.join(root, codexContractSource.schemaFile), "utf8"),
     );
     writeFileSync(schemaFile, JSON.stringify(schema));
-    const run = () => {
-      const result = spawnSync("just", ["provider-drift"], {
+    const run = (args = ["provider-drift"]) => {
+      const result = spawnSync("just", args, {
         cwd: root,
         env: {
           ...process.env,
@@ -318,6 +404,38 @@ test("the drift recipe exits one on a breaking payload-field change", () => {
     };
     const baseline = run();
     assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+    const owner = readFileSync(
+      path.join(
+        root,
+        "workspaces/tooling/apps/repository-checks/provider-contract-sources.ts",
+      ),
+      "utf8",
+    );
+    const review = run(["provider-update", "codex", "0.0.0-test"]);
+    assert.equal(review.status, 0, review.stdout + review.stderr);
+    assert.match(review.stdout, /--reviewed-sha [a-f0-9]{64}/);
+    const wrongVersion = run(["provider-update", "codex", "0.0.1-test"]);
+    assert.equal(wrongVersion.status, 1);
+    assert.match(wrongVersion.stderr, /Expected codex-cli 0.0.1-test/);
+    const wrongSha = run([
+      "provider-update",
+      "codex",
+      "0.0.0-test",
+      "--reviewed-sha",
+      "0".repeat(64),
+    ]);
+    assert.equal(wrongSha.status, 1);
+    assert.match(wrongSha.stderr, /Reviewed SHA differs/);
+    assert.equal(
+      readFileSync(
+        path.join(
+          root,
+          "workspaces/tooling/apps/repository-checks/provider-contract-sources.ts",
+        ),
+        "utf8",
+      ),
+      owner,
+    );
     schema.definitions.v2.AgentMessageDeltaNotification.properties.delta = {
       type: "integer",
       format: "int64",
@@ -380,7 +498,7 @@ test("new provider controls, policies and identities require exhaustive decision
       enumBody(identity, "ProviderKind"),
       "#[derive(Clone, Copy)]",
       enumBody(identity, "ProviderCapability"),
-      controls,
+      controls.replaceAll(", Serialize, JsonSchema", ""),
       enumBody(adapter, "ProviderFeature"),
       policies,
     ].join("\n");
@@ -422,4 +540,18 @@ test("new provider controls, policies and identities require exhaustive decision
   } finally {
     rmSync(copy, { recursive: true, force: true });
   }
+});
+
+test("both fast-filter copies include the actual binding witness", () => {
+  const config = readFileSync(path.join(root, ".config/nextest.toml"), "utf8");
+  const filters = [
+    ...config.matchAll(/default-filter\s*=\s*'''([\s\S]*?)'''/g),
+  ];
+  assert.equal(filters.length, 2);
+  for (const filter of filters)
+    assert.ok(
+      filter[1]?.includes(
+        "test(=notification_dispatch::review_tests::handled_dispositions_reference_production_handlers)",
+      ),
+    );
 });

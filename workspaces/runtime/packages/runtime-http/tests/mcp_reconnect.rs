@@ -17,6 +17,7 @@ use tower::ServiceExt;
 struct Session {
     calls: Mutex<Vec<Value>>,
     unknown: bool,
+    app_timeout: std::sync::atomic::AtomicBool,
     reconnect_gate: Mutex<Option<(Arc<tokio::sync::Notify>, tokio::sync::oneshot::Receiver<()>)>>,
 }
 fn scope() -> ConnectionScope {
@@ -53,7 +54,19 @@ impl AccountSessionPort for Session {
                 }
                 "skills/list" => {
                     assert_production_codec(&request);
-                    json!({"data":[]})
+                    json!({"data":[{"cwd":"/fixture","skills":[],"errors":[]}]})
+                }
+                "app/list" => {
+                    assert_production_codec(&request);
+                    if self.app_timeout.load(std::sync::atomic::Ordering::Relaxed) {
+                        tokio::time::sleep_until(request.deadline.into()).await;
+                        return Err(AccountSessionError::Unknown);
+                    }
+                    json!({"data":[{"id":"native-app","name":"Native app","isEnabled":true}],"nextCursor":"apps-next"})
+                }
+                "plugin/list" => {
+                    assert_production_codec(&request);
+                    json!({"marketplaces":[{"name":"Native market","plugins":[{"id":"native-plugin","name":"Native plugin","enabled":true,"installed":true,"authPolicy":"ON_USE","installPolicy":"AVAILABLE","source":{"type":"local","path":"/native-plugin"}}]}]})
                 }
                 "mcpServerStatus/list" => {
                     assert_production_codec(&request);
@@ -142,6 +155,7 @@ async fn fixture(
     let session = Arc::new(Session {
         calls: Mutex::new(vec![]),
         unknown,
+        app_timeout: std::sync::atomic::AtomicBool::new(false),
         reconnect_gate: Mutex::new(None),
     });
     let mut state = HttpState::new(
@@ -411,11 +425,55 @@ async fn internal_sender_witness_catalog_discovery() {
 }
 async fn catalog_discovery(provider: &str) {
     let (_root, _store, app, session) = fixture(provider, false).await;
+    assert_eq!(
+        request(&app, "/api/capabilities?agent=agent&fresh=true", None, true)
+            .await
+            .0,
+        400
+    );
     let skills = request(&app, "/api/skills?agent=agent", None, true).await;
     assert_eq!(skills.0, 200, "{skills:?}");
     let first = request(&app, "/api/capabilities?agent=agent", None, true).await;
     assert_eq!(first.0, 200, "{first:?}");
     assert_eq!(first.1["serversCursor"], "next");
+    if provider == "codex" {
+        assert_eq!(
+            first.1["apps"],
+            json!([{"id":"native-app","name":"Native app","enabled":true}])
+        );
+        assert_eq!(first.1["appsCursor"], "apps-next");
+        assert_eq!(
+            first.1["plugins"],
+            json!([{"id":"native-plugin","name":"Native plugin","enabled":true}])
+        );
+    }
+    let repeated = request(&app, "/api/capabilities?agent=agent", None, true).await;
+    assert_eq!(repeated.0, 200);
+    for method in [
+        "skills/list",
+        "mcpServerStatus/list",
+        "app/list",
+        "plugin/list",
+    ] {
+        let expected = if method == "skills/list" {
+            3
+        } else if provider == "claude" && matches!(method, "app/list" | "plugin/list") {
+            0
+        } else {
+            2
+        };
+        assert_eq!(
+            session
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|call| call["method"] == method)
+                .count(),
+            expected,
+            "{provider} {method}"
+        );
+    }
     assert_eq!(first.1["mcpSession"], body()["session"]);
     let next = request(
         &app,
@@ -427,16 +485,6 @@ async fn catalog_discovery(provider: &str) {
     assert_eq!(next.0, 200, "{next:?}");
     assert_eq!(next.1["mcp"][0]["name"], "second");
     assert!(next.1["serversCursor"].is_null());
-    assert_eq!(
-        session
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|call| call["method"] == "mcpServerStatus/list")
-            .count(),
-        2
-    );
 }
 
 #[tokio::test]
@@ -548,4 +596,21 @@ fn assert_production_codec(
     request: &studio_runtime_services::account_session_runtime::ProviderRequest,
 ) {
     studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
+}
+
+#[tokio::test(start_paused = true)]
+async fn internal_sender_witness_catalog_optional_timeout_preserves_other_results() {
+    let (_root, _store, app, session) = fixture("codex", false).await;
+    session
+        .app_timeout
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let response = request(&app, "/api/capabilities?agent=agent", None, true).await;
+    assert_eq!(response.0, 200, "{response:?}");
+    assert_eq!(response.1["skills"][0]["cwd"], "/fixture");
+    assert_eq!(response.1["mcp"][0]["name"], "server");
+    assert_eq!(response.1["plugins"][0]["id"], "native-plugin");
+    assert_eq!(
+        response.1["errors"],
+        json!(["apps: Provider request failed"])
+    );
 }

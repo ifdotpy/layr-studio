@@ -1,13 +1,16 @@
+import type { ServerServices } from "../../servers/serverServices.ts";
 import { whileObserved } from "../../observed.ts";
 import * as mobx from "mobx";
 import { errorText, type ApiReadMetadata } from "../../api.ts";
 
-// Changes, checkpoints, profiles, rules and capabilities lack an SSE resource
-// owner. Keep explicit reads and command rereads until that server contract exists.
+type ReadWatcher = ReturnType<ServerServices["watchResourceReads"]>;
+type WatchRead = (read: () => Promise<void>) => ReadWatcher;
+
 export class WorkspaceResource<T> {
   data: T | null = null;
   error = "";
   loading = true;
+  private stopWatch: ReadWatcher | undefined;
   private active = false;
   private busy = false;
   private again = false;
@@ -19,34 +22,54 @@ export class WorkspaceResource<T> {
     metadata: ApiReadMetadata,
   ) => Promise<T | undefined>;
   readonly receive: (data: T) => void;
+  readonly watch: WatchRead | undefined;
   constructor(
     read: WorkspaceResource<T>["read"],
     receive: (data: T) => void = () => {},
+    watch?: WatchRead,
   ) {
     this.receive = receive;
+    this.watch = watch;
     this.read = read;
-    mobx.makeAutoObservable(
+    mobx.makeAutoObservable<this, "stopWatch">(
       this,
-      { data: mobx.observableRef, read: false, receive: false },
+      {
+        data: mobx.observableRef,
+        read: false,
+        receive: false,
+        watch: false,
+        stopWatch: false,
+      },
       { autoBind: true },
     );
     whileObserved(this, "data", () => {
       this.start();
-      void this.load();
+      if (!this.watch) void this.load();
       return this.dispose;
     });
   }
   dispose() {
     this.active = false;
+    this.stopWatch?.();
+    this.stopWatch = undefined;
     this.controller?.abort();
   }
   start() {
     this.active = true;
+    this.stopWatch ??= this.watch?.(async () => {
+      await mobx.flowResult(this.load(true));
+    });
     return this.dispose;
   }
-  *load(): Generator<Promise<T | undefined>, void, T | undefined> {
+  *load(
+    fromWatch = false,
+  ): Generator<Promise<T | undefined>, void, T | undefined> {
     if (!this.active) return;
-    if (this.busy) {
+    if (!fromWatch && this.stopWatch) {
+      this.stopWatch.refresh();
+      return;
+    }
+    if (!fromWatch && this.busy) {
       this.again = true;
       return;
     }
@@ -65,13 +88,15 @@ export class WorkspaceResource<T> {
       }
       this.error = "";
     } catch (error) {
-      if (this.active && !controller.signal.aborted)
+      if (this.active && !controller.signal.aborted) {
         this.error = errorText(error);
+        if (fromWatch) throw error;
+      }
     } finally {
       this.busy = false;
       if (this.active) {
         this.loading = false;
-        if (this.again || controller.signal.aborted) {
+        if (!fromWatch && (this.again || controller.signal.aborted)) {
           this.again = false;
           void this.load();
         }

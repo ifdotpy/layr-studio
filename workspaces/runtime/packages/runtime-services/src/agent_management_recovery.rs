@@ -121,7 +121,11 @@ fn stable(record: &Value) -> Value {
     record
 }
 
-fn authorize(tx: &Transaction<'_>, actor: &Value, target: &str) -> Result<(Value, Value), Error> {
+fn authorize(
+    tx: &Transaction<'_>,
+    actor: &Value,
+    target: &str,
+) -> Result<(Value, AgentRecord), Error> {
     let lead_id = actor["id"].as_str().ok_or(Error::Stale)?;
     let lead = AgentRepository::get(tx, &AgentId::from(lead_id))?
         .ok_or(Error::Stale)?
@@ -134,9 +138,9 @@ fn authorize(tx: &Transaction<'_>, actor: &Value, target: &str) -> Result<(Value
     {
         return Err(Error::Stale);
     }
-    let worker = AgentRepository::get(tx, &AgentId::from(target))?
-        .ok_or(Error::Invalid("Unknown managed agent"))?
-        .value();
+    let worker_record = AgentRepository::get(tx, &AgentId::from(target))?
+        .ok_or(Error::Invalid("Unknown managed agent"))?;
+    let worker = worker_record.value();
     if worker["isLead"] == true
         || target == lead_id
         || worker["rootId"] != lead["rootId"]
@@ -147,7 +151,7 @@ fn authorize(tx: &Transaction<'_>, actor: &Value, target: &str) -> Result<(Value
     {
         return Err(Error::Invalid("Manage only a local live descendant worker"));
     }
-    Ok((lead, worker))
+    Ok((lead, worker_record))
 }
 
 impl AuthorizedRecoveryRequest {
@@ -174,7 +178,7 @@ impl AuthorizedRecoveryRequest {
                 let current_lead =
                     AgentRecord::from_value(stable(&lead)).map_err(|_| Error::Stale)?;
                 let current_worker =
-                    AgentRecord::from_value(stable(&worker)).map_err(|_| Error::Stale)?;
+                    AgentRecord::from_value(stable(&worker.value())).map_err(|_| Error::Stale)?;
                 Ok(current_lead == saved_lead && current_worker == saved_worker)
             }
             Err(Error::Stale | Error::Invalid(_)) => Ok(false),
@@ -419,7 +423,9 @@ pub(crate) async fn execute(
     let initial = store.transaction_with(move |tx| {
         let resolved = crate::provider_callbacks::tools::services::manage::resolved_args(tx, &actor, &args).map_err(|_| Error::Invalid("Unknown managed agent"))?;
         let target = resolved["agent_id"].as_str().ok_or(Error::Invalid("Supply agent_id"))?;
-        let (lead, mut worker) = authorize(tx, &actor, target)?;
+        let (lead, worker_record) = authorize(tx, &actor, target)?;
+        let provider = worker_record.provider.value().copied().ok_or(Error::Unavailable("native-release/local-codex-session"))?;
+        let mut worker = worker_record.value();
         let epoch=lead["epoch"].to_string();
         let authority = [lead["id"].as_str().ok_or(Error::Stale)?, &epoch];
         if let Ok(identity) = RequestIdentity::new("manual-management", &authority, &root_request_id, &[])
@@ -435,7 +441,7 @@ pub(crate) async fn execute(
             save(tx,&auth,&crate::recovery::RecoveryReceipt::Unknown(pending.clone()))?;
             return Ok((Some((auth, Value::Null)), crate::recovery::RecoveryReceipt::Unknown(pending)));
         }
-        if worker["provider"].as_str().unwrap_or("codex") != "codex" || worker["executionMode"].as_str().is_some_and(|mode| mode != "native") {
+        if provider != studio_runtime_schema::ProviderKind::Codex || worker["executionMode"].as_str().is_some_and(|mode| mode != "native") {
             return Err(Error::Unavailable("native-release/local-codex-session"));
         }
         let previous = &worker["nativeRelease"];
@@ -1377,6 +1383,7 @@ mod tests {
         let (auth, snapshot) = store
             .transaction_with(move |tx| {
                 let (lead, target) = authorize(tx, &actor.record().value(), "worker-00000000")?;
+                let target = target.value();
                 let raw = AgentRepository::get_raw(tx, &AgentId::from("worker-00000000"))?
                     .expect("raw worker");
                 let root = RequestIdentity::issue_root();

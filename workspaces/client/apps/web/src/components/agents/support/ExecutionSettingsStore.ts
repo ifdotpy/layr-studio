@@ -13,7 +13,7 @@ import {
 import { appendAppLog } from "../../../appLog.ts";
 import { AgentPermissionMode } from "../../../generated/api.ts";
 import { agentId } from "../../../generated/observableResources.ts";
-import { ProviderKind } from "../../../generated/providerKind.ts";
+import { ProviderKind, providerSupports } from "../../../generated/providerKind.ts";
 import { resourceData } from "../../../store/runtime.ts";
 import type { Agent } from "../../../types.ts";
 import {
@@ -99,7 +99,9 @@ export class ExecutionSettingsStore {
     ui.set(key, "saving", true);
     ui.set(key, "error", "");
     if (!permissions) ui.set(key, "status", { kind: "saving", text: "" });
-    if (request.next_turn) {
+    const receipted =
+      request.next_turn || request.settings_scope?.scope === "current_turn";
+    if (receipted) {
       c.sources.api.save(receiptKey, request);
       ui.set(key, "unconfirmed", request);
     }
@@ -154,7 +156,7 @@ export class ExecutionSettingsStore {
           request.next_turn === true,
           canonical,
         );
-      if (request.next_turn) clearReceipt();
+      if (receipted) clearReceipt();
       if (permissions) {
         clearSettingsRequest(
           c.sources.api,
@@ -179,9 +181,9 @@ export class ExecutionSettingsStore {
       const rejected =
         failure instanceof ApiError &&
         [400, 401, 403, 404, 409].includes(failure.status);
-      if (request.next_turn && !confirmed && rejected) clearReceipt();
+      if (receipted && !confirmed && rejected) clearReceipt();
       if (live && !confirmed) {
-        const uncertain = !!request.next_turn && !rejected;
+        const uncertain = !!receipted && !rejected;
         appendAppLog({
           at: Date.now(),
           level: "error",
@@ -204,6 +206,30 @@ export class ExecutionSettingsStore {
     } finally {
       ui.set(key, "saving", false);
     }
+  }
+  applyCurrentTurn(c: ExecutionContext) {
+    if (
+      c.disabled ||
+      !c.active ||
+      !c.queued ||
+      !providerSupports(c.agent.provider, "current_turn_settings") ||
+      !c.detail?.turnId
+    )
+      return;
+    return flowResult(
+      this.submit(
+        c,
+        {
+          id: c.agent.id,
+          request_id: randomUUID(),
+          settings_scope: { scope: "current_turn", turn_id: c.detail.turnId },
+          model: c.current.model,
+          effort: c.current.effort,
+          fast_mode: c.current.fast_mode,
+        },
+        "Applied to the current turn",
+      ),
+    );
   }
   change(c: ExecutionContext, patch: Partial<SettingsValue>) {
     if (

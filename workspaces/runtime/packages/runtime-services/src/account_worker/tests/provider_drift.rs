@@ -144,3 +144,74 @@ async fn rejected_callback_keeps_worker_running(request: Value) {
     );
     worker.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn live_settings_native_echo_running_idle_and_next_turn() {
+    let state = State::new().await;
+    let id = state.agent.clone();
+    state
+        .bridge
+        .store
+        .transaction(move |tx| {
+            let mut agent = AgentRepository::get(tx, &AgentId::from(id))?.unwrap();
+            agent.native_effort = studio_runtime_schema::queue_command::Field::Value("low".into());
+            AgentRepository::put(tx, &agent)
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    peer.codec = studio_runtime_process::provider_seam::ProviderCodec::codex();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.wait_for_write_receipt(&start).await;
+    peer.accepted(&start).await;
+    for idle in [false, true] {
+        if idle {
+            peer.completed().await;
+            worker_barrier(&worker).await;
+        }
+        let before = state
+            .bridge
+            .store
+            .transaction_with(|tx| store::load_streams(tx, "default"))
+            .await
+            .unwrap();
+        let event = json!({"method":"thread/settings/updated","params":{"threadId":"fake-thread-0","threadSettings":{"model":"native-echo","effort":"high","serviceTier":"priority","approvalPolicy":"on-request","approvalsReviewer":"user","collaborationMode":{"mode":"default","settings":{"model":"native-echo"}},"cwd":"/work","modelProvider":"openai","sandboxPolicy":{"type":"dangerFullAccess"}}}});
+        peer.cursor += 1;
+        let cursor = peer.cursor;
+        let frame =
+            studio_runtime_providers::decode_codex_frame(event.to_string().as_bytes()).unwrap();
+        peer.entries
+            .send(JournalEntry {
+                boundary_at: None,
+                received_at_ms: peer.clock.now_ms(),
+                cursor: EventCursor(cursor),
+                generation: peer.generation,
+                payload: JournalPayload::Frame(frame),
+            })
+            .await
+            .unwrap();
+        peer.acknowledged(cursor).await;
+        worker_barrier(&worker).await;
+        let after = state
+            .bridge
+            .store
+            .transaction_with(|tx| store::load_streams(tx, "default"))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde::Serialize::serialize(&before, studio_json::value::Serializer).unwrap()["publication_sequence"],
+            serde::Serialize::serialize(&after, studio_json::value::Serializer).unwrap()["publication_sequence"],
+            "ignored echoes do not publish settings"
+        );
+        assert_eq!(state.record().await["model"], "fake-model");
+        assert_eq!(state.record().await["nativeEffort"], "low");
+    }
+    state.enqueue("after-settings").await;
+    let next = state.start(&mut peer, &worker).await;
+    assert_eq!(next["params"]["effort"], "low");
+    peer.wait_for_write_receipt(&next).await;
+    peer.accepted(&next).await;
+    peer.completed().await;
+    worker.shutdown().await.unwrap();
+}

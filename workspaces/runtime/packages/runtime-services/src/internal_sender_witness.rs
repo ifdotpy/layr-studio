@@ -22,6 +22,18 @@ pub fn request(method: Method, params: &Value) {
         codex || claude,
         "internal-only request must use its non-vendor owner: {method:?}"
     );
+    if let Some(native) =
+        studio_runtime_providers::codex::ClientRequestMethod::from_wire(method.as_str())
+    {
+        use studio_runtime_providers::codex_disposition::{
+            Disposition, HandlerKey, client_request,
+        };
+        assert_eq!(
+            client_request(native),
+            Disposition::Handled(HandlerKey::Sender(native)),
+            "an actual registered Codex sender needs a Handled disposition: {method:?}"
+        );
+    }
     for (provider, reachable) in [(ProviderKind::Codex, codex), (ProviderKind::Claude, claude)] {
         if !reachable {
             continue;

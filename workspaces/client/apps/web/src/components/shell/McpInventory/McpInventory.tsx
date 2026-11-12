@@ -55,7 +55,7 @@ export class McpInventoryStore {
   readonly outbox = sessionOutboxRequests();
   readonly agent: string;
   readonly owner: string;
-  readonly loadPage: (cursor?: string) => Promise<Inventory>;
+  readonly loadPage: (cursor?: string) => Promise<Inventory | void>;
   readonly reconnect: (body: Reconnect) => Promise<Result>;
   constructor(
     owner: string,
@@ -127,7 +127,9 @@ export class McpInventoryStore {
       }
     }
   }
-  *load(cursor?: string): Generator<Promise<Inventory>, void, Inventory> {
+  *load(
+    cursor?: string,
+  ): Generator<Promise<Inventory | void>, void, Inventory | void> {
     if (this.pageBusy) return;
     const current = ++this.revision;
     this.pageBusy = true;
@@ -138,7 +140,7 @@ export class McpInventoryStore {
           "The server list cursor did not advance. Refresh the tools list.",
         );
       const page = yield this.loadPage(cursor);
-      if (!this.active || current !== this.revision) return;
+      if (!page || !this.active || current !== this.revision) return;
       if (cursor) {
         if (
           JSON.stringify(page.mcpSession) !==

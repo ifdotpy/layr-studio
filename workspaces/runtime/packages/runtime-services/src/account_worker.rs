@@ -3149,6 +3149,19 @@ impl Worker {
         entry: JournalEntry,
         effect: Option<Effect>,
     ) -> Result<(), WorkerError> {
+        if let JournalPayload::Frame(frame) = &entry.payload
+            && crate::provider_adapter::catalog_changed(frame)
+        {
+            let request_id = format!(
+                "native-catalog:{}",
+                studio_runtime_store::sha256_hex(
+                    format!("{}:{}:{}", self.account, entry.generation.0, entry.cursor.0)
+                        .as_bytes()
+                )
+            );
+            self.publication_sink
+                .native_catalog_changed(&self.account, &request_id)?;
+        }
         if let JournalPayload::Frame(Frame::Notification(notification)) = &entry.payload {
             self.idle_provider_notification(
                 notification.method.as_str(),

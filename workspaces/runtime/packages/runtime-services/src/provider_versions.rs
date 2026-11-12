@@ -39,22 +39,36 @@ pub const PROVIDER_UPDATE_PREFERENCE_KEY: &str =
 const PROBE_DEADLINE: Duration = Duration::from_secs(5);
 const MAX_RELEASE_BYTES: usize = 1024 * 1024;
 const REGISTRY_ACCEPT: &str = "application/vnd.npm.install-v1+json";
-const RELEASES: [(&str, &str, &str); 2] = [
-    (
-        ProviderKind::Claude.key(),
-        "@anthropic-ai/claude-code",
-        "https://registry.npmjs.org/@anthropic-ai%2fclaude-code",
-    ),
-    (
-        ProviderKind::Codex.key(),
-        "@openai/codex",
-        "https://registry.npmjs.org/@openai%2fcodex",
-    ),
-];
-const BASELINES: [(&str, &str, &str); 2] = [
-    (ProviderKind::Codex.key(), "0.153.4", "Codex CLI"),
-    (ProviderKind::Claude.key(), "2.1.278", "Claude Code"),
-];
+/// Tested CLI baseline and unauthenticated release registry, owned together per provider.
+struct Release {
+    baseline: &'static str,
+    label: &'static str,
+    package: &'static str,
+    url: &'static str,
+}
+
+fn release(provider: ProviderKind) -> Release {
+    let (baseline, label, package, url) = match provider {
+        ProviderKind::Codex => (
+            "0.153.4",
+            "Codex CLI",
+            "@openai/codex",
+            "https://registry.npmjs.org/@openai%2fcodex",
+        ),
+        ProviderKind::Claude => (
+            "2.1.278",
+            "Claude Code",
+            "@anthropic-ai/claude-code",
+            "https://registry.npmjs.org/@anthropic-ai%2fclaude-code",
+        ),
+    };
+    Release {
+        baseline,
+        label,
+        package,
+        url,
+    }
+}
 
 /// Reads the named preference from merged sync fields; missing values default to enabled.
 pub fn provider_updates_enabled_from_fields(fields: &Map<String, Value>) -> bool {
@@ -65,58 +79,25 @@ pub fn provider_updates_enabled_from_fields(fields: &Map<String, Value>) -> bool
         .unwrap_or(true)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 struct VersionKey {
-    major: String,
-    minor: String,
-    patch: String,
+    major: (usize, String),
+    minor: (usize, String),
+    patch: (usize, String),
     release: bool,
     prerelease: Vec<VersionPart>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum VersionPart {
-    Number(String),
+    Number((usize, String)),
     Text(String),
 }
 
-impl Ord for VersionPart {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Self::Number(left), Self::Number(right)) => number_cmp(left, right),
-            (Self::Number(_), Self::Text(_)) => Ordering::Less,
-            (Self::Text(_), Self::Number(_)) => Ordering::Greater,
-            (Self::Text(left), Self::Text(right)) => left.cmp(right),
-        }
-    }
-}
-
-impl PartialOrd for VersionPart {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for VersionKey {
-    fn cmp(&self, other: &Self) -> Ordering {
-        number_cmp(&self.major, &other.major)
-            .then_with(|| number_cmp(&self.minor, &other.minor))
-            .then_with(|| number_cmp(&self.patch, &other.patch))
-            .then_with(|| self.release.cmp(&other.release))
-            .then_with(|| self.prerelease.cmp(&other.prerelease))
-    }
-}
-
-impl PartialOrd for VersionKey {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-fn number_cmp(left: &str, right: &str) -> Ordering {
-    let left = left.trim_start_matches('0');
-    let right = right.trim_start_matches('0');
-    left.len().cmp(&right.len()).then_with(|| left.cmp(right))
+// Decimal length and digits preserve unbounded numeric ordering, including leading zeroes.
+fn number_key(value: &str) -> (usize, String) {
+    let digits = value.trim_start_matches('0');
+    (digits.len(), digits.to_owned())
 }
 
 fn parse_key(value: &str) -> Option<VersionKey> {
@@ -130,16 +111,16 @@ fn parse_key(value: &str) -> Option<VersionKey> {
     })?;
     let prerelease = captures.get(4).map(|part| part.as_str());
     Some(VersionKey {
-        major: captures.get(1)?.as_str().into(),
-        minor: captures.get(2)?.as_str().into(),
-        patch: captures.get(3)?.as_str().into(),
+        major: number_key(captures.get(1)?.as_str()),
+        minor: number_key(captures.get(2)?.as_str()),
+        patch: number_key(captures.get(3)?.as_str()),
         release: prerelease.is_none(),
         prerelease: prerelease
             .unwrap_or("")
             .split('.')
             .map(|part| {
                 if !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()) {
-                    VersionPart::Number(part.into())
+                    VersionPart::Number(number_key(part))
                 } else {
                     VersionPart::Text(part.into())
                 }
@@ -398,38 +379,28 @@ impl VersionProbe for SystemVersionProbe {
                     .launched_binary
                     .as_deref()
                     .ok_or(ProviderPortError)?;
-                let (installed_version, launched_error) =
-                    match read_cli_version(launched_binary, deadline) {
-                        Ok(version) => (Some(version), None),
-                        Err(_) => (
-                            None,
-                            Some("Could not read the Claude Code executable version.".to_owned()),
-                        ),
-                    };
-                let (configured_version, configured_error) = match profile.configured_binary.as_deref()
-            {
-                Some(binary) => match read_cli_version(binary, deadline) {
-                    Ok(version) => (Some(version), None),
-                    Err(_) => (
-                        None,
-                        Some(
-                            "Could not read the current Claude Code profile executable version."
-                                .to_owned(),
-                        ),
-                    ),
-                },
-                None => (
-                    None,
-                    Some("Claude Code executable was not found for this profile.".to_owned()),
-                ),
-            };
+                let installed = read_cli_version(launched_binary, deadline);
+                let configured = profile
+                    .configured_binary
+                    .as_deref()
+                    .map(|binary| read_cli_version(binary, deadline));
+                let error = match (&installed, &configured) {
+                    (Err(_), _) => Some("Could not read the Claude Code executable version."),
+                    (_, Some(Err(_))) => {
+                        Some("Could not read the current Claude Code profile executable version.")
+                    }
+                    (_, None) => Some("Claude Code executable was not found for this profile."),
+                    (Ok(_), Some(Ok(_))) => None,
+                }
+                .map(str::to_owned);
+                let configured_version = configured.and_then(Result::ok);
                 let available_version = configured_version.clone();
                 Ok(VersionFacts {
                     running_version: None,
-                    installed_version,
+                    installed_version: installed.ok(),
                     configured_version,
                     available_version,
-                    error: launched_error.or(configured_error),
+                    error,
                     running_note: Some(
                         "The exact version already running in Claude sessions is unknown.".into(),
                     ),
@@ -641,7 +612,9 @@ fn check_upstream(
     now: f64,
 ) -> UpstreamCheck {
     let mut failed = false;
-    for (_, package, url) in RELEASES {
+    // Preserve the registry request order used by the retained release cache.
+    for provider in ProviderKind::ALL.into_iter().rev() {
+        let Release { package, url, .. } = release(provider);
         let entry = cache.entry(package.into()).or_default();
         if !attempt_due(entry, now) {
             continue;
@@ -701,11 +674,11 @@ fn cached_versions(
     cache
         .iter()
         .filter_map(|(package, entry)| {
-            let provider = RELEASES
-                .iter()
-                .find(|(_, candidate, _)| *candidate == package)?
-                .0;
-            cached_version(entry, now).map(|version| (provider.to_owned(), version.to_owned()))
+            let provider = ProviderKind::ALL
+                .into_iter()
+                .find(|provider| release(*provider).package == package)?;
+            cached_version(entry, now)
+                .map(|version| (provider.key().to_owned(), version.to_owned()))
         })
         .collect()
 }
@@ -960,33 +933,20 @@ impl ProviderVersionMonitor {
             return CheckOutcome { retry: false };
         }
         let warnings = warnings_projection(&providers, upstream_enabled);
-        if profiles.is_empty() && warnings.is_empty() {
-            if let Ok(mut state) = self.state.lock() {
-                state.providers.clear();
-                state.profile_snapshot.clear();
-                state.checked_at = Some(now);
-                if preference_known {
-                    state.upstream_enabled = upstream_enabled;
-                }
-                self.checked.notify_waiters();
-                crate::resource_notify::publish_bounded_source(
-                    crate::resource_notify::BoundedSource::Desktop,
-                );
-            }
-            return outcome;
-        }
         let observed_accounts = profiles
             .iter()
             .map(|profile| profile.account_key.clone())
             .collect::<Vec<_>>();
-        if self
-            .persist_warnings(&observed_accounts, &warnings)
-            .await
-            .is_ok()
+        if (profiles.is_empty()
+            || self
+                .store
+                .persist_warnings(&observed_accounts, &warnings)
+                .await
+                .is_ok())
             && let Ok(mut state) = self.state.lock()
         {
             state.providers = providers;
-            state.profile_snapshot = profiles.clone();
+            state.profile_snapshot = profiles;
             state.checked_at = Some(now);
             if preference_known {
                 state.upstream_enabled = upstream_enabled;
@@ -996,7 +956,7 @@ impl ProviderVersionMonitor {
                 crate::resource_notify::BoundedSource::Desktop,
             );
         } else {
-            outcome.retry = true;
+            outcome.retry |= !profiles.is_empty();
         }
         outcome
     }
@@ -1005,16 +965,6 @@ impl ProviderVersionMonitor {
         self.connections
             .as_ref()
             .map_or(expected.is_empty(), |port| port.snapshot() == expected)
-    }
-
-    async fn persist_warnings(
-        &self,
-        observed_accounts: &[String],
-        warnings: &[Value],
-    ) -> Result<(), ProviderVersionsError> {
-        self.store
-            .persist_warnings(observed_accounts, warnings)
-            .await
     }
 }
 
@@ -1116,9 +1066,14 @@ fn next_check_deadline(
 }
 
 fn next_upstream_attempt_at(cache: &std::collections::BTreeMap<String, CacheEntry>) -> Option<f64> {
-    RELEASES
-        .iter()
-        .map(|(_, package, _)| cache.get(*package).cloned().unwrap_or_default())
+    ProviderKind::ALL
+        .into_iter()
+        .map(|provider| {
+            cache
+                .get(release(provider).package)
+                .cloned()
+                .unwrap_or_default()
+        })
         .map(|entry| next_attempt_at(&entry))
         .min_by(f64::total_cmp)
 }
@@ -1175,10 +1130,10 @@ fn unknown_row(profile: &ProviderProfile, now: f64) -> Value {
 }
 
 fn baseline(provider: &str) -> Option<&'static str> {
-    BASELINES
-        .iter()
-        .find(|(name, _, _)| *name == provider)
-        .map(|(_, version, _)| *version)
+    provider
+        .parse()
+        .ok()
+        .map(|provider| release(provider).baseline)
 }
 
 fn diagnostic(
@@ -1211,14 +1166,7 @@ fn diagnostic(
     .into_iter()
     .flatten()
     .find_map(|(version, source)| baseline_warning(&profile.provider, version, source));
-    let known = [running, installed, configured]
-        .into_iter()
-        .flatten()
-        .any(|version| {
-            compare_version_text(version, baseline_version)
-                .is_some_and(|order| order == Ordering::Less)
-        });
-    let status = if known {
+    let status = if warning.is_some() {
         "outdated"
     } else if running.is_some() {
         "current"
@@ -1244,10 +1192,9 @@ fn diagnostic(
 }
 
 fn baseline_warning(provider: &str, version: &str, source: &str) -> Option<String> {
-    let (baseline, label) = BASELINES
-        .iter()
-        .find(|(name, _, _)| *name == provider)
-        .map(|(_, version, label)| (*version, *label))?;
+    let Release {
+        baseline, label, ..
+    } = release(provider.parse().ok()?);
     if !compare_version_text(version, baseline).is_some_and(|order| order == Ordering::Less) {
         return None;
     }
@@ -1285,10 +1232,10 @@ fn update_warnings(provider: &Value, upstream_enabled: bool) -> Vec<Value> {
         .get("installedVersion")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let label = BASELINES
-        .iter()
-        .find(|(provider, _, _)| *provider == name)
-        .map(|(_, _, label)| *label)
+    let label = name
+        .parse()
+        .ok()
+        .map(|provider| release(provider).label)
         .unwrap_or(name);
     notices.iter().filter_map(|notice| {
         let available = notice.get("availableVersion")?.as_str()?;
@@ -1339,22 +1286,15 @@ fn warning_projection(provider: &Value, upstream_enabled: bool) -> Vec<Value> {
 }
 
 fn warnings_projection(providers: &[Value], upstream_enabled: bool) -> Vec<Value> {
-    let mut version_warnings = Vec::new();
-    let mut update_warnings = Vec::new();
-    for warning in providers
+    let (mut version_warnings, update_warnings): (Vec<_>, Vec<_>) = providers
         .iter()
         .flat_map(|provider| warning_projection(provider, upstream_enabled))
-    {
-        if warning
-            .get("id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| id.starts_with("provider-version:"))
-        {
-            version_warnings.push(warning);
-        } else {
-            update_warnings.push(warning);
-        }
-    }
+        .partition(|warning| {
+            warning
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.starts_with("provider-version:"))
+        });
     version_warnings.extend(update_warnings);
     version_warnings
 }
@@ -1389,7 +1329,10 @@ fn read_cache(
         .map(|(key, entry)| (key, entry.0))
         .collect::<std::collections::BTreeMap<_, _>>();
     packages.retain(|package, entry| {
-        if !RELEASES.iter().any(|(_, known, _)| known == package) {
+        if !ProviderKind::ALL
+            .into_iter()
+            .any(|provider| release(provider).package == package)
+        {
             return false;
         }
         if entry

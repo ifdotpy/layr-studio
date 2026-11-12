@@ -85,6 +85,7 @@ export class ServerAreas {
     this.workspace = new WorkspaceResources(
       scope.services.api,
       scope.services.owner.id,
+      scope.services.watchResourceReads,
     );
     this.unsentText = new UnsentText(scope.services.owner.id);
     this.accountsUi = new AccountsUi(this);

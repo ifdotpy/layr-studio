@@ -96,6 +96,7 @@ pub mod lifecycle_effects;
 pub mod limit_reset;
 #[cfg(any(test, feature = "test-support"))]
 pub mod live_restart_fixture;
+pub mod live_settings;
 pub mod liveness;
 pub mod maintenance;
 #[allow(dead_code)] // The managed-tools callback caller is integrated by its owning package.

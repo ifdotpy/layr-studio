@@ -1510,6 +1510,20 @@ async fn conversation(
             Value::String(field.to_owned()),
         ]));
     }
+    if let Some(scope) = body.settings_scope.clone() {
+        match scope {
+            generated::ProviderSettingsScope::ProviderSettingsScopeVariant(target) => {
+                return Box::pin(current_turn_settings(state, body, target.turn_id)).await;
+            }
+            generated::ProviderSettingsScope::ProviderSettingsScopeVariant2(_) => (),
+            generated::ProviderSettingsScope::ProviderSettingsScopeVariant3(_) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    studio_runtime_schema::settings_scope::PERSISTENT_UNSUPPORTED_REASON,
+                ));
+            }
+        }
+    }
     validate_review_model(body.review_defaults.as_ref().and_then(Option::as_ref))?;
     let request = agents_create::Conversation {
         non_defaults: body.next_turn.is_some() || body.request_id.is_some(),
@@ -2439,4 +2453,66 @@ inventory::submit! {
             "worker-driver/settings-catalog",
         ],
     }
+}
+
+async fn current_turn_settings(
+    state: HttpState,
+    body: generated::ConversationRequest,
+    turn_id: String,
+) -> Result<Json<generated::AgentResponse>, ApiError> {
+    if body.next_turn.flatten() == Some(true)
+        || body.cwd.as_deref().is_some_and(|v| !v.is_empty())
+        || body.yolo_mode.is_some()
+        || body.worker_defaults.is_some()
+        || body.review_defaults.is_some()
+        || body.daybreak_enabled.is_some()
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "Only model, effort and fast mode can target the current turn",
+        ));
+    }
+    let request_id = body.request_id.flatten().ok_or_else(|| {
+        ApiError::new(StatusCode::BAD_REQUEST, "A settings request id is required")
+    })?;
+    let store = state.store.clone().ok_or_else(ApiError::internal)?;
+    let port = state.account_session.as_ref().ok_or_else(|| {
+        ApiError::new(StatusCode::CONFLICT, "The provider session is unavailable")
+    })?;
+    use studio_runtime_services::native_actions::NativeError;
+    let (agent, _) = super::claude_controls::load_agent(store, body.id).await?;
+    if body.expected_account_key.as_deref() != Some(agent.account_key.as_str()) {
+        return Err(super::catalog_agent::native_command_error(
+            NativeError::Changed,
+        ));
+    }
+    let params = studio_runtime_providers::codex::TurnSettingsUpdateParams {
+        thread_id: agent
+            .thread_id
+            .clone()
+            .ok_or_else(|| super::catalog_agent::native_command_error(NativeError::Changed))?,
+        turn_id,
+        model: body.model,
+        effort: body.effort,
+        service_tier: body.fast_mode.map(|value| {
+            value.map(|fast| studio_runtime_services::thread_prepare::service_tier(fast).into())
+        }),
+        approvals_reviewer: None,
+        summary: None,
+    };
+    let result = studio_runtime_services::live_settings::update_current_turn(
+        port.as_ref(),
+        *agent,
+        request_id,
+        params,
+    )
+    .await
+    .map_err(|error| {
+        if matches!(error, NativeError::Unknown) {
+            ApiError::new(StatusCode::BAD_GATEWAY, error.to_string())
+        } else {
+            super::catalog_agent::native_command_error(error)
+        }
+    })?;
+    super::generated_json(result.value()).map(Json)
 }

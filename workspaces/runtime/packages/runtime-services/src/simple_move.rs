@@ -406,16 +406,18 @@ pub async fn move_across_providers(
                 .filter_map(|row| row.ok())
                 .filter_map(|raw| studio_json::from_str::<Value>(&raw).ok())
                 .collect::<Vec<_>>();
-            Ok(Some((agent.value(), items)))
+            let Some(provider) = agent.provider.value().copied() else {
+                return Ok(None);
+            };
+            Ok(Some((provider, agent.value(), items)))
         })
         .await?;
-    let Some((agent, items)) = read else {
+    let Some((source_provider, agent, items)) = read else {
         return Ok(None);
     };
     if legacy_vm_workspace(&agent) {
         return Err(TransferError::Refused("VmWorkspaceUnsupported"));
     }
-    let source_provider = agent["provider"].as_str().unwrap_or("codex").to_owned();
     let busy = agent["inFlight"].as_bool() == Some(true)
         || matches!(agent["status"].as_str(), Some("running" | "starting"));
     let guidance = agent["nativeRoleGuidance"]
@@ -424,7 +426,7 @@ pub async fn move_across_providers(
         .to_owned();
     let cwd = agent["cwd"].as_str().unwrap_or_default().to_owned();
     if busy
-        || source_provider == target_provider.key()
+        || source_provider == target_provider
         || guidance.is_empty()
         || cwd.is_empty()
         || agent
@@ -448,7 +450,7 @@ pub async fn move_across_providers(
     .map_err(|_| TransferError::Refused("The transcript write stopped"))?
     .map_err(|_| TransferError::Refused("The transcript could not be written"))?;
     let (id, target_key) = (lead.to_owned(), target.to_owned());
-    let note = history_note(&path, &source_provider);
+    let note = history_note(&path, source_provider.key());
     let source_epoch = agent["epoch"].clone();
     store
         .transaction_with_error(move |tx| {
@@ -460,7 +462,7 @@ pub async fn move_across_providers(
             }
             if value["epoch"] != source_epoch
                 || value["inFlight"].as_bool() == Some(true)
-                || value["provider"].as_str() != Some(source_provider.as_str())
+                || value["provider"].as_str() != Some(source_provider.key())
             {
                 return Err(TransferError::Refused(
                     "The chat changed during the account move",

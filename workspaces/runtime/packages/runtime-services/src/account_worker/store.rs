@@ -408,7 +408,9 @@ fn journal_frame_payload(frame: &Frame, operation: &str) -> Result<Vec<u8>, Work
     writer_preparation_tests::FRAME_ENCODINGS.with(|count| count.set(count.get() + 1));
     // This persistence boundary retains the canonical object ordering of the
     // earlier stored projection, including receipts replayed after an update.
-    let encoded = if crate::notification_dispatch::progress::native(frame).is_some() {
+    let encoded = if crate::notification_dispatch::progress::native(frame).is_some()
+        || crate::live_settings::native_event(frame).is_some()
+    {
         studio_json::to_vec(&json!(frame)).map_err(|_| invalid(operation))?
     } else {
         let mut encoded =

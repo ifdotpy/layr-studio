@@ -3688,6 +3688,8 @@ export interface components {
       taskDefaultGate?: components["schemas"]["TaskAcceptanceGate"] | undefined;
       /** Tokensused */
       tokensUsed?: number | null | undefined;
+      /** Turnid */
+      turnId?: null | string | undefined;
       turnStatus?: components["schemas"]["AgentStatus"] | null | undefined;
       usageResume?:
         | components["schemas"]["AgentEntityUsageResumeDto"]
@@ -9471,6 +9473,10 @@ export interface components {
     CapabilitiesResponse: {
       /** Agent */
       agent: string;
+      /** @default [] */
+      apps?: components["schemas"]["NativeCatalogEntry"][] | undefined;
+      /** @default null */
+      appsCursor?: string | null | undefined;
       /** At */
       at: number;
       /**
@@ -9497,6 +9503,8 @@ export interface components {
       observed: string[];
       /** Observednative */
       observedNative: string[];
+      /** @default [] */
+      plugins?: components["schemas"]["NativeCatalogEntry"][] | undefined;
       role: components["schemas"]["studio_api__agents__models__AgentRole"];
       /** Servers */
       servers: components["schemas"]["JsonValue"][];
@@ -10595,6 +10603,22 @@ export interface components {
       action: "settings";
       id: string;
       request_id: string;
+      /** SettingsScope */
+      scope?:
+        | {
+            /** @constant */
+            scope: "current_turn";
+            turn_id: string;
+          }
+        | {
+            /** @constant */
+            scope: "session";
+          }
+        | {
+            /** @constant */
+            scope: "persistent";
+          }
+        | undefined;
       settings: components["schemas"]["ClaudeSettings"];
     };
     /** ClaudeSessionStateRequest */
@@ -11981,6 +12005,9 @@ export interface components {
         | undefined;
       reviewer_excluded_account_keys?:
         | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
+      settings_scope?:
+        | components["schemas"]["ProviderSettingsScope"]
         | undefined;
       /**
        * Subagent Concurrency
@@ -15481,6 +15508,22 @@ export interface components {
      * @enum {string}
      */
     NativeCandidateState: "discovered" | "rejected" | "approved";
+    /** NativeCatalogEntry */
+    NativeCatalogEntry: {
+      enabled?: boolean | null | undefined;
+      id: string;
+      name: string;
+    };
+    /** NativeCatalogResource */
+    NativeCatalogResource: {
+      /** Accountkey */
+      accountKey: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "native-catalog";
+    };
     /** NativeClaudeAccount */
     NativeClaudeAccount: {
       /** Activeturns */
@@ -18380,6 +18423,32 @@ export interface components {
     ProviderObject: {
       [key: string]: unknown;
     };
+    /** SettingsScope */
+    ProviderSettingsScope:
+      | {
+          /** @constant */
+          scope: "current_turn";
+          turn_id: string;
+        }
+      | {
+          /** @constant */
+          scope: "session";
+        }
+      | {
+          /** @constant */
+          scope: "persistent";
+        };
+    /**
+     * ProviderSupport
+     * @description Explicit availability of a user control or internal provider policy.
+     */
+    ProviderSupport:
+      | "Supported"
+      | {
+          Unsupported: {
+            reason: string;
+          };
+        };
     /**
      * ProviderUpdateNotice
      * @description A newer installed or upstream provider version is available.
@@ -19638,7 +19707,8 @@ export interface components {
       | components["schemas"]["TerminalOutputResource"]
       | components["schemas"]["NativeLayrSettingsResource"]
       | components["schemas"]["TaskDetailResource"]
-      | components["schemas"]["RetainedWorktreesResource"];
+      | components["schemas"]["RetainedWorktreesResource"]
+      | components["schemas"]["NativeCatalogResource"];
     /**
      * ResourceRevisionEntry
      * @description Per-resource revision; StateResource uses the entity sequence.
@@ -22675,6 +22745,7 @@ export interface components {
       models: components["schemas"]["SyncEntityPayload"][];
       monitors: components["schemas"]["MonitorEntityDto"][];
       "multi-server": components["schemas"]["AccessSnapshot"];
+      "native-catalog": null;
       "native-layr-settings": components["schemas"]["NativeLayrSettingsResponse"];
       processes: components["schemas"]["ProcessList"];
       queue: components["schemas"]["SyncEntityPayload"][];
@@ -29969,7 +30040,6 @@ export interface operations {
       query?:
         | {
             agent?: string | undefined;
-            fresh?: boolean | undefined;
             serversCursor?: string | undefined;
           }
         | undefined;

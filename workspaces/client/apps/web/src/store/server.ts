@@ -1,3 +1,4 @@
+import { watchResourceReads } from "../sync/subscriptions/reads.ts";
 import { createObservableResources } from "../generated/observableResources.ts";
 import { createObservableResourceRuntime } from "./runtime.ts";
 import { flatResourceKey } from "../sync/subscriptions/contracts.ts";
@@ -12,6 +13,7 @@ export type SkillsReadContext = {
 /** The caller supplies its server's existing subscription module. */
 export function createServerStore(
   subscriptions: Parameters<typeof createObservableResourceRuntime>[0],
+  watch: typeof watchResourceReads = watchResourceReads,
 ) {
   const runtime = createObservableResourceRuntime(subscriptions);
   const read = <P extends ApiGetPath>(path: P) => {
@@ -33,6 +35,17 @@ export function createServerStore(
           "@epoch": session?.sessionId,
           "@operation": path,
         }),
+        ...(path === "/api/skills" && context
+          ? {
+              watch: (read: () => Promise<void>) =>
+                watch(
+                  { kind: "native-catalog", accountKey: context.account },
+                  read,
+                  () => {},
+                  { waitForBaseline: true },
+                ),
+            }
+          : {}),
         async read() {
           const data = await api.get(path, { query, readMetadata: {} });
           if (data === undefined)

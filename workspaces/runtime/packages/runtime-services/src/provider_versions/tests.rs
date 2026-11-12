@@ -194,6 +194,32 @@ fn version_parse_and_comparison_match_the_real_python_functions() {
 }
 
 #[test]
+fn d1_version_ordering_preserves_unbounded_numeric_components() {
+    for (left, right, expected) in [
+        (
+            "999999999999999999999999.1.0",
+            "1000000000000000000000000.0.0",
+            Ordering::Less,
+        ),
+        ("1.0002.0003-0009", "01.2.3-9", Ordering::Equal),
+        (
+            "1.2.3-999999999999999999999999",
+            "1.2.3-1000000000000000000000000",
+            Ordering::Less,
+        ),
+        ("1.2.3-9", "1.2.3-alpha", Ordering::Less),
+        ("1.2.3-alpha.1", "1.2.3-alpha", Ordering::Greater),
+        ("1.2.3-0", "1.2.3", Ordering::Less),
+    ] {
+        assert_eq!(
+            compare_version_text(left, right),
+            Some(expected),
+            "{left} / {right}"
+        );
+    }
+}
+
+#[test]
 fn update_warning_projection_preserves_python_ids_and_messages() {
     let profile = ProviderProfile {
         account_key: "default".into(),
@@ -339,6 +365,44 @@ fn claude_version_probe_uses_launch_binary_and_reports_configured_binary_separat
     assert_eq!(facts.installed_version.as_deref(), Some("2.1.100"));
     assert_eq!(facts.configured_version.as_deref(), Some("2.1.200"));
     assert_eq!(facts.available_version.as_deref(), Some("2.1.200"));
+    let deadline = || Instant::now() + Duration::from_secs(5);
+    let missing = temporary
+        .path()
+        .join("missing")
+        .to_string_lossy()
+        .into_owned();
+    let mut changed = profile.clone();
+    changed.configured_binary = Some(missing.clone());
+    let facts = SystemVersionProbe
+        .probe(&changed, deadline())
+        .expect("launched evidence survives");
+    assert_eq!(facts.installed_version.as_deref(), Some("2.1.100"));
+    assert_eq!(facts.configured_version, None);
+    assert!(facts.error.is_some());
+    changed.launched_binary = Some(missing);
+    changed.configured_binary = profile.configured_binary.clone();
+    let facts = SystemVersionProbe
+        .probe(&changed, deadline())
+        .expect("configured evidence survives");
+    assert_eq!(facts.installed_version, None);
+    assert_eq!(facts.configured_version.as_deref(), Some("2.1.200"));
+    changed.launched_binary = None;
+    assert!(SystemVersionProbe.probe(&changed, deadline()).is_err());
+
+    // Codex's configured selection must not replace the pinned connection executable.
+    changed = profile;
+    changed.provider = ProviderKind::Codex.key().to_owned();
+    let facts = SystemVersionProbe
+        .probe(&changed, deadline())
+        .expect("pinned Codex executable");
+    assert_eq!(facts.running_version.as_deref(), Some("2.1.100"));
+    assert_eq!(facts.installed_version.as_deref(), Some("2.1.100"));
+    assert_eq!(facts.configured_version, None);
+    changed.launched_binary = None;
+    let facts = SystemVersionProbe
+        .probe(&changed, deadline())
+        .expect("configured Codex fallback");
+    assert_eq!(facts.running_version.as_deref(), Some("2.1.200"));
 }
 
 #[tokio::test]
@@ -665,7 +729,10 @@ async fn preference_read_failure_retries_without_using_stale_enablement() {
     .await
     .expect("monitor starts with provider updates enabled");
     assert!(monitor.wait_until_checked(Duration::from_secs(3)).await);
-    assert_eq!(fetch.0.load(AtomicOrdering::SeqCst), RELEASES.len());
+    assert_eq!(
+        fetch.0.load(AtomicOrdering::SeqCst),
+        ProviderKind::ALL.len()
+    );
     tokio::time::timeout(Duration::from_secs(3), async {
         while store.completed_passes.load(AtomicOrdering::SeqCst) < 1 {
             tokio::task::yield_now().await;
@@ -688,7 +755,7 @@ async fn preference_read_failure_retries_without_using_stale_enablement() {
     .expect("targeted wake observes the transient preference read error");
     assert_eq!(
         fetch.0.load(AtomicOrdering::SeqCst),
-        RELEASES.len(),
+        ProviderKind::ALL.len(),
         "unknown preference state must not make an upstream request"
     );
 
@@ -696,7 +763,7 @@ async fn preference_read_failure_retries_without_using_stale_enablement() {
     monitor.wake();
     tokio::time::timeout(Duration::from_secs(3), async {
         while store.completed_passes.load(AtomicOrdering::SeqCst) < 3
-            || fetch.0.load(AtomicOrdering::SeqCst) < RELEASES.len() * 2
+            || fetch.0.load(AtomicOrdering::SeqCst) < ProviderKind::ALL.len() * 2
         {
             tokio::task::yield_now().await;
         }

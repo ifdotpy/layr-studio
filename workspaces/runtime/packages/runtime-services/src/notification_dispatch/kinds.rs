@@ -8,11 +8,88 @@ use super::{
 use super::{items, notices, questions};
 use rusqlite::OptionalExtension;
 use studio_json::{Value, json};
+use studio_runtime_providers::codex::ServerNotificationMethod;
+use studio_runtime_providers::codex_disposition::{
+    self, Disposition, HandlerKey, NotificationHandler, ProgressHandler, ProjectionHandler,
+};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
     AgentRecord, NotificationDispatchRepository, PlanRecord, StoreError, TaskId, TaskRecord,
     Transaction,
 };
+
+struct ApplyInput<'a, 'conn> {
+    tx: &'a Transaction<'conn>,
+    agent: &'a mut AgentRecord,
+    method: &'a str,
+    p: &'a Value,
+    identity: &'a ProviderDeliveryIdentity,
+    publication: &'a super::PublicationContext,
+    at: f64,
+}
+type Apply = fn(ApplyInput<'_, '_>) -> Result<Option<DispatchOutcome>, NotificationDispatchError>;
+enum Projection {
+    Apply(Apply),
+    Buffered,
+    AccountLimits,
+    Requires(NotificationDependency),
+}
+
+// The generated key is consumed at the real projection branch, not a wire-string fallback.
+fn projection(key: ProjectionHandler) -> Projection {
+    use NotificationDependency as D;
+    use ProjectionHandler as H;
+    match key {
+        H::TurnDiffUpdated => Projection::Apply(|input| input.write_plan_diff("Changes")),
+        H::TurnPlanUpdated => Projection::Apply(|input| input.plan()),
+        H::ItemReasoningTextDelta => Projection::Apply(|input| input.reasoning()),
+        H::CommandExecOutputDelta => Projection::Apply(|input| input.command_output()),
+        H::ServerRequestResolved => Projection::Apply(|input| input.resolved()),
+        H::ThreadClosed | H::ThreadStatusChanged => Projection::Apply(|input| input.unload()),
+        H::SkillsChanged
+        | H::AppListUpdated
+        | H::ThreadTokenUsageUpdated
+        | H::ItemAgentMessageDelta
+        | H::ItemCommandExecutionOutputDelta => Projection::Buffered,
+        H::AccountRateLimitsUpdated => Projection::AccountLimits,
+        H::AccountLoginCompleted => Projection::Requires(D::AccountLogin),
+        H::AccountUpdated => Projection::Requires(D::AccountRefresh),
+        H::TurnStarted | H::TurnCompleted => Projection::Requires(D::TurnLifecycle),
+        H::ThreadRealtimeStarted
+        | H::ThreadRealtimeItemAdded
+        | H::ThreadRealtimeItemTranscriptDelta
+        | H::ThreadRealtimeOutputAudioDelta
+        | H::ThreadRealtimeItemStarted
+        | H::ThreadRealtimeItemCompleted
+        | H::ThreadRealtimeTranscriptDelta
+        | H::ThreadRealtimeTranscriptDone
+        | H::ThreadRealtimeSdp
+        | H::ThreadRealtimeError
+        | H::ThreadRealtimeClosed => Projection::Requires(D::Realtime),
+    }
+}
+
+fn native_binding(method: &str) -> Option<NotificationHandler> {
+    let Disposition::Handled(HandlerKey::Notification(key)) =
+        codex_disposition::server_notification(ServerNotificationMethod::from_wire(method)?)
+    else {
+        return None;
+    };
+    Some(key)
+}
+pub(super) fn ignored_reason(method: &str) -> Option<&'static str> {
+    match codex_disposition::server_notification(ServerNotificationMethod::from_wire(method)?) {
+        Disposition::Ignored { reason } => Some(reason),
+        Disposition::Handled(_) => None,
+    }
+}
+
+pub(super) fn notice_kind(method: &str) -> Option<notices::NoticeKind> {
+    let NotificationHandler::Notice(kind) = native_binding(method)? else {
+        return None;
+    };
+    Some(kind)
+}
 
 pub(super) fn apply(
     tx: &Transaction<'_>,
@@ -23,61 +100,58 @@ pub(super) fn apply(
     publication: &super::PublicationContext,
     at: f64,
 ) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
-    let id = agent.id.as_ref().to_owned();
-    let account = identity
-        .provider_handle
-        .strip_prefix("account:")
-        .ok_or(NotificationDispatchError::invalid_account())?;
-    if method == "thread/shellPolicy/updated" {
-        crate::shell_policy::observe(tx, agent, &p["report"], at)?;
-        return Ok(Some(DispatchOutcome::Written));
+    let input = ApplyInput {
+        tx,
+        agent,
+        method,
+        p,
+        identity,
+        publication,
+        at,
+    };
+    match native_binding(method) {
+        Some(NotificationHandler::Notice(kind)) => input.notice(kind),
+        Some(NotificationHandler::Projection(key)) => match projection(key) {
+            Projection::Apply(apply) => apply(input),
+            Projection::Buffered => Ok(None),
+            Projection::AccountLimits => Ok(Some(DispatchOutcome::Ignored {
+                reason: "account-journal/limits-observation".into(),
+            })),
+            Projection::Requires(dependency) => input.required(dependency),
+        },
+        Some(NotificationHandler::Progress(key)) => input.progress(key),
+        None if ServerNotificationMethod::from_wire(method).is_some() => input.retained(),
+        None => input.bridge(),
     }
-    if method == "thread/idleCompaction/updated" {
-        if let Some(request) = p["preparedSummary"]["requestId"].as_str() {
-            if idle_episode_id(agent) == Some(request)
-                && crate::idle_compaction::settled(tx, request)?
-            {
-                agent.idle_summary_prepared = studio_runtime_schema::queue_command::Field::Value(
-                    studio_runtime_store::StoredTransferValue::Known(request.to_owned()),
-                );
-                persist_agent(tx, &id, agent)?;
-            }
-            return Ok(Some(DispatchOutcome::Written));
-        }
-        crate::idle_compaction::observe(tx, agent, &p["report"])?;
-        persist_agent(tx, &id, agent)?;
-        return Ok(Some(DispatchOutcome::Written));
-    }
-    if method == "command/exec/outputDelta" {
-        let Some(process_id) = p
-            .get("processId")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-        else {
-            return Ok(Some(DispatchOutcome::Written));
-        };
-        let delta = <crate::monitor_event_queue::OutputDelta as serde::Deserialize>::deserialize(p)
-            .map_err(|_| NotificationDispatchError::invalid())?;
-        crate::monitor_event_queue::enqueue_output_in_transaction(
-            tx,
-            process_id,
-            account,
-            identity.generation,
-            identity.cursor,
-            &delta,
-        )?;
-        return Ok(Some(DispatchOutcome::Written));
-    }
-    if let Some(kind) = notices::NoticeKind::parse(method) {
+}
+
+impl ApplyInput<'_, '_> {
+    fn notice(
+        self,
+        kind: notices::NoticeKind,
+    ) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let id = self.agent.id.as_ref().to_owned();
+        let account = self
+            .identity
+            .provider_handle
+            .strip_prefix("account:")
+            .ok_or(NotificationDispatchError::invalid_account())?;
         let item_id = format!(
             "{id}:native-notice:hook:{}",
-            p["run"]["id"].as_str().unwrap_or_default()
+            self.p["run"]["id"].as_str().unwrap_or_default()
         );
         let old =
-            NotificationDispatchRepository::notification_item(tx, &id, &item_id)?.map(|v| v.0);
-        let snapshot = NotificationSnapshot::from_records(agent.clone(), None, old)?;
-        let decision =
-            notices::decide(&snapshot, method, kind, p, account, identity.generation, at)?;
+            NotificationDispatchRepository::notification_item(self.tx, &id, &item_id)?.map(|v| v.0);
+        let snapshot = NotificationSnapshot::from_records(self.agent.clone(), None, old)?;
+        let decision = notices::decide(
+            &snapshot,
+            self.method,
+            kind,
+            self.p,
+            account,
+            self.identity.generation,
+            self.at,
+        )?;
         if decision.refresh_limits {
             return Err(NotificationDispatchError::Dependency(
                 NotificationDependency::RefreshLimits.name(),
@@ -85,325 +159,452 @@ pub(super) fn apply(
         }
         if let Some(item) = decision.item {
             write_item(
-                tx,
+                self.tx,
                 &id,
                 &item.key,
                 (
                     "system",
-                    notices::provider_label(agent.provider.value().copied()),
+                    notices::provider_label(self.agent.provider.value().copied()),
                 ),
                 &item.text,
                 item.metadata,
-                at,
+                self.at,
             )?;
         }
         if let Some(next) = decision.agent {
-            *agent = next;
-            persist_agent(tx, &id, agent)?;
+            *self.agent = next;
+            persist_agent(self.tx, &id, self.agent)?;
         }
-        return Ok(Some(DispatchOutcome::Written));
+        Ok(Some(DispatchOutcome::Written))
     }
-    let dependency = match method {
-        "account/login/completed" => Some(NotificationDependency::AccountLogin),
-        "account/updated" => Some(NotificationDependency::AccountRefresh),
-        // Account telemetry is consumed by the durable account journal before
-        // thread dispatch. It does not require an agent or a thread ID.
-        "account/rateLimits/updated" => {
-            return Ok(Some(DispatchOutcome::Ignored {
-                reason: "account-journal/limits-observation".into(),
-            }));
+
+    fn resolved(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let id = self.agent.id.as_ref().to_owned();
+        let account = self
+            .identity
+            .provider_handle
+            .strip_prefix("account:")
+            .ok_or(NotificationDispatchError::invalid_account())?;
+        let before = self.agent.clone();
+        questions::resolved(
+            self.tx,
+            self.agent,
+            self.p,
+            account,
+            self.identity.generation,
+            self.at,
+        )?;
+        if *self.agent != before {
+            persist_agent(self.tx, &id, self.agent)?;
         }
-        "turn/started" | "turn/completed" => Some(NotificationDependency::TurnLifecycle),
-        kind if kind.starts_with("thread/realtime/") => Some(NotificationDependency::Realtime),
-        "thread/closed" => Some(NotificationDependency::ThreadUnloaded),
-        "thread/status/changed" if p["status"]["type"] == "notLoaded" => {
-            Some(NotificationDependency::ThreadUnloaded)
+        Ok(Some(DispatchOutcome::Written))
+    }
+
+    fn retained(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        update_common_agent_fields(self.agent, self.method, self.p, self.at)?;
+        let id = self.agent.id.as_ref().to_owned();
+        persist_agent(self.tx, &id, self.agent)?;
+        Ok(Some(DispatchOutcome::Written))
+    }
+
+    fn bridge(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let id = self.agent.id.as_ref().to_owned();
+        if self.method == "thread/shellPolicy/updated" {
+            crate::shell_policy::observe(self.tx, self.agent, &self.p["report"], self.at)?;
+            return Ok(Some(DispatchOutcome::Written));
         }
-        _ => None,
-    };
-    if let Some(dependency) = dependency {
+        if self.method == "thread/idleCompaction/updated" {
+            if let Some(request) = self.p["preparedSummary"]["requestId"].as_str() {
+                if idle_episode_id(self.agent) == Some(request)
+                    && crate::idle_compaction::settled(self.tx, request)?
+                {
+                    self.agent.idle_summary_prepared =
+                        studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_store::StoredTransferValue::Known(request.to_owned()),
+                        );
+                    persist_agent(self.tx, &id, self.agent)?;
+                }
+                return Ok(Some(DispatchOutcome::Written));
+            }
+            crate::idle_compaction::observe(self.tx, self.agent, &self.p["report"])?;
+            persist_agent(self.tx, &id, self.agent)?;
+            return Ok(Some(DispatchOutcome::Written));
+        }
+        if self.method == "thread/contextUsage/updated" {
+            return Ok(None);
+        }
+        self.retained()
+    }
+
+    fn command_output(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let account = self
+            .identity
+            .provider_handle
+            .strip_prefix("account:")
+            .ok_or(NotificationDispatchError::invalid_account())?;
+        let Some(process_id) = self
+            .p
+            .get("processId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(Some(DispatchOutcome::Written));
+        };
+        let delta =
+            <crate::monitor_event_queue::OutputDelta as serde::Deserialize>::deserialize(self.p)
+                .map_err(|_| NotificationDispatchError::invalid())?;
+        crate::monitor_event_queue::enqueue_output_in_transaction(
+            self.tx,
+            process_id,
+            account,
+            self.identity.generation,
+            self.identity.cursor,
+            &delta,
+        )?;
+        Ok(Some(DispatchOutcome::Written))
+    }
+
+    fn unload(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        if self.method == "thread/status/changed" && self.p["status"]["type"] != "notLoaded" {
+            return self.retained();
+        }
+        self.required(NotificationDependency::ThreadUnloaded)
+    }
+
+    fn required(
+        self,
+        dependency: NotificationDependency,
+    ) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let id = self.agent.id.as_ref().to_owned();
         if dependency == NotificationDependency::Realtime {
             // With no configured voice session, Python retains these as thread events.
-            update_common_agent_fields(agent, method, p, at)?;
-            persist_agent(tx, &id, agent)?;
+            update_common_agent_fields(self.agent, self.method, self.p, self.at)?;
+            persist_agent(self.tx, &id, self.agent)?;
         } else if dependency == NotificationDependency::ThreadUnloaded {
-            let supplied = match p.get("threadId") {
+            let supplied = match self.p.get("threadId") {
                 None => studio_runtime_schema::queue_command::Field::Missing,
                 Some(value) => {
                     studio_json::from_str(&studio_json::to_string(value).map_err(StoreError::from)?)
                         .map_err(StoreError::from)?
                 }
             };
-            if let Some(release) = &mut agent.native_release
-                && release.close_thread(&supplied, at, &id)?
+            if let Some(release) = &mut self.agent.native_release
+                && release.close_thread(&supplied, self.at, &id)?
             {
-                persist_agent(tx, &id, agent)?;
+                persist_agent(self.tx, &id, self.agent)?;
             }
         }
-        return Ok(Some(required(dependency)));
+        Ok(Some(required(dependency)))
     }
-    if method == "serverRequest/resolved" {
-        let before = agent.clone();
-        questions::resolved(tx, agent, p, account, identity.generation, at)?;
-        if *agent != before {
-            persist_agent(tx, &id, agent)?;
+
+    fn progress(
+        self,
+        key: ProgressHandler,
+    ) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        use ProgressHandler as H;
+        if matches!(key, H::ItemStarted | H::ItemCompleted)
+            && self.p["item"]["type"] == "agentMessage"
+        {
+            return Ok(None);
         }
-        return Ok(Some(DispatchOutcome::Written));
-    }
-    if method == "thread/tokenUsage/updated"
-        || method == "thread/contextUsage/updated"
-        || method == "item/agentMessage/delta"
-        || (matches!(method, "item/started" | "item/completed")
-            && p["item"]["type"] == "agentMessage")
-    {
-        return Ok(None);
-    }
-    let stale = method.starts_with("item/")
-        && p["turnId"]
-            .as_str()
-            .is_some_and(|t| !t.is_empty() && agent.turn_id.as_deref() != Some(t));
-    let task_key = format!(
-        "{id}:{}",
-        p["item"]["id"]
-            .as_str()
-            .or_else(|| p["itemId"].as_str())
-            .unwrap_or_default()
-    );
-    let task = if matches!(
-        method,
-        "item/started" | "item/completed" | "item/commandExecution/outputDelta"
-    ) {
-        studio_runtime_store::TaskRepository::get(tx, &TaskId::from(task_key.as_str()))?
-    } else {
-        None
-    };
-    let snapshot = NotificationSnapshot::from_records(agent.clone(), task, None)?;
-    match method {
-        "item/started" | "item/completed" => {
-            if p["item"]["type"] == "userMessage"
-                && p["item"]["clientId"]
-                    .as_str()
-                    .is_some_and(|s| !s.is_empty())
-            {
-                let (Some(thread_id), Some(turn_id), Some(event_id)) = (
-                    p["threadId"].as_str().filter(|value| !value.is_empty()),
-                    p["turnId"].as_str().filter(|value| !value.is_empty()),
-                    p["item"]["clientId"]
+        let method = self.method;
+        let id = self.agent.id.as_ref().to_owned();
+        let account = self
+            .identity
+            .provider_handle
+            .strip_prefix("account:")
+            .ok_or(NotificationDispatchError::invalid_account())?;
+        let stale = method.starts_with("item/")
+            && self.p["turnId"]
+                .as_str()
+                .is_some_and(|t| !t.is_empty() && self.agent.turn_id.as_deref() != Some(t));
+        let task_key = format!(
+            "{id}:{}",
+            self.p["item"]["id"]
+                .as_str()
+                .or_else(|| self.p["itemId"].as_str())
+                .unwrap_or_default()
+        );
+        let task = if matches!(
+            method,
+            "item/started" | "item/completed" | "item/commandExecution/outputDelta"
+        ) {
+            studio_runtime_store::TaskRepository::get(self.tx, &TaskId::from(task_key.as_str()))?
+        } else {
+            None
+        };
+        let snapshot = NotificationSnapshot::from_records(self.agent.clone(), task, None)?;
+        match key {
+            H::ItemStarted | H::ItemCompleted => {
+                if self.p["item"]["type"] == "userMessage"
+                    && self.p["item"]["clientId"]
                         .as_str()
-                        .filter(|value| !value.is_empty()),
-                ) else {
-                    return Err(NotificationDispatchError::invalid());
-                };
-                if !crate::scheduler::settle_user_message_receipt_in_transaction(
-                    tx,
-                    snapshot.agent(),
-                    event_id,
-                    account,
-                    identity.generation,
-                    thread_id,
-                    turn_id,
-                )
-                .map_err(|error| match error {
-                    crate::scheduler::SchedulerError::Store(error) => {
-                        NotificationDispatchError::Store(error)
+                        .is_some_and(|s| !s.is_empty())
+                {
+                    let (Some(thread_id), Some(turn_id), Some(event_id)) = (
+                        self.p["threadId"]
+                            .as_str()
+                            .filter(|value| !value.is_empty()),
+                        self.p["turnId"].as_str().filter(|value| !value.is_empty()),
+                        self.p["item"]["clientId"]
+                            .as_str()
+                            .filter(|value| !value.is_empty()),
+                    ) else {
+                        return Err(NotificationDispatchError::invalid());
+                    };
+                    if !crate::scheduler::settle_user_message_receipt_in_transaction(
+                        self.tx,
+                        snapshot.agent(),
+                        event_id,
+                        account,
+                        self.identity.generation,
+                        thread_id,
+                        turn_id,
+                    )
+                    .map_err(|error| match error {
+                        crate::scheduler::SchedulerError::Store(error) => {
+                            NotificationDispatchError::Store(error)
+                        }
+                        error @ crate::scheduler::SchedulerError::InvalidAttemptTimestamp
+                        | error @ crate::scheduler::SchedulerError::PreparationWorker
+                        | error @ crate::scheduler::SchedulerError::PolicyRefused(_) => {
+                            NotificationDispatchError::Store(StoreError::SchemaMismatch(
+                                error.to_string(),
+                            ))
+                        }
+                    })? {
+                        return Ok(Some(DispatchOutcome::Ignored {
+                            reason: "stale-user-message-receipt".into(),
+                        }));
                     }
-                    error @ crate::scheduler::SchedulerError::InvalidAttemptTimestamp
-                    | error @ crate::scheduler::SchedulerError::PreparationWorker
-                    | error @ crate::scheduler::SchedulerError::PolicyRefused(_) => {
-                        NotificationDispatchError::Store(StoreError::SchemaMismatch(
-                            error.to_string(),
-                        ))
+                    let Some(accepted_agent) =
+                        super::NotificationDispatchRepository::agent_record(self.tx, &id)?
+                    else {
+                        return Err(NotificationDispatchError::InvalidStoredObject {
+                            table: "runtime_agents".into(),
+                            id,
+                        });
+                    };
+                    *self.agent = accepted_agent;
+                    update_common_agent_fields(self.agent, method, self.p, self.at)?;
+                    persist_agent(self.tx, &id, self.agent)?;
+                    return Ok(Some(DispatchOutcome::Written));
+                }
+                if stale {
+                    if snapshot.task().is_none_or(|task| {
+                        task.status() == studio_runtime_schema::task_record::TaskStatus::Running
+                    }) && let Some(task) = items::task_transition(
+                        snapshot.agent(),
+                        method,
+                        self.p,
+                        snapshot.task(),
+                        true,
+                        self.at,
+                    )? {
+                        put_checked_task(self.tx, &task)?;
+                        write_historical_item(self.tx, &id, self.p, &task, self.at)?;
                     }
-                })? {
                     return Ok(Some(DispatchOutcome::Ignored {
-                        reason: "stale-user-message-receipt".into(),
+                        reason: "stale-turn-item".into(),
                     }));
                 }
-                let Some(accepted_agent) =
-                    super::NotificationDispatchRepository::agent_record(tx, &id)?
-                else {
-                    return Err(NotificationDispatchError::InvalidStoredObject {
-                        table: "runtime_agents".into(),
-                        id: id.clone(),
-                    });
-                };
-                *agent = accepted_agent;
-                update_common_agent_fields(agent, method, p, at)?;
-                persist_agent(tx, &id, agent)?;
-                return Ok(Some(DispatchOutcome::Written));
-            }
-            if stale {
-                if snapshot.task().is_none_or(|task| {
-                    task.status() == studio_runtime_schema::task_record::TaskStatus::Running
-                }) && let Some(task) =
-                    items::task_transition(snapshot.agent(), method, p, snapshot.task(), true, at)?
-                {
-                    put_checked_task(tx, &task)?;
-                    write_historical_item(tx, &id, p, &task, at)?;
+                let already_compacted =
+                    studio_runtime_store::context_settings::was_compacted(self.tx, &task_key)?;
+                let decision = items::non_text(
+                    self.agent,
+                    method,
+                    self.p,
+                    snapshot.task(),
+                    already_compacted,
+                    self.at,
+                )?;
+                if let Some(mut task) = decision.task {
+                    if snapshot.task().is_none() {
+                        task.owner_epoch = Some(self.agent.epoch);
+                        let source = self.publication.native_source.as_ref().filter(|source| {
+                            source.account == account
+                                && source
+                                    .generation
+                                    .is_none_or(|g| g == self.identity.generation)
+                        });
+                        task.source_account_key = Some(
+                            source
+                                .map(|source| source.account.as_str())
+                                .unwrap_or(account)
+                                .to_owned(),
+                        );
+                        task.source_connection_id = source.map(|source| source.connection.clone());
+                        task.source_thread_id = if source.is_some() {
+                            self.agent.thread_id.clone()
+                        } else {
+                            None
+                        };
+                        task.source_provider = source
+                            .map(|source| source.provider.as_str().parse())
+                            .transpose()
+                            .map_err(|_| NotificationDispatchError::invalid())?;
+                    }
+                    put_checked_task(self.tx, &task)?;
                 }
-                return Ok(Some(DispatchOutcome::Ignored {
-                    reason: "stale-turn-item".into(),
-                }));
-            }
-            let already_compacted =
-                studio_runtime_store::context_settings::was_compacted(tx, &task_key)?;
-            let decision =
-                items::non_text(agent, method, p, snapshot.task(), already_compacted, at)?;
-            if let Some(mut task) = decision.task {
-                if snapshot.task().is_none() {
-                    task.owner_epoch = Some(agent.epoch);
-                    let source = publication.native_source.as_ref().filter(|source| {
-                        source.account == account
-                            && source.generation.is_none_or(|g| g == identity.generation)
-                    });
-                    task.source_account_key = Some(
-                        source
-                            .map(|source| source.account.as_str())
-                            .unwrap_or(account)
-                            .to_owned(),
-                    );
-                    task.source_connection_id = source.map(|source| source.connection.clone());
-                    task.source_thread_id = if source.is_some() {
-                        agent.thread_id.clone()
+                if decision.compacted {
+                    let deferred = self.p["item"]["idleCompactionOnReturn"] == true
+                        && self.p["item"]["idleCompactionRequestId"].as_str()
+                            == idle_episode_id(self.agent);
+                    if let Some(request_id) = if deferred {
+                        self.p["item"]["idleCompactionRequestId"].as_str()
                     } else {
-                        None
-                    };
-                    task.source_provider = source
-                        .map(|source| source.provider.as_str().parse())
-                        .transpose()
-                        .map_err(|_| NotificationDispatchError::invalid())?;
-                }
-                put_checked_task(tx, &task)?;
-            }
-            if decision.compacted {
-                let deferred = p["item"]["idleCompactionOnReturn"] == true
-                    && p["item"]["idleCompactionRequestId"].as_str() == idle_episode_id(agent);
-                if let Some(request_id) = if deferred {
-                    p["item"]["idleCompactionRequestId"].as_str()
-                } else {
-                    agent
-                        .start_attempt
-                        .as_ref()
-                        .and_then(|attempt| attempt.action_request_id.as_deref())
-                }
-                .map(str::to_owned)
-                    && idle_episode_id(agent) == Some(request_id.as_str())
-                {
-                    if let studio_runtime_schema::queue_command::Field::Value(
-                        studio_runtime_store::StoredTransferObject::Known(episode),
-                    ) = &mut agent.idle_compaction_episode
+                        self.agent
+                            .start_attempt
+                            .as_ref()
+                            .and_then(|attempt| attempt.action_request_id.as_deref())
+                    }
+                    .map(str::to_owned)
+                        && idle_episode_id(self.agent) == Some(request_id.as_str())
                     {
-                        episode.extra.insert(
+                        if let studio_runtime_schema::queue_command::Field::Value(
+                            studio_runtime_store::StoredTransferObject::Known(episode),
+                        ) = &mut self.agent.idle_compaction_episode
+                        {
+                            episode.extra.insert(
                             "outcome".into(),
                             studio_json::to_raw_value(
                                 &studio_runtime_schema::persistence::IdleEpisodeOutcome::Compacted,
                             )
                             .map_err(StoreError::from)?,
                         );
-                        episode.extra.insert(
-                            "completedAt".into(),
-                            studio_json::to_raw_value(&at).map_err(StoreError::from)?,
-                        );
+                            episode.extra.insert(
+                                "completedAt".into(),
+                                studio_json::to_raw_value(&self.at).map_err(StoreError::from)?,
+                            );
+                        }
+                        write_item(
+                            self.tx,
+                            &id,
+                            &format!("{request_id}:notice"),
+                            ("system", "Idle compaction"),
+                            if deferred {
+                                crate::idle_compaction::ON_RETURN_NOTICE
+                            } else {
+                                crate::idle_compaction::NOTICE
+                            },
+                            json!({"idleCompaction":true}),
+                            self.at,
+                        )?;
                     }
-                    write_item(
-                        tx,
-                        &id,
-                        &format!("{request_id}:notice"),
-                        ("system", "Idle compaction"),
-                        if deferred {
-                            crate::idle_compaction::ON_RETURN_NOTICE
-                        } else {
-                            crate::idle_compaction::NOTICE
-                        },
-                        json!({"idleCompaction":true}),
-                        at,
+                    studio_runtime_store::context_settings::remember_compaction(
+                        self.tx, &task_key, &id,
                     )?;
                 }
-                studio_runtime_store::context_settings::remember_compaction(tx, &task_key, &id)?;
+                if let Some(item) = decision.item {
+                    let key = self.p["item"]["id"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .ok_or(NotificationDispatchError::invalid())?;
+                    let kind = self.p["item"]["type"]
+                        .as_str()
+                        .ok_or(NotificationDispatchError::invalid())?;
+                    write_item(
+                        self.tx,
+                        &id,
+                        key,
+                        ("output", kind),
+                        &notices::ordered_text(
+                            &item,
+                            self.p["item"]
+                                .as_object()
+                                .into_iter()
+                                .flat_map(|o| o.keys().cloned())
+                                .chain(
+                                    [
+                                        "aggregatedOutput",
+                                        "outputTruncated",
+                                        "startedAtMs",
+                                        "completedAtMs",
+                                        "durationMs",
+                                    ]
+                                    .map(str::to_owned),
+                                ),
+                        ),
+                        items::item_metadata(
+                            kind,
+                            &self.p["item"],
+                            json!({"toolStatus":items::tool_status(&item,method=="item/started"),"turnId":turn(self.agent,self.p)}),
+                        ),
+                        self.at,
+                    )?;
+                }
             }
-            if let Some(item) = decision.item {
-                let key = p["item"]["id"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .ok_or(NotificationDispatchError::invalid())?;
-                let kind = p["item"]["type"]
-                    .as_str()
-                    .ok_or(NotificationDispatchError::invalid())?;
-                write_item(
-                    tx,
-                    &id,
-                    key,
-                    ("output", kind),
-                    &notices::ordered_text(
-                        &item,
-                        p["item"]
-                            .as_object()
-                            .into_iter()
-                            .flat_map(|o| o.keys().cloned())
-                            .chain(
-                                [
-                                    "aggregatedOutput",
-                                    "outputTruncated",
-                                    "startedAtMs",
-                                    "completedAtMs",
-                                    "durationMs",
-                                ]
-                                .map(str::to_owned),
-                            ),
-                    ),
-                    items::item_metadata(
-                        kind,
-                        &p["item"],
-                        json!({"toolStatus":items::tool_status(&item,method=="item/started"),"turnId":turn(agent,p)}),
-                    ),
-                    at,
-                )?;
+            H::ItemReasoningSummaryTextDelta => {
+                if stale {
+                    return Ok(Some(DispatchOutcome::Ignored {
+                        reason: "stale-turn-item".into(),
+                    }));
+                }
+                items::advance_reasoning(self.agent, self.p, self.at);
             }
+            H::ItemPlanDelta | H::ItemReasoningSummaryPartAdded | H::ItemMcpToolCallProgress => {}
         }
-        "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => {
-            if stale {
-                return Ok(Some(DispatchOutcome::Ignored {
-                    reason: "stale-turn-item".into(),
-                }));
-            }
-            items::advance_reasoning(agent, p, at);
-        }
-        "turn/plan/updated" | "turn/diff/updated" => {
-            if method == "turn/plan/updated" {
-                let mut plan = studio_runtime_store::WorkItemsRepository::plan(tx, id.as_str())?
-                    .map(Ok)
-                    .unwrap_or_else(|| PlanRecord::from_value(json!({"id":id,"rootId":agent.root_id,"text":"","version":0,"updated":null})))?;
-                plan.update_native(p.clone(), at)?;
-                studio_runtime_store::WorkItemsRepository::put_plan(tx, id.as_str(), &plan)?;
-            }
-            let turn = turn(agent, p);
-            let key = format!(
-                "{method}:{}",
-                turn.as_str().filter(|s| !s.is_empty()).unwrap_or("unknown")
-            );
-            write_item(
-                tx,
-                &id,
-                &key,
-                (
-                    "output",
-                    if method == "turn/plan/updated" {
-                        "Plan"
-                    } else {
-                        "Changes"
-                    },
-                ),
-                &notices::json_text(p),
-                json!({"turnId":turn}),
-                at,
-            )?;
-        }
-        _ => {}
+        update_common_agent_fields(self.agent, method, self.p, self.at)?;
+        persist_agent(self.tx, &id, self.agent)?;
+        Ok(Some(DispatchOutcome::Written))
     }
-    update_common_agent_fields(agent, method, p, at)?;
-    persist_agent(tx, &id, agent)?;
-    Ok(Some(DispatchOutcome::Written))
+
+    fn reasoning(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let stale = self.p["turnId"]
+            .as_str()
+            .is_some_and(|t| !t.is_empty() && self.agent.turn_id.as_deref() != Some(t));
+        if stale {
+            return Ok(Some(DispatchOutcome::Ignored {
+                reason: "stale-turn-item".into(),
+            }));
+        }
+        items::advance_reasoning(self.agent, self.p, self.at);
+        update_common_agent_fields(self.agent, self.method, self.p, self.at)?;
+        let id = self.agent.id.as_ref().to_owned();
+        persist_agent(self.tx, &id, self.agent)?;
+        Ok(Some(DispatchOutcome::Written))
+    }
+
+    fn plan(self) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let id = self.agent.id.as_ref().to_owned();
+        let mut plan = studio_runtime_store::WorkItemsRepository::plan(self.tx, id.as_str())?
+        .map(Ok)
+        .unwrap_or_else(|| {
+            PlanRecord::from_value(
+                json!({"id":id,"rootId":self.agent.root_id,"text":"","version":0,"updated":null}),
+            )
+        })?;
+        plan.update_native(self.p.clone(), self.at)?;
+        studio_runtime_store::WorkItemsRepository::put_plan(self.tx, id.as_str(), &plan)?;
+        self.write_plan_diff("Plan")
+    }
+
+    fn write_plan_diff(
+        self,
+        title: &str,
+    ) -> Result<Option<DispatchOutcome>, NotificationDispatchError> {
+        let id = self.agent.id.as_ref().to_owned();
+        let turn = turn(self.agent, self.p);
+        let key = format!(
+            "{}:{}",
+            self.method,
+            turn.as_str().filter(|s| !s.is_empty()).unwrap_or("unknown")
+        );
+        write_item(
+            self.tx,
+            &id,
+            &key,
+            ("output", title),
+            &notices::json_text(self.p),
+            json!({"turnId":turn}),
+            self.at,
+        )?;
+        update_common_agent_fields(self.agent, self.method, self.p, self.at)?;
+        persist_agent(self.tx, &id, self.agent)?;
+        Ok(Some(DispatchOutcome::Written))
+    }
 }
+
 fn turn(agent: &AgentRecord, params: &Value) -> Value {
     params
         .get("turnId")

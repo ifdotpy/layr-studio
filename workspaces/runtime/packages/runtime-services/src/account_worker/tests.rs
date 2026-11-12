@@ -26,6 +26,7 @@ mod manual_release_closure;
 #[cfg(unix)]
 mod many_agents;
 mod missing_session;
+mod native_catalog;
 mod native_requests;
 mod native_review;
 mod orphan_thread_receipt;

@@ -7,7 +7,12 @@ import {
 } from "../../../generated/providerKind.ts";
 
 test("each provider reports its capability list; unknown providers report none", () => {
-  assert.deepEqual(providerCapabilities("claude"), PROVIDER_CAPABILITIES);
+  assert.deepEqual(
+    providerCapabilities("claude"),
+    PROVIDER_CAPABILITIES.filter(
+      (capability) => capability !== "current_turn_settings",
+    ),
+  );
   assert.deepEqual(providerCapabilities("codex"), PROVIDER_CAPABILITIES);
   for (const unknown of [undefined, null, "", "future", "CLAUDE"])
     assert.deepEqual(providerCapabilities(unknown), []);

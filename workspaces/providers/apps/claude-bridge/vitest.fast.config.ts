@@ -11,6 +11,7 @@ export default {
       "request-regressions.test.ts",
       "bridge-decode.test.ts",
       "live-permissions.test.ts",
+      "feature-containment.test.ts",
       // Native tool plan fields retain their raw wire values.
       "protocol-output.test.ts",
       "provider-lifecycle.test.ts",

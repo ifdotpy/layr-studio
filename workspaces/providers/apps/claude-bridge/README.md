@@ -26,8 +26,28 @@ member; [sdk-message-policy.ts](sdk-message-policy.ts) exhaustively handles mess
 types and subtypes. Ignored entries explain the feature backlog. New declared
 keys, methods or variants fail compilation. Undeclared runtime variants produce
 an explicit Unknown decision and one stderr diagnostic per provider, installed
-SDK version and type/subtype. `just claude-sdk-drift` compares the pinned exports
+SDK version and type/subtype, up to the per-process identity limit owned by
+`MAX_UNKNOWN_SDK_DIAGNOSTICS` in [sdk-message-policy.ts](sdk-message-policy.ts).
+Further unknown messages still receive Unknown decisions without retaining keys.
+`just claude-sdk-drift` compares the pinned exports
 with the latest registry package; pass a local `sdk.d.ts` path for an offline comparison.
+
+A retained query reapplies requested model and flag controls before every turn.
+Only an absent setter permits a value equal to the query's immutable launch
+configuration. Present setters always run with their native receiver; an
+unsupported rejection refuses the operation even for a launch value. Other values
+with an absent setter also receive an operation-specific Unsupported refusal
+before input submission, preserving the session. No applied-settings cache is
+kept, so delayed controls and native overlay merging cannot invalidate one.
+Optional notice and tool-progress projection failures report stderr diagnostics
+and leave the query running; identity, authorization, persistence and result
+lifecycle failures retain their existing refusal or fatal behavior.
+
+Live Studio MCP schema replacement is unsupported: this SDK requires removing
+the old in-process server before installing its replacement. The bridge refuses
+before removal and preserves the current tools. Unload the idle query through
+the existing control before changing tools; running background work must settle
+first. There is no automatic rollback or input resubmission.
 
 [session-state.ts](session-state.ts) retains permissive historical disk records.
 Legacy items without identity remain readable but produce no item notification.

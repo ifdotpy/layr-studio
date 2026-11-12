@@ -9,6 +9,7 @@ export default {
     name: "fast",
     exclude: HTTP_FIXTURE_TESTS,
     include: [
+      "src/components/agents/AgentSetupPicker/AgentSetupPicker.support.test.ts",
       "src/components/conversation/transcript/Activity/Activity.progress.test.ts",
       "src/observed.test.ts",
       "src/observedNetwork.test.ts",

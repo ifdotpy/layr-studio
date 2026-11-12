@@ -255,6 +255,13 @@ impl Controls {
         Self { store, session }
     }
     pub async fn execute(&self, request: ControlRequest) -> Result<Value> {
+        let ControlRequest::Settings { scope, .. } = &request;
+        if !matches!(
+            scope,
+            studio_runtime_schema::settings_scope::SettingsScope::Session
+        ) {
+            return Err(ControlError::Request);
+        }
         let _running =
             crate::checkpoints::RestoreExecution::acquire(self.store.execution_key(&request))
                 .map_err(|_| ControlError::Busy)?;

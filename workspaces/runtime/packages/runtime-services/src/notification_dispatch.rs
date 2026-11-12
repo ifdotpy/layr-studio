@@ -417,8 +417,10 @@ pub(crate) fn dispatch_checked_notification(
     } = input;
     let mut next_streams = streams.clone();
     let native_progress = progress::native(notification);
+    let native_settings = crate::live_settings::native_event(notification);
     let (kind, params) = match &native_progress {
         Some(progress) => (progress.scope.method, &Value::Null),
+        None if native_settings.is_some() => ("thread/settings/updated", &Value::Null),
         None => notification_parts(notification)?,
     };
     let mut before = None;
@@ -452,7 +454,9 @@ pub(crate) fn dispatch_checked_notification(
                 | Frame::CodexClientNotification(_)
                 | Frame::Request(_)
                 | Frame::Response { .. } => false,
-                Frame::CodexNotification(_) => native_progress.is_some(),
+                Frame::CodexNotification(_) => {
+                    native_progress.is_some() || native_settings.is_some()
+                }
             });
             let content_signature = match canonical_frame {
                 Some(bytes) => notification_signature_from_bytes(agent_id, bytes)?,
@@ -473,8 +477,20 @@ pub(crate) fn dispatch_checked_notification(
             }
 
             fresh = true;
-            if let Some(notice) = notices::NoticeKind::parse(kind)
-                && notice.is_account_notice()
+            if native_settings.is_some()
+                && let Some(reason) = kinds::ignored_reason(kind)
+            {
+                return save_outcome(
+                    transaction,
+                    delivery,
+                    &content_signature,
+                    DispatchOutcome::Ignored {
+                        reason: reason.into(),
+                    },
+                );
+            }
+            if let Some(notice) = kinds::notice_kind(kind)
+                && notices::is_account_notice(notice)
                 && params["threadId"].as_str().is_none_or(str::is_empty)
             {
                 effects.account_notice(transaction, kind, params, identity, observed_at)?;
@@ -4071,7 +4087,13 @@ mod tests {
 
     #[test]
     fn absent_service_rolls_back_all_notification_rows_and_receipt() {
-        for method in ["thread/realtime/started", "account/updated"] {
+        for method in [
+            "thread/realtime/started",
+            "thread/realtime/itemAdded",
+            "thread/realtime/item/transcript/delta",
+            "thread/realtime/outputAudio/delta",
+            "account/updated",
+        ] {
             let mut connection = database();
             let tx = connection.transaction().expect("transaction");
             let rows = |tx: &rusqlite::Transaction<'_>| {
@@ -4883,23 +4905,25 @@ mod tests {
 
     #[test]
     fn assistant_replacement_clears_old_metadata_and_preserves_start_tail() {
-        let mut connection = database();
-        connection
-            .execute(
-                "UPDATE runtime_agents SET record=?2 WHERE id='agent'",
-                params![
-                    "agent",
-                    json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
-                        "id":"agent","rootId":"agent","epoch":1,"status":"running",
-                        "threadId":"thread","accountKey":"default","turnId":"turn",
-                        "inFlight":true,"events":0,"activeTools":[],"autoWake":false,
-                        "tail":"previous tail","nativeStatus":{"phase":"retrying","turnId":"turn"}
-                    })
-                    .to_string(),
-                ],
+        for send in [dispatch, dispatch_native] {
+            let mut connection = database();
+            studio_runtime_store::approvals::create_schema(&connection).unwrap();
+            let tx = connection.transaction().unwrap();
+            let mut agent = TranscriptRepository::agent(&tx, "agent")
+                .unwrap()
+                .unwrap()
+                .into_value();
+            agent["isLead"] = json!(true);
+            agent["tail"] = json!("previous tail");
+            agent["nativeStatus"] = json!({"phase":"retrying","turnId":"turn"});
+            NotificationDispatchRepository::put_agent_record(
+                &tx,
+                "agent",
+                &studio_runtime_store::AgentRecord::from_value(agent).unwrap(),
             )
-            .expect("agent retry state sets");
-        connection
+            .unwrap();
+            tx.commit().unwrap();
+            connection
             .execute(
                 "INSERT INTO runtime_items(id,agent,record,created) VALUES('agent:answer','agent',?1,1.0)",
                 [json!({
@@ -4911,55 +4935,86 @@ mod tests {
                 .to_string()],
             )
             .expect("old item with metadata inserts");
-        let started = json!({"method":"item/started","params":{"threadId":"thread","turnId":"turn","item":{"id":"answer","type":"agentMessage","text":"replacement"}}});
-        let mut streams = NotificationStreamBuffer::default();
-        let transaction = connection.transaction().expect("start transaction begins");
-        dispatch(&transaction, &mut streams, 1, &started, 2.0)
-            .expect("standalone start writes a fresh transcript record");
-        transaction.commit().expect("start commits");
-        let item = TranscriptRepository::item(&connection, "agent", "agent:answer")
-            .expect("replacement item reads")
-            .expect("replacement item exists");
-        assert_eq!(item.record.value()["text"], "replacement");
-        assert_eq!(item.record.value()["turnId"], "turn");
-        for field in ["afterRestore", "inputs", "assets", "obsolete"] {
-            assert!(
-                item.record.value().get(field).is_none(),
-                "old field {field} survived"
-            );
-        }
-        let agent = TranscriptRepository::agent(&connection, "agent")
-            .expect("agent reads")
-            .expect("agent exists");
-        assert_eq!(agent.tail.as_deref(), Some("previous tail"));
-        assert_eq!(agent.native_response_turn.as_deref(), Some("turn"));
-        assert!(agent.native_status.is_none());
+            let started = json!({"method":"item/started","params":{"startedAtMs":2000,"threadId":"thread","turnId":"turn","item":{"id":"answer","type":"agentMessage","text":"replacement"}}});
+            let mut streams = NotificationStreamBuffer::default();
+            let transaction = connection.transaction().expect("start transaction begins");
+            send(&transaction, &mut streams, 1, &started, 2.0)
+                .expect("standalone start writes a fresh transcript record");
+            transaction.commit().expect("start commits");
+            let item = TranscriptRepository::item(&connection, "agent", "agent:answer")
+                .expect("replacement item reads")
+                .expect("replacement item exists");
+            assert_eq!(item.record.value()["text"], "replacement");
+            assert_eq!(item.record.value()["turnId"], "turn");
+            for field in ["afterRestore", "inputs", "assets", "obsolete"] {
+                assert!(
+                    item.record.value().get(field).is_none(),
+                    "old field {field} survived"
+                );
+            }
+            let agent = TranscriptRepository::agent(&connection, "agent")
+                .expect("agent reads")
+                .expect("agent exists");
+            assert_eq!(agent.tail.as_deref(), Some("previous tail"));
+            assert_eq!(agent.native_response_turn.as_deref(), Some("turn"));
+            assert!(agent.native_status.is_none());
 
-        let mut no_turn_agent = agent.into_value();
-        no_turn_agent["turnId"] = Value::Null;
-        no_turn_agent["nativeStatus"] = json!({"phase":"retrying","turnId":null});
-        connection
-            .execute(
-                "UPDATE runtime_agents SET record=?1 WHERE id='agent'",
-                [no_turn_agent.to_string()],
+            let completed = json!({"method":"item/completed","params":{"completedAtMs":3000,"threadId":"thread","turnId":"turn","item":{"id":"answer","type":"agentMessage","text":"final answer","questions":[{"title":"Which option?","options":["A","B"]}]}}});
+            let transaction = connection.transaction().unwrap();
+            send(&transaction, &mut streams, 2, &json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":" draft"}}), 2.5).unwrap();
+            send(&transaction, &mut streams, 3, &completed, 3.0).unwrap();
+            transaction.commit().unwrap();
+            let item = TranscriptRepository::item(&connection, "agent", "agent:answer")
+                .unwrap()
+                .unwrap();
+            assert_eq!(item.record.value()["text"], "final answer");
+            assert_eq!(item.record.value()["streaming"], false);
+            assert_eq!(streams.closed_len(), 1);
+            let request = studio_runtime_store::approvals::get(
+                &connection,
+                &studio_runtime_schema::approvals::ApprovalId("agent:question:answer".into()),
             )
-            .expect("missing turn state stores");
-        let completed = json!({"method":"item/completed","params":{"threadId":"thread","turnId":null,"item":{"id":"no-turn","type":"agentMessage","text":"answer"}}});
-        let transaction = connection
-            .transaction()
-            .expect("null-turn transaction begins");
-        dispatch(&transaction, &mut streams, 2, &completed, 3.0)
-            .expect("null-turn completion writes");
-        transaction.commit().expect("null-turn completion commits");
-        let item = TranscriptRepository::item(&connection, "agent", "agent:no-turn")
-            .expect("null-turn item reads")
-            .expect("null-turn item exists");
-        assert_eq!(item.record.value().get("turnId"), Some(&Value::Null));
-        let agent = TranscriptRepository::agent(&connection, "agent")
-            .expect("updated agent reads")
-            .expect("updated agent exists");
-        assert!(agent.native_response_turn.is_none());
-        assert!(agent.native_status.is_none());
+            .unwrap()
+            .unwrap();
+            let studio_runtime_schema::approvals::Request::AgentQuestion { questions } =
+                request.request
+            else {
+                panic!("completed question");
+            };
+            assert_eq!(questions[0].question, "Which option?");
+            let agent = TranscriptRepository::agent(&connection, "agent")
+                .unwrap()
+                .unwrap();
+            assert_eq!(agent.last_answer.as_deref(), Some("final answer"));
+            assert!(agent.active_tools.as_ref().is_none_or(Vec::is_empty));
+            let mut no_turn_agent = agent.into_value();
+            no_turn_agent["turnId"] = Value::Null;
+            no_turn_agent["nativeStatus"] = json!({"phase":"retrying","turnId":null});
+            let tx = connection.transaction().unwrap();
+            NotificationDispatchRepository::put_agent_record(
+                &tx,
+                "agent",
+                &studio_runtime_store::AgentRecord::from_value(no_turn_agent).unwrap(),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            let completed = json!({"method":"item/completed","params":{"threadId":"thread","turnId":null,"item":{"id":"no-turn","type":"agentMessage","text":"answer"}}});
+            let transaction = connection
+                .transaction()
+                .expect("null-turn transaction begins");
+            dispatch(&transaction, &mut streams, 4, &completed, 4.0)
+                .expect("null-turn completion writes");
+            transaction.commit().expect("null-turn completion commits");
+            let item = TranscriptRepository::item(&connection, "agent", "agent:no-turn")
+                .expect("null-turn item reads")
+                .expect("null-turn item exists");
+            assert_eq!(item.record.value().get("turnId"), Some(&Value::Null));
+            let agent = TranscriptRepository::agent(&connection, "agent")
+                .expect("updated agent reads")
+                .expect("updated agent exists");
+            assert!(agent.native_response_turn.is_none());
+            assert!(agent.native_status.is_none());
+        }
     }
 
     #[test]

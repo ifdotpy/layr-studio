@@ -35,11 +35,23 @@ pub(crate) struct Native {
     pub(crate) calls: Mutex<Vec<Value>>,
     pub(crate) repair_report: Mutex<Option<Value>>,
     ready: Notify,
+    lost_reply: AtomicBool,
+    reconnected: AtomicBool,
+    not_sent: AtomicBool,
+    unsupported: AtomicBool,
 }
 impl Native {
     fn response(&self, request: &Value) -> Value {
         self.calls.lock().unwrap().push(request.clone());
         let p = &request["params"];
+        studio_runtime_services::internal_sender_witness::request(
+            studio_runtime_providers::Method::from_wire(request["method"].as_str().unwrap())
+                .unwrap(),
+            p,
+        );
+        if request["method"] == "turn/settings/update" && self.unsupported.load(Ordering::SeqCst) {
+            return json!({"id":request["id"],"error":{"code":-32601,"message":"unsupported settings"}});
+        }
         let result = match request["method"].as_str().unwrap() {
             "claude/repairReport" => {
                 self.repair_report.lock().unwrap().clone().unwrap_or_else(|| json!({"status":"needs_repair","skippedRows":3,"invalidSequence":true,"scopeConfirmed":true,"nativeHistoryConfirmed":false,"secret":"must-not-escape","transcript":"private transcript content","path":"/private/account"}))
@@ -48,6 +60,7 @@ impl Native {
                 json!({"tasks":[],"turns":[{"id":"one","status":"completed","canRestoreFiles":true},{"id":"two","status":"completed","canRestoreFiles":true}]})
             }
             "claude/settings" => json!({"settings":p["settings"]}),
+            "turn/settings/update" => json!({"status":"applied"}),
             "claude/stopTask" => json!({"stopped":true}),
             "claude/fileBackups" => {
                 let release = p["settledRequestIds"]
@@ -95,6 +108,12 @@ impl ProviderTaskFactory for Factory {
                             observed,
                         } => {
                             let method = write.frame().method().unwrap_or("");
+                            if method == "turn/settings/update"
+                                && native.not_sent.swap(false, Ordering::SeqCst)
+                            {
+                                drop(reply.send(CommandReceipt::NotSent));
+                                continue;
+                            }
                             if method == "initialize" {
                                 drop(reply.send(CommandReceipt::CachedInitialize(json!({}))));
                             } else {
@@ -211,13 +230,25 @@ async fn fixture_with_live_session(
     AccountHandle,
     Arc<Native>,
 ) {
+    fixture_with_provider(live, studio_runtime_providers::ProviderKind::Claude).await
+}
+async fn fixture_with_provider(
+    live: Option<bool>,
+    provider: studio_runtime_providers::ProviderKind,
+) -> (
+    tempfile::TempDir,
+    Arc<RuntimeStore>,
+    axum::Router,
+    AccountHandle,
+    Arc<Native>,
+) {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().join("cwd");
     std::fs::create_dir(&cwd).unwrap();
     let state_dir = root.path().join("state");
     std::fs::create_dir(&state_dir).unwrap();
     let store = Arc::new(RuntimeStore::open(Some(&state_dir)).await.unwrap());
-    let agent = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"cwd":cwd,"provider":"claude","accountKey":"account","threadId":"thread","status":"paused","autoWake":false});
+    let agent = json!({"compactions":0,"id":"agent","rootId":"agent","epoch":2,"cwd":cwd,"provider":provider,"accountKey":"account","threadId":"thread","turnId":"one","model":"old-model","status":"paused","inFlight":false,"autoWake":false});
     store
         .transaction(move |tx| {
             studio_runtime_store::AgentRepository::put(
@@ -246,7 +277,7 @@ async fn fixture_with_live_session(
         studio_runtime_services::model_catalog::ModelCatalogService::new(),
     )
     .unwrap();
-    resources.claude_account_pin = json!({"provider":studio_runtime_schema::ProviderKind::Claude});
+    resources.claude_account_pin = json!({"provider":provider});
     let worker = start_account_worker(
         StoreBridge::new(store.clone()).await.unwrap(),
         "account".into(),
@@ -259,7 +290,7 @@ async fn fixture_with_live_session(
         SessionTaskConfig {
             initialize_params: json!({}),
             generation: Generation(1),
-            wire: studio_runtime_providers::ProviderKind::Claude.wire(),
+            wire: provider.wire(),
             timeout_ms: 20000,
             initialize_operation: OperationId("init".into()),
             request_id_prefix: None,
@@ -270,7 +301,19 @@ async fn fixture_with_live_session(
     .await
     .unwrap();
     native.ready.notified().await;
-    let policy=AccountPolicyState::from_startup(Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"account","accounts":{"account":{"id":"account","provider":"claude","home":"/fixture","label":"Fixture","source":"Claude Code","status":"ready"}},"logins":{}}).to_string().as_bytes()),[]).unwrap();
+    if provider == studio_runtime_providers::ProviderKind::Codex {
+        store
+            .transaction(|tx| {
+                let mut record = AgentRepository::get(tx, &AgentId::from("agent"))?.unwrap();
+                record.status = studio_runtime_store::AgentStatus::Running;
+                record.in_flight = Some(true);
+                record.turn_id = Some("one".into());
+                AgentRepository::put(tx, &record)
+            })
+            .await
+            .unwrap();
+    }
+    let policy=AccountPolicyState::from_startup(Some(studio_json::json!({"version":studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,"defaultAccountKey":"account","accounts":{"account":{"id":"account","provider":provider,"home":"/fixture","label":"Fixture","source":"Claude Code","status":"ready"}},"logins":{}}).to_string().as_bytes()),[]).unwrap();
     let mut state = HttpState::new(
         "fixture-token".into(),
         "fixture".into(),
@@ -281,10 +324,15 @@ async fn fixture_with_live_session(
         Some(Arc::new(policy)),
     );
     state.account_session = live.map(|live| {
-        Arc::new(Broker(
-            Arc::new(worker.claude_session().unwrap()),
-            AtomicBool::new(live),
-        )) as Arc<dyn AccountSessionPort>
+        if provider == studio_runtime_providers::ProviderKind::Claude {
+            Arc::new(Broker(
+                Arc::new(worker.claude_session().unwrap()),
+                AtomicBool::new(live),
+            )) as Arc<dyn AccountSessionPort>
+        } else {
+            Arc::new(CodexBroker(worker.retained_session(), native.clone()))
+                as Arc<dyn AccountSessionPort>
+        }
     });
     (root, store, router(state).unwrap(), worker, native)
 }
@@ -370,7 +418,7 @@ async fn claude_control_settings_ingress_and_exact_receipt_replay() {
     assert!(native.calls.lock().unwrap().is_empty());
     assert!(agent(&store)["workspaceReservationId"].is_null());
 
-    let body = json!({"id":"agent","action":"settings","request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"settings":{"permissionMode":"plan","thinking":false,"autoCompactWindow":null}});
+    let body = json!({"id":"agent","action":"settings","scope":{"scope":"session"},"request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"settings":{"permissionMode":"plan","thinking":false,"autoCompactWindow":null}});
     let result = post(&app, "/api/claude/session", body.clone()).await;
     assert_eq!(result.0, 200, "{result:?}");
     assert_eq!(
@@ -390,6 +438,9 @@ async fn claude_control_settings_ingress_and_exact_receipt_replay() {
     assert_eq!(replay, result);
     assert_eq!(*native.calls.lock().unwrap(), calls);
 
+    let mut persistent = body.clone();
+    persistent["scope"] = json!({"scope":"persistent"});
+    assert_eq!(post(&app, "/api/claude/session", persistent).await.0, 400);
     let mut conflict = body;
     conflict["settings"]
         .as_object_mut()
@@ -461,5 +512,150 @@ async fn claude_controls_report_unavailable_and_keep_local_paths() {
     let settings = post(&app, "/api/claude/session", json!({"id":"agent","action":"settings","request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(),"settings":{"thinking":false}})).await;
     assert_eq!(settings.0, 200, "{settings:?}");
     assert!(native.calls.lock().unwrap().is_empty());
+    worker.shutdown().await.unwrap();
+}
+
+struct CodexBroker(
+    studio_runtime_services::account_worker::retained::RetainedSessionPort,
+    Arc<Native>,
+);
+impl AccountSessionPort for CodexBroker {
+    fn current_scope(&self, _: &str) -> Option<ConnectionScope> {
+        let mut scope = self.0.scope().clone();
+        if self.1.reconnected.load(Ordering::SeqCst) {
+            scope.generation += 1;
+        }
+        Some(scope)
+    }
+    fn provider_request<'a>(
+        &'a self,
+        request: ProviderRequest,
+    ) -> AccountSessionFuture<'a, SessionReceipt> {
+        Box::pin(async move {
+            let receipt = self
+                .0
+                .request(
+                    studio_runtime_services::account_worker::retained::SessionRequest {
+                        root_request_id: request.root_request_id,
+                        admitted_request: request.admitted_request,
+                        scope: self.0.scope().clone(),
+                        expected_scope: Some(self.0.scope().clone()),
+                        operation: request.operation,
+                        actor: request.actor,
+                        transfer: None,
+                        deleted_actor_session: None,
+                        method: request.method,
+                        params: request.params,
+                        deadline: request.deadline,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    if matches!(
+                        error,
+                        studio_runtime_services::account_worker::retained::PortError::Identity
+                            | studio_runtime_services::account_worker::retained::PortError::Invalid
+                    ) {
+                        AccountSessionError::Refused("settings refused")
+                    } else {
+                        AccountSessionError::Unknown
+                    }
+                })?;
+            if self.1.lost_reply.swap(false, Ordering::SeqCst) {
+                return Err(AccountSessionError::Unknown);
+            }
+            Ok(receipt.into())
+        })
+    }
+}
+#[tokio::test]
+async fn internal_sender_witness_current_turn_settings_http_worker_codec() {
+    let (_root, store, app, mut worker, native) =
+        fixture_with_provider(Some(true), studio_runtime_providers::ProviderKind::Codex).await;
+    let body = current_settings_body();
+    let result = post(&app, "/api/conversation", body.clone()).await;
+    assert_eq!(result.0, 200, "{result:?}");
+    assert_eq!(post(&app, "/api/conversation", body.clone()).await.0, 200);
+    let calls = native.calls.lock().unwrap().clone();
+    let settings: Vec<_> = calls
+        .iter()
+        .filter(|c| c["method"] == "turn/settings/update")
+        .collect();
+    assert_eq!(settings.len(), 1);
+    assert_eq!(
+        settings[0]["params"],
+        json!({"threadId":"thread","turnId":"one","model":"new-model","effort":"high","serviceTier":"priority"})
+    );
+    assert_eq!(
+        agent(&store)["model"],
+        "old-model",
+        "turn override must not overwrite session defaults"
+    );
+    let mut stale = body.clone();
+    stale["settings_scope"]["turn_id"] = json!("different-turn");
+    stale["request_id"] = json!(studio_runtime_schema::persistence::RequestIdentity::issue_root());
+    assert_eq!(post(&app, "/api/conversation", stale).await.0, 400);
+    let mut persistent = body;
+    persistent["settings_scope"] = json!({"scope":"persistent"});
+    assert_eq!(post(&app, "/api/conversation", persistent).await.0, 400);
+    worker.shutdown().await.unwrap();
+}
+
+fn current_settings_body() -> Value {
+    json!({"id":"agent", "expected_account_key":"account", "request_id":studio_runtime_schema::persistence::RequestIdentity::issue_root(), "settings_scope":{"scope":"current_turn","turn_id":"one"}, "model":"new-model", "effort":"high", "fast_mode":true})
+}
+
+#[tokio::test]
+async fn live_settings_lost_receipt_replays_after_turn_or_generation_changes() {
+    for ended in [true, false] {
+        let (_root, store, app, mut worker, native) =
+            fixture_with_provider(Some(true), studio_runtime_providers::ProviderKind::Codex).await;
+        let body = current_settings_body();
+        native.lost_reply.store(true, Ordering::SeqCst);
+        assert_eq!(post(&app, "/api/conversation", body.clone()).await.0, 502);
+        if ended {
+            store
+                .transaction(|tx| {
+                    let mut record = AgentRepository::get(tx, &AgentId::from("agent"))?.unwrap();
+                    record.in_flight = Some(false);
+                    record.turn_id = None;
+                    record.status = studio_runtime_store::AgentStatus::Idle;
+                    AgentRepository::put(tx, &record)
+                })
+                .await
+                .unwrap();
+        } else {
+            // Simulates current generation two with the retained checkpoint-verified generation-one receipt.
+            native.reconnected.store(true, Ordering::SeqCst);
+        }
+        let result = post(&app, "/api/conversation", body).await;
+        assert_eq!(result.0, 200, "ended={ended}: {result:?}");
+        assert_eq!(native.calls.lock().unwrap().len(), 1);
+        worker.shutdown().await.unwrap();
+    }
+}
+#[tokio::test]
+async fn live_settings_unsupported_and_not_sent_are_terminal_http_refusals() {
+    let (_root, store, app, mut worker, native) =
+        fixture_with_provider(Some(true), studio_runtime_providers::ProviderKind::Codex).await;
+    native.not_sent.store(true, Ordering::SeqCst);
+    let result = post(&app, "/api/conversation", current_settings_body()).await;
+    assert_eq!(result.0, 400, "{result:?}");
+    assert!(native.calls.lock().unwrap().is_empty());
+    native.unsupported.store(true, Ordering::SeqCst);
+    assert_eq!(
+        post(&app, "/api/conversation", current_settings_body())
+            .await
+            .0,
+        400
+    );
+    native.unsupported.store(false, Ordering::SeqCst);
+    assert_eq!(
+        post(&app, "/api/conversation", current_settings_body())
+            .await
+            .0,
+        200
+    );
+    assert_eq!(agent(&store)["status"], "running");
     worker.shutdown().await.unwrap();
 }

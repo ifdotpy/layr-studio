@@ -278,3 +278,29 @@ fn p06_recovery_message_retains_buffered_text_questions_and_atomicity() {
         0
     );
 }
+#[test]
+fn handled_dispositions_reference_production_handlers() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(4)
+        .expect("workspace root");
+    let test =
+        root.join("workspaces/tooling/apps/repository-checks/tests/provider-contracts.test.ts");
+    crate::bounded_child::run(crate::bounded_child::Request {
+        program: std::ffi::OsStr::new("node"),
+        git_directory: None,
+        args: &[
+            "--test",
+            "--test-reporter=spec",
+            "--test-reporter-destination=stderr",
+            "--test-name-pattern=synthetic vendor method|both fast-filter copies",
+            test.to_str().expect("test path"),
+        ],
+        environment: &[],
+        input: None,
+        stdout_limit: 256 * 1024,
+        stderr_limit: 256 * 1024,
+        timeout: std::time::Duration::from_secs(60),
+    })
+    .expect("disposition binding witnesses");
+}

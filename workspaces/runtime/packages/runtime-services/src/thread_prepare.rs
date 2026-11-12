@@ -782,7 +782,7 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
     }
 }
 
-pub(crate) fn service_tier(fast_mode: bool) -> &'static str {
+pub fn service_tier(fast_mode: bool) -> &'static str {
     if fast_mode { "priority" } else { "default" }
 }
 

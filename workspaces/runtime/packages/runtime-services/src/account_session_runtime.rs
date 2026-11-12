@@ -757,7 +757,7 @@ impl From<crate::account_worker::retained::SessionReceipt> for SessionReceipt {
     }
 }
 
-fn provider_receipt_matches(
+pub(crate) fn provider_receipt_matches(
     receipt: &SessionReceipt,
     account: &str,
     operation: &str,

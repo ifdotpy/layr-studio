@@ -257,6 +257,24 @@ async fn session(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<SessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    if let SessionRequest::Settings(ClaudeControlCommand::Settings { scope, .. }) = &body {
+        use studio_runtime_schema::settings_scope::SettingsScope;
+        match scope {
+            SettingsScope::Session => (),
+            SettingsScope::Persistent => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    studio_runtime_schema::settings_scope::PERSISTENT_UNSUPPORTED_REASON,
+                ));
+            }
+            SettingsScope::CurrentTurn { .. } => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "Claude settings are session scoped",
+                ));
+            }
+        }
+    }
     let id = match &body {
         SessionRequest::Settings(request) => request.id(),
         SessionRequest::Command(request) => &request.id,
@@ -497,7 +515,7 @@ impl ControlSession for LocalControlSession {
     }
 }
 
-async fn load_agent(
+pub(super) async fn load_agent(
     store: Arc<RuntimeStore>,
     id: String,
 ) -> Result<

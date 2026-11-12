@@ -4685,6 +4685,17 @@
             ],
             "title": "Tokensused"
           },
+          "turnId": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Turnid"
+          },
           "turnStatus": {
             "anyOf": [
               {
@@ -19592,6 +19603,20 @@
             "title": "Agent",
             "type": "string"
           },
+          "apps": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NativeCatalogEntry"
+            },
+            "type": "array"
+          },
+          "appsCursor": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "at": {
             "title": "At",
             "type": "number"
@@ -19660,6 +19685,13 @@
               "type": "string"
             },
             "title": "Observednative",
+            "type": "array"
+          },
+          "plugins": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NativeCatalogEntry"
+            },
             "type": "array"
           },
           "role": {
@@ -22170,6 +22202,57 @@
             "maxLength": 1024,
             "minLength": 1,
             "type": "string"
+          },
+          "scope": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "scope": {
+                    "const": "current_turn",
+                    "type": "string"
+                  },
+                  "turn_id": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scope",
+                  "turn_id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "scope": {
+                    "const": "session",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "scope": {
+                    "const": "persistent",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "type": "object"
+              }
+            ],
+            "title": "SettingsScope"
           },
           "settings": {
             "$ref": "#/components/schemas/ClaudeSettings"
@@ -25289,6 +25372,9 @@
           },
           "reviewer_excluded_account_keys": {
             "$ref": "#/components/schemas/ChatAccountExclusions"
+          },
+          "settings_scope": {
+            "$ref": "#/components/schemas/ProviderSettingsScope"
           },
           "subagent_concurrency": {
             "default": 32,
@@ -33848,6 +33934,50 @@
         "title": "NativeCandidateState",
         "type": "string"
       },
+      "NativeCatalogEntry": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "NativeCatalogEntry",
+        "type": "object"
+      },
+      "NativeCatalogResource": {
+        "additionalProperties": false,
+        "properties": {
+          "accountKey": {
+            "minLength": 1,
+            "title": "Accountkey",
+            "type": "string"
+          },
+          "kind": {
+            "const": "native-catalog",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "accountKey"
+        ],
+        "title": "NativeCatalogResource",
+        "type": "object"
+      },
       "NativeClaudeAccount": {
         "additionalProperties": false,
         "properties": {
@@ -41087,6 +41217,90 @@
         "description": "Provider-owned content that Studio stores and shows as is (tolerant at the\nprovider boundary). Typed request fields are removed from `params`.",
         "type": "object"
       },
+      "ProviderSettingsScope": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "scope": {
+                "const": "current_turn",
+                "type": "string"
+              },
+              "turn_id": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope",
+              "turn_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "scope": {
+                "const": "session",
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "scope": {
+                "const": "persistent",
+                "type": "string"
+              }
+            },
+            "required": [
+              "scope"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "SettingsScope"
+      },
+      "ProviderSupport": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "Explicit availability of a user control or internal provider policy.",
+        "oneOf": [
+          {
+            "enum": [
+              "Supported"
+            ],
+            "type": "string"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "Unsupported": {
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "Unsupported"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "ProviderSupport"
+      },
       "ProviderUpdateNotice": {
         "additionalProperties": false,
         "description": "A newer installed or upstream provider version is available.",
@@ -44430,6 +44644,7 @@
             "models": "#/components/schemas/ModelsResource",
             "monitors": "#/components/schemas/MonitorsResource",
             "multi-server": "#/components/schemas/MultiServerResource",
+            "native-catalog": "#/components/schemas/NativeCatalogResource",
             "native-layr-settings": "#/components/schemas/NativeLayrSettingsResource",
             "processes": "#/components/schemas/ProcessesResource",
             "queue": "#/components/schemas/QueueResource",
@@ -44546,6 +44761,9 @@
           },
           {
             "$ref": "#/components/schemas/RetainedWorktreesResource"
+          },
+          {
+            "$ref": "#/components/schemas/NativeCatalogResource"
           }
         ],
         "title": "ResourceRef"
@@ -52360,6 +52578,9 @@
           "multi-server": {
             "$ref": "#/components/schemas/AccessSnapshot"
           },
+          "native-catalog": {
+            "type": "null"
+          },
           "native-layr-settings": {
             "$ref": "#/components/schemas/NativeLayrSettingsResponse"
           },
@@ -52490,7 +52711,8 @@
           "terminal-output",
           "native-layr-settings",
           "taskDetail",
-          "retained-worktrees"
+          "retained-worktrees",
+          "native-catalog"
         ],
         "type": "object"
       },
@@ -69491,14 +69713,6 @@
             "schema": {
               "minLength": 1,
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "fresh",
-            "required": false,
-            "schema": {
-              "type": "boolean"
             }
           }
         ],

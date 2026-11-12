@@ -2,6 +2,7 @@ import type {
   SDKControlGetUsageResponse,
   SDKAssistantMessage,
   SDKUserMessage,
+  SDKMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { KnownCodexErrorKind } from "./provider-errors.generated.ts";
 import type { FreshToolItem } from "./session-state.ts";
@@ -266,26 +267,14 @@ export function legacyClaudeErrorInfo(
   return null;
 }
 
-export function providerNotice(message: Record<string, unknown>) {
-  if (message.subtype === "api_retry") {
-    const status =
-      message.error_status == null
-        ? "no HTTP response"
-        : "HTTP " + message.error_status;
-    return `Claude API retry ${message.attempt} of ${message.max_retries}. Delay: ${message.retry_delay_ms} ms. Status: ${status}.`;
-  }
-  if (
-    ["model_fallback", "model_consent_fallback"].includes(
-      message.subtype as string,
-    )
-  ) {
-    const original =
-      message.original_model || message.originalModel || "unknown";
-    const fallback =
-      message.fallback_model || message.fallbackModel || "unknown";
-    return `Claude model fallback: ${original} to ${fallback}. ${message.content || message.text || ""}`.trim();
-  }
-  return null;
+export function providerNotice(
+  message: Extract<SDKMessage, { type: "system"; subtype: "api_retry" }>,
+) {
+  const status =
+    message.error_status == null
+      ? "no HTTP response"
+      : "HTTP " + message.error_status;
+  return `Claude API retry ${message.attempt} of ${message.max_retries}. Delay: ${message.retry_delay_ms} ms. Status: ${status}.`;
 }
 
 export function modelFamily(model: unknown) {

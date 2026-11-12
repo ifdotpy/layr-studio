@@ -1,12 +1,24 @@
+import type { BridgeOptions } from "./bridge.ts";
+import { PERSISTENT_UNSUPPORTED_REASON } from "./settings-policy.generated.ts";
 import type { Options, Query } from "@anthropic-ai/claude-agent-sdk";
+import { readFileSync } from "node:fs";
+import { z } from "zod";
 
 // Pinned by package.json; additions require a disposition before tsc passes.
-export const CLAUDE_SDK_VERSION = "0.3.308";
+export const CLAUDE_SDK_VERSION = z
+  .object({
+    dependencies: z.object({ "@anthropic-ai/claude-agent-sdk": z.string() }),
+  })
+  .parse(
+    JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")),
+  ).dependencies["@anthropic-ai/claude-agent-sdk"];
 export type Disposition =
   | { kind: "Handled" }
   | { kind: "Ignored"; reason: string };
 const handled = { kind: "Handled" } as const;
-const ignored = (reason: string): Disposition => ({ kind: "Ignored", reason });
+const ignored = (reason: string) => ({ kind: "Ignored" as const, reason });
+
+type ConfiguredOptionKeys<T> = T extends unknown ? keyof T : never;
 
 export const sdkOptionsDispositions = {
   // Preparation queries have bounded cancellation.
@@ -123,66 +135,72 @@ export const sdkOptionsDispositions = {
   systemPrompt: handled,
   title: ignored("Studio stores thread names separately."),
   spawnClaudeCodeProcess: ignored("Use the SDK process transport."),
-} satisfies Record<keyof Options, Disposition>;
+} satisfies {
+  [K in keyof Options]-?: K extends ConfiguredOptionKeys<BridgeOptions>
+    ? Extract<Disposition, { kind: "Handled" }>
+    : Extract<Disposition, { kind: "Ignored" }>;
+};
 
-export const sdkQueryDispositions = {
-  // Stop and recovery interrupt the native query.
-  interrupt: handled,
-  // Apply live permission changes.
-  setPermissionMode: handled,
+// This native invocation surface is the support owner. Bind lazily available
+// members independently so one unavailable control cannot prevent query startup.
+export function querySurface(q: Query) {
+  const nativeIterator = q[Symbol.asyncIterator]();
+  const iterator = {
+    next: nativeIterator.next.bind(nativeIterator),
+    return: nativeIterator.return.bind(nativeIterator),
+  };
+  return {
+    ...iterator,
+    interrupt: q.interrupt?.bind(q),
+    setPermissionMode: q.setPermissionMode?.bind(q),
+    setModel: q.setModel?.bind(q),
+    applyFlagSettings: q.applyFlagSettings?.bind(q),
+    initializationResult: q.initializationResult?.bind(q),
+    reinitialize: q.reinitialize?.bind(q),
+    supportedCommands: q.supportedCommands?.bind(q),
+    supportedModels: q.supportedModels?.bind(q),
+    mcpServerStatus: q.mcpServerStatus?.bind(q),
+    getContextUsage: q.getContextUsage?.bind(q),
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET:
+      q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?.bind(q),
+    accountInfo: q.accountInfo?.bind(q),
+    reconnectMcpServer: q.reconnectMcpServer?.bind(q),
+    stopTask: q.stopTask?.bind(q),
+    backgroundTasks: q.backgroundTasks?.bind(q),
+    close: q.close?.bind(q),
+    [Symbol.asyncIterator]: () => iterator,
+  };
+}
+export type BridgeQuery = ReturnType<typeof querySurface>;
+
+export const sdkQueryUnsupported = {
+  setMcpServers: ignored(
+    "Live Studio server replacement requires destructive removal; reopen the query to change tools.",
+  ),
   setMcpPermissionModeOverride: ignored(
     "No per-server permission override control is exposed.",
   ),
-  // Apply live model changes.
-  setModel: handled,
   setMaxThinkingTokens: ignored(
     "Thinking uses session flags and the thinking option.",
   ),
-  // Apply current session flag settings.
-  applyFlagSettings: handled,
-  updateSettings: ignored("Studio does not write native user settings files."),
-  // Read native capabilities and commands.
-  initializationResult: handled,
-  // Recover controls and verified account evidence.
-  reinitialize: handled,
-  supportedCommands: ignored(
-    "The initialization result already includes commands.",
-  ),
-  // Read the account model catalog.
-  supportedModels: handled,
+  updateSettings: ignored(PERSISTENT_UNSUPPORTED_REASON),
   supportedAgents: ignored("Studio owns the agent catalog."),
-  // Read and verify external MCP catalogs.
-  mcpServerStatus: handled,
-  // Main-loop occupancy is read at result boundaries, separately from billing.
-  getContextUsage: handled,
-  // Read account plan usage.
-  usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: handled,
   readFile: ignored("File operations use normal native tool permissions."),
   reloadPlugins: ignored("No live native plugin reload control is exposed."),
   reloadSkills: ignored("No live native skill reload control is exposed."),
   reloadOutputStyles: ignored(
     "No live output style reload control is exposed.",
   ),
-  // Verify native account identity.
-  accountInfo: handled,
   rewindFiles: ignored("Studio restores verified file checkpoints itself."),
   seedReadState: ignored("Read provenance remains SDK-owned."),
-  // Reconnect pending or requested MCP servers.
-  reconnectMcpServer: handled,
   toggleMcpServer: ignored("MCP changes use verified full catalogs."),
   readMcpResource: ignored("MCP resources are invoked through native tools."),
-  // Apply verified live external MCP configurations.
-  setMcpServers: handled,
   streamInput: ignored("The query prompt async iterator owns input delivery."),
-  // Stop explicit or policy-selected background tasks.
-  stopTask: handled,
-  // Move foreground tools to background.
-  backgroundTasks: handled,
-  // Release native process ownership.
-  close: handled,
-  next: handled,
-  return: handled,
-  throw: handled,
-  [Symbol.asyncIterator]: handled,
-  [Symbol.asyncDispose]: handled,
-} satisfies Record<keyof Query, Disposition>;
+  throw: ignored("Studio does not inject exceptions into the native iterator."),
+  [Symbol.asyncDispose]: ignored(
+    "Queries are released through close and iterator return.",
+  ),
+} satisfies Record<
+  Exclude<keyof Query, keyof BridgeQuery>,
+  Extract<Disposition, { kind: "Ignored" }>
+>;

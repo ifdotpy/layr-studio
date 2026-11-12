@@ -15,6 +15,7 @@ import {
   REVIEWED_P2_SQL_ALLOWANCES,
   WRITER_PLAN_WITNESS_SQL_ALLOWANCES,
   REVIEWED_WAVE_C_SQL_ALLOWANCES,
+  REVIEWED_WAVE_DE_JSON_ALLOWANCES,
   fingerprint,
   formatSqlBaseline,
   ownerFor,
@@ -37,6 +38,7 @@ test("reviewed SQL remains limited to its exact sites and counts", () => {
     ...REVIEWED_P2_SQL_ALLOWANCES,
     ...WRITER_PLAN_WITNESS_SQL_ALLOWANCES,
     ...REVIEWED_WAVE_C_SQL_ALLOWANCES,
+    ...REVIEWED_WAVE_DE_JSON_ALLOWANCES,
   ];
   const identity = (row: (typeof allowances)[number]) =>
     `${row.file}:${row.api}:${row.fingerprint}`;

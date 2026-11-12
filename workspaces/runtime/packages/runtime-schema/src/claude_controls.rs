@@ -158,6 +158,8 @@ pub enum ClaudeControlCommand {
         id: ControlId,
         request_id: ControlId,
         settings: ClaudeSettings,
+        #[serde(default)]
+        scope: crate::settings_scope::SettingsScope,
     },
 }
 
@@ -223,6 +225,7 @@ pub(crate) fn schemas() -> Vec<(&'static str, Value)> {
             root
         }
     };
+    settings_request["properties"]["scope"] = crate::settings_scope::schema();
     let settings = settings_request["properties"]["settings"].clone();
     settings_request["properties"]["settings"] =
         json!({"$ref":"#/components/schemas/ClaudeSettings"});

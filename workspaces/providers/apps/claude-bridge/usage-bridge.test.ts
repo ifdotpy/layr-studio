@@ -728,3 +728,17 @@ test.each([
     expect(completion.params.turn.error?.message).toMatch(message);
   },
 );
+
+test("native catalog changes reach the bridge notification and current command read", async () => {
+  const b = await setup();
+  const id = await start(b, "catalog-change");
+  await done(b, id);
+  expect(b.notes.map((note) => note.method)).toContain("skills/changed");
+  expect(await b.call("claude/commands", { cwd: b.root })).toContainEqual({
+    name: "fresh-skill",
+    description: "Discovered skill",
+    argumentHint: "",
+    builtin: false,
+    aliases: [],
+  });
+});

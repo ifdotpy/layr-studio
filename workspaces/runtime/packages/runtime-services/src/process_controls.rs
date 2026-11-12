@@ -830,22 +830,25 @@ pub fn processes(
             ProcessSource::Task(raw) => {
                 let provider = raw
                     .source_provider
-                    .map(|provider| provider.key())
-                    .unwrap_or_else(|| owner.provider.unwrap_or(ProviderKind::Codex).key());
-                let source = if raw.kind() == studio_runtime_schema::task_record::TaskKind::Command
-                    && raw.process_id().is_some_and(|id| id.truthy())
-                {
-                    ProcessSourceKind::CodexTask
-                } else if provider == ProviderKind::Claude.key()
-                    && raw.kind() == studio_runtime_schema::task_record::TaskKind::Tool
-                    && raw
-                        .item_id()
-                        .strip_prefix("task:")
-                        .is_some_and(|v| !v.is_empty())
-                {
-                    ProcessSourceKind::ClaudeTask
-                } else {
-                    continue;
+                    .or(owner.provider)
+                    .ok_or(Error::Invalid("Unknown process provider"))?;
+                let source = match provider {
+                    ProviderKind::Codex
+                        if raw.kind() == studio_runtime_schema::task_record::TaskKind::Command
+                            && raw.process_id().is_some_and(|id| id.truthy()) =>
+                    {
+                        ProcessSourceKind::CodexTask
+                    }
+                    ProviderKind::Claude
+                        if raw.kind() == studio_runtime_schema::task_record::TaskKind::Tool
+                            && raw
+                                .item_id()
+                                .strip_prefix("task:")
+                                .is_some_and(|v| !v.is_empty()) =>
+                    {
+                        ProcessSourceKind::ClaudeTask
+                    }
+                    ProviderKind::Codex | ProviderKind::Claude => continue,
                 };
                 output.push(project(source, raw, owner, owner_connection));
             }
@@ -1274,6 +1277,57 @@ mod claim_identity_tests {
 
     thread_local! {
         static SCHEMA_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn process_projection_requires_explicit_provider_identity() {
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        let task: studio_runtime_store::TaskRecord = studio_json::from_str(r#"{"id":"command","agent":"owner","created":1,"itemId":"item","turnId":"turn","kind":"command","status":"running","type":"commandExecution","name":"commandExecution","processId":"pid"}"#).unwrap();
+        let mut owner: ProcessOwner = serde::Deserialize::deserialize(&json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true})).unwrap();
+        let connections = Connections::default();
+        assert!(matches!(
+            processes(
+                &tx,
+                &[(&owner, ProcessSource::Task(Box::new(task.clone())))],
+                &connections
+            ),
+            Err(Error::Invalid("Unknown process provider"))
+        ));
+        owner.provider = Some(ProviderKind::Claude);
+        assert!(
+            processes(
+                &tx,
+                &[(&owner, ProcessSource::Task(Box::new(task.clone())))],
+                &connections
+            )
+            .unwrap()
+            .is_empty()
+        );
+        owner.provider = Some(ProviderKind::Codex);
+        assert_eq!(
+            processes(
+                &tx,
+                &[(&owner, ProcessSource::Task(Box::new(task.clone())))],
+                &connections
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        owner.provider = None;
+        let mut task = task;
+        task.source_provider = Some(ProviderKind::Codex);
+        assert_eq!(
+            processes(
+                &tx,
+                &[(&owner, ProcessSource::Task(Box::new(task)))],
+                &connections
+            )
+            .unwrap()
+            .len(),
+            1
+        );
     }
 
     #[test]

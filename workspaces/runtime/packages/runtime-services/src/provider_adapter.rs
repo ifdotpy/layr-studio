@@ -244,7 +244,10 @@ pub trait ProviderAdapter: Send + Sync + 'static {
 
 /// The store consumes JSON projections; native protocol parsing remains typed.
 pub(crate) fn project_frame(frame: ProviderEvent) -> ProviderEvent {
-    if crate::notification_dispatch::progress::native(&frame).is_some() {
+    if catalog_changed(&frame)
+        || crate::notification_dispatch::progress::native(&frame).is_some()
+        || crate::live_settings::native_event(&frame).is_some()
+    {
         return frame;
     }
     use studio_runtime_providers::{
@@ -727,9 +730,17 @@ static CLAUDE_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
     },
     configured_binary: |profile, launched| {
         launched.as_ref()?;
-        Some(crate::account_driver::claude::resolve_public_claude_binary(
-            profile,
-        ))
+        let configured = profile
+            .claude_options
+            .as_ref()
+            .and_then(|options| options.binary_path.as_str());
+        Some(
+            crate::account_driver::claude::resolve_login_binary(
+                configured,
+                &env::vars_os().collect(),
+            )
+            .map(|binary| binary.to_string_lossy().into_owned()),
+        )
     },
     owns_model: ClaudeAdapter::owns_model,
     classify_error: ClaudeAdapter::classify_error,
@@ -888,6 +899,125 @@ pub fn is_executable(path: &Path) -> bool {
     }
 }
 
+/// Extra native catalogs supported by the selected provider. Missing identity stays unsupported.
+pub fn catalog_requests(
+    provider: Option<ProviderKind>,
+    cwd: &str,
+    thread: Option<&str>,
+) -> Vec<(&'static str, crate::catalog_reads::ProviderRequest)> {
+    use crate::catalog_reads::ProviderRequest;
+    match provider {
+        Some(ProviderKind::Codex) => vec![
+            (
+                "apps",
+                // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
+                ProviderRequest {
+                    method: codex::ClientRequestMethod::AppList.as_str().to_owned(),
+                    params: json!(codex::AppsListParams {
+                        cursor: None,
+                        force_refetch: Some(true),
+                        limit: Some(Some(studio_runtime_schema::native_catalog::APPS_PER_PAGE)),
+                        thread_id: Some(thread.map(str::to_owned))
+                    }),
+                },
+            ),
+            (
+                "plugins",
+                // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
+                ProviderRequest {
+                    method: codex::ClientRequestMethod::PluginList.as_str().to_owned(),
+                    params: json!(codex::PluginListParams {
+                        cwds: Some(Some(vec![cwd.to_owned()])),
+                        force_refetch: Some(true),
+                        marketplace_kinds: None
+                    }),
+                },
+            ),
+        ],
+        Some(ProviderKind::Claude) | None => Vec::new(),
+    }
+}
+
+/// Project each supported catalog once at its owning provider boundary.
+pub fn apply_capability_result(
+    provider: Option<ProviderKind>,
+    result: &mut Value,
+    label: &str,
+    response: &Value,
+) -> Result<(), &'static str> {
+    let (data, cursor) = match (provider, label) {
+        (Some(ProviderKind::Codex), "apps") => {
+            let native: codex::AppsListResponse = serde::Deserialize::deserialize(response)
+                .map_err(|_| "Invalid native app catalog")?;
+            (
+                catalog_entries(
+                    native
+                        .data
+                        .into_iter()
+                        .map(|app| (app.id, app.name, app.is_enabled)),
+                ),
+                json!(native.next_cursor.flatten()),
+            )
+        }
+        (Some(ProviderKind::Codex), "plugins") => {
+            let native: codex::PluginListResponse = serde::Deserialize::deserialize(response)
+                .map_err(|_| "Invalid native plugin catalog")?;
+            for error in native.marketplace_load_errors.into_iter().flatten() {
+                crate::catalog_reads::append_capability_error(result, label, &error.message);
+            }
+            (
+                catalog_entries(
+                    native
+                        .marketplaces
+                        .into_iter()
+                        .flat_map(|marketplace| marketplace.plugins)
+                        .map(|plugin| (plugin.id, plugin.name, Some(plugin.enabled))),
+                ),
+                Value::Null,
+            )
+        }
+        (Some(ProviderKind::Codex | ProviderKind::Claude), _) => (
+            response
+                .get("data")
+                .or_else(|| {
+                    (label == "servers")
+                        .then(|| response.get("servers"))
+                        .flatten()
+                })
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+            response.get("nextCursor").cloned().unwrap_or(Value::Null),
+        ),
+        (None, _) => return Err("Unsupported provider"),
+    };
+    result[label] = data.clone();
+    if label != "plugins" {
+        result[format!("{label}Cursor")] = cursor;
+    }
+    if label == "servers" {
+        result["mcp"] = data;
+    }
+    Ok(())
+}
+
+fn catalog_entries(entries: impl Iterator<Item = (String, String, Option<bool>)>) -> Value {
+    use studio_runtime_schema::native_catalog::NativeCatalogEntry;
+    json!(
+        entries
+            .map(|(id, name, enabled)| NativeCatalogEntry { id, name, enabled })
+            .collect::<Vec<_>>()
+    )
+}
+
+/// Account-wide native catalog changes, classified before generic projection.
+pub(crate) fn catalog_changed(frame: &ProviderEvent) -> bool {
+    use studio_runtime_providers::codex_disposition::{
+        self, Disposition, HandlerKey, NotificationHandler, ProjectionHandler,
+    };
+    matches!(frame, ProviderEvent::CodexNotification(notification) if matches!(codex_disposition::server_notification(notification.method()), Disposition::Handled(HandlerKey::Notification(NotificationHandler::Projection(ProjectionHandler::SkillsChanged | ProjectionHandler::AppListUpdated)))))
+        || matches!(frame, ProviderEvent::Notification(notification) if notification.method.as_str() == "skills/changed")
+}
+
 #[cfg(test)]
 mod tests {
     fn test_claude_launch(
@@ -991,23 +1121,10 @@ mod tests {
 
     #[test]
     fn each_adapter_reports_its_typed_control_list() {
-        use super::ProviderCapability::{
-            Approvals, Compaction, Effort, Fork, ModelChange, Rewind, Steer,
-        };
         for kind in ProviderKind::ALL {
-            assert_eq!(
-                adapter(kind).descriptor().kind.capabilities(),
-                [
-                    Steer,
-                    Rewind,
-                    Fork,
-                    ModelChange,
-                    Effort,
-                    Compaction,
-                    Approvals
-                ],
-                "{kind}"
-            );
+            let descriptor = adapter(kind).descriptor();
+            assert_eq!(descriptor.kind, kind);
+            assert_eq!(descriptor.kind.capabilities(), kind.capabilities());
         }
     }
 

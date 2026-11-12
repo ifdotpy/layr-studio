@@ -137,6 +137,7 @@ async fn transcript_initial(
         | ResourceRef::DesktopResource(_)
         | ResourceRef::DraftsResource(_)
         | ResourceRef::LimitsResource(_)
+        | ResourceRef::NativeCatalogResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
         | ResourceRef::NativeLayrSettingsResource(_)
@@ -254,6 +255,7 @@ async fn view_value(
         | ResourceRef::DesktopResource(_)
         | ResourceRef::DraftsResource(_)
         | ResourceRef::LimitsResource(_)
+        | ResourceRef::NativeCatalogResource(_)
         | ResourceRef::ModelsResource(_)
         | ResourceRef::MultiServerResource(_)
         | ResourceRef::NativeLayrSettingsResource(_)
@@ -434,6 +436,7 @@ resource_handlers! {
     DraftsResourceHandler => DraftsResource, draft_initial, NoCache;
     LimitsResourceHandler => LimitsResource, passive_initial, NoCache;
     ModelsResourceHandler => ModelsResource, passive_initial, NoCache;
+    NativeCatalogResourceHandler => NativeCatalogResource, passive_initial, NoCache;
     MultiServerResourceHandler => MultiServerResource, passive_initial, NoCache;
     NativeLayrSettingsResourceHandler => NativeLayrSettingsResource, passive_initial, NoCache;
     QueueResourceHandler => QueueResource, passive_initial, NoCache;
@@ -564,6 +567,17 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
             .and_then(|value| studio_json::to_vec(&value).ok());
     }
     match resource {
+        ResourceRef::NativeCatalogResource(resource) => studio_json::to_vec(
+            &state
+                .resource_notifications
+                .published_revision(
+                    &studio_runtime_schema::resource_ref::ResourceRef::NativeCatalogResource(
+                        resource,
+                    ),
+                )
+                .ok()?,
+        )
+        .ok(),
         ResourceRef::DraftsResource(_) => state
             .store?
             .read_async(

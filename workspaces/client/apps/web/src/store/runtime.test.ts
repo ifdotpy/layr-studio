@@ -1,3 +1,4 @@
+import { watchResourceReads } from "../sync/subscriptions/reads.ts";
 import { FrontendLocality } from "../generated/api.ts";
 import { approval } from "../approvalFixtures.ts";
 import { autorun, makeObservable, observable, spy } from "mobx";
@@ -826,4 +827,62 @@ it("defers observable staleness until after the unobserving derivation", async (
     f.subscriptions.dispose();
     vi.useRealTimers();
   }
+});
+
+it("a native revision waits for the eager skills read and starts a fresh read", async () => {
+  vi.useFakeTimers();
+  const f = fixture(),
+    eager = Promise.withResolvers<GetResult<"/api/skills">>();
+  let notify: (version?: ResourceVersion) => void = () => {
+    throw new Error("Missing watcher");
+  };
+  const stopWatch = vi.fn();
+  const watch: NonNullable<Parameters<typeof createServerStore>[1]> = (
+    refs,
+    read,
+    failed,
+    options,
+  ) => {
+    expect(refs).toEqual({ kind: "native-catalog", accountKey: "account" });
+    return watchResourceReads(refs, read, failed, {
+      ...options,
+      events: {
+        watchResourceChanges: (_ref, receive) => {
+          notify = receive;
+          return stopWatch;
+        },
+        watchResourceConnection: () => () => {},
+      },
+    });
+  };
+  const store = createServerStore(f.subscriptions, watch);
+  const get = vi
+    .fn()
+    .mockReturnValueOnce(eager.promise)
+    .mockResolvedValue({ skills: [], errors: [] });
+  const slot = store.reads.skills(
+    { get, getStreamSession: () => undefined },
+    { agent: "agent" },
+    { workspace: "w", account: "account", cwd: "/repo", provider: "codex" },
+  );
+  const pending = slot.read();
+  const stop = autorun(() => void slot.current);
+  try {
+    await vi.advanceTimersByTimeAsync(101);
+    notify({ epoch: "server", revision: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get).toHaveBeenCalledTimes(1);
+    eager.resolve({ skills: [], errors: [] });
+    await pending;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(get).toHaveBeenCalledTimes(2);
+  } finally {
+    eager.resolve({ skills: [], errors: [] });
+    stop();
+    await vi.advanceTimersByTimeAsync(101);
+    store.dispose();
+    f.runtime.dispose();
+    vi.useRealTimers();
+  }
+  expect(stopWatch).toHaveBeenCalledTimes(1);
 });

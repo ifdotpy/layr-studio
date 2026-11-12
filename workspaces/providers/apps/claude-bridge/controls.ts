@@ -30,7 +30,7 @@ import { nativeInputIds } from "./input-messages.ts";
 import { nativeProjectCwd } from "./native-history.ts";
 import { randomUUID } from "node:crypto";
 
-// Initialization is the CLI's authoritative list after native skill policy.
+// The CLI owns command metadata after applying its current native skill policy.
 export function commandCatalog(commands: readonly Command[] = []) {
   const named = new Map<string, BridgeCommand>();
   for (const row of commands) {

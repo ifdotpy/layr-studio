@@ -1,10 +1,10 @@
+import type { JsonValue } from "../../../types.ts";
 import { WorkspaceResourceState as ResourceState } from "../WorkspaceResourceState/WorkspaceResourceState.tsx";
 import { Badge, TextInput } from "@mantine/core";
 import { Search, SlidersHorizontal, Wrench } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { useState } from "react";
 import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
-import type { JsonValue } from "../../../types.ts";
 import ErrorDescription from "../ErrorDescription/ErrorDescription.tsx";
 import { isRecord, McpInventory } from "../McpInventory/McpInventory.tsx";
 import type { Context } from "../Workspace/Workspace.tsx";
@@ -12,6 +12,7 @@ import type { Context } from "../Workspace/Workspace.tsx";
 export const WorkspaceTools = observer(function WorkspaceTools(c: Context) {
   const { state, inventory } = useServerAreas().workspace.capabilities(
     c.selected?.id ?? "",
+    c.selected?.accountKey ?? undefined,
   );
   const [query, setQuery] = useState("");
   const managedTools = (state.data?.managed ?? []).filter((tool) =>
@@ -98,7 +99,16 @@ export const WorkspaceTools = observer(function WorkspaceTools(c: Context) {
             </p>
           )}
           <h3 className="workspace-section-title">Skills</h3>
-          <Inventory value={state.data.skills} query={query} />
+          <Inventory
+            value={state.data.skills.filter(
+              (entry): entry is Record<string, JsonValue> => isRecord(entry),
+            )}
+            query={query}
+          />
+          <h3 className="workspace-section-title">Apps</h3>
+          <Inventory value={state.data.apps ?? []} query={query} />
+          <h3 className="workspace-section-title">Plugins</h3>
+          <Inventory value={state.data.plugins ?? []} query={query} />
           <h3 className="workspace-section-title">Connected tools (MCP)</h3>
           <McpInventory key={c.selected?.id} state={inventory} query={query} />
         </>
@@ -107,16 +117,30 @@ export const WorkspaceTools = observer(function WorkspaceTools(c: Context) {
   );
 });
 
-function Inventory({ value, query }: { value: JsonValue[]; query: string }) {
+type InventoryEntry = {
+  name?: JsonValue | undefined;
+  cwd?: JsonValue | undefined;
+  serverName?: JsonValue | undefined;
+};
+
+function Inventory({
+  value,
+  query,
+}: {
+  value: readonly InventoryEntry[];
+  query: string;
+}) {
   if (!value.length)
-    return <p className="workspace-muted">No entries returned by Codex.</p>;
+    return (
+      <p className="workspace-muted">No entries returned by the provider.</p>
+    );
   return (
     <div className="workspace-tools">
       {value
-        .filter((entry: unknown) =>
+        .filter((entry) =>
           JSON.stringify(entry)?.toLowerCase().includes(query.toLowerCase()),
         )
-        .map((entry: unknown, index: number) => (
+        .map((entry, index) => (
           <details className="workspace-tool" key={index}>
             <summary>
               <SlidersHorizontal size={14} />
@@ -131,7 +155,7 @@ function Inventory({ value, query }: { value: JsonValue[]; query: string }) {
   );
 }
 
-function inventoryName(value: unknown): string | undefined {
+function inventoryName(value: JsonValue | InventoryEntry): string | undefined {
   if (!isRecord(value)) return;
   return [value.name, value.cwd, value.serverName].find(
     (candidate): candidate is string =>

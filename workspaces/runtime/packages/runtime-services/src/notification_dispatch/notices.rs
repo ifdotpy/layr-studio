@@ -14,64 +14,20 @@ use super::{NotificationDispatchError, format_utc};
 
 const ACCOUNT_NOTICE_LIMIT: i64 = 50;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum NoticeKind {
-    Warning,
-    Guardian,
-    Config,
-    Deprecation,
-    Rerouted,
-    McpStartup,
-    McpLogin,
-    StrictReview,
-    HookStarted,
-    HookCompleted,
-    Safety,
-    Verification,
-    ReviewStarted,
-    ReviewCompleted,
-    Error,
-    AuthStarted,
-    AuthCompleted,
-}
-impl NoticeKind {
-    pub(super) fn is_account_notice(self) -> bool {
-        matches!(
-            self,
-            Self::Warning
-                | Self::Guardian
-                | Self::Config
-                | Self::Deprecation
-                | Self::McpStartup
-                | Self::McpLogin
-                | Self::StrictReview
-                | Self::AuthStarted
-                | Self::AuthCompleted
-        )
-    }
-
-    pub(super) fn parse(method: &str) -> Option<Self> {
-        Some(match method {
-            "warning" => Self::Warning,
-            "guardianWarning" => Self::Guardian,
-            "configWarning" => Self::Config,
-            "deprecationNotice" => Self::Deprecation,
-            "model/rerouted" => Self::Rerouted,
-            "mcpServer/startupStatus/updated" => Self::McpStartup,
-            "mcpServer/oauthLogin/completed" => Self::McpLogin,
-            "autoApprovalReview/strictReviewRequired" => Self::StrictReview,
-            "hook/started" => Self::HookStarted,
-            "hook/completed" => Self::HookCompleted,
-            "model/safetyBuffering/updated" => Self::Safety,
-            "model/verification" => Self::Verification,
-            "item/autoApprovalReview/started" => Self::ReviewStarted,
-            "item/autoApprovalReview/completed" => Self::ReviewCompleted,
-            "error" => Self::Error,
-            "modelProvider/authRecoveryStarted" => Self::AuthStarted,
-            "modelProvider/authRecoveryCompleted" => Self::AuthCompleted,
-            _ => return None,
-        })
-    }
+pub(super) use studio_runtime_providers::codex_disposition::NoticeHandler as NoticeKind;
+pub(super) fn is_account_notice(kind: NoticeKind) -> bool {
+    matches!(
+        kind,
+        NoticeKind::Warning
+            | NoticeKind::Guardian
+            | NoticeKind::Config
+            | NoticeKind::Deprecation
+            | NoticeKind::McpStartup
+            | NoticeKind::McpLogin
+            | NoticeKind::StrictReview
+            | NoticeKind::AuthStarted
+            | NoticeKind::AuthCompleted
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -628,7 +584,7 @@ pub(super) fn object_keys(text: &str) -> Option<Vec<String>> {
 }
 
 pub(crate) fn is_notice(method: &str) -> bool {
-    NoticeKind::parse(method).is_some()
+    crate::notification_dispatch::kinds::notice_kind(method).is_some()
 }
 
 pub(crate) fn captures_analytics(
@@ -637,13 +593,13 @@ pub(crate) fn captures_analytics(
     method: &str,
     params: &Value,
 ) -> bool {
-    let Some(kind) = NoticeKind::parse(method) else {
+    let Some(kind) = crate::notification_dispatch::kinds::notice_kind(method) else {
         return false;
     };
     let thread = params["threadId"].as_str().filter(|s| !s.is_empty());
     let turn = params["turnId"].as_str().filter(|s| !s.is_empty());
     !matches!(kind, NoticeKind::HookStarted | NoticeKind::HookCompleted)
-        && !(thread.is_none() && kind.is_account_notice())
+        && !(thread.is_none() && is_account_notice(kind))
         && !turn.is_some_and(|turn| agent_turn != Some(turn) || !in_flight)
         && !(matches!(
             kind,
@@ -671,8 +627,8 @@ pub(crate) fn account_notice(
         .strip_prefix("account:")
         .filter(|s| !s.is_empty())
         .ok_or(NotificationDispatchError::invalid())?;
-    let kind = NoticeKind::parse(method)
-        .filter(|kind| kind.is_account_notice())
+    let kind = crate::notification_dispatch::kinds::notice_kind(method)
+        .filter(|kind| is_account_notice(*kind))
         .ok_or(NotificationDispatchError::invalid())?;
     let connection = format!("connection-{}", identity.generation);
     let text = warning_text(kind, params);
@@ -836,7 +792,8 @@ mod tests {
             AgentRecord::from_value(json!({"id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread","accountKey":"default","provider":"codex","turnId":"turn","inFlight":true,"compactions":0})).unwrap(), None, None,
         ).unwrap();
         let params = json!({"threadId":"thread","turnId":"turn","fromModel":"gpt-original","toModel":"gpt-routed","reason":"highRiskCyberActivity"});
-        let kind = NoticeKind::parse("model/rerouted").expect("reroutes have a notice projection");
+        let kind = crate::notification_dispatch::kinds::notice_kind("model/rerouted")
+            .expect("reroutes have a notice projection");
         let notice = decide(
             &snapshot,
             "model/rerouted",

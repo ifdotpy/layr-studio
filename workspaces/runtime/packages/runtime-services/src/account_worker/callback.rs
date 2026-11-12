@@ -345,7 +345,7 @@ async fn callback_context(
 pub(super) struct ManagedReplyAuthority {
     context: crate::provider_callbacks::CallbackContext,
     root: String,
-    provider: String,
+    provider: studio_runtime_schema::ProviderKind,
     parent: Option<String>,
     role: Option<String>,
     is_lead: bool,
@@ -378,7 +378,7 @@ impl ManagedReplyAuthority {
         Self {
             context,
             root,
-            provider: "claude".into(),
+            provider: studio_runtime_schema::ProviderKind::Claude,
             parent: None,
             role: Some("implementer".into()),
             is_lead: true,
@@ -450,11 +450,10 @@ pub(super) fn managed_reply_authority_in(
     if !snapshot.is_ok_and(|snapshot| snapshot.active().is_ok()) {
         return Ok(None);
     }
-    let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
-    let provider = text("provider").unwrap_or_else(|| "codex".to_owned());
-    if !matches!(provider.as_str(), "claude" | "codex") {
+    let Some(provider) = actor.provider.value().copied() else {
         return Ok(None);
-    }
+    };
+    let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
     Ok(Some(ManagedReplyAuthority {
         context,
         root: actor.root_id.0,

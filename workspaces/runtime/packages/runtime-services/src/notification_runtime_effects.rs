@@ -155,6 +155,15 @@ pub trait NotificationPostCommitSink: Send + Sync {
         Box::pin(async { Ok(()) })
     }
 
+    /// Publish a committed account-wide native catalog invalidation.
+    fn native_catalog_changed(
+        &self,
+        _account: &str,
+        _request_id: &str,
+    ) -> Result<(), NotificationDispatchError> {
+        Ok(())
+    }
+
     /// A committed model text delta, for streams that have its chat open. Best effort.
     fn live_delta(&self, _delta: crate::resource_notify::LiveDelta) {}
 }
@@ -185,6 +194,31 @@ impl NotificationPostCommitSink for RuntimeNotificationPostCommitSink {
         effect: &'a NotificationPostCommit,
     ) -> Pin<Box<dyn Future<Output = Result<(), NotificationDispatchError>> + Send + 'a>> {
         Box::pin(async move { self.publish_effect(effect).await })
+    }
+
+    fn native_catalog_changed(
+        &self,
+        account: &str,
+        request_id: &str,
+    ) -> Result<(), NotificationDispatchError> {
+        use studio_runtime_schema::{
+            resource_notification::ResourceNotifyRequest,
+            resource_ref::{AccountResource, ResourceRef},
+        };
+        let request = ResourceNotifyRequest::new(
+            request_id.to_owned(),
+            vec![ResourceRef::NativeCatalogResource(AccountResource {
+                account_key: account
+                    .to_owned()
+                    .try_into()
+                    .map_err(|_| NotificationDispatchError::invalid())?,
+            })],
+        )
+        .map_err(|_| NotificationDispatchError::invalid())?;
+        self.resources
+            .publish_once(&request)
+            .map_err(|_| NotificationDispatchError::Dependency("sync/resources/publication"))?;
+        Ok(())
     }
 
     fn live_delta(&self, delta: crate::resource_notify::LiveDelta) {

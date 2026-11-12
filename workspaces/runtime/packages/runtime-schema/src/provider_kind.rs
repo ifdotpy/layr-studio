@@ -105,10 +105,12 @@ pub enum ProviderCapability {
     Compaction,
     /// Ask the user before a tool call.
     Approvals,
+    /// Override settings of the exact current turn.
+    CurrentTurnSettings,
 }
 
 impl ProviderCapability {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Steer,
         Self::Rewind,
         Self::Fork,
@@ -116,6 +118,7 @@ impl ProviderCapability {
         Self::Effort,
         Self::Compaction,
         Self::Approvals,
+        Self::CurrentTurnSettings,
     ];
 
     /// Wire and generated-contract spelling.
@@ -129,12 +132,13 @@ impl ProviderCapability {
             Self::Effort => "effort",
             Self::Compaction => "compaction",
             Self::Approvals => "approvals",
+            Self::CurrentTurnSettings => "current_turn_settings",
         }
     }
 }
 
 /// Explicit availability of a user control or internal provider policy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub enum ProviderSupport {
     Supported,
     Unsupported { reason: &'static str },
@@ -151,14 +155,18 @@ impl ProviderKind {
     /// Single owner of user-control availability. Each provider must decide every control.
     #[must_use]
     pub const fn capability(self, capability: ProviderCapability) -> ProviderSupport {
-        use ProviderCapability::{Approvals, Compaction, Effort, Fork, ModelChange, Rewind, Steer};
+        use ProviderCapability::{
+            Approvals, Compaction, CurrentTurnSettings, Effort, Fork, ModelChange, Rewind, Steer,
+        };
         match self {
             Self::Codex => match capability {
-                Steer | Rewind | Fork | ModelChange | Effort | Compaction | Approvals => {
-                    ProviderSupport::Supported
-                }
+                Steer | Rewind | Fork | ModelChange | Effort | Compaction | Approvals
+                | CurrentTurnSettings => ProviderSupport::Supported,
             },
             Self::Claude => match capability {
+                CurrentTurnSettings => ProviderSupport::Unsupported {
+                    reason: "Claude settings are session scoped.",
+                },
                 Steer | Rewind | Fork | ModelChange | Effort | Compaction | Approvals => {
                     ProviderSupport::Supported
                 }
@@ -247,19 +255,20 @@ mod tests {
     fn capability_lists_are_declared_per_provider() {
         use ProviderCapability::*;
         for kind in ProviderKind::ALL {
-            assert_eq!(
-                kind.capabilities(),
-                [
-                    Steer,
-                    Rewind,
-                    Fork,
-                    ModelChange,
-                    Effort,
-                    Compaction,
-                    Approvals
-                ],
-                "{kind}"
-            );
+            let mut expected = vec![
+                Steer,
+                Rewind,
+                Fork,
+                ModelChange,
+                Effort,
+                Compaction,
+                Approvals,
+            ];
+            match kind {
+                ProviderKind::Codex => expected.push(CurrentTurnSettings),
+                ProviderKind::Claude => (),
+            }
+            assert_eq!(kind.capabilities(), expected, "{kind}");
             assert!(kind.supports(Rewind), "{kind}");
         }
         for kind in ProviderKind::ALL {

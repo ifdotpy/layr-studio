@@ -20,6 +20,20 @@ does not build the application or interpret Rust source itself. Run the focused
 witnesses with
 `node --test workspaces/tooling/apps/repository-checks/tests/compiler-policy.test.ts workspaces/tooling/apps/repository-checks/tests/rust-lint-policy.test.ts`.
 
+## Provider updates
+
+`just provider-update codex <exact-version>` requires that CLI on `CODEX_BIN`
+(or `PATH`) and prints candidate schema SHA and vendor response-source provenance
+for review. Rerun with `--reviewed-sha <sha>` to update the contract pin and
+response links, refresh, generate, check drift, and compile with the Clippy ratchet.
+`just provider-update claude <exact-sdk-version>` updates the bridge manifest's
+single SDK pin, runs `pnpm install --ignore-scripts`, then generation, freshness,
+SDK declaration drift and bridge compilation. New methods and SDK members still
+require explicit decisions in their existing disposition owners. Both paths
+report changed files on failure; inspect those files before rerunning. CLI
+installation, runtime version-notice baselines, delivery and live compatibility
+validation remain separate operator actions.
+
 ## Syntax guards and ratchet
 
 The ast-grep rules under `ast-grep/rules` detect direct JSON round trips,

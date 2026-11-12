@@ -1689,3 +1689,56 @@ test("remounts reuse bounded owner form state and retain an unresolved request",
   permissionControl(full).onChange({ currentTarget: { checked: false } });
   expect(h.post).toHaveBeenCalledTimes(calls);
 });
+
+test("an uncertain current-turn save retains the original target and request identity", async () => {
+  const agent: Agent = {
+    ...initial,
+    status: AgentStatus.running,
+    turnId: "original-turn",
+    nextTurnSettingsSupported: true,
+    pendingSettings: { model: "gpt-6-luna", effort: "high", fastMode: true },
+    pendingSettingsAccountKey: "default",
+  };
+  h.post.mockRejectedValueOnce(new Error("response lost"));
+  const apply = children(render(agent).controls).find(
+    (node) =>
+      node.type === Button &&
+      node.props.children === "Apply queued settings to current turn",
+  );
+  (required(apply).props.onClick as () => void)();
+  await vi.waitFor(() => expect(h.post).toHaveBeenCalledOnce());
+  await vi.waitFor(() =>
+    expect(
+      children(render(agent).controls).some(
+        (node) =>
+          node.type === Button && node.props.children === "Check settings save",
+      ),
+    ).toBe(true),
+  );
+  const first = required(h.post.mock.calls[0]?.[1]);
+  h.post.mockResolvedValue(agent);
+  const retry = children(
+    render({ ...agent, turnId: "later-turn" }).controls,
+  ).find(
+    (node) =>
+      node.type === Button && node.props.children === "Check settings save",
+  );
+  (required(retry).props.onClick as () => void)();
+  await vi.waitFor(() => expect(h.post).toHaveBeenCalledTimes(2));
+  expect(h.post.mock.calls[1]?.[1]).toEqual(first);
+  expect(first).toMatchObject({
+    id: agent.id,
+    settings_scope: { scope: "current_turn", turn_id: "original-turn" },
+    model: "gpt-6-luna",
+    effort: "high",
+    fast_mode: true,
+  });
+  expect(first).not.toHaveProperty("next_turn");
+  expect(
+    children(render({ ...agent, provider: ProviderKind.claude }).controls).some(
+      (node) =>
+        node.type === Button &&
+        node.props.children === "Apply queued settings to current turn",
+    ),
+  ).toBe(false);
+});

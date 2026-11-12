@@ -1,3 +1,5 @@
+import { flowResult } from "mobx";
+import type { ServerServices } from "../../servers/serverServices.ts";
 import { UnsentText } from "../../unsent/useUnsentText.ts";
 import { FormDraft } from "./FormDraft.ts";
 import type * as Api from "../../api.ts";
@@ -25,8 +27,14 @@ export class WorkspaceResources {
   private readonly tools = new Map<string, Tools>();
   readonly api: Pick<Api.ServerApi, "get" | "post">;
   readonly owner: string;
-  constructor(api: WorkspaceResources["api"], owner = "local") {
+  private readonly watch: ServerServices["watchResourceReads"] | undefined;
+  constructor(
+    api: WorkspaceResources["api"],
+    owner = "local",
+    watch?: ServerServices["watchResourceReads"],
+  ) {
     this.api = api;
+    this.watch = watch;
     this.text = new UnsentText(owner);
     this.owner = owner;
     const read = <P extends Api.ApiGetPath>(path: P) => {
@@ -52,38 +60,55 @@ export class WorkspaceResources {
     path: P,
     query: Api.GetOptions<P>["query"],
     receive?: (data: Api.GetResult<P>) => void,
+    watch?: WorkspaceResource<Api.GetResult<P>>["watch"],
   ) {
     const state = new WorkspaceResource(
       (signal, etag, readMetadata) =>
         this.api.get(path, { query, signal, etag, readMetadata }),
       receive,
+      watch,
     );
     this.states.push(state);
     return state;
   }
-  capabilities(agent: string) {
-    let entry = this.tools.get(agent);
+  capabilities(agent: string, account?: string) {
+    const watch = this.watch;
+    const key = JSON.stringify([agent, account]);
+    let entry = this.tools.get(key);
     if (!entry) {
       const inventory = new McpInventoryStore(
         this.owner,
         agent,
-        (cursor) =>
-          this.api.get("/api/capabilities", {
+        async (cursor): Promise<Api.GetResult<"/api/capabilities"> | void> => {
+          if (!cursor) {
+            await flowResult(state.load());
+            return;
+          }
+          return this.api.get("/api/capabilities", {
             query: {
               agent,
-              fresh: true,
-              ...(cursor ? { serversCursor: cursor } : {}),
+              serversCursor: cursor,
             },
-          }),
+          });
+        },
         (body) => this.api.post("/api/mcp/reconnect", body),
       );
-      const state = this.createRead(
+      const state: Tools["state"] = this.createRead(
         "/api/capabilities",
         { agent },
         inventory.receive,
+        account && watch
+          ? (read) =>
+              watch(
+                { kind: "native-catalog", accountKey: account },
+                read,
+                () => {},
+                { waitForBaseline: true },
+              )
+          : undefined,
       );
       entry = { state, inventory };
-      this.tools.set(agent, entry);
+      this.tools.set(key, entry);
     }
     return entry;
   }

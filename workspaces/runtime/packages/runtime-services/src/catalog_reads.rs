@@ -1,22 +1,19 @@
 //! Pure projections used by the skills and capabilities discovery endpoints.
 
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::future::Future;
-use std::sync::Mutex;
+use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 use studio_json::{Value, json};
 use studio_runtime_providers::Method;
-use tokio::time::Instant;
-
-const CACHE_TTL: Duration = Duration::from_secs(30);
-const MAX_CACHE_ENTRIES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProviderRequest {
     pub method: String,
     pub params: Value,
 }
+
+pub type CatalogRequest = (&'static str, ProviderRequest);
+pub type CatalogResult = (&'static str, Result<Value, CatalogReadError>);
 
 /// Return the full native tool inventory carried by the selected preparation catalog.
 pub fn managed_tool_catalog(
@@ -67,155 +64,66 @@ impl CapabilityAgentSnapshot {
 pub async fn account_session_exchange(
     session: &dyn crate::account_session_runtime::AccountSessionPort,
     account: &str,
-    requests: Vec<ProviderRequest>,
+    requests: Vec<CatalogRequest>,
     timeout: Duration,
-) -> Result<Vec<Result<Value, CatalogReadError>>, CatalogReadError> {
+) -> Vec<CatalogResult> {
     use crate::account_session_runtime::{ProviderRequest as SessionRequest, ProviderResponse};
 
     const OPERATION_PREFIX: &str = "catalog-discovery";
     static REQUEST_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let scope = session
-        .current_scope(account)
-        .ok_or(CatalogReadError::ProviderExchangeFailed)?;
-    let deadline = std::time::Instant::now() + timeout;
     let mut responses = Vec::with_capacity(requests.len());
-    for request in requests {
-        let sequence = REQUEST_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let operation = format!(
-            "{OPERATION_PREFIX}:{}:{sequence}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|_| CatalogReadError::ProviderExchangeFailed)?
-                .as_nanos()
-        );
-        let method =
-            Method::from_wire(&request.method).ok_or(CatalogReadError::ProviderExchangeFailed)?;
-        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/catalog_reads.rs#internal_sender_witness_catalog_account_session_exchange
-        let receipt = session
+    for (label, request) in requests {
+        let response = async {
+            let scope = session
+                .current_scope(account)
+                .ok_or(CatalogReadError::ProviderExchangeFailed)?;
+            let deadline = std::time::Instant::now() + timeout;
+            let sequence = REQUEST_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let operation = format!(
+                "{OPERATION_PREFIX}:{}:{sequence}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_err(|_| CatalogReadError::ProviderExchangeFailed)?
+                    .as_nanos()
+            );
+            let method = Method::from_wire(&request.method)
+                .ok_or(CatalogReadError::ProviderExchangeFailed)?;
             // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/catalog_reads.rs#internal_sender_witness_catalog_account_session_exchange
-            .provider_request(SessionRequest {
-                root_request_id: String::new(),
-                admitted_request: None,
-                account: account.to_owned(),
-                operation: operation.clone(),
-                actor: None,
-                expected_scope: Some(scope.clone()),
-                deleted_actor_session: None,
-                method,
-                params: request.params,
-                deadline,
-            })
-            .await
-            .map_err(|_| CatalogReadError::ProviderExchangeFailed)?;
-        let ReceiptOutcome::Written { ticket, response } = receipt.outcome else {
-            return Err(CatalogReadError::ProviderExchangeFailed);
-        };
-        if receipt.scope != scope
-            || receipt.operation != operation
-            || ticket.method != method
-            || ticket.generation != scope.generation
-        {
-            return Err(CatalogReadError::ProviderExchangeFailed);
-        }
-        match response {
-            ProviderResponse::Reply(response) => responses.push(Ok(response)),
-            ProviderResponse::Rejected(_) => {
-                responses.push(Err(CatalogReadError::ProviderExchangeFailed))
+            let receipt = session
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/catalog_reads.rs#internal_sender_witness_catalog_account_session_exchange
+                .provider_request(SessionRequest {
+                    root_request_id: String::new(),
+                    admitted_request: None,
+                    account: account.to_owned(),
+                    operation: operation.clone(),
+                    actor: None,
+                    expected_scope: Some(scope.clone()),
+                    deleted_actor_session: None,
+                    method,
+                    params: request.params,
+                    deadline,
+                })
+                .await
+                .map_err(|_| CatalogReadError::ProviderExchangeFailed)?;
+            let ReceiptOutcome::Written { ticket, response } = receipt.outcome else {
+                return Err(CatalogReadError::ProviderExchangeFailed);
+            };
+            if receipt.scope != scope
+                || receipt.operation != operation
+                || ticket.method != method
+                || ticket.generation != scope.generation
+            {
+                return Err(CatalogReadError::ProviderExchangeFailed);
+            }
+            match response {
+                ProviderResponse::Reply(response) => Ok(response),
+                ProviderResponse::Rejected(_) => Err(CatalogReadError::ProviderExchangeFailed),
             }
         }
+        .await;
+        responses.push((label, response));
     }
-    Ok(responses)
-}
-
-/// Per-agent in-memory cache for capabilities discovery results.
-#[derive(Default)]
-pub struct CapabilitiesCache(Mutex<HashMap<String, std::sync::Arc<CapabilityEntry>>>);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CapabilitiesCacheError {
-    LockPoisoned,
-    Capacity,
-}
-
-#[derive(Default)]
-struct CapabilityEntry {
-    value: tokio::sync::OnceCell<Value>,
-    expires_at: Mutex<Option<Instant>>,
-}
-
-impl CapabilitiesCache {
-    pub fn get(&self, agent: &str, now: Instant) -> Option<Value> {
-        let cache = self.0.lock().ok()?;
-        let entry = cache.get(agent)?;
-        if entry
-            .expires_at
-            .lock()
-            .ok()?
-            .is_some_and(|expires| expires > now)
-        {
-            return entry.value.get().cloned();
-        }
-        None
-    }
-
-    /// Cache one consumer's discovery and share an in-flight miss with concurrent requests.
-    pub async fn get_or_fetch<F, Fut>(
-        &self,
-        agent: &str,
-        fetch: F,
-    ) -> Result<Value, CapabilitiesCacheError>
-    where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Value>,
-    {
-        let now = Instant::now();
-        let expires_at = now + CACHE_TTL;
-        let entry = {
-            let mut cache = self
-                .0
-                .lock()
-                .map_err(|_| CapabilitiesCacheError::LockPoisoned)?;
-            cache.retain(|_, entry| {
-                entry
-                    .expires_at
-                    .lock()
-                    .is_ok_and(|expires| expires.is_none_or(|expires| expires > now))
-            });
-            if let Some(entry) = cache.get(agent) {
-                entry.clone()
-            } else {
-                if cache.len() >= MAX_CACHE_ENTRIES {
-                    let oldest =
-                        cache
-                            .iter()
-                            .filter_map(|(key, entry)| {
-                                entry.expires_at.lock().ok().and_then(|expires| {
-                                    expires.map(|expires| (key.clone(), expires))
-                                })
-                            })
-                            .min_by_key(|(_, expires)| *expires)
-                            .map(|(key, _)| key);
-                    if let Some(oldest) = oldest {
-                        cache.remove(&oldest);
-                    } else {
-                        return Err(CapabilitiesCacheError::Capacity);
-                    }
-                }
-                let entry = std::sync::Arc::new(CapabilityEntry::default());
-                cache.insert(agent.to_owned(), entry.clone());
-                entry
-            }
-        };
-        let value = entry.value.get_or_init(fetch).await.clone();
-        let mut expiry = entry
-            .expires_at
-            .lock()
-            .map_err(|_| CapabilitiesCacheError::LockPoisoned)?;
-        if expiry.is_none() {
-            *expiry = Some(expires_at);
-        }
-        Ok(value)
-    }
+    responses
 }
 
 /// Project a provider `skills/list` response onto the requested working directory.
@@ -314,6 +222,9 @@ pub fn capabilities_base(
         "managed": managed,
         "observed": observed,
         "skills": [],
+        "apps": [],
+        "plugins": [],
+        "appsCursor": null,
         "servers": [],
         "errors": [],
         "model": agent.model,
@@ -327,30 +238,6 @@ pub fn capabilities_base(
     })
 }
 
-/// Apply one provider result using the Python response's `data`/`servers` fallback.
-pub fn apply_capability_result(result: &mut Value, label: &str, response: &Value) {
-    let data = response
-        .get("data")
-        .or_else(|| {
-            (label == "servers")
-                .then(|| response.get("servers"))
-                .flatten()
-        })
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let cursor = response.get("nextCursor").cloned().unwrap_or(Value::Null);
-    let (field, cursor_field) = if label == "skills" {
-        ("skills", "skillsCursor")
-    } else {
-        ("servers", "serversCursor")
-    };
-    result[field] = data.clone();
-    result[cursor_field] = cursor;
-    if field == "servers" {
-        result["mcp"] = data;
-    }
-}
-
 pub fn append_capability_error(result: &mut Value, label: &str, error: &str) {
     if let Some(errors) = result.get_mut("errors").and_then(Value::as_array_mut) {
         errors.push(Value::String(format!("{label}: {error}")));
@@ -360,16 +247,14 @@ pub fn append_capability_error(result: &mut Value, label: &str, error: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CapabilitiesCache, CapabilityAgentSnapshot, ProviderRequest, account_session_exchange,
-        apply_capability_result, capabilities_base, host_finder_view, skills_for_cwd,
+        CapabilityAgentSnapshot, ProviderRequest, account_session_exchange, capabilities_base,
+        host_finder_view, skills_for_cwd,
     };
     use std::{
         sync::{Arc, Mutex},
         time::Duration,
     };
     use studio_json::json;
-
-    use tokio::time::Instant;
 
     struct RetainedDiscovery {
         calls: Arc<Mutex<Vec<studio_json::Value>>>,
@@ -491,11 +376,13 @@ mod tests {
             ["tool-z".into(), "tool-a".into(), "tool-z".into()],
             123.0,
         );
-        apply_capability_result(
+        crate::provider_adapter::apply_capability_result(
+            Some(studio_runtime_schema::ProviderKind::Codex),
             &mut result,
             "servers",
             &json!({"servers":[{"name":"mcp"}],"nextCursor":"next"}),
-        );
+        )
+        .expect("capability projection");
         assert_eq!(result["observed"], json!(["tool-a", "tool-z"]));
         assert_eq!(result["mcp"], json!([{"name":"mcp"}]));
         assert_eq!(result["serversCursor"], "next");
@@ -516,46 +403,6 @@ mod tests {
         );
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn discovery_cache_coalesces_per_consumer_and_expires_at_thirty_seconds() {
-        let cache = std::sync::Arc::new(CapabilitiesCache::default());
-        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let mut requests = Vec::new();
-        for _ in 0..16 {
-            let cache = std::sync::Arc::clone(&cache);
-            let calls = std::sync::Arc::clone(&calls);
-            requests.push(tokio::spawn(async move {
-                cache
-                    .get_or_fetch("agent-a", || async move {
-                        calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        tokio::task::yield_now().await;
-                        json!({"servers":[]})
-                    })
-                    .await
-                    .expect("coalesced discovery")
-            }));
-        }
-        for request in requests {
-            assert_eq!(request.await.expect("cache task"), json!({"servers":[]}));
-        }
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-        assert_eq!(
-            cache.get("agent-a", Instant::now()),
-            Some(json!({"servers":[]}))
-        );
-        assert_eq!(cache.get("agent-b", Instant::now()), None);
-        let other = cache
-            .get_or_fetch("agent-b", || async { json!({"other":true}) })
-            .await;
-        assert_eq!(other, Ok(json!({"other":true})));
-        tokio::time::advance(Duration::from_secs(30)).await;
-        assert_eq!(cache.get("agent-a", Instant::now()), None);
-        let refreshed = cache
-            .get_or_fetch("agent-a", || async { json!({"refreshed":true}) })
-            .await;
-        assert_eq!(refreshed, Ok(json!({"refreshed":true})));
-    }
-
     #[tokio::test]
     async fn internal_sender_witness_catalog_account_session_exchange() {
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -566,24 +413,29 @@ mod tests {
             &session,
             "claude-account",
             vec![
-                ProviderRequest {
-                    method: "skills/list".to_owned(),
-                    params: json!({"cwds":["/repo"],"forceReload":false}),
-                },
-                ProviderRequest {
-                    method: "mcpServerStatus/list".to_owned(),
-                    params: json!({"threadId":"thread-1","limit":100}),
-                },
+                (
+                    "skills",
+                    ProviderRequest {
+                        method: "skills/list".to_owned(),
+                        params: json!({"cwds":["/repo"],"forceReload":false}),
+                    },
+                ),
+                (
+                    "servers",
+                    ProviderRequest {
+                        method: "mcpServerStatus/list".to_owned(),
+                        params: json!({"threadId":"thread-1","limit":100}),
+                    },
+                ),
             ],
             Duration::from_secs(5),
         )
-        .await
-        .expect("written discovery replies");
+        .await;
         assert_eq!(
             responses,
             vec![
-                Ok(json!({"data":[{"cwd":"/repo","skills":[]}]})),
-                Ok(json!({"servers":[],"nextCursor":null})),
+                ("skills", Ok(json!({"data":[{"cwd":"/repo","skills":[]}]}))),
+                ("servers", Ok(json!({"servers":[],"nextCursor":null}))),
             ]
         );
         let calls = calls.lock().expect("discovery calls");

@@ -267,6 +267,11 @@ export interface components {
     BridgeNotification:
       | {
           /** @constant */
+          method: "skills/changed";
+          params: components["schemas"]["BridgeEmpty"];
+        }
+      | {
+          /** @constant */
           method: "item/modelOutput/firstDelta";
           params: components["schemas"]["FirstModelOutput"];
         }
@@ -349,6 +354,7 @@ export interface components {
       "item/started": components["schemas"]["ItemEvent"];
       "provider/generationStarted": components["schemas"]["NotificationProviderGenerationStarted"];
       "serverRequest/resolved": components["schemas"]["NotificationServerRequestResolved"];
+      "skills/changed": components["schemas"]["BridgeEmpty"];
       "thread/contextUsage/updated": components["schemas"]["NotificationThreadContextUsageUpdated"];
       "thread/idleCompaction/updated": components["schemas"]["NotificationThreadIdleCompactionUpdated"];
       "thread/shellPolicy/updated": components["schemas"]["NotificationThreadShellPolicyUpdated"];

@@ -5,7 +5,11 @@ import { ModelField } from "../../settings/models/ModelField/ModelField.tsx";
 import { EffortField } from "../../settings/models/EffortField/EffortField.tsx";
 import { ModeToggles } from "../../settings/models/ModeToggles/ModeToggles.tsx";
 import type { ModelOption } from "../../settings/models/support/modelOption.ts";
-import { providerSupports } from "../../../generated/providerKind.ts";
+import {
+  PROVIDER_CAPABILITIES,
+  providerSupport,
+  providerSupports,
+} from "../../../generated/providerKind.ts";
 
 export type SetupRole = "orchestrator" | "worker" | "review";
 export type AgentSetupPickerProps = {
@@ -121,6 +125,14 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
           disabled={!!p.readOnlyReason || p.disabled || p.effortDisabled}
         />
       )}
+      {PROVIDER_CAPABILITIES.map((capability) => {
+        const support = providerSupport(capabilityProvider, capability);
+        return support && typeof support === "object" ? (
+          <Text key={capability} size="xs" c="dimmed">
+            {capability.replaceAll("_", " ")}: {support.Unsupported.reason}
+          </Text>
+        ) : null;
+      })}
       <ModeToggles
         {...p}
         daybreakAvailable={p.role !== "review" && p.daybreakAvailable}

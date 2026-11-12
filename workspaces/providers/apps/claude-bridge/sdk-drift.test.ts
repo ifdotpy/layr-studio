@@ -1,3 +1,4 @@
+import { dispatchMessage } from "./sdk-message-policy.ts";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import ts from "typescript";
@@ -59,13 +60,13 @@ for (const { name, file, from, to } of [
   },
   {
     name: "a new top-level event",
-    file: "sdk-message-policy.ts",
+    file: "bridge.ts",
     from: "| SDKConversationResetMessage;",
     to: "| SDKConversationResetMessage | { type: 'future_event' };",
   },
   {
     name: "a new system event",
-    file: "sdk-message-policy.ts",
+    file: "bridge.ts",
     from: "| SDKConversationResetMessage;",
     to: "| SDKConversationResetMessage | { type: 'system'; subtype: 'future_system' };",
   },
@@ -174,4 +175,96 @@ test("SDK pack metadata accepts the installed npm named-package receipt", () => 
   assert.throws(() =>
     sdkPackMetadata([{ ...metadata, filename: "../outside.tgz" }]),
   );
+});
+
+for (const invocation of [
+  ".throw(new Error('test'))",
+  "[Symbol.asyncDispose]()",
+]) {
+  test("an ignored Query invocation is rejected: " + invocation, () => {
+    const errors = sdkDiagnostics("bridge.ts", undefined, "sdk", (source) => {
+      const call = "const sdkQuery = query({ prompt: prompt(), options });";
+      assert.ok(source.includes(call));
+      return source.replace(call, call + " await sdkQuery" + invocation + ";");
+    });
+    assert.ok(
+      errors.some(
+        (error) =>
+          (error.code === 2339 || error.code === 7053) &&
+          error.file?.fileName.endsWith("/bridge.ts"),
+      ),
+      "Ignored Query invocations must not compile",
+    );
+  });
+}
+
+test("removing retry dispatch while retaining its parser breaks compilation", () => {
+  const errors = sdkDiagnostics("bridge.ts", undefined, "sdk", (source) => {
+    const ast = ts.createSourceFile(
+      "bridge.ts",
+      source,
+      ts.ScriptTarget.ESNext,
+      true,
+    );
+    let property: ts.PropertyAssignment | undefined;
+    function visit(node: ts.Node) {
+      if (
+        ts.isPropertyAssignment(node) &&
+        node.name.getText(ast) === "api_retry"
+      )
+        property = node;
+      ts.forEachChild(node, visit);
+    }
+    visit(ast);
+    assert.ok(property, "Production retry registration is required");
+    const end = property.getEnd();
+    return (
+      source.slice(0, property.getStart(ast)) +
+      source.slice(source[end] === "," ? end + 1 : end)
+    );
+  });
+  assert.ok(
+    errors.some(
+      (error) =>
+        error.code === 1360 && error.file?.fileName.endsWith("/bridge.ts"),
+    ),
+    "Handled retry must require its actual callback",
+  );
+});
+
+for (const change of ["remove", "add"]) {
+  test(`the actual Options builder rejects policy drift: ${change}`, () => {
+    const errors = sdkDiagnostics("bridge.ts", undefined, "sdk", (source) => {
+      const field = 'supportedDialogKinds: ["resume_return"],';
+      assert.ok(source.includes(field));
+      return source.replace(
+        field,
+        change === "remove" ? "" : field + ' title: "test",',
+      );
+    });
+    assert.ok(
+      errors.some((error) =>
+        error.file?.fileName.endsWith("/sdk-dispositions.ts"),
+      ),
+      "Options decisions must follow configured keys",
+    );
+  });
+}
+
+test("a text delta dispatches synchronously", () => {
+  const message = {
+    type: "stream_event",
+    event: {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "hello" },
+    },
+  } satisfies Pick<SDKMessage & { type: "stream_event" }, "type" | "event">;
+  let seen = false;
+  const handlers = { stream_event: () => void (seen = true) };
+  assert.equal(
+    dispatchMessage(message, handlers, message.type, undefined, undefined),
+    undefined,
+  );
+  assert.equal(seen, true);
 });

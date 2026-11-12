@@ -68,57 +68,51 @@ pub(crate) fn native(frame: &Frame) -> Option<Native<'_>> {
     let Frame::CodexNotification(notification) = frame else {
         return None;
     };
-    let (thread, turn, item, event) = if let N::ItemPlanDelta { params, .. } = notification.as_ref()
-    {
-        (
-            &params.thread_id,
-            &params.turn_id,
-            &params.item_id,
-            Event::Plan(params),
-        )
-    } else if let N::ItemReasoningSummaryTextDelta { params, .. } = notification.as_ref() {
-        (
-            &params.thread_id,
-            &params.turn_id,
-            &params.item_id,
-            Event::Summary(params),
-        )
-    } else if let N::ItemReasoningSummaryPartAdded { params, .. } = notification.as_ref() {
-        (
-            &params.thread_id,
-            &params.turn_id,
-            &params.item_id,
-            Event::Part(params),
-        )
-    } else if let N::ItemMcpToolCallProgress { params, .. } = notification.as_ref() {
-        (
-            &params.thread_id,
-            &params.turn_id,
-            &params.item_id,
-            Event::Tool(params),
-        )
-    } else if let N::ItemStarted { params, .. } = notification.as_ref() {
-        let (ThreadItem::Plan { id, .. } | ThreadItem::Reasoning { id, .. }) = &params.item else {
-            return None;
-        };
-        (
-            &params.thread_id,
-            &params.turn_id,
-            id,
-            Event::Started(&params.item),
-        )
-    } else if let N::ItemCompleted { params, .. } = notification.as_ref() {
-        let (ThreadItem::Plan { id, .. } | ThreadItem::Reasoning { id, .. }) = &params.item else {
-            return None;
-        };
-        (
-            &params.thread_id,
-            &params.turn_id,
-            id,
-            Event::Completed(&params.item),
-        )
-    } else {
+    use studio_runtime_providers::codex_disposition::ProgressHandler as H;
+    let studio_runtime_providers::codex_disposition::Disposition::Handled(
+        studio_runtime_providers::codex_disposition::HandlerKey::Notification(
+            studio_runtime_providers::codex_disposition::NotificationHandler::Progress(key),
+        ),
+    ) = studio_runtime_providers::codex_disposition::server_notification(notification.method())
+    else {
         return None;
+    };
+    // Both pinned payload shapes share the same borrowed routing fields.
+    macro_rules! native_event {
+        ($variant:ident, $event:ident) => {{
+            let N::$variant { params, .. } = notification.as_ref() else {
+                return None;
+            };
+            (
+                &params.thread_id,
+                &params.turn_id,
+                &params.item_id,
+                Event::$event(params),
+            )
+        }};
+        ($variant:ident, $event:ident, item) => {{
+            let N::$variant { params, .. } = notification.as_ref() else {
+                return None;
+            };
+            let (ThreadItem::Plan { id, .. } | ThreadItem::Reasoning { id, .. }) = &params.item
+            else {
+                return None;
+            };
+            (
+                &params.thread_id,
+                &params.turn_id,
+                id,
+                Event::$event(&params.item),
+            )
+        }};
+    }
+    let (thread, turn, item, event) = match key {
+        H::ItemPlanDelta => native_event!(ItemPlanDelta, Plan),
+        H::ItemReasoningSummaryTextDelta => native_event!(ItemReasoningSummaryTextDelta, Summary),
+        H::ItemReasoningSummaryPartAdded => native_event!(ItemReasoningSummaryPartAdded, Part),
+        H::ItemMcpToolCallProgress => native_event!(ItemMcpToolCallProgress, Tool),
+        H::ItemStarted => native_event!(ItemStarted, Started, item),
+        H::ItemCompleted => native_event!(ItemCompleted, Completed, item),
     };
     Some(Native {
         event,

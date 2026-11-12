@@ -29,6 +29,7 @@ mod context_repair_corpus;
 mod continuation_corpus;
 mod continuation_recovery;
 mod idle_compaction;
+mod live_settings;
 mod liveness;
 mod media_auth_fixtures;
 mod monitor_deadline_answer;

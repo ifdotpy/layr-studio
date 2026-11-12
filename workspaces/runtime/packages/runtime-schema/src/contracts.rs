@@ -324,7 +324,7 @@ fn provider_kind_ts() -> String {
         .collect::<Vec<_>>()
         .join(", ");
     let mut text = format!(
-        "// {HEADER}\nexport const PROVIDER_KINDS = [{values}] as const;\nexport type ProviderKind = (typeof PROVIDER_KINDS)[number];\n\nexport const ProviderKind = {{\n"
+        "// {HEADER}\nimport type {{ components }} from \"./api.ts\";\nexport const PROVIDER_KINDS = [{values}] as const;\nexport type ProviderKind = (typeof PROVIDER_KINDS)[number];\n\nexport const ProviderKind = {{\n"
     );
     for provider in crate::provider_kind::ProviderKind::ALL {
         writeln!(text, "  {provider:?}: {},", json_string(provider.key())).expect("String write");
@@ -347,17 +347,22 @@ fn provider_kind_ts() -> String {
             .map(|capability| json_string(capability.key()))
             .join(", "),
     );
-    text.push_str("] as const;\nexport type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];\n\nexport const PROVIDER_CAPABILITY_LISTS: Record<ProviderKind, readonly ProviderCapability[]> = {\n");
+    text.push_str("] as const;\nexport type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];\n\nexport const PROVIDER_CAPABILITY_SUPPORT = {\n");
     for provider in crate::provider_kind::ProviderKind::ALL {
-        let list = provider
-            .capabilities()
-            .iter()
-            .map(|capability| json_string(capability.key()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        writeln!(text, "  {}: [{list}],", provider.key()).expect("String write");
+        writeln!(text, "  {}: {{", provider.key()).expect("String write");
+        for capability in crate::provider_kind::ProviderCapability::ALL {
+            writeln!(
+                text,
+                "    {}: {},",
+                capability.key(),
+                studio_json::to_string(&provider.capability(capability))
+                    .expect("support serializes")
+            )
+            .expect("String write");
+        }
+        text.push_str("  },\n");
     }
-    text.push_str("};\n\nexport function providerCapabilities(value: unknown): readonly ProviderCapability[] {\n  return isProviderKind(value) ? PROVIDER_CAPABILITY_LISTS[value] : [];\n}\n\nexport function providerSupports(value: unknown, capability: ProviderCapability): boolean {\n  return providerCapabilities(value).includes(capability);\n}\n\nexport function providerToString(provider: ProviderKind): ProviderKind {\n  return provider;\n}\n\nexport function isProviderKind(value: unknown): value is ProviderKind {\n  return PROVIDER_KINDS.some((provider) => provider === value);\n}\n\nexport function providerLabel(value: string): string {\n  return isProviderKind(value) ? PROVIDER_LABELS[value] : value;\n}\n");
+    text.push_str("} as const;\nexport type ProviderSupport = components[\"schemas\"][\"ProviderSupport\"];\n\nexport function providerSupport(value: unknown, capability: ProviderCapability): ProviderSupport | undefined {\n  return isProviderKind(value) ? PROVIDER_CAPABILITY_SUPPORT[value][capability] : undefined;\n}\n\nexport function providerCapabilities(value: unknown): readonly ProviderCapability[] {\n  return PROVIDER_CAPABILITIES.filter((capability) => providerSupports(value, capability));\n}\n\nexport function providerSupports(value: unknown, capability: ProviderCapability): boolean {\n  return providerSupport(value, capability) === \"Supported\";\n}\n\nexport function providerToString(provider: ProviderKind): ProviderKind {\n  return provider;\n}\n\nexport function isProviderKind(value: unknown): value is ProviderKind {\n  return PROVIDER_KINDS.some((provider) => provider === value);\n}\n\nexport function providerLabel(value: string): string {\n  return isProviderKind(value) ? PROVIDER_LABELS[value] : value;\n}\n");
     text
 }
 
@@ -1345,6 +1350,8 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         .pointer_mut("/components/schemas/AgentCapacity")
         .ok_or("missing AgentCapacity schema")? = agent_limits::capacity_schema();
     crate::workspace_modes::update_openapi(&mut openapi);
+    openapi["components"]["schemas"]["ProviderSupport"] =
+        schemars::schema_for!(crate::provider_kind::ProviderSupport).to_value();
     let review = schemars::schema_for!(crate::review::ReviewTarget).to_value();
     let review: Value = studio_json::from_str(
         &studio_json::to_string(&review)
@@ -1552,6 +1559,11 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .pointer_mut(&format!("/components/schemas/{name}"))
             .ok_or_else(|| format!("OpenAPI is missing Rust-owned {name}"))? = schema;
     }
+    openapi["components"]["schemas"]["ProviderSettingsScope"] = crate::settings_scope::schema();
+    openapi["components"]["schemas"]["ConversationRequest"]["properties"]["settings_scope"] =
+        studio_json::json!({"$ref":"#/components/schemas/ProviderSettingsScope"});
+    openapi["components"]["schemas"]["AgentDetailEntityDto"]["properties"]["turnId"] =
+        openapi["components"]["schemas"]["AgentEntityDto"]["properties"]["turnId"].clone();
     openapi["components"]["schemas"]["RadioControls"] = crate::radio_controls::schema();
     openapi["components"]["schemas"]["RoomRadio"]["properties"]["controls"] =
         studio_json::json!({"$ref":"#/components/schemas/RadioControls"});
@@ -1565,6 +1577,76 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name] = schema;
     }
     crate::process_controls::apply_background_views(&mut openapi);
+    // Derive catalog additions while the legacy parent contracts remain OpenAPI-owned.
+    let mut catalog = schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.definitions_path = "/components/schemas".into())
+        .into_generator();
+    let catalog_ref = catalog
+        .subschema_for::<crate::native_catalog::NativeCatalogResource>()
+        .to_value();
+    catalog.subschema_for::<crate::native_catalog::NativeCatalogCapabilities>();
+    catalog.subschema_for::<crate::native_catalog::NativeCatalogSubscription>();
+    let mut catalog_schemas = catalog.take_definitions(true);
+    let identity = schemars::generate::SchemaSettings::draft2020_12()
+        .with(|settings| settings.inline_subschemas = true)
+        .into_generator()
+        .into_root_schema_for::<crate::native_catalog::NativeCatalogResource>()
+        .to_value();
+    let mut resource = identity["oneOf"][0].clone();
+    resource["title"] =
+        <crate::native_catalog::NativeCatalogResource as schemars::JsonSchema>::schema_name()
+            .as_ref()
+            .into();
+    let kind = resource["properties"]["kind"]["const"]
+        .as_str()
+        .ok_or("catalog resource kind")?
+        .to_owned();
+    let schemas = &mut openapi["components"]["schemas"];
+    schemas["NativeCatalogResource"] = resource;
+    schemas["NativeCatalogEntry"] =
+        schemars::schema_for!(crate::native_catalog::NativeCatalogEntry).to_value();
+    schemas["ResourceRef"]["discriminator"]["mapping"][&kind] = catalog_ref["$ref"].clone();
+    let variants = schemas["ResourceRef"]["oneOf"]
+        .as_array_mut()
+        .ok_or("resource variants")?;
+    if !variants.contains(&catalog_ref) {
+        variants.push(catalog_ref);
+    }
+    let capabilities = catalog_schemas
+        .remove("NativeCatalogCapabilities")
+        .ok_or("catalog capabilities schema")?;
+    schemas["CapabilitiesResponse"]["properties"]
+        .as_object_mut()
+        .ok_or("capability properties")?
+        .extend(
+            capabilities["properties"]
+                .as_object()
+                .ok_or("catalog capability properties")?
+                .clone(),
+        );
+    let subscription = catalog_schemas
+        .remove("NativeCatalogSubscription")
+        .ok_or("catalog subscription schema")?;
+    schemas["SubscriptionDataMap"]["properties"]
+        .as_object_mut()
+        .ok_or("subscription properties")?
+        .extend(
+            subscription["properties"]
+                .as_object()
+                .ok_or("catalog subscription properties")?
+                .clone(),
+        );
+    let required = schemas["SubscriptionDataMap"]["required"]
+        .as_array_mut()
+        .ok_or("subscription kinds")?;
+    for field in subscription["required"]
+        .as_array()
+        .ok_or("catalog subscription kinds")?
+    {
+        if !required.contains(field) {
+            required.push(field.clone());
+        }
+    }
     crate::resource_ref::refresh_task_detail(&mut openapi);
     crate::resource_ref::refresh_retained_worktrees(&mut openapi);
     for (name, schema) in crate::approvals::schemas() {
@@ -1835,6 +1917,10 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: OPENAPI_PATH.into(),
             text: studio_json::to_string_pretty(&openapi).map_err(|error| error.to_string())? + "\n",
+        },
+        Rendered {
+            path: "workspaces/providers/apps/claude-bridge/settings-policy.generated.ts".into(),
+            text: format!("// {HEADER}\nexport const PERSISTENT_UNSUPPORTED_REASON = {};\n",json_string(crate::settings_scope::PERSISTENT_UNSUPPORTED_REASON)),
         },
         Rendered {
             path: web("deliveryMoment.ts"),

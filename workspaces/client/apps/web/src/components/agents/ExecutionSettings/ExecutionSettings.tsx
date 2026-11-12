@@ -553,6 +553,19 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings(
             ` Current mode: ${view.detail?.daybreakEnabled ? "Daybreak" : "Standard"}. Next turn: ${view.modeLabel}.`}
         </p>
       )}
+      {view.active &&
+        view.queued &&
+        providerSupports(view.agent.provider, "current_turn_settings") &&
+        view.detail?.turnId && (
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            disabled={view.disabled}
+            onClick={() => void execution.applyCurrentTurn(view)}
+          >
+            Apply queued settings to current turn
+          </Button>
+        )}
       {view.active && !view.canQueueSettings && (
         <p className="notice">
           Available when this turn ends. Update the server to set options for

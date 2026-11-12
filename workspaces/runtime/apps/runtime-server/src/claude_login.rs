@@ -21,8 +21,9 @@ pub async fn attach(
     let directory = root.join("claude-logins");
     let receipts = Arc::new(FileReceipts::new(directory.clone())?);
     let environment = std::env::vars_os().collect();
-    let program = studio_runtime_services::account_driver::claude::login_binary(&environment)
-        .unwrap_or_else(|| PathBuf::from("claude"));
+    let program =
+        studio_runtime_services::account_driver::claude::resolve_login_binary(None, &environment)
+            .unwrap_or_else(|| PathBuf::from("claude"));
     let on_change = state.claude_login_change_callback();
     state.claude_login = Some(
         LoginService::open(
