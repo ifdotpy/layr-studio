@@ -13,6 +13,7 @@ mod m2026_11_11_writer_query_indexes;
 mod m2026_11_11_writer_receipt_indexes;
 mod m2026_11_12_changes_label_sequence;
 mod m2026_11_12_direct_durable_keys;
+mod m2026_11_12_event_publication_members;
 mod m2026_11_12_writer_window_indexes;
 
 use crate::{StoreError, StoreResult};
@@ -219,6 +220,20 @@ static POST_F1_CATALOG: &[SqlMigration] = &[
     SqlMigration {
         definition: m2026_11_12_direct_durable_keys::DEFINITION,
         apply: m2026_11_12_direct_durable_keys::apply,
+    },
+    SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-12-event-publication-members",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 12,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Event retirement walks publications across collections and history",
+            remove_when: "Supported installations and backups all contain the ordered collection member index",
+        },
+        apply: m2026_11_12_event_publication_members::apply,
     },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
@@ -691,10 +706,53 @@ const RELEASED_CANVAS_CATALOGS: &[&str] = &[
     "561c94aa6bffe48d6de89805793b296560ace24b89a3b914d38635215eae5f53",
     "e07877dd5a4eef610f66b99336716fb9e32515094d81713b45d30ec61d09cd63",
     "85c8d18a41f9de456bfa310c7b4f119d2b78045f6a2dabb8fb2634c7b3c29bc9",
+    "44933893bb8ff0173863fdf28513266c0d42dc3b07d980ecc53a51a598f390ae",
 ];
 
 #[cfg(test)]
 mod released_catalog_tests {
+    #[test]
+    fn event_publication_member_index_upgrades_once_without_changing_triggers() {
+        let root = tempfile::tempdir().unwrap();
+        let mut db = crate::fresh_state::canvas_before_indexes(
+            &root.path().join("canvas.sqlite3"),
+            &["publications_entity_collection_members"],
+        )
+        .unwrap();
+        let position = super::POST_F1_CATALOG
+            .iter()
+            .position(|step| step.definition.id == "2026-11-12-event-publication-members")
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        super::write_canvas_catalog_at(&tx, position).unwrap();
+        tx.commit().unwrap();
+        let triggers = |db: &rusqlite::Connection| {
+            studio_db_api::catalog::export(db)
+                .unwrap()
+                .into_iter()
+                .filter(|entry| entry.r#type == "trigger")
+                .map(|entry| (entry.name, entry.sql))
+                .collect::<Vec<_>>()
+        };
+        let before = triggers(&db);
+        super::upgrade_current_canvas(&mut db).unwrap();
+        assert_eq!(triggers(&db), before);
+        let index = studio_db_api::catalog::export(&db)
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.name == "publications_entity_collection_members")
+            .unwrap();
+        assert_eq!(
+            index.sql,
+            crate::queue_schema::index_sql::<crate::publication_schema::Publications>(
+                "publications_entity_collection_members"
+            )
+        );
+        let version = super::schema_version(&db).unwrap();
+        super::upgrade_current_canvas(&mut db).unwrap();
+        assert_eq!(super::schema_version(&db).unwrap(), version);
+    }
+
     #[test]
     fn consolidated_f1_prefix_receives_writer_indexes_once() {
         use studio_runtime_schema::studio_errors::MigrationTarget;

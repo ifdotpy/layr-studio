@@ -41,6 +41,7 @@ const TOMBSTONES: &str = studio_db_api::static_sql!(
     index(name="publications_entity_identity",columns(collection_order,entity_id),unique,predicate=ENTITIES),
     index(name="publications_source_rowid",columns(kind,source_rowid),unique),
     index(name="publications_entity_collection_deleted",columns(collection_order,deleted),predicate=ENTITIES),
+    index(name="publications_entity_collection_members",columns(collection_order,deleted,entity_id),predicate=ENTITIES),
     index(name="publications_entity_collection_sequence",columns(kind,collection_order,publication_seq,source_rowid)),
     index(name="publications_entity_non_transcript_sequence",columns(kind,non_transcript,publication_seq,source_rowid)),
     index(name="publications_entity_prune_order",columns(publication_seq,collection_order,entity_id),predicate=TOMBSTONES),
@@ -367,7 +368,7 @@ mod tests {
     #[test]
     fn f1_publication_context_roundtrips_document_live_cache_null_and_legacy() {
         let mut db = CodecContext::open_in_memory().unwrap();
-        assert_eq!(Publications::INDEXES.len(), 10);
+        assert_eq!(Publications::INDEXES.len(), 11);
         Publications::descriptor().install_if_absent(&db).unwrap();
         let transaction = db.transaction().unwrap();
         let mut tx = canvas_tx(&transaction);

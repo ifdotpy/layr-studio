@@ -658,7 +658,7 @@ mod tests {
                 &Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_DELETED,
             ),
             studio_db_api::query_index::<Canvas, Publications>(
-                &Publications::INDEX_PUBLICATIONS_ENTITY_IDENTITY,
+                &Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_MEMBERS,
             ),
         ]) {
             assert!(plan.iter().any(|step| step.contains(index)), "{plan:?}");

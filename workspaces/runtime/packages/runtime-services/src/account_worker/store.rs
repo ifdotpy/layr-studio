@@ -2149,10 +2149,7 @@ pub(super) async fn journal_batch(
     let mut entries = entries
         .into_iter()
         .map(|entry| {
-            PreparedJournalEntry::new(
-                crate::provider_adapter::project_entry(entry),
-                journal_scope,
-            )
+            PreparedJournalEntry::new(crate::provider_adapter::project_entry(entry), journal_scope)
         })
         .collect::<Result<Vec<_>, _>>()?;
     if entries.is_empty() && outcome.is_none() {

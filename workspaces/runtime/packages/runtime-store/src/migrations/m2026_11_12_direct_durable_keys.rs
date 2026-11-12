@@ -34,9 +34,13 @@ mod tests {
         let store = crate::RuntimeStore::open(Some(directory.path()))
             .await
             .unwrap();
-        store.transaction(|tx| {
+        let position = super::super::POST_F1_CATALOG
+            .iter()
+            .position(|step| step.definition.id == super::DEFINITION.id)
+            .unwrap();
+        store.transaction(move |tx| {
             tx.execute_batch("DROP TRIGGER durable_graph_edges_insert; CREATE TRIGGER durable_graph_edges_insert AFTER INSERT ON graph_edges BEGIN SELECT 1; END;")?;
-            crate::clock_schema::SyncEntityMeta::put(tx,super::super::MIGRATION_CATALOG_KEY,&super::super::catalog_marker(tx,&super::super::canvas_catalog_prefix_fingerprint(super::super::POST_F1_CATALOG.len() - 1))?)?;
+            crate::clock_schema::SyncEntityMeta::put(tx,super::super::MIGRATION_CATALOG_KEY,&super::super::catalog_marker(tx,&super::super::canvas_catalog_prefix_fingerprint(position))?)?;
             Ok(())
         }).await.unwrap();
         drop(store);
@@ -64,7 +68,7 @@ mod tests {
             "current producers are not recreated on every startup"
         );
         assert_eq!(
-            super::super::catalog().last().unwrap().id,
+            super::super::POST_F1_CATALOG[position].definition.id,
             super::DEFINITION.id
         );
     }

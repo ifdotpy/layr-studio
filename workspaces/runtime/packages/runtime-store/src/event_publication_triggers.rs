@@ -177,6 +177,227 @@ mod tests {
     use crate::queue_schema::EventsRow;
     use studio_db_api::{DbQuery, Table, migration::encode_key};
 
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),tables(events=EventsRow),
+        columns(id=EventsRow::ID,agent=EventsRow::AGENT,kind=EventsRow::KIND,text=EventsRow::TEXT,status=EventsRow::STATUS,created=EventsRow::CREATED,epoch=EventsRow::EPOCH),
+        sql="INSERT INTO {events}({id},{agent},{kind},{text},{status},{created},{epoch}) VALUES(?1,'worker','monitor_exit','','pending',?2,1) ON CONFLICT({id}) DO NOTHING")]
+    struct InsertReceipt<'a> {
+        #[db(column=EventsRow::ID)]
+        id: &'a str,
+        #[db(column=EventsRow::CREATED)]
+        created: f64,
+    }
+
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=read,cardinality=many,native,result=String,tables(rows=Publications),
+        indexes(rows=Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_MEMBERS),predicates(entities=rows),
+        columns(id=Publications::ENTITY_ID,collection=Publications::COLLECTION_ORDER,deleted=Publications::DELETED),
+        sql="SELECT {id} FROM {rows} WHERE {entities} AND {collection}=?1 AND {deleted}=0 ORDER BY {id}")]
+    struct ActiveEventIds<'a> {
+        #[db(column=Publications::COLLECTION_ORDER)]
+        collection: Option<&'a str>,
+    }
+
+    #[test]
+    fn runtime_event_insert_has_bounded_vm_work_and_indexed_trigger_lookups() {
+        use crate::metadata_values::StoredBoolean;
+        use crate::publication_collection::CollectionName;
+        use crate::publication_schema::EntityValue;
+        let mut db = crate::fresh_state::canvas_before_indexes(
+            std::path::Path::new(":memory:"),
+            &["sync_entity_event_INSERT"],
+        )
+        .unwrap();
+        crate::schema::register_python_trigger_functions(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        // Seed source history before installing its producer. Both the target
+        // agent and unrelated agents have history well beyond the public window.
+        for n in 1..=6000 {
+            let mut row = event(&format!("history-{n:06}"), n as f64);
+            if n % 2 != 0 {
+                row.agent = "other".into();
+            }
+            canvas_tx(&tx).insert(&row).unwrap();
+        }
+        install(&tx);
+        canvas_tx(&tx)
+            .named(
+                &InsertReceipt::QUERY,
+                &InsertReceipt {
+                    id: "warm",
+                    created: 6001.0,
+                },
+            )
+            .unwrap();
+        for n in 1..5000 {
+            let id = format!("history-{n:06}");
+            let payload =
+                crate::entity_scopes::tombstone_payload("event", &id, None, None).unwrap();
+            canvas_tx(&tx)
+                .insert(&SyncEntities {
+                    identity: encode_key(&("event".to_owned(), id.clone())),
+                    source_rowid: 10000 + n,
+                    publication_seq: 10000 + n,
+                    deleted: StoredBoolean::Valid(true),
+                    collection_order: CollectionName::from_stored("event".into()),
+                    collection_kind: CollectionKind::Event,
+                    collection_agent: None,
+                    entity_hash: crate::schema::sha256_hex(payload.as_bytes()),
+                    entity_payload: EntityValue::from_stored(
+                        "event",
+                        &id,
+                        StoredBoolean::Valid(true),
+                        Some(payload),
+                    )
+                    .unwrap(),
+                    entity_id: id,
+                    non_transcript: true,
+                })
+                .unwrap();
+        }
+        let (_, steps) = crate::query_plan_test_support::vm_steps(&tx, || {
+            canvas_tx(&tx).named(
+                &InsertReceipt::QUERY,
+                &InsertReceipt {
+                    id: "measured",
+                    created: 6002.0,
+                },
+            )
+        })
+        .unwrap();
+        eprintln!("runtime event single insert vm_steps={steps}");
+        assert!(
+            steps < 20000,
+            "single runtime event insert used {steps} VM steps"
+        );
+        let plan = crate::query_plan_test_support::explain(
+            &tx,
+            ActiveEventIds::QUERY.sql(),
+            &ActiveEventIds {
+                collection: Some("event"),
+            },
+        )
+        .unwrap();
+        assert!(
+            plan.iter()
+                .all(|line| !line.contains("SCAN ") && !line.contains("TEMP B-TREE")),
+            "{plan:?}"
+        );
+        let index = studio_db_api::query_index::<Canvas, Publications>(
+            &Publications::INDEX_PUBLICATIONS_ENTITY_COLLECTION_MEMBERS,
+        );
+        assert!(plan.iter().any(|line| line.contains(index)), "{plan:?}");
+        tx.set_db_config(
+            rusqlite::config::DbConfig::SQLITE_DBCONFIG_TRIGGER_EQP,
+            true,
+        )
+        .unwrap();
+        let trigger_plan = crate::query_plan_test_support::explain(
+            &tx,
+            InsertReceipt::QUERY.sql(),
+            &InsertReceipt {
+                id: "plan-only",
+                created: 6003.0,
+            },
+        )
+        .unwrap();
+        assert!(
+            trigger_plan
+                .iter()
+                .any(|line| line.contains(index)
+                    && line.contains("collection_order=? AND deleted=?")),
+            "{trigger_plan:?}"
+        );
+        for line in &trigger_plan {
+            if line.starts_with("SCAN ") {
+                // Window scans stop after EVENT_WINDOW_ROWS, independently of history.
+                let window = line.starts_with("SCAN runtime_events USING ")
+                    && line.contains("runtime_event_created_id");
+                // Derived rows/ordinals come from the same fixed window or singleton sources.
+                let derived = line.starts_with("SCAN e")
+                    || line.starts_with("SCAN (subquery-")
+                    || line.starts_with("SCAN source_key")
+                    || line == "SCAN CONSTANT ROW";
+                // Scope JSON scans inspect only selectors in the keyed prior row.
+                let scope = line.starts_with("SCAN json_each VIRTUAL TABLE");
+                assert!(
+                    window || derived || scope,
+                    "unbounded trigger scan: {line}; {trigger_plan:?}"
+                );
+            }
+            assert!(
+                !line.contains("USING INDEX publications_entity_id (kind=?)"),
+                "unbounded publication traversal: {trigger_plan:?}"
+            );
+        }
+        // TEMP B-TREE is allowed only for window ordinals or json_each's last-key selection;
+        // the ordered publication lookup above must have neither a scan nor a temporary sort.
+    }
+
+    #[test]
+    fn runtime_event_retirement_index_preserves_publication_semantics() {
+        let run = |old_index: bool| {
+            let excluded = if old_index {
+                vec![
+                    "sync_entity_event_INSERT",
+                    "publications_entity_collection_members",
+                ]
+            } else {
+                vec!["sync_entity_event_INSERT"]
+            };
+            let mut db = crate::fresh_state::canvas_before_indexes(
+                std::path::Path::new(":memory:"),
+                &excluded,
+            )
+            .unwrap();
+            crate::schema::register_python_trigger_functions(&db).unwrap();
+            let tx = db.transaction().unwrap();
+            for n in 0..205 {
+                canvas_tx(&tx)
+                    .upsert(&event(&format!("e{n:04}"), (n / 2) as f64))
+                    .unwrap();
+            }
+            install(&tx);
+            for (id, created) in [
+                ("warm", 300.0),
+                ("new", 301.0),
+                ("old", -1.0),
+                ("tie", 300.0),
+            ] {
+                canvas_tx(&tx).upsert(&event(id, created)).unwrap();
+            }
+            // A duplicate receipt remains a no-op; deleting a member restores its predecessor.
+            assert!(!canvas_tx(&tx).insert_new(&event("new", 301.0)).unwrap());
+            canvas_tx(&tx)
+                .delete::<EventsRow>(&("new".to_owned(),))
+                .unwrap();
+            assert_eq!(entity(&tx, "old").deleted.as_stored(), 1);
+            assert_eq!(entity(&tx, "tie").deleted.as_stored(), 0);
+            let mut rows = canvas_read(&tx)
+                .collect(&SyncEntities::SELECT_QUERY, &())
+                .unwrap()
+                .into_iter()
+                .map(|row| {
+                    (
+                        row.entity_id,
+                        row.source_rowid,
+                        row.publication_seq,
+                        row.deleted.as_stored(),
+                        row.entity_hash,
+                        row.entity_payload.value().raw().map(str::to_owned),
+                    )
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|left, right| left.0.cmp(&right.0));
+            assert_eq!(
+                rows.iter().filter(|row| row.3 == 0).count(),
+                EVENT_WINDOW_ROWS
+            );
+            (rows, marker(&tx))
+        };
+        assert_eq!(run(true), run(false));
+    }
+
     fn fixture() -> rusqlite::Connection {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         for descriptor in [
