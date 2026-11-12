@@ -260,8 +260,8 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
                         self.session.as_ref(),
                         scope,
                         None,
-                        request.method,
-                        request.params,
+                        request.method(),
+                        request.params(),
                         deadline,
                     )
                 }));
@@ -382,7 +382,9 @@ async fn provider_read(
     if Instant::now() >= deadline {
         return None;
     }
+    // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/provider_ports.rs#internal_sender_witness_diagnostics
     let receipt = session
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/provider_ports.rs#internal_sender_witness_diagnostics
         .provider_request(ProviderRequest {
             root_request_id: String::new(),
             admitted_request: None,
@@ -530,13 +532,12 @@ impl TitleRequestPort for ProviderTitleRequestPort {
             // Cancellation or process loss during a submitted write must leave
             // the same cwd available when the durable receipt is inspected.
             home.retain();
-            let mut thread_params = studio_json::Map::new();
-            thread_params.insert("cwd".into(), json!(home.path()));
-            thread_params.insert("model".into(), json!(request.model));
-            thread_params.insert("ephemeral".into(), json!(true));
             let Ok(prepared) = studio_runtime_services::provider_adapter::adapter(provider).encode(
                 studio_runtime_services::provider_adapter::ProviderCommand::SetTitle {
-                    params: thread_params,
+                    input: studio_runtime_services::provider_adapter::TitleInput {
+                        cwd: home.path().to_string_lossy().into_owned(),
+                        model: request.model.clone(),
+                    },
                 },
             ) else {
                 return title_receipt(&request, WriteOutcome::NotSent, None);
@@ -546,8 +547,8 @@ impl TitleRequestPort for ProviderTitleRequestPort {
                     &request,
                     &start_operation,
                     Some(actor.clone()),
-                    prepared.method,
-                    prepared.params,
+                    prepared.method(),
+                    prepared.params(),
                     deadline,
                     None,
                 )
@@ -743,6 +744,7 @@ impl ProviderTitleRequestPort {
             .await
             .ok()?)
             };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/provider_ports.rs#internal_sender_witness_title
         let request = ProviderRequest {
             root_request_id,
             admitted_request,
@@ -755,6 +757,7 @@ impl ProviderTitleRequestPort {
             params,
             deadline,
         };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/provider_ports.rs#internal_sender_witness_title
         let receipt = session.provider_request(request).await.ok()?;
         (receipt.scope.account == expected_account
             && receipt.operation == expected_operation
@@ -978,6 +981,9 @@ mod tests {
                         | ReplyScenario::NotSentTurn
                         | ReplyScenario::Listed(_) => json!({"thread":{"id":"title-thread"}}),
                     })),
+                    Method::ThreadLoadedList | Method::ClaudeDiagnostics => {
+                        Some(ProviderResponse::Reply(json!({"data":[]})))
+                    }
                     Method::TurnStart => {
                         Some(ProviderResponse::Reply(json!({"turn":{"id":"title-turn"}})))
                     }
@@ -1034,6 +1040,98 @@ mod tests {
                     replayed: false,
                 })
             })
+        }
+    }
+
+    fn assert_requests_use_real_codec(
+        provider: studio_runtime_providers::ProviderKind,
+        calls: &[ProviderRequest],
+    ) {
+        use studio_runtime_process::provider_seam::ProviderCodec;
+        use studio_runtime_providers::{Frame, ProviderKind, RequestFrame, RequestId};
+        let codec = match provider {
+            ProviderKind::Codex => ProviderCodec::codex(),
+            ProviderKind::Claude => ProviderCodec::default(),
+        };
+        for call in calls {
+            studio_runtime_services::internal_sender_witness::request(call.method, &call.params);
+            let frame = (codec.normalize)(&Frame::Request(RequestFrame {
+                id: RequestId::String(call.operation.clone()),
+                method: call.method,
+                params: Some(call.params.clone()),
+                fields: Default::default(),
+            }))
+            .expect("production normalization");
+            assert!(match provider {
+                ProviderKind::Codex => matches!(frame, Frame::CodexClientRequest(_)),
+                ProviderKind::Claude => matches!(frame, Frame::Request(_)),
+            });
+            let bytes = (codec.encode)(&frame).expect("production encoding");
+            assert_eq!((codec.decode)(&bytes).expect("roundtrip").0, frame);
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_sender_witness_title() {
+        use studio_runtime_providers::ProviderKind;
+        for provider in [ProviderKind::Codex, ProviderKind::Claude] {
+            let session = Arc::new(Session {
+                requests: Mutex::new(Vec::new()),
+                scenario: ReplyScenario::Ready,
+            });
+            let (_root, _request_id, result) =
+                run_title(Arc::clone(&session), provider.key(), 3).await;
+            assert_eq!(
+                result,
+                TitleResult::Applied {
+                    title: "A Useful Title".into()
+                }
+            );
+            let calls = session.requests.lock().expect("title requests");
+            assert_eq!(
+                calls.iter().map(|call| call.method).collect::<Vec<_>>(),
+                [
+                    Method::ThreadStart,
+                    Method::TurnStart,
+                    Method::ThreadTurnsList
+                ]
+            );
+            assert_requests_use_real_codec(provider, &calls);
+        }
+    }
+
+    #[tokio::test]
+    async fn internal_sender_witness_diagnostics() {
+        use studio_runtime_providers::ProviderKind;
+        for provider in [ProviderKind::Codex, ProviderKind::Claude] {
+            let session = Session {
+                requests: Mutex::new(Vec::new()),
+                scenario: ReplyScenario::Ready,
+            };
+            let scope = session.current_scope("diagnostics-account").expect("scope");
+            let request = (studio_runtime_services::provider_adapter::adapter(provider)
+                .descriptor()
+                .diagnostics)();
+            let result = super::provider_read(
+                &session,
+                &scope,
+                None,
+                request.method(),
+                request.params(),
+                std::time::Instant::now() + Duration::from_secs(10),
+            )
+            .await;
+            assert_eq!(result, Some(json!({"data":[]})));
+            let calls = session.requests.lock().expect("diagnostics requests");
+            assert_eq!(calls.len(), 1);
+            assert_eq!(
+                calls[0].method,
+                match provider {
+                    ProviderKind::Codex => Method::ThreadLoadedList,
+                    ProviderKind::Claude => Method::ClaudeDiagnostics,
+                }
+            );
+            assert_requests_use_real_codec(provider, &calls);
         }
     }
 

@@ -606,6 +606,14 @@ export const bridgeWireDefinitions = {
       },
       {
         properties: {
+          method: { const: "thread/contextUsage/updated", type: "string" },
+          params: { $ref: "#/$defs/NotificationThreadContextUsageUpdated" },
+        },
+        required: ["method", "params"],
+        type: "object",
+      },
+      {
+        properties: {
           method: { const: "account/rateLimits/updated", type: "string" },
           params: { $ref: "#/$defs/RateLimits" },
         },
@@ -686,6 +694,9 @@ export const bridgeWireDefinitions = {
       "serverRequest/resolved": {
         $ref: "#/$defs/NotificationServerRequestResolved",
       },
+      "thread/contextUsage/updated": {
+        $ref: "#/$defs/NotificationThreadContextUsageUpdated",
+      },
       "thread/idleCompaction/updated": {
         $ref: "#/$defs/NotificationThreadIdleCompactionUpdated",
       },
@@ -706,6 +717,7 @@ export const bridgeWireDefinitions = {
       "turn/started",
       "turn/completed",
       "thread/tokenUsage/updated",
+      "thread/contextUsage/updated",
       "account/rateLimits/updated",
       "provider/generationStarted",
       "item/agentMessage/delta",
@@ -1564,6 +1576,24 @@ export const bridgeWireDefinitions = {
     required: ["threadId", "taskId"],
     type: "object",
   },
+  ContextUsageDto: {
+    additionalProperties: false,
+    properties: {
+      at: { format: "double", type: ["number", "null"] },
+      tokens: {
+        maximum: 9007199254740991,
+        minimum: 0,
+        type: ["integer", "null"],
+      },
+      window: {
+        maximum: 9007199254740991,
+        minimum: 0,
+        type: ["integer", "null"],
+      },
+    },
+    required: ["tokens", "window"],
+    type: "object",
+  },
   CumulativeModelUsage: {
     additionalProperties: false,
     description: "One model's cumulative contribution to a Claude query.",
@@ -2208,6 +2238,18 @@ export const bridgeWireDefinitions = {
   },
   NotificationServerRequestResolvedRequestId: {
     anyOf: [{ type: "string" }, { format: "double", type: "number" }],
+  },
+  NotificationThreadContextUsageUpdated: {
+    properties: {
+      contextUsage: {
+        anyOf: [{ $ref: "#/$defs/ContextUsageDto" }, { type: "null" }],
+        description: "Native main-loop occupancy, independent of billing.",
+      },
+      threadId: { type: "string" },
+      turnId: { type: ["string", "null"] },
+    },
+    required: ["threadId"],
+    type: "object",
   },
   NotificationThreadIdleCompactionUpdated: {
     properties: {

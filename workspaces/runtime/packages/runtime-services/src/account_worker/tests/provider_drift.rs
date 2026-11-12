@@ -1,5 +1,46 @@
 use super::*;
 
+#[tokio::test]
+async fn native_progress_reasoning_turn_preserves_its_final_answer() {
+    let state = State::new().await;
+    let mut peer = Peer::new();
+    peer.codec = studio_runtime_process::provider_seam::ProviderCodec::codex();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let start = state.start(&mut peer, &worker).await;
+    peer.accepted(&start).await;
+    let prior = state.record().await["lastAnswer"].clone();
+    let frame = studio_runtime_providers::decode_codex_frame(&studio_json::to_vec(&json!({"method":"item/completed","params":{"completedAtMs":2000,"threadId":"fake-thread-0","turnId":"turn","item":{"id":"summary","type":"reasoning","summary":["Public summary"],"content":["PRIVATE_REASONING"]}}})).unwrap()).unwrap();
+    assert!(matches!(frame, Frame::CodexNotification(_)));
+    peer.cursor += 1;
+    let cursor = peer.cursor;
+    peer.entries
+        .send(JournalEntry {
+            boundary_at: None,
+            received_at_ms: peer.clock.now_ms(),
+            cursor: EventCursor(cursor),
+            generation: peer.generation,
+            payload: JournalPayload::Frame(frame),
+        })
+        .await
+        .unwrap();
+    peer.acknowledged(cursor).await;
+    peer.completed().await;
+    worker_barrier(&worker).await;
+    let record = state.record().await;
+    assert_eq!(record["status"], "completed");
+    assert_eq!(record["lastAnswer"], prior);
+    let saved = studio_runtime_store::TranscriptRepository::item(
+        &state.bridge.store.test_reader().unwrap(),
+        &state.agent,
+        &format!("{}:summary", state.agent),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(saved.record.value()["text"], "Public summary");
+    assert_eq!(saved.record.value()["streaming"], false);
+    worker.shutdown().await.unwrap();
+}
+
 async fn native_frame(peer: &mut Peer, value: Value) -> u64 {
     peer.cursor += 1;
     let frame = studio_runtime_providers::decode_codex_frame(&studio_json::to_vec(&value).unwrap())
@@ -22,7 +63,7 @@ async fn native_frame(peer: &mut Peer, value: Value) -> u64 {
 }
 
 #[tokio::test]
-async fn known_completion_missing_pinned_items_still_completes_the_turn() {
+async fn internal_sender_witness_known_completion_missing_pinned_items_still_completes_the_turn() {
     let state = State::new().await;
     let mut peer = Peer::new();
     peer.codec = studio_runtime_process::provider_seam::ProviderCodec::codex();

@@ -13,6 +13,8 @@ import {
   checkSqlRatchet,
   REVIEWED_CALLBACK_SQL_ALLOWANCES,
   REVIEWED_P2_SQL_ALLOWANCES,
+  WRITER_PLAN_WITNESS_SQL_ALLOWANCES,
+  REVIEWED_WAVE_C_SQL_ALLOWANCES,
   fingerprint,
   formatSqlBaseline,
   ownerFor,
@@ -30,13 +32,35 @@ import {
 } from "../sql-ratchet.ts";
 
 test("reviewed SQL remains limited to its exact sites and counts", () => {
-  for (const allowance of [
+  const allowances = [
     ...REVIEWED_CALLBACK_SQL_ALLOWANCES,
     ...REVIEWED_P2_SQL_ALLOWANCES,
-  ]) {
+    ...WRITER_PLAN_WITNESS_SQL_ALLOWANCES,
+    ...REVIEWED_WAVE_C_SQL_ALLOWANCES,
+  ];
+  const identity = (row: (typeof allowances)[number]) =>
+    `${row.file}:${row.api}:${row.fingerprint}`;
+  for (const allowance of new Map(
+    allowances.map((row) => [identity(row), row]),
+  ).values()) {
+    const budget = allowances.filter(
+      (row) => identity(row) === identity(allowance),
+    ).length;
     const site = { ...allowance, symbol: "reviewed callback lookup" };
-    assert.deepEqual(checkSqlRatchet([site], []), []);
-    assert.equal(checkSqlRatchet([site, site], []).length, 1);
+    assert.deepEqual(
+      checkSqlRatchet(
+        Array.from({ length: budget }, () => site),
+        [],
+      ),
+      [],
+    );
+    assert.equal(
+      checkSqlRatchet(
+        Array.from({ length: budget + 1 }, () => site),
+        [],
+      ).length,
+      1,
+    );
     assert.equal(
       checkSqlRatchet([{ ...site, file: "other.rs" }], []).length,
       1,

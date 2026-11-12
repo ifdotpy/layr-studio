@@ -798,18 +798,25 @@ export function renderFullCodexDefinitions(
             .join(" "),
         ),
       );
-      const fields = [
+      const preparationParams = [
         "ThreadStartParams",
         "ThreadResumeParams",
         "TurnStartParams",
         "ThreadForkParams",
-      ].includes(name)
-        ? `impl ${name} {\n${Object.keys(object(schema.properties ?? {}))
+      ].includes(name);
+      const requiredFields = strings(shape.required ?? []);
+      const constructor = preparationParams
+        ? `    pub fn new(${requiredFields.map((field) => `${snake(field)}: ${rust(object(shape.properties)[field], `${name}${typeName(field)}`, name)}`).join(", ")}) -> Self { Self { ${Object.keys(
+            object(shape.properties),
+          )
             .map(
               (field) =>
-                `    pub const FIELD_${snake(field).toUpperCase()}: &'static str = ${JSON.stringify(field)};`,
+                `${snake(field)}: ${requiredFields.includes(field) ? snake(field) : "None"}`,
             )
-            .join("\n")}\n}\n`
+            .join(", ")} } }\n`
+        : "";
+      const fields = preparationParams
+        ? `impl ${name} {\n${constructor}}\n`
         : "";
       return `${derive}\n${schema.additionalProperties === false ? "#[serde(deny_unknown_fields)]\n" : ""}pub struct ${name} {\n${fieldsFull(shape, name)}\n}\n${fields}`;
     }
@@ -922,6 +929,7 @@ export function renderFullCodexDefinitions(
         .join("\n")}\n        })\n    }\n`;
     }
     if (request) {
+      rustText += `    pub fn from_deserializer<'de, D: serde::Deserializer<'de>>(id: RequestId, method: ${name}, params: D) -> Result<Self, D::Error> { Ok(match method {\n${variants.map((variant) => `        ${name}::${variant} => Self::${variant} { id, params: serde::Deserialize::deserialize(params)? },`).join("\n")}\n    }) }\n`;
       rustText += `    pub const fn id(&self) -> &RequestId { match self {\n${variants.map((variant) => `        Self::${variant} { r#id, .. } => r#id,`).join("\n")}\n    }}\n    pub fn set_id(&mut self, new_id: RequestId) { match self {\n${variants.map((variant) => `        Self::${variant} { r#id, .. } => *r#id = new_id,`).join("\n")}\n    }}\n    pub fn from_method_params(id: RequestId, method: ${name}, params: &impl serde::Serialize) -> Result<Self, studio_json::Error> {\n        #[derive(serde::Serialize)]\n        struct Wire<'a, T> { id: RequestId, method: ${name}, params: &'a T }\n        studio_json::from_slice(&studio_json::to_vec(&Wire { id, method, params })?)\n    }\n`;
     }
     rustText += `}\n`;
@@ -940,6 +948,8 @@ export function renderFullCodexDefinitions(
         `match self { ${variants.map((variant) => `Self::${variant}(value) => VisitUnknown::visit_unknowns(value, visitor)`).join(", ")} }`,
       );
       rustText += `impl ${kind}Result {\n    pub const fn method(&self) -> ${name} { match self {\n${variants.map((variant) => `        Self::${variant}(_) => ${name}::${variant},`).join("\n")}\n    }}\n    pub fn decode(method: ${name}, result: &str) -> Result<Self, studio_json::Error> { match method {\n${variants.map((variant) => `        ${name}::${variant} => studio_json::from_str(result).map(|result| Self::${variant}(Box::new(result))),`).join("\n")}\n    }}\n    pub fn serialize_payload<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { match self {\n${variants.map((variant) => `        Self::${variant}(result) => serde::Serialize::serialize(result, serializer),`).join("\n")}\n    }}\n}\n`;
+      if (kind === "ServerRequest")
+        rustText += `impl ${kind}Result { pub fn from_deserializer<'de, D: serde::Deserializer<'de>>(method: ${name}, result: D) -> Result<Self, D::Error> { match method {\n${variants.map((variant) => `        ${name}::${variant} => serde::Deserialize::deserialize(result).map(|result| Self::${variant}(Box::new(result))),`).join("\n")}\n    }} }\n`;
       tsText += `export type ${kind}Results = { ${results.map(({ method, result }) => `${JSON.stringify(method)}: ${result}`).join("; ")} };\n`;
     }
   }

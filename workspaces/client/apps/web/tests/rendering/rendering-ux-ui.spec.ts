@@ -9,8 +9,17 @@ import { rm, mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, expect } from "../playwright.ts";
+import type { Page, TestInfo } from "@playwright/test";
 
-test("rendering ux ui", async ({ page: runnerPage }) => {
+const progressTest =
+  "native progress card and text render through the shared projection";
+test("rendering ux ui", rendering);
+test(progressTest, rendering);
+async function rendering(
+  { page: runnerPage }: { page: Page },
+  testInfo: TestInfo,
+) {
+  const progressOnly = testInfo.title === progressTest;
   const root = fileURLToPath(new URL("../../../../../../", import.meta.url));
   const { createFixtureViteServer: createServer } =
     await import("../playwright.ts");
@@ -60,6 +69,19 @@ test("rendering ux ui", async ({ page: runnerPage }) => {
     );
     const baseUrl = server.resolvedUrls!.local[0]!;
     await page.goto(`${baseUrl}${name}.html`);
+    const progress = page.locator("#native-progress");
+    await expect(progress).toContainText("Inspect the provider");
+    await expect(progress).toContainText("Check the event");
+    await expect(progress).toContainText("Trace the renderer");
+    await expect(progress).toContainText("Reading documentation");
+    await expect(progress).toContainText("Running for 3s");
+    await progress.screenshot({
+      path: testInfo.outputPath("native-progress.png"),
+    });
+    if (progressOnly) {
+      expect(errors).toEqual([]);
+      return;
+    }
     await page.getByText("Partial", { exact: true }).waitFor();
     await page.locator("#text .sentence-enter").count();
     await page.evaluate(() => {
@@ -255,4 +277,4 @@ test("rendering ux ui", async ({ page: runnerPage }) => {
     await server?.close();
     await rm(artifacts, { recursive: true, force: true });
   }
-});
+}

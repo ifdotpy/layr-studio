@@ -276,12 +276,14 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
     let mut reader = BufReader::new(output);
     let deadline = tokio::time::Instant::now() + SMOKE_TIMEOUT;
     let result = async {
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         let initialize = codex::ClientRequest::Initialize {
             id: codex::RequestId::Variant2(Box::new(1)),
             params: studio_runtime_providers::codex_initialize_params(
                 studio_runtime_providers::ClientName::UpdateProbe,
             ),
         };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         write_frame(&mut input, &initialize).await?;
         let codex::ClientRequestResult::Initialize(_) = response(
             &mut reader,
@@ -293,7 +295,9 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
         else {
             return Err(());
         };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         write_frame(&mut input, &codex::ClientNotification::Initialized).await?;
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         let config = codex::ClientRequest::ConfigRead {
             id: codex::RequestId::Variant2(Box::new(2)),
             params: codex::ConfigReadParams {
@@ -301,6 +305,7 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
                 include_layers: Some(false),
             },
         };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         write_frame(&mut input, &config).await?;
         let codex::ClientRequestResult::ConfigRead(_) = response(
             &mut reader,
@@ -312,6 +317,7 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
         else {
             return Err(());
         };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         let loaded = codex::ClientRequest::ThreadLoadedList {
             id: codex::RequestId::Variant2(Box::new(3)),
             params: codex::ThreadLoadedListParams {
@@ -319,6 +325,7 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
                 limit: None,
             },
         };
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/native_probe.rs#internal_sender_witness_native_probe
         write_frame(&mut input, &loaded).await?;
         let codex::ClientRequestResult::ThreadLoadedList(loaded) = response(
             &mut reader,
@@ -619,6 +626,60 @@ mod tests {
             .is_err()
         );
         assert!(super::companion_ready(br#"{"type":"bad","type":"connection/ready","selectedVersion":1,"capabilities":[]}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn internal_sender_witness_native_probe() {
+        use studio_runtime_process::provider_seam::ProviderCodec;
+        use studio_runtime_providers::Frame;
+
+        let root = tempfile::tempdir().expect("probe fixture");
+        let program = root.path().join("probe");
+        // Capture the real smoke builder's four writes, including initialized.
+        write_executable(
+            &program,
+            r##"#!/bin/sh
+read -r line
+printf '%s\n' "$line" > requests
+printf '%s\n' '{"id":1,"result":{"codexHome":"/probe","platformFamily":"unix","platformOs":"test","userAgent":"fixture"}}'
+read -r line
+printf '%s\n' "$line" >> requests
+read -r line
+printf '%s\n' "$line" >> requests
+printf '%s\n' '{"id":2,"result":{"config":{},"origins":{}}}'
+read -r line
+printf '%s\n' "$line" >> requests
+printf '%s\n' '{"id":3,"result":{"data":[]}}'
+"##,
+        );
+        super::smoke(&program, root.path())
+            .await
+            .expect("probe smoke");
+        let captured = fs::read_to_string(root.path().join("requests")).expect("probe writes");
+        let codec = ProviderCodec::codex();
+        let mut methods = Vec::new();
+        for line in captured.lines() {
+            let (frame, boundary_at) = (codec.decode)(line.as_bytes()).expect("Codex decode");
+            assert_eq!(boundary_at, None);
+            assert!(matches!(
+                frame,
+                Frame::CodexClientRequest(_) | Frame::CodexClientNotification(_)
+            ));
+            let normalized = (codec.normalize)(&frame).expect("Codex normalization");
+            let encoded = (codec.encode)(&normalized).expect("Codex encoding");
+            assert_eq!((codec.decode)(&encoded).expect("Codex round trip").0, frame);
+            methods.push(frame.method().expect("probe method").to_owned());
+        }
+        assert_eq!(
+            methods,
+            [
+                "initialize",
+                "initialized",
+                "config/read",
+                "thread/loaded/list"
+            ]
+        );
+        // This native compatibility probe is Codex-only; Claude never calls smoke.
     }
 
     #[tokio::test]

@@ -85,8 +85,7 @@ impl ProviderKind {
     }
 }
 
-/// A control or behavior that a provider adapter supports. The UI shows only the
-/// controls of the adapter's list; a missing entry hides the control.
+/// A user control whose availability is decided explicitly for every provider.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
@@ -134,29 +133,51 @@ impl ProviderCapability {
     }
 }
 
-impl ProviderKind {
-    /// The capability list of this provider's adapter. The exhaustive match
-    /// forces a new provider to declare its list.
+/// Explicit availability of a user control or internal provider policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderSupport {
+    Supported,
+    Unsupported { reason: &'static str },
+}
+
+impl ProviderSupport {
     #[must_use]
-    pub const fn capabilities(self) -> &'static [ProviderCapability] {
+    pub const fn is_supported(self) -> bool {
+        matches!(self, Self::Supported)
+    }
+}
+
+impl ProviderKind {
+    /// Single owner of user-control availability. Each provider must decide every control.
+    #[must_use]
+    pub const fn capability(self, capability: ProviderCapability) -> ProviderSupport {
         use ProviderCapability::{Approvals, Compaction, Effort, Fork, ModelChange, Rewind, Steer};
         match self {
-            // `edit(turn)` serves every provider, so both support rewind.
-            Self::Codex | Self::Claude => &[
-                Steer,
-                Rewind,
-                Fork,
-                ModelChange,
-                Effort,
-                Compaction,
-                Approvals,
-            ],
+            Self::Codex => match capability {
+                Steer | Rewind | Fork | ModelChange | Effort | Compaction | Approvals => {
+                    ProviderSupport::Supported
+                }
+            },
+            Self::Claude => match capability {
+                Steer | Rewind | Fork | ModelChange | Effort | Compaction | Approvals => {
+                    ProviderSupport::Supported
+                }
+            },
         }
     }
 
+    /// Generated UI lists are projections of the exhaustive decision above.
     #[must_use]
-    pub fn supports(self, capability: ProviderCapability) -> bool {
-        self.capabilities().contains(&capability)
+    pub fn capabilities(self) -> Vec<ProviderCapability> {
+        ProviderCapability::ALL
+            .into_iter()
+            .filter(|capability| self.supports(*capability))
+            .collect()
+    }
+
+    #[must_use]
+    pub const fn supports(self, capability: ProviderCapability) -> bool {
+        self.capability(capability).is_supported()
     }
 }
 
@@ -252,6 +273,18 @@ mod tests {
 
     #[test]
     fn capability_keys_match_serde() {
+        let schema = schemars::schema_for!(ProviderCapability).to_value();
+        let variants = schema["oneOf"]
+            .as_array()
+            .expect("documented unit variants have individual schemas")
+            .iter()
+            .map(|variant| variant["const"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            json!(variants),
+            json!(ProviderCapability::ALL.map(ProviderCapability::key)),
+            "The generated capability inventory must cover every enum variant",
+        );
         for capability in ProviderCapability::ALL {
             assert_eq!(
                 studio_json::to_value(capability).expect("serialize"),

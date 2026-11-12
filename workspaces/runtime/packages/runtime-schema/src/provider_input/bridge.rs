@@ -130,6 +130,8 @@ pub struct BridgeNotifications {
     pub turn_completed: NotificationTurnCompleted,
     #[serde(rename = "thread/tokenUsage/updated")]
     pub thread_token_usage_updated: NotificationThreadTokenUsageUpdated,
+    #[serde(rename = "thread/contextUsage/updated")]
+    pub thread_context_usage_updated: NotificationThreadContextUsageUpdated,
     #[serde(rename = "account/rateLimits/updated")]
     pub account_rate_limits_updated: RateLimits,
     #[serde(rename = "provider/generationStarted")]
@@ -162,6 +164,8 @@ pub enum BridgeNotification {
     TurnCompleted(NotificationTurnCompleted),
     #[serde(rename = "thread/tokenUsage/updated")]
     ThreadTokenUsageUpdated(NotificationThreadTokenUsageUpdated),
+    #[serde(rename = "thread/contextUsage/updated")]
+    ThreadContextUsageUpdated(NotificationThreadContextUsageUpdated),
     #[serde(rename = "account/rateLimits/updated")]
     AccountRateLimitsUpdated(RateLimits),
     #[serde(rename = "provider/generationStarted")]
@@ -999,6 +1003,17 @@ pub struct NotificationThreadTokenUsageUpdated {
     pub turn_id: Option<Option<String>>,
     #[serde(rename = "studioUsage")]
     pub studio_usage: crate::usage::UsageObservation,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct NotificationThreadContextUsageUpdated {
+    #[serde(rename = "threadId")]
+    pub thread_id: String,
+    #[serde(rename = "turnId", skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    /// Native main-loop occupancy, independent of billing.
+    #[serde(rename = "contextUsage", skip_serializing_if = "Option::is_none")]
+    pub context_usage: Option<crate::agent_entity_nested_extra::ContextUsageDto>,
 }
 
 #[derive(Serialize, JsonSchema)]

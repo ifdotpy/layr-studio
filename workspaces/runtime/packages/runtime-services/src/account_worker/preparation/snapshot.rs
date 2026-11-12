@@ -1067,7 +1067,13 @@ fn frozen_params(record: &Value) -> Result<Option<thread::FrozenParams>, WorkerE
             .cloned()
             .ok_or_else(|| invalid("agent/frozenNativeParams"))
     };
-    let dynamic_tools = studio_json::from_value(field("dynamicTools")?)
+    let provider = ProviderKind::of_record(record).map_err(|_| invalid("agent/provider"))?;
+    let dynamic_tools: Vec<Value> = studio_json::from_value(field("dynamicTools")?)
+        .map_err(|_| invalid("agent/frozenNativeParams"))?;
+    let dynamic_tools = dynamic_tools
+        .into_iter()
+        .map(|tool| thread::FrozenTool::from_import(provider, tool))
+        .collect::<Result<_, _>>()
         .map_err(|_| invalid("agent/frozenNativeParams"))?;
     Ok(Some(thread::FrozenParams {
         base_instructions: field("baseInstructions")?,
@@ -1867,7 +1873,7 @@ mod resource_tests {
     #[test]
     fn a_moved_agent_keeps_its_frozen_native_parameters() {
         let tool = json!({"name":"orchestration_message","description":"Saved","inputSchema":{"type":"object"}});
-        let record = json!({"frozenNativeParams":{"baseInstructions":"base","developerInstructions":"guidance",
+        let record = json!({"provider":"claude","frozenNativeParams":{"baseInstructions":"base","developerInstructions":"guidance",
             "model":"default","dynamicTools":[tool],"effort":"high"}});
         let frozen = frozen_params(&record).expect("valid").expect("frozen");
         assert_eq!(frozen.model, json!("default"));
@@ -1899,6 +1905,85 @@ mod resource_tests {
             frozen_params(&malformed).is_err(),
             "a tool needs its schema"
         );
+    }
+
+    async fn prepare_frozen_tool(
+        provider: ProviderKind,
+        tool: Value,
+    ) -> Result<thread::Outcome, StoreError> {
+        let directory = tempfile::tempdir().expect("temporary state");
+        let store = RuntimeStore::open(Some(directory.path())).await?;
+        let resources = PreparationResources::bundled(String::new(), ModelCatalogService::new())
+            .expect("resources")
+            .capture_filesystem(None);
+        store.transaction_with(move |tx| {
+            let record = json!({"compactions":0,"id":"imported","rootId":"imported","epoch":1,
+                "status":"queued","isLead":true,"provider":provider,"accountKey":"default","cwd":"/line",
+                "frozenNativeParams":{"baseInstructions":"base","developerInstructions":"saved guidance",
+                    "model":"saved-model","dynamicTools":[tool]}});
+            let mut persisted = record.clone();
+            persisted.as_object_mut().expect("agent").remove("frozenNativeParams");
+            AgentRepository::put(tx, &AgentRecord::from_value(persisted).expect("agent"))?;
+            let snapshot = thread_snapshot(tx, &resources, &record, "connection", Path::new("/state"), None)
+                .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+            let restored: thread::Snapshot = serde::Deserialize::deserialize(json!(&snapshot)).expect("receipt snapshot");
+            assert_eq!(json!(restored.frozen), json!(snapshot.frozen), "saved catalog remains unchanged");
+            Ok(thread::plan(&snapshot, "attempt", "ticket"))
+        }).await
+    }
+
+    #[tokio::test]
+    async fn frozen_thread_preparation_preserves_unknown_native_tool_variants() {
+        let tool = json!({"type":"futureTool","name":"saved","description":"saved",
+            "inputSchema":{},"futureOption":true});
+        let outcome = prepare_frozen_tool(ProviderKind::Codex, tool.clone())
+            .await
+            .expect("frozen preparation");
+        let attempt = match outcome {
+            thread::Outcome::Start(attempt) | thread::Outcome::Resume(attempt) => attempt,
+            other @ (thread::Outcome::Ready(_) | thread::Outcome::Refuse(_)) => panic!("{other:?}"),
+        };
+        assert_eq!(attempt.params["dynamicTools"], json!([tool]));
+        let native = attempt.native.expect("retained native request");
+        let frame = native
+            .frame(RequestId::String("ticket".into()))
+            .expect("frame");
+        let mut unknown = Vec::new();
+        frame
+            .visit_unknown_variants(&mut |kind, variant| unknown.push(format!("{kind}:{variant}")));
+        assert_eq!(unknown, ["DynamicToolSpec:futureTool"]);
+    }
+
+    #[tokio::test]
+    async fn frozen_thread_preparation_rejects_malformed_known_native_tools() {
+        let tool = json!({"type":"function","name":"saved","description":"saved",
+            "inputSchema":{},"deferLoading":"invalid"});
+        assert!(
+            prepare_frozen_tool(ProviderKind::Codex, tool)
+                .await
+                .is_err(),
+            "known native fields must be validated at import"
+        );
+    }
+
+    #[tokio::test]
+    async fn frozen_claude_preparation_preserves_opaque_tool_extensions() {
+        for extra in [json!({"type":null}), json!({"deferLoading":null})] {
+            let mut tool = json!({"name":"saved","description":"Saved","inputSchema":{"type":"object","properties":{}}});
+            tool.as_object_mut()
+                .expect("tool")
+                .extend(extra.as_object().expect("extensions").clone());
+            let outcome = prepare_frozen_tool(ProviderKind::Claude, tool.clone())
+                .await
+                .expect("Claude catalog extensions remain opaque");
+            let attempt = match outcome {
+                thread::Outcome::Start(attempt) | thread::Outcome::Resume(attempt) => attempt,
+                other @ (thread::Outcome::Ready(_) | thread::Outcome::Refuse(_)) => {
+                    panic!("{other:?}")
+                }
+            };
+            assert_eq!(attempt.params["dynamicTools"], json!([tool]));
+        }
     }
 
     #[test]

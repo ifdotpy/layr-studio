@@ -1,7 +1,7 @@
 //! One provider task owns the command socket; its event pump owns a second
 //! supervisor socket for cancellable event waits. Writes and durable ACKs stay
 //! on the command socket. No automatic reconnect or write retry exists here.
-use crate::{provider_seam::*, provider_shared::*, provider_stdio::CodexMethodDiagnostics, *};
+use crate::{provider_seam::*, provider_shared::*, *};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::{collections::BTreeMap, future::Future, path::PathBuf, time::Duration};
@@ -200,7 +200,6 @@ impl SupervisorProviderTaskFactory {
             let actor = AdapterTask {
                 codec: options.launch.codec,
                 provider: options.launch.provider,
-                codex_diagnostics: CodexMethodDiagnostics::default(),
                 activation,
                 inherit_cwd: options.launch.cwd.is_none(),
                 clock: options.clock,
@@ -464,7 +463,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Rpc<S> {
 struct AdapterTask {
     codec: ProviderCodec,
     provider: Option<ProviderKind>,
-    codex_diagnostics: CodexMethodDiagnostics,
     account_store: Option<Arc<studio_runtime_store::RuntimeStore>>,
     inherit_cwd: bool,
     activation: Option<(oneshot::Sender<Generation>, oneshot::Receiver<Activation>)>,
@@ -662,17 +660,6 @@ impl AdapterTask {
         } else {
             None
         };
-        match self.provider {
-            Some(ProviderKind::Codex) => {
-                if let Some(ResponseBody::CodexResult(
-                    studio_runtime_providers::codex::ClientRequestResult::Initialize(result),
-                )) = &self.cached_initialize
-                {
-                    self.codex_diagnostics.initialize(Some(&result.user_agent));
-                }
-            }
-            Some(ProviderKind::Claude) | None => {}
-        }
         if self.cached_initialize.is_some() {
             self.initialization = InitializationStatus::InitializedWritePending;
         }
@@ -1096,11 +1083,7 @@ impl AdapterTask {
             operation_id: write.operation_id,
             native_id,
             message: studio_json::OwnedRawJson::from_string(
-                String::from_utf8(
-                    (write.encode)(&write.message)
-                        .map_err(|_| AdapterError::InvalidConfiguration)?,
-                )
-                .map_err(|_| AdapterError::InvalidConfiguration)?,
+                String::from_utf8(write.bytes).map_err(|_| AdapterError::InvalidConfiguration)?,
             )
             .map_err(|_| AdapterError::InvalidConfiguration)?,
             extra: Default::default(),
@@ -1164,7 +1147,6 @@ impl AdapterTask {
                 boundary_at = decoded.boundary_at;
                 match decoded.payload {
                     DecodedJournalPayload::Frame(mut frame) => {
-                        self.codex_diagnostics.record(self.provider, &frame);
                         if let Frame::Response { id, body, .. } = &mut frame {
                             self.settle_reply(id, body, event.generation);
                         }
@@ -1238,12 +1220,7 @@ fn decode_stdout_with(
     raw: &str,
     codec: ProviderCodec,
 ) -> studio_runtime_providers::DecodedJournalEntry {
-    let decoded = studio_runtime_providers::decode_journal_with(
-        0,
-        0,
-        raw.as_bytes(),
-        codec.decode_with_metadata,
-    );
+    let decoded = studio_runtime_providers::decode_journal_with(0, 0, raw.as_bytes(), codec.decode);
     if let DecodedJournalPayload::RawStdout { .. } = decoded.payload
         && let Ok(wrapped) = studio_json::from_str::<SupervisorRawStdout<'_>>(raw)
     {
@@ -1251,7 +1228,7 @@ fn decode_stdout_with(
             0,
             0,
             wrapped.raw.as_bytes(),
-            codec.decode_with_metadata,
+            codec.decode,
         );
         decoded.boundary_at = wrapped.boundary_at;
         return decoded;

@@ -280,6 +280,8 @@ fn commit(
     Ok((Some(value), true))
 }
 
+// One registry entity selected by its complete primary key; JSON enumerates its accounts once.
+
 // LimitAgent owns the consumed fields. JSON tokens preserve their stored types;
 // null and absent optional fields both have no value in the limit projection.
 #[cfg(test)]
@@ -884,7 +886,9 @@ mod tests {
                 let before_steps = statement.get_status(rusqlite::StatementStatus::VmStep);
                 let before_decodes = AGENT_DECODES.get();
                 AGENT_DECODES.set(0);
-                commit(tx, account, LimitsWrite::Snapshot(LimitsSnapshot { response }), 1.0, None)?;
+                studio_runtime_store::writer_query_plans::assert_writer_query_plans(tx, &[(studio_runtime_store::ProjectionPublicationQueries::CURRENT_ACCOUNT_IDENTITY_SQL, "one primary-key account registry publication")], || {
+                    commit(tx, account, LimitsWrite::Snapshot(LimitsSnapshot { response }), 1.0, None)
+                })?;
                 let decodes = AGENT_DECODES.get();
                 let payload = studio_runtime_store::ProjectionPublicationQueries::raw_payload(tx, "rateLimit", account, false)?.expect("published limits");
                 let (published, unreadable) = account_state::normalized_limits_view(account, payload.as_bytes(), 1.0);

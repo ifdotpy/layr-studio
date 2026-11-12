@@ -168,8 +168,8 @@ pub async fn prepare_turn_with_connection_id(
 }
 impl PreparedTurn {
     /// Exact native method and parameters handed to SessionControl::prepare.
-    pub fn native_request(&self) -> Value {
-        json!({"method":self.0.method.as_str(),"params":self.0.params})
+    pub fn native_request(&self) -> &crate::provider_adapter::NativeRequest {
+        &self.0.native
     }
     /// Enter the production submission owner, including durable transport receipt
     /// persistence and refusal settlement. No provider write occurs here.

@@ -17,7 +17,10 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
-import Activity from "../../src/components/conversation/transcript/Activity/Activity.tsx";
+import Activity, {
+  ToolCard,
+} from "../../src/components/conversation/transcript/Activity/Activity.tsx";
+import progressFixtures from "../../../../../providers/fixtures/native-progress.json";
 import History from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
 function TurnHistory(props: ComponentProps<typeof History>) {
   return (
@@ -73,6 +76,30 @@ function Harness() {
   return (
     <MantineProvider forceColorScheme={theme}>
       <main>
+        <section id="native-progress">
+          {progressFixtures.map((fixture) => (
+            <section key={fixture.provider}>
+              <h2>
+                {fixture.provider === "codex" ? "Codex" : "Claude"} progress
+              </h2>
+              {fixture.rows.map((row) =>
+                row.payload ? (
+                  <ToolCard
+                    key={row.id}
+                    item={{
+                      id: row.id,
+                      role: "output",
+                      text: JSON.stringify(row.payload),
+                      toolStatus: "running",
+                    }}
+                  />
+                ) : (
+                  <StreamingText key={row.id} text={row.text} streaming />
+                ),
+              )}
+            </section>
+          ))}
+        </section>
         <div id="text">
           <StreamingText text={text} streaming={streaming} agentId="fixture" />
         </div>
@@ -96,4 +123,8 @@ function Harness() {
   );
 }
 const root = document.getElementById("root")!;
-createRoot(root).render(<Harness />);
+createRoot(root).render(
+  <AgentModelsFixture agents={[]}>
+    <Harness />
+  </AgentModelsFixture>,
+);

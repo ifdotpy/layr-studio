@@ -16263,30 +16263,33 @@ pub struct ThreadForkParams {
     pub r#thread_source: Option<Option<ThreadSource>>,
 }
 impl ThreadForkParams {
-    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
-    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
-    pub const FIELD_ATTACH_TO_SOURCE: &'static str = "attachToSource";
-    pub const FIELD_BASE_INSTRUCTIONS: &'static str = "baseInstructions";
-    pub const FIELD_BEFORE_TURN_ID: &'static str = "beforeTurnId";
-    pub const FIELD_CONFIG: &'static str = "config";
-    pub const FIELD_CWD: &'static str = "cwd";
-    pub const FIELD_DEFER_GOAL_CONTINUATION: &'static str = "deferGoalContinuation";
-    pub const FIELD_DEVELOPER_INSTRUCTIONS: &'static str = "developerInstructions";
-    pub const FIELD_EPHEMERAL: &'static str = "ephemeral";
-    pub const FIELD_EXCLUDE_TURNS: &'static str = "excludeTurns";
-    pub const FIELD_EXPERIMENTAL_DISABLE_PREDICTION_MCP: &'static str =
-        "experimentalDisablePredictionMcp";
-    pub const FIELD_EXPERIMENTAL_PREDICTION_MODE: &'static str = "experimentalPredictionMode";
-    pub const FIELD_LAST_TURN_ID: &'static str = "lastTurnId";
-    pub const FIELD_MODEL: &'static str = "model";
-    pub const FIELD_MODEL_PROVIDER: &'static str = "modelProvider";
-    pub const FIELD_PATH: &'static str = "path";
-    pub const FIELD_PERMISSIONS: &'static str = "permissions";
-    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
-    pub const FIELD_SANDBOX: &'static str = "sandbox";
-    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
-    pub const FIELD_THREAD_ID: &'static str = "threadId";
-    pub const FIELD_THREAD_SOURCE: &'static str = "threadSource";
+    pub fn new(thread_id: String) -> Self {
+        Self {
+            approval_policy: None,
+            approvals_reviewer: None,
+            attach_to_source: None,
+            base_instructions: None,
+            before_turn_id: None,
+            config: None,
+            cwd: None,
+            defer_goal_continuation: None,
+            developer_instructions: None,
+            ephemeral: None,
+            exclude_turns: None,
+            experimental_disable_prediction_mcp: None,
+            experimental_prediction_mode: None,
+            last_turn_id: None,
+            model: None,
+            model_provider: None,
+            path: None,
+            permissions: None,
+            runtime_workspace_roots: None,
+            sandbox: None,
+            service_tier: None,
+            thread_id: thread_id,
+            thread_source: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -18746,24 +18749,28 @@ pub struct ThreadResumeParams {
     pub r#thread_id: String,
 }
 impl ThreadResumeParams {
-    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
-    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
-    pub const FIELD_BASE_INSTRUCTIONS: &'static str = "baseInstructions";
-    pub const FIELD_CONFIG: &'static str = "config";
-    pub const FIELD_CWD: &'static str = "cwd";
-    pub const FIELD_DEVELOPER_INSTRUCTIONS: &'static str = "developerInstructions";
-    pub const FIELD_EXCLUDE_TURNS: &'static str = "excludeTurns";
-    pub const FIELD_HISTORY: &'static str = "history";
-    pub const FIELD_INITIAL_TURNS_PAGE: &'static str = "initialTurnsPage";
-    pub const FIELD_MODEL: &'static str = "model";
-    pub const FIELD_MODEL_PROVIDER: &'static str = "modelProvider";
-    pub const FIELD_PATH: &'static str = "path";
-    pub const FIELD_PERMISSIONS: &'static str = "permissions";
-    pub const FIELD_PERSONALITY: &'static str = "personality";
-    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
-    pub const FIELD_SANDBOX: &'static str = "sandbox";
-    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
-    pub const FIELD_THREAD_ID: &'static str = "threadId";
+    pub fn new(thread_id: String) -> Self {
+        Self {
+            approval_policy: None,
+            approvals_reviewer: None,
+            base_instructions: None,
+            config: None,
+            cwd: None,
+            developer_instructions: None,
+            exclude_turns: None,
+            history: None,
+            initial_turns_page: None,
+            model: None,
+            model_provider: None,
+            path: None,
+            permissions: None,
+            personality: None,
+            runtime_workspace_roots: None,
+            sandbox: None,
+            service_tier: None,
+            thread_id: thread_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -19728,33 +19735,37 @@ pub struct ThreadStartParams {
     pub r#thread_source: Option<Option<ThreadSource>>,
 }
 impl ThreadStartParams {
-    pub const FIELD_ALLOW_PROVIDER_MODEL_FALLBACK: &'static str = "allowProviderModelFallback";
-    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
-    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
-    pub const FIELD_BASE_INSTRUCTIONS: &'static str = "baseInstructions";
-    pub const FIELD_CONFIG: &'static str = "config";
-    pub const FIELD_CWD: &'static str = "cwd";
-    pub const FIELD_DAYBREAK_ENABLED: &'static str = "daybreakEnabled";
-    pub const FIELD_DEVELOPER_INSTRUCTIONS: &'static str = "developerInstructions";
-    pub const FIELD_DYNAMIC_TOOLS: &'static str = "dynamicTools";
-    pub const FIELD_ENVIRONMENTS: &'static str = "environments";
-    pub const FIELD_EPHEMERAL: &'static str = "ephemeral";
-    pub const FIELD_EXPERIMENTAL_RAW_EVENTS: &'static str = "experimentalRawEvents";
-    pub const FIELD_HISTORY_MODE: &'static str = "historyMode";
-    pub const FIELD_MOCK_EXPERIMENTAL_FIELD: &'static str = "mockExperimentalField";
-    pub const FIELD_MODEL: &'static str = "model";
-    pub const FIELD_MODEL_PROVIDER: &'static str = "modelProvider";
-    pub const FIELD_MULTI_AGENT_MODE: &'static str = "multiAgentMode";
-    pub const FIELD_PERMISSIONS: &'static str = "permissions";
-    pub const FIELD_PERSONALITY: &'static str = "personality";
-    pub const FIELD_PROJECT_ID: &'static str = "projectId";
-    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
-    pub const FIELD_SANDBOX: &'static str = "sandbox";
-    pub const FIELD_SELECTED_CAPABILITY_ROOTS: &'static str = "selectedCapabilityRoots";
-    pub const FIELD_SERVICE_NAME: &'static str = "serviceName";
-    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
-    pub const FIELD_SESSION_START_SOURCE: &'static str = "sessionStartSource";
-    pub const FIELD_THREAD_SOURCE: &'static str = "threadSource";
+    pub fn new() -> Self {
+        Self {
+            allow_provider_model_fallback: None,
+            approval_policy: None,
+            approvals_reviewer: None,
+            base_instructions: None,
+            config: None,
+            cwd: None,
+            daybreak_enabled: None,
+            developer_instructions: None,
+            dynamic_tools: None,
+            environments: None,
+            ephemeral: None,
+            experimental_raw_events: None,
+            history_mode: None,
+            mock_experimental_field: None,
+            model: None,
+            model_provider: None,
+            multi_agent_mode: None,
+            permissions: None,
+            personality: None,
+            project_id: None,
+            runtime_workspace_roots: None,
+            sandbox: None,
+            selected_capability_roots: None,
+            service_name: None,
+            service_tier: None,
+            session_start_source: None,
+            thread_source: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -20790,35 +20801,38 @@ pub struct TurnStartParams {
     pub r#turn_trigger: Option<Option<String>>,
 }
 impl TurnStartParams {
-    pub const FIELD_ADDITIONAL_CONTEXT: &'static str = "additionalContext";
-    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
-    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
-    pub const FIELD_CLIENT_USER_MESSAGE_ID: &'static str = "clientUserMessageId";
-    pub const FIELD_COLLABORATION_MODE: &'static str = "collaborationMode";
-    pub const FIELD_CWD: &'static str = "cwd";
-    pub const FIELD_CYBER_ACCESS_PROGRAM: &'static str = "cyberAccessProgram";
-    pub const FIELD_DISABLED_PLUGIN_IDS: &'static str = "disabledPluginIds";
-    pub const FIELD_EFFORT: &'static str = "effort";
-    pub const FIELD_ENVIRONMENTS: &'static str = "environments";
-    pub const FIELD_INPUT: &'static str = "input";
-    pub const FIELD_MODEL: &'static str = "model";
-    pub const FIELD_MULTI_AGENT_MODE: &'static str = "multiAgentMode";
-    pub const FIELD_OUTPUT_SCHEMA: &'static str = "outputSchema";
-    pub const FIELD_PARENT_TURN_ID: &'static str = "parentTurnId";
-    pub const FIELD_PERMISSIONS: &'static str = "permissions";
-    pub const FIELD_PERSONALITY: &'static str = "personality";
-    pub const FIELD_RESPONSESAPI_CLIENT_METADATA: &'static str = "responsesapiClientMetadata";
-    pub const FIELD_RESPONSESAPI_CLIENT_METADATA_PATCH: &'static str =
-        "responsesapiClientMetadataPatch";
-    pub const FIELD_ROOT_TURN_ID: &'static str = "rootTurnId";
-    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
-    pub const FIELD_SANDBOX_POLICY: &'static str = "sandboxPolicy";
-    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
-    pub const FIELD_SERVICE_TIER_FOR_TURN: &'static str = "serviceTierForTurn";
-    pub const FIELD_SUMMARY: &'static str = "summary";
-    pub const FIELD_THREAD_ID: &'static str = "threadId";
-    pub const FIELD_TOOL_OUTPUT: &'static str = "toolOutput";
-    pub const FIELD_TURN_TRIGGER: &'static str = "turnTrigger";
+    pub fn new(input: Vec<UserInput>, thread_id: String) -> Self {
+        Self {
+            additional_context: None,
+            approval_policy: None,
+            approvals_reviewer: None,
+            client_user_message_id: None,
+            collaboration_mode: None,
+            cwd: None,
+            cyber_access_program: None,
+            disabled_plugin_ids: None,
+            effort: None,
+            environments: None,
+            input: input,
+            model: None,
+            multi_agent_mode: None,
+            output_schema: None,
+            parent_turn_id: None,
+            permissions: None,
+            personality: None,
+            responsesapi_client_metadata: None,
+            responsesapi_client_metadata_patch: None,
+            root_turn_id: None,
+            runtime_workspace_roots: None,
+            sandbox_policy: None,
+            service_tier: None,
+            service_tier_for_turn: None,
+            summary: None,
+            thread_id: thread_id,
+            tool_output: None,
+            turn_trigger: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -29816,6 +29830,760 @@ impl ClientRequest {
             },
         })
     }
+    pub fn from_deserializer<'de, D: serde::Deserializer<'de>>(
+        id: RequestId,
+        method: ClientRequestMethod,
+        params: D,
+    ) -> Result<Self, D::Error> {
+        Ok(match method {
+            ClientRequestMethod::Initialize => Self::Initialize {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ServerDiagnostics => Self::ServerDiagnostics {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::UserVerificationStatus => Self::UserVerificationStatus {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::UserVerificationEnroll => Self::UserVerificationEnroll {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::UserVerificationDelete => Self::UserVerificationDelete {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::UserVerificationVerify => Self::UserVerificationVerify {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::UserVerificationCancel => Self::UserVerificationCancel {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadStart => Self::ThreadStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadResume => Self::ThreadResume {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadFork => Self::ThreadFork {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSample => Self::ThreadSample {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSampleCancel => Self::ThreadSampleCancel {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadArchive => Self::ThreadArchive {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadDelete => Self::ThreadDelete {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadUnsubscribe => Self::ThreadUnsubscribe {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadIncrementElicitation => Self::ThreadIncrementElicitation {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadDecrementElicitation => Self::ThreadDecrementElicitation {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadNameSet => Self::ThreadNameSet {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadPredictionRequest => Self::ThreadPredictionRequest {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadGoalSet => Self::ThreadGoalSet {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadGoalGet => Self::ThreadGoalGet {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadGoalClear => Self::ThreadGoalClear {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadQueueAdd => Self::ThreadQueueAdd {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadQueueList => Self::ThreadQueueList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadQueueUpdate => Self::ThreadQueueUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadQueueDelete => Self::ThreadQueueDelete {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadQueueReorder => Self::ThreadQueueReorder {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadQueueStart => Self::ThreadQueueStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadMetadataUpdate => Self::ThreadMetadataUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadAttachmentAdd => Self::ThreadAttachmentAdd {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadAttachmentList => Self::ThreadAttachmentList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadAttachmentOwnerList => Self::ThreadAttachmentOwnerList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadAttachmentRemove => Self::ThreadAttachmentRemove {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSectionMove => Self::ThreadSectionMove {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSettingsUpdate => Self::ThreadSettingsUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadMemoryModeSet => Self::ThreadMemoryModeSet {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadMemoryRead => Self::ThreadMemoryRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::MemoryStatus => Self::MemoryStatus {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::MemoryReset => Self::MemoryReset {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RolloutCompress => Self::RolloutCompress {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadUnarchive => Self::ThreadUnarchive {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadCompactStart => Self::ThreadCompactStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadShellCommand => Self::ThreadShellCommand {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadApproveGuardianDeniedAction => {
+                Self::ThreadApproveGuardianDeniedAction {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ThreadBackgroundTerminalsClean => {
+                Self::ThreadBackgroundTerminalsClean {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ThreadBackgroundTerminalsList => {
+                Self::ThreadBackgroundTerminalsList {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ThreadBackgroundTerminalsTerminate => {
+                Self::ThreadBackgroundTerminalsTerminate {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ThreadRevert => Self::ThreadRevert {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadList => Self::ThreadList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectList => Self::ProjectList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectRead => Self::ProjectRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectCreate => Self::ProjectCreate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectImport => Self::ProjectImport {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectUpdate => Self::ProjectUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectMove => Self::ProjectMove {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProjectDelete => Self::ProjectDelete {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSectionList => Self::ThreadSectionList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSectionCreate => Self::ThreadSectionCreate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSectionUpdate => Self::ThreadSectionUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSectionDelete => Self::ThreadSectionDelete {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSearch => Self::ThreadSearch {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadSearchOccurrences => Self::ThreadSearchOccurrences {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadLoadedList => Self::ThreadLoadedList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRead => Self::ThreadRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadReadStateUpdate => Self::ThreadReadStateUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadTurnsList => Self::ThreadTurnsList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadItemsList => Self::ThreadItemsList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadItemsRead => Self::ThreadItemsRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadGuardianReview => Self::ThreadGuardianReview {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadInjectItems => Self::ThreadInjectItems {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::SkillsList => Self::SkillsList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::SkillsExtraRootsSet => Self::SkillsExtraRootsSet {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::HooksList => Self::HooksList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::MarketplaceAdd => Self::MarketplaceAdd {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::MarketplaceRemove => Self::MarketplaceRemove {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::MarketplaceUpgrade => Self::MarketplaceUpgrade {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginList => Self::PluginList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginSearch => Self::PluginSearch {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginInstalled => Self::PluginInstalled {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginReconcile => Self::PluginReconcile {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginRead => Self::PluginRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginSkillRead => Self::PluginSkillRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginShareSave => Self::PluginShareSave {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginShareUpdateTargets => Self::PluginShareUpdateTargets {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginShareList => Self::PluginShareList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginShareCheckout => Self::PluginShareCheckout {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginShareDelete => Self::PluginShareDelete {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AppRead => Self::AppRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AppList => Self::AppList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AppInstalled => Self::AppInstalled {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsReadFile => Self::FsReadFile {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsWriteFile => Self::FsWriteFile {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsCreateDirectory => Self::FsCreateDirectory {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsGetMetadata => Self::FsGetMetadata {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsReadDirectory => Self::FsReadDirectory {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsRemove => Self::FsRemove {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsCopy => Self::FsCopy {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsWatch => Self::FsWatch {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FsUnwatch => Self::FsUnwatch {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::SkillsConfigWrite => Self::SkillsConfigWrite {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginInstall => Self::PluginInstall {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PluginUninstall => Self::PluginUninstall {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::TurnStart => Self::TurnStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::TurnSettingsUpdate => Self::TurnSettingsUpdate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::TurnSteer => Self::TurnSteer {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::TurnInterrupt => Self::TurnInterrupt {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRealtimeStart => Self::ThreadRealtimeStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRealtimeAppendAudio => Self::ThreadRealtimeAppendAudio {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRealtimeAppendText => Self::ThreadRealtimeAppendText {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRealtimeAppendSpeech => Self::ThreadRealtimeAppendSpeech {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRealtimeStop => Self::ThreadRealtimeStop {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadTimelineList => Self::ThreadTimelineList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ThreadRealtimeListVoices => Self::ThreadRealtimeListVoices {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ReviewStart => Self::ReviewStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ModelList => Self::ModelList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountGatewayOAuthRead => Self::AccountGatewayOAuthRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountGatewayOAuthLogin => Self::AccountGatewayOAuthLogin {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountGatewayOAuthCancel => Self::AccountGatewayOAuthCancel {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ModelProviderCapabilitiesRead => {
+                Self::ModelProviderCapabilitiesRead {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ExperimentalFeatureList => Self::ExperimentalFeatureList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::PermissionProfileList => Self::PermissionProfileList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ExperimentalFeatureEnablementSet => {
+                Self::ExperimentalFeatureEnablementSet {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::RemoteControlEnable => Self::RemoteControlEnable {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RemoteControlDisable => Self::RemoteControlDisable {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RemoteControlStatusRead => Self::RemoteControlStatusRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RemoteControlPairingStart => Self::RemoteControlPairingStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RemoteControlPairingStatus => Self::RemoteControlPairingStatus {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RemoteControlClientList => Self::RemoteControlClientList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::RemoteControlClientRevoke => Self::RemoteControlClientRevoke {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::CollaborationModeList => Self::CollaborationModeList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::MockExperimentalMethod => Self::MockExperimentalMethod {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::EnvironmentAdd => Self::EnvironmentAdd {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::EnvironmentInfo => Self::EnvironmentInfo {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::EnvironmentStatus => Self::EnvironmentStatus {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::McpServerOauthLogin => Self::McpServerOauthLogin {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ConfigMcpServerReload => Self::ConfigMcpServerReload {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::McpServerStatusList => Self::McpServerStatusList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::McpServerResourceRead => Self::McpServerResourceRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::McpServerEventStreamStart => Self::McpServerEventStreamStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::McpServerEventStreamStop => Self::McpServerEventStreamStop {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::McpServerToolCall => Self::McpServerToolCall {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::WindowsSandboxSetupStart => Self::WindowsSandboxSetupStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::WindowsSandboxReadiness => Self::WindowsSandboxReadiness {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountLoginStart => Self::AccountLoginStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountBedrockDiscover => Self::AccountBedrockDiscover {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountBedrockSetup => Self::AccountBedrockSetup {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountGcpSetup => Self::AccountGcpSetup {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountBedrockCheckGovCloudRequirements => {
+                Self::AccountBedrockCheckGovCloudRequirements {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::AccountLoginCancel => Self::AccountLoginCancel {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountSessionList => Self::AccountSessionList {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountSessionSwitch => Self::AccountSessionSwitch {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountLogout => Self::AccountLogout {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountRateLimitsRead => Self::AccountRateLimitsRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountRateLimitResetCreditConsume => {
+                Self::AccountRateLimitResetCreditConsume {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::AccountUsageRead => Self::AccountUsageRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountWorkspaceMessagesRead => {
+                Self::AccountWorkspaceMessagesRead {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::AccountSendAddCreditsNudgeEmail => {
+                Self::AccountSendAddCreditsNudgeEmail {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::FeedbackUpload => Self::FeedbackUpload {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FeedbackSave => Self::FeedbackSave {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::CommandExec => Self::CommandExec {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::CommandExecWrite => Self::CommandExecWrite {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::CommandExecTerminate => Self::CommandExecTerminate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::CommandExecResize => Self::CommandExecResize {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProcessSpawn => Self::ProcessSpawn {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProcessWriteStdin => Self::ProcessWriteStdin {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProcessKill => Self::ProcessKill {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ProcessResizePty => Self::ProcessResizePty {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ConfigRead => Self::ConfigRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ExternalAgentConfigDetect => Self::ExternalAgentConfigDetect {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ExternalAgentConfigImport => Self::ExternalAgentConfigImport {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ExternalAgentConfigImportRecordHistory => {
+                Self::ExternalAgentConfigImportRecordHistory {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ExternalAgentConfigImportReadHistories => {
+                Self::ExternalAgentConfigImportReadHistories {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::ConfigValueWrite => Self::ConfigValueWrite {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ConfigBatchWrite => Self::ConfigBatchWrite {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::ConfigRequirementsRead => Self::ConfigRequirementsRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::AccountRead => Self::AccountRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FuzzyFileSearch => Self::FuzzyFileSearch {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FuzzyFileSearchSessionStart => Self::FuzzyFileSearchSessionStart {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ClientRequestMethod::FuzzyFileSearchSessionUpdate => {
+                Self::FuzzyFileSearchSessionUpdate {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ClientRequestMethod::FuzzyFileSearchSessionStop => Self::FuzzyFileSearchSessionStop {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+        })
+    }
     pub const fn id(&self) -> &RequestId {
         match self {
             Self::Initialize { r#id, .. } => r#id,
@@ -33144,6 +33912,66 @@ impl ServerRequest {
             },
         })
     }
+    pub fn from_deserializer<'de, D: serde::Deserializer<'de>>(
+        id: RequestId,
+        method: ServerRequestMethod,
+        params: D,
+    ) -> Result<Self, D::Error> {
+        Ok(match method {
+            ServerRequestMethod::ItemCommandExecutionRequestApproval => {
+                Self::ItemCommandExecutionRequestApproval {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ServerRequestMethod::ItemFileChangeRequestApproval => {
+                Self::ItemFileChangeRequestApproval {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ServerRequestMethod::ItemToolRequestUserInput => Self::ItemToolRequestUserInput {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ServerRequestMethod::McpServerElicitationRequest => Self::McpServerElicitationRequest {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ServerRequestMethod::ItemPermissionsRequestApproval => {
+                Self::ItemPermissionsRequestApproval {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ServerRequestMethod::ItemToolCall => Self::ItemToolCall {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ServerRequestMethod::AccountChatgptAuthTokensRefresh => {
+                Self::AccountChatgptAuthTokensRefresh {
+                    id,
+                    params: serde::Deserialize::deserialize(params)?,
+                }
+            }
+            ServerRequestMethod::AttestationGenerate => Self::AttestationGenerate {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ServerRequestMethod::CurrentTimeRead => Self::CurrentTimeRead {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ServerRequestMethod::ApplyPatchApproval => Self::ApplyPatchApproval {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+            ServerRequestMethod::ExecCommandApproval => Self::ExecCommandApproval {
+                id,
+                params: serde::Deserialize::deserialize(params)?,
+            },
+        })
+    }
     pub const fn id(&self) -> &RequestId {
         match self {
             Self::ItemCommandExecutionRequestApproval { r#id, .. } => r#id,
@@ -33325,6 +34153,49 @@ impl ServerRequestResult {
             Self::CurrentTimeRead(result) => serde::Serialize::serialize(result, serializer),
             Self::ApplyPatchApproval(result) => serde::Serialize::serialize(result, serializer),
             Self::ExecCommandApproval(result) => serde::Serialize::serialize(result, serializer),
+        }
+    }
+}
+impl ServerRequestResult {
+    pub fn from_deserializer<'de, D: serde::Deserializer<'de>>(
+        method: ServerRequestMethod,
+        result: D,
+    ) -> Result<Self, D::Error> {
+        match method {
+            ServerRequestMethod::ItemCommandExecutionRequestApproval => {
+                serde::Deserialize::deserialize(result)
+                    .map(|result| Self::ItemCommandExecutionRequestApproval(Box::new(result)))
+            }
+            ServerRequestMethod::ItemFileChangeRequestApproval => {
+                serde::Deserialize::deserialize(result)
+                    .map(|result| Self::ItemFileChangeRequestApproval(Box::new(result)))
+            }
+            ServerRequestMethod::ItemToolRequestUserInput => {
+                serde::Deserialize::deserialize(result)
+                    .map(|result| Self::ItemToolRequestUserInput(Box::new(result)))
+            }
+            ServerRequestMethod::McpServerElicitationRequest => {
+                serde::Deserialize::deserialize(result)
+                    .map(|result| Self::McpServerElicitationRequest(Box::new(result)))
+            }
+            ServerRequestMethod::ItemPermissionsRequestApproval => {
+                serde::Deserialize::deserialize(result)
+                    .map(|result| Self::ItemPermissionsRequestApproval(Box::new(result)))
+            }
+            ServerRequestMethod::ItemToolCall => serde::Deserialize::deserialize(result)
+                .map(|result| Self::ItemToolCall(Box::new(result))),
+            ServerRequestMethod::AccountChatgptAuthTokensRefresh => {
+                serde::Deserialize::deserialize(result)
+                    .map(|result| Self::AccountChatgptAuthTokensRefresh(Box::new(result)))
+            }
+            ServerRequestMethod::AttestationGenerate => serde::Deserialize::deserialize(result)
+                .map(|result| Self::AttestationGenerate(Box::new(result))),
+            ServerRequestMethod::CurrentTimeRead => serde::Deserialize::deserialize(result)
+                .map(|result| Self::CurrentTimeRead(Box::new(result))),
+            ServerRequestMethod::ApplyPatchApproval => serde::Deserialize::deserialize(result)
+                .map(|result| Self::ApplyPatchApproval(Box::new(result))),
+            ServerRequestMethod::ExecCommandApproval => serde::Deserialize::deserialize(result)
+                .map(|result| Self::ExecCommandApproval(Box::new(result))),
         }
     }
 }

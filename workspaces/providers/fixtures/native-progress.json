@@ -1,0 +1,160 @@
+[
+  {
+    "provider": "codex",
+    "events": [
+      {
+        "method": "item/plan/delta",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "plan",
+          "delta": "Inspect the provider"
+        }
+      },
+      {
+        "method": "item/reasoning/summaryPartAdded",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "summary",
+          "summaryIndex": 0
+        }
+      },
+      {
+        "method": "item/reasoning/summaryTextDelta",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "summary",
+          "summaryIndex": 0,
+          "delta": "Check the event"
+        }
+      },
+      {
+        "method": "item/reasoning/summaryPartAdded",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "summary",
+          "summaryIndex": 1
+        }
+      },
+      {
+        "method": "item/reasoning/summaryTextDelta",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "summary",
+          "summaryIndex": 1,
+          "delta": "Trace the renderer"
+        }
+      },
+      {
+        "method": "item/started",
+        "params": {
+          "startedAtMs": 1000,
+          "threadId": "thread",
+          "turnId": "turn",
+          "item": {
+            "id": "tool",
+            "type": "mcpToolCall",
+            "server": "docs",
+            "tool": "search",
+            "arguments": {},
+            "status": "inProgress"
+          }
+        }
+      },
+      {
+        "method": "item/mcpToolCall/progress",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "tool",
+          "message": "Reading documentation"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": "agent:plan",
+        "kind": "text",
+        "text": "Inspect the provider",
+        "payload": null
+      },
+      {
+        "id": "agent:summary",
+        "kind": "text",
+        "text": "Check the event\n\nTrace the renderer",
+        "payload": null
+      },
+      {
+        "id": "agent:tool",
+        "kind": "tool",
+        "text": "",
+        "payload": {
+          "id": "tool",
+          "type": "mcpToolCall",
+          "server": "docs",
+          "tool": "search",
+          "arguments": {},
+          "status": "inProgress",
+          "progressMessage": "Reading documentation"
+        }
+      }
+    ]
+  },
+  {
+    "provider": "claude",
+    "events": [
+      {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "itemId": "thinking",
+          "delta": "Check the event"
+        }
+      },
+      {
+        "method": "item/started",
+        "params": {
+          "threadId": "thread",
+          "turnId": "turn",
+          "item": {
+            "id": "tool",
+            "type": "mcpToolCall",
+            "server": "claude",
+            "tool": "search",
+            "arguments": {},
+            "status": "inProgress",
+            "elapsedSeconds": 3
+          }
+        }
+      }
+    ],
+    "rows": [
+      {
+        "id": "agent:thinking",
+        "kind": "text",
+        "text": "Check the event",
+        "payload": null
+      },
+      {
+        "id": "agent:tool",
+        "kind": "tool",
+        "text": "",
+        "payload": {
+          "id": "tool",
+          "type": "mcpToolCall",
+          "server": "claude",
+          "tool": "search",
+          "arguments": {},
+          "status": "inProgress",
+          "elapsedSeconds": 3,
+          "progressMessage": "Running for 3s"
+        }
+      }
+    ]
+  }
+]

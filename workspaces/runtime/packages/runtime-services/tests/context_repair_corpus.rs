@@ -38,6 +38,7 @@ impl studio_runtime_services::account_session_runtime::AccountSessionPort for Re
         'a,
         studio_runtime_services::account_session_runtime::SessionReceipt,
     > {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
         Box::pin(async move {
             use studio_runtime_providers::{Method, RequestId, RequestTicket};
             use studio_runtime_services::account_session_runtime::{
@@ -88,6 +89,10 @@ impl studio_runtime_services::agent_lifecycle_runtime::LifecyclePorts for StopPo
 }
 
 #[tokio::test]
+async fn internal_sender_witness_stop_then_repair_preserves_historical_attempt_ownership() {
+    stop_then_repair_preserves_historical_attempt_ownership().await;
+}
+
 async fn stop_then_repair_preserves_historical_attempt_ownership() {
     use std::sync::Arc;
     use studio_runtime_services::{agent_lifecycle_runtime, agent_management::Action};

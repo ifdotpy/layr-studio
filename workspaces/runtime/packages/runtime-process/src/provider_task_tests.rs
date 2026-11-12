@@ -275,7 +275,6 @@ fn actor(
     let actor = AdapterTask {
         codec: ProviderCodec::default(),
         provider: None,
-        codex_diagnostics: CodexMethodDiagnostics::default(),
         account_store: None,
         activation: None,
         inherit_cwd: false,
@@ -643,12 +642,11 @@ async fn cancellation_before_send_is_not_sent_and_missing_receipt_is_unknown() {
         .command(
             &mut rpc,
             AdapterCommand::Write {
-                write: PreparedWrite {
-                    encode: studio_runtime_providers::encode_line,
-                    operation_id: OperationId("owned".into()),
-                    message: studio_runtime_providers::decode_frame(br#"{"method":"notice"}"#)
-                        .unwrap(),
-                },
+                write: PreparedWrite::new(
+                    OperationId("owned".into()),
+                    &studio_runtime_providers::decode_frame(br#"{"method":"notice"}"#).unwrap(),
+                )
+                .unwrap(),
                 reply: sender,
                 observed: oneshot::channel().1,
             },
@@ -711,11 +709,13 @@ async fn abandoned_buffered_write_receipt_or_receive_future_fences_attachment() 
         let (mut actor, _commands, _journal) = actor(&shutdown);
         let (socket, server) = tokio::io::duplex(4096);
         let mut server = BufReader::new(server);
-        let (command, mut receipt) = AdapterCommand::write(PreparedWrite {
-            encode: studio_runtime_providers::encode_line,
-            operation_id: OperationId("once".into()),
-            message: studio_runtime_providers::decode_frame(br#"{"method":"notice"}"#).unwrap(),
-        });
+        let (command, mut receipt) = AdapterCommand::write(
+            PreparedWrite::new(
+                OperationId("once".into()),
+                &studio_runtime_providers::decode_frame(br#"{"method":"notice"}"#).unwrap(),
+            )
+            .unwrap(),
+        );
         let task = tokio::spawn(async move {
             let mut rpc = Rpc {
                 stream: BufReader::new(socket),
@@ -836,14 +836,14 @@ async fn response_mapping_prunes_all_settled_entries() {
             let receipt = actor
                 .write(
                     &mut rpc,
-                    PreparedWrite {
-                        encode: studio_runtime_providers::encode_line,
-                        operation_id: OperationId(format!("request:{id}")),
-                        message: studio_runtime_providers::decode_frame(
+                    PreparedWrite::new(
+                        OperationId(format!("request:{id}")),
+                        &studio_runtime_providers::decode_frame(
                             format!(r#"{{"id":{id},"method":"model/list"}}"#).as_bytes(),
                         )
                         .unwrap(),
-                    },
+                    )
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
@@ -870,14 +870,14 @@ async fn response_mapping_prunes_all_settled_entries() {
             actor
                 .write(
                     &mut rpc,
-                    PreparedWrite {
-                        encode: studio_runtime_providers::encode_line,
-                        operation_id: OperationId("after-prune".into()),
-                        message: studio_runtime_providers::decode_frame(
+                    PreparedWrite::new(
+                        OperationId("after-prune".into()),
+                        &studio_runtime_providers::decode_frame(
                             br#"{"id":99,"method":"model/list"}"#
                         )
                         .unwrap()
-                    }
+                    )
+                    .unwrap()
                 )
                 .await
                 .unwrap(),
@@ -1304,13 +1304,10 @@ async fn retained_environment_wait_ends_on_shutdown() {
 }
 
 #[test]
-fn supervised_codex_ingress_classifies_once_and_preserves_raw_frame() {
+fn supervised_ingress_preserves_unknown_frame_for_session_diagnostics() {
     for provider in [Some(ProviderKind::Codex), Some(ProviderKind::Claude), None] {
         let (mut actor, _commands, _journal) = actor(&Shutdown::default());
         actor.provider = provider;
-        actor
-            .codex_diagnostics
-            .initialize(Some("codex-cli/0.167.1"));
         let wire = r#"{"method":"future/notification","params":{"opaque":[1,2]}}"#;
         let entry = actor
             .journal_entry_v2(
@@ -1333,9 +1330,6 @@ fn supervised_codex_ingress_classifies_once_and_preserves_raw_frame() {
             .unwrap(),
             studio_json::from_str::<Value>(wire).unwrap()
         );
-        assert_eq!(
-            actor.codex_diagnostics.observe(&frame).is_none(),
-            provider == Some(ProviderKind::Codex)
-        );
+        assert_eq!(frame.method(), Some("future/notification"));
     }
 }

@@ -780,8 +780,9 @@ impl NotificationStreamBuffer {
         if self.indexes.closed.contains(&key) {
             return EnqueueResult::Closed;
         }
-        let live = (key.method == "item/agentMessage/delta")
-            .then(|| (key.agent_id.clone(), key.transcript_id()));
+        let live = (key.method == "item/agentMessage/delta"
+            || super::progress::Kind::from_method(&key.method).is_some())
+        .then(|| (key.agent_id.clone(), key.transcript_id()));
         let index = if let Some(index) = self.indexes.entries.get(&key).copied() {
             index
         } else {
@@ -818,7 +819,8 @@ impl NotificationStreamBuffer {
         entry.characters = entry
             .characters
             .saturating_add(delta.chars().count() as u64);
-        if entry.key.method == "item/agentMessage/delta"
+        if (entry.key.method == "item/agentMessage/delta"
+            || super::progress::Kind::from_method(&entry.key.method).is_some())
             && entry.pending.len().saturating_add(delta.len()) >= MAX_PENDING_TEXT_BYTES
         {
             // The adapter writes pending plus this borrowed delta in one flush.

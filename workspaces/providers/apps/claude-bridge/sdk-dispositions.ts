@@ -104,9 +104,7 @@ export const sdkOptionsDispositions = {
   resumeSessionAt: ignored(
     "History controls use verified native fork boundaries.",
   ),
-  resumeDropsTurn: ignored(
-    "History controls use explicit native boundaries.",
-  ),
+  resumeDropsTurn: ignored("History controls use explicit native boundaries."),
   // Native reviewers use isolated SDK sandbox settings.
   sandbox: handled,
   // Apply validated session flag overlays.
@@ -155,7 +153,8 @@ export const sdkQueryDispositions = {
   supportedAgents: ignored("Studio owns the agent catalog."),
   // Read and verify external MCP catalogs.
   mcpServerStatus: handled,
-  getContextUsage: ignored("Context telemetry uses streamed response usage."),
+  // Main-loop occupancy is read at result boundaries, separately from billing.
+  getContextUsage: handled,
   // Read account plan usage.
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: handled,
   readFile: ignored("File operations use normal native tool permissions."),

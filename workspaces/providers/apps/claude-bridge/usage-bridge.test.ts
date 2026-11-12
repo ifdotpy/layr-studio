@@ -200,12 +200,28 @@ test("emitted notifications match the shared Rust dispatch golden fixture", asyn
     notes.find((n) => n.params.studioUsage.kind === "gap"),
   ];
   const normalized = selected.map((n) => ({
-    ...n!.params,
-    threadId: "thread",
-    turnId: "turn",
-    studioUsage: { ...n!.params.studioUsage, turnId: "turn" },
+    method: "thread/tokenUsage/updated",
+    params: {
+      ...n!.params,
+      threadId: "thread",
+      turnId: "turn",
+      studioUsage: { ...n!.params.studioUsage, turnId: "turn" },
+    },
   }));
-  expect(normalized).toEqual(golden);
+  const context = b.notes
+    .slice(before)
+    .find((n) => n.method === "thread/contextUsage/updated");
+  assert.ok(context);
+  const normalizedContext = {
+    method: context.method,
+    params: { ...context.params, threadId: "thread", turnId: "turn" },
+  };
+  expect([
+    normalized[0],
+    normalized[1],
+    normalizedContext,
+    normalized[2],
+  ]).toEqual(golden);
 });
 
 test("background response starts retain the tool originating turn across Studio turns", async () => {

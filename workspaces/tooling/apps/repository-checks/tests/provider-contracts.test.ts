@@ -333,3 +333,93 @@ test("the drift recipe exits one on a breaking payload-field change", () => {
     rmSync(temporary, { recursive: true, force: true });
   }
 });
+
+// Compile the owning decisions without dependencies, so this witness remains
+// cheap and does not contend for the workspace Cargo lock.
+test("new provider controls, policies and identities require exhaustive decisions", () => {
+  const copy = mkdtempSync(path.join(tmpdir(), "studio-provider-decisions-"));
+  try {
+    const identity = readFileSync(
+      path.join(
+        root,
+        "workspaces/runtime/packages/runtime-schema/src/provider_kind.rs",
+      ),
+      "utf8",
+    );
+    const adapter = readFileSync(
+      path.join(
+        root,
+        "workspaces/runtime/packages/runtime-services/src/provider_adapter.rs",
+      ),
+      "utf8",
+    );
+    const enumBody = (source: string, name: string) => {
+      const body = source.match(
+        new RegExp(`pub enum ${name} \\{[\\s\\S]*?\\n\\}`),
+      )?.[0];
+      assert.ok(body, `${name} owner`);
+      return body;
+    };
+    const controls = identity.slice(
+      identity.indexOf("impl ProviderCapability {"),
+      identity.indexOf("/// How the session numbers"),
+    );
+    const policies = adapter
+      .slice(
+        adapter.indexOf("impl ProviderFeature {"),
+        adapter.indexOf("/// Provider-neutral request preparation"),
+      )
+      .replaceAll(
+        "studio_runtime_schema::provider_kind::ProviderSupport",
+        "ProviderSupport",
+      );
+    // ProviderSupport is already in the controls segment, between the capability
+    // keys and the provider decisions. Only the identity and feature enums are added.
+    const baseline = [
+      "#[derive(Clone, Copy)]",
+      enumBody(identity, "ProviderKind"),
+      "#[derive(Clone, Copy)]",
+      enumBody(identity, "ProviderCapability"),
+      controls,
+      enumBody(adapter, "ProviderFeature"),
+      policies,
+    ].join("\n");
+    const check = (text: string) => {
+      writeFileSync(path.join(copy, "lib.rs"), text);
+      const result = spawnSync(
+        "rustc",
+        [
+          "--edition=2024",
+          "--crate-type=lib",
+          "--emit=metadata",
+          "-o",
+          path.join(copy, "lib.rmeta"),
+          path.join(copy, "lib.rs"),
+        ],
+        { encoding: "utf8", timeout: 60_000 },
+      );
+      assert.equal(result.error, undefined);
+      assert.equal(result.signal, null);
+      return result;
+    };
+    const valid = check(baseline);
+    assert.equal(valid.status, 0, valid.stderr);
+    for (const name of [
+      "ProviderCapability",
+      "ProviderFeature",
+      "ProviderKind",
+    ]) {
+      const result = check(
+        baseline.replace(
+          `pub enum ${name} {`,
+          `pub enum ${name} {\n    FutureWitness,`,
+        ),
+      );
+      assert.notEqual(result.status, 0, name);
+      assert.match(result.stderr, /non-exhaustive patterns/, name);
+      assert.match(result.stderr, /FutureWitness/, name);
+    }
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
+});

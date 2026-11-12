@@ -151,6 +151,7 @@ pub(super) fn apply(
         return Ok(Some(DispatchOutcome::Written));
     }
     if method == "thread/tokenUsage/updated"
+        || method == "thread/contextUsage/updated"
         || method == "item/agentMessage/delta"
         || (matches!(method, "item/started" | "item/completed")
             && p["item"]["type"] == "agentMessage")
@@ -463,7 +464,7 @@ pub(super) fn put_checked_task(
     }
     Ok(())
 }
-fn write_item(
+pub(super) fn write_item(
     tx: &Transaction<'_>,
     agent: &str,
     key: &str,

@@ -20,6 +20,8 @@ mod items;
 mod kinds;
 #[path = "notification_dispatch/notices.rs"]
 pub(crate) mod notices;
+#[path = "notification_dispatch/progress.rs"]
+pub(crate) mod progress;
 #[path = "notification_dispatch/questions.rs"]
 mod questions;
 #[path = "notification_dispatch/snapshot.rs"]
@@ -414,7 +416,11 @@ pub(crate) fn dispatch_checked_notification(
         canonical_frame,
     } = input;
     let mut next_streams = streams.clone();
-    let (kind, params) = notification_parts(notification)?;
+    let native_progress = progress::native(notification);
+    let (kind, params) = match &native_progress {
+        Some(progress) => (progress.scope.method, &Value::Null),
+        None => notification_parts(notification)?,
+    };
     let mut before = None;
     // The stored agent after this dispatch when known without reading it back.
     let mut after_known = AfterAgent::Unknown;
@@ -443,10 +449,10 @@ pub(crate) fn dispatch_checked_notification(
                 }
                 Frame::CodexClientRequest(_)
                 | Frame::CodexServerRequest(_)
-                | Frame::CodexNotification(_)
                 | Frame::CodexClientNotification(_)
                 | Frame::Request(_)
                 | Frame::Response { .. } => false,
+                Frame::CodexNotification(_) => native_progress.is_some(),
             });
             let content_signature = match canonical_frame {
                 Some(bytes) => notification_signature_from_bytes(agent_id, bytes)?,
@@ -535,8 +541,25 @@ pub(crate) fn dispatch_checked_notification(
                     },
                 );
             }
-            validate_agent(&agent, agent_id, &identity.provider_handle, kind, params)?;
             before = Some(agent.clone());
+            if let Some(progress) = &native_progress {
+                let (outcome, changed) = progress.apply(
+                    transaction,
+                    agent_id,
+                    &mut agent,
+                    &mut next_streams,
+                    identity,
+                    observed_at,
+                )?;
+                after_known = if changed {
+                    persist_agent(transaction, agent_id, &mut agent)?;
+                    AfterAgent::Stored(Box::new(agent))
+                } else {
+                    AfterAgent::Unchanged
+                };
+                return save_outcome(transaction, delivery, &content_signature, outcome);
+            }
+            validate_agent(&agent, agent_id, &identity.provider_handle, kind, params)?;
             // Whether a flush below changed the agent after `before` was taken.
             let mut agent_changed = false;
             if kind == "command/exec/outputDelta" {
@@ -732,6 +755,7 @@ pub(crate) fn dispatch_checked_notification(
                                         generation: identity.generation,
                                         params,
                                         item_id,
+                                        native: None,
                                         observed_at,
                                         update: TextUpdate::Delta(delta),
                                     },
@@ -794,6 +818,7 @@ pub(crate) fn dispatch_checked_notification(
                                     generation: identity.generation,
                                     params,
                                     item_id,
+                                    native: None,
                                     observed_at,
                                     update,
                                 },
@@ -839,6 +864,12 @@ pub(crate) fn dispatch_checked_notification(
                         )?;
                     }
                     apply_token_usage(&mut agent, &observation, observed_at)?
+                }
+                "thread/contextUsage/updated" => {
+                    let context = Option::<
+                        studio_runtime_schema::agent_entity_nested_extra::ContextUsageDto,
+                    >::deserialize(&params["contextUsage"])?;
+                    apply_context_usage(&mut agent, context.as_ref(), observed_at)
                 }
                 _ => return Err(NotificationDispatchError::invalid()),
             };
@@ -913,22 +944,26 @@ pub(crate) fn dispatch_checked_notification(
             } else {
                 after.map(NotificationAgent::from)
             };
-            let mut current = effects.post_commit(
-                effect_before.as_ref(),
-                if unchanged {
-                    effect_before.as_ref()
-                } else {
-                    effect_after.as_ref()
-                },
-                &notification_payload(notification),
-                delivery,
-                effects::NotificationClock {
-                    observed_at: ObservationTime::new(observed_at)
-                        .ok_or_else(NotificationDispatchError::invalid)?,
-                    boundary_at,
-                },
-                &outcome,
-            );
+            let mut current = if native_progress.is_some() {
+                Vec::new()
+            } else {
+                effects.post_commit(
+                    effect_before.as_ref(),
+                    if unchanged {
+                        effect_before.as_ref()
+                    } else {
+                        effect_after.as_ref()
+                    },
+                    &notification_payload(notification),
+                    delivery,
+                    effects::NotificationClock {
+                        observed_at: ObservationTime::new(observed_at)
+                            .ok_or_else(NotificationDispatchError::invalid)?,
+                        boundary_at,
+                    },
+                    &outcome,
+                )
+            };
             if command_output_monitor_present == Some(false) {
                 current
                     .retain(|effect| !matches!(effect, NotificationPostCommit::Analytics { .. }));
@@ -1118,6 +1153,7 @@ impl NotificationStreamBuffer {
                     generation,
                     params: &params,
                     item_id,
+                    native: None,
                     observed_at: at,
                     update: TextUpdate::Completed(body, item.get("phase")),
                 },
@@ -1185,6 +1221,7 @@ struct TextWriteInput<'a> {
     generation: u64,
     params: &'a Value,
     item_id: &'a str,
+    native: Option<(progress::Scope<'a>, progress::Kind)>,
     observed_at: f64,
     update: TextUpdate<'a>,
 }
@@ -1194,15 +1231,45 @@ fn saved_text(
     id: &str,
     record: &Value,
 ) -> Result<String, NotificationDispatchError> {
-    if record.get("truncated").and_then(Value::as_bool) == Some(true) {
-        return NotificationDispatchRepository::full_text(transaction, id, record)?
-            .ok_or_else(|| stored("runtime_items", id));
+    let text = if record.get("truncated").and_then(Value::as_bool) == Some(true) {
+        NotificationDispatchRepository::full_text(transaction, id, record)?
+            .ok_or_else(|| stored("runtime_items", id))?
+    } else {
+        record
+            .get("text")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| stored("runtime_items", id))?
+    };
+    if record["role"] == "output" && record["title"] == "plan" {
+        let studio_runtime_providers::codex::ThreadItem::Plan { text, .. } =
+            studio_json::from_str(&text).map_err(|_| stored("runtime_items", id))?
+        else {
+            return Err(stored("runtime_items", id));
+        };
+        return Ok(text);
     }
-    record
-        .get("text")
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| stored("runtime_items", id))
+    Ok(text)
+}
+
+fn read_text_item(
+    tx: &Transaction<'_>,
+    agent: &str,
+    id: &str,
+    kind: Option<progress::Kind>,
+) -> Result<Option<(Value, f64)>, NotificationDispatchError> {
+    if kind != Some(progress::Kind::Plan) {
+        return Ok(NotificationDispatchRepository::transcript_item(
+            tx, agent, id,
+        )?);
+    }
+    let item = NotificationDispatchRepository::notification_item(tx, agent, id)?;
+    if item.as_ref().is_some_and(|(record, _)| {
+        record["role"] != "assistant" && !(record["role"] == "output" && record["title"] == "plan")
+    }) {
+        return Err(stored("runtime_items", id));
+    }
+    Ok(item)
 }
 
 fn notification_parts(notification: &Frame) -> Result<(&str, &Value), NotificationDispatchError> {
@@ -1355,6 +1422,13 @@ fn notification_content_signature(
     agent: &str,
     notification: &Frame,
 ) -> Result<String, NotificationDispatchError> {
+    if matches!(notification, Frame::CodexNotification(_)) {
+        // Match the canonical persisted JSON representation across upgrades.
+        return notification_signature_from_bytes(
+            agent,
+            &studio_json::to_vec(&json!(notification))?,
+        );
+    }
     let payload =
         BorrowedNotification::new(notification).ok_or(NotificationDispatchError::invalid())?;
     let bytes = studio_json::to_vec(&NotificationContentSignature {
@@ -1401,7 +1475,11 @@ fn validate_agent(
     });
     if matches!(
         kind,
-        "item/agentMessage/delta" | "item/started" | "item/completed" | "thread/tokenUsage/updated"
+        "item/agentMessage/delta"
+            | "item/started"
+            | "item/completed"
+            | "thread/tokenUsage/updated"
+            | "thread/contextUsage/updated"
     ) && notification_thread.is_none_or(str::is_empty)
     {
         return Err(NotificationDispatchError::invalid());
@@ -1451,17 +1529,18 @@ fn write_text_notification(
         generation,
         params,
         item_id,
+        native,
         observed_at,
         update,
     } = input;
     let id = format!("{agent_id}:{item_id}");
-    let thread = params
-        .get("threadId")
-        .and_then(Value::as_str)
+    let thread = native
+        .map(|(scope, _)| scope.thread)
+        .or_else(|| params.get("threadId").and_then(Value::as_str))
         .ok_or(NotificationDispatchError::invalid())?;
-    let turn = params
-        .get("turnId")
-        .and_then(Value::as_str)
+    let turn = native
+        .map(|(scope, _)| scope.turn)
+        .or_else(|| params.get("turnId").and_then(Value::as_str))
         .filter(|turn| !turn.is_empty())
         .map(str::to_owned);
     let key = StreamKey {
@@ -1471,12 +1550,14 @@ fn write_text_notification(
         thread: thread.to_owned(),
         turn: turn.clone(),
         item: item_id.to_owned(),
-        method: "item/agentMessage/delta".to_owned(),
+        method: native
+            .map_or("item/agentMessage/delta", |(_, kind)| kind.method())
+            .to_owned(),
     };
     if let TextUpdate::Delta(delta) = update {
         // A stream opened or recovered now continues the text that the item already holds.
         let stored_chars = if streams.live_unseeded(&key) {
-            NotificationDispatchRepository::transcript_item(transaction, agent_id, &id)?
+            read_text_item(transaction, agent_id, &id, native.map(|(_, kind)| kind))?
                 .map(|(record, _)| saved_text(transaction, &id, &record))
                 .transpose()?
                 .map_or(0, |text| text.chars().count() as u64)
@@ -1503,7 +1584,7 @@ fn write_text_notification(
     if matches!(update, TextUpdate::Started(..)) && streams.awaits_base(&key) {
         // The snapshot replaces the flushed text; later flushes continue the
         // flushed text, so keep it as the stream's durable base.
-        let flushed = NotificationDispatchRepository::transcript_item(transaction, agent_id, &id)?
+        let flushed = read_text_item(transaction, agent_id, &id, native.map(|(_, kind)| kind))?
             .map(|(record, _)| saved_text(transaction, &id, &record))
             .transpose()?
             .unwrap_or_default();
@@ -1531,12 +1612,10 @@ fn write_text_notification(
             // when the provider sent no completed snapshot.
             let text = match snapshot.filter(|text| !text.is_empty()) {
                 Some(text) => text.to_owned(),
-                None => {
-                    NotificationDispatchRepository::transcript_item(transaction, agent_id, &id)?
-                        .map(|(record, _)| saved_text(transaction, &id, &record))
-                        .transpose()?
-                        .unwrap_or_default()
-                }
+                None => read_text_item(transaction, agent_id, &id, native.map(|(_, kind)| kind))?
+                    .map(|(record, _)| saved_text(transaction, &id, &record))
+                    .transpose()?
+                    .unwrap_or_default(),
             };
             (
                 text,
@@ -1554,7 +1633,12 @@ fn write_text_notification(
             .filter(|turn| !turn.is_empty())
             .map(str::to_owned)
     });
-    let record = assistant_item_record(&id, &text, observed_at, streaming, turn.as_deref(), phase);
+    let mut record =
+        assistant_item_record(&id, &text, observed_at, streaming, turn.as_deref(), phase);
+    if let Some((_, kind)) = native {
+        record["title"] = json!(kind.title());
+        record["phase"] = json!("commentary");
+    }
     NotificationDispatchRepository::put_transcript_item(
         transaction,
         &id,
@@ -1566,13 +1650,17 @@ fn write_text_notification(
     )?;
     if completed {
         // Sign-in links become cards once the message commits; its text stays unchanged.
-        crate::sign_in::note_message(agent_id, &id, &text);
+        if native.is_none() {
+            crate::sign_in::note_message(agent_id, &id, &text);
+        }
         agent.activity = Some(studio_runtime_store::AgentActivity {
             phase: Some("thinking".into()),
             at: Some(observed_at),
             ..Default::default()
         });
-        agent.last_answer = Some(suffix(&text, 16_000));
+        if native.is_none() {
+            agent.last_answer = Some(suffix(&text, 16_000));
+        }
         agent.tail = Some(suffix(&text, 300));
     } else {
         agent.activity = Some(studio_runtime_store::AgentActivity {
@@ -1934,7 +2022,8 @@ fn flush_text_stream(
         return Ok(());
     }
     let id = format!("{agent_id}:{}", key.item);
-    let old = NotificationDispatchRepository::transcript_item(transaction, agent_id, &id)?;
+    let progress_kind = progress::Kind::from_method(&key.method);
+    let old = read_text_item(transaction, agent_id, &id, progress_kind)?;
     // The stored item holds the flushed text unless item/started replaced it,
     // which preserved the flushed text as the durable base first.
     let base = streams.base(key).map(str::to_owned);
@@ -1950,10 +2039,15 @@ fn flush_text_stream(
         let phase = old
             .as_ref()
             .and_then(|(record, _)| record.get("phase"))
+            .or_else(|| params.get("phase"))
             .cloned()
             .unwrap_or(Value::Null);
         let turn = key.turn.as_deref().or(agent.turn_id.as_deref());
-        let record = assistant_item_record(&id, &text, observed_at, true, turn, phase);
+        let mut record = assistant_item_record(&id, &text, observed_at, true, turn, phase);
+        if let Some(kind) = progress_kind {
+            record["title"] = json!(kind.title());
+            record["phase"] = json!("commentary");
+        }
         NotificationDispatchRepository::put_transcript_item(
             transaction,
             &id,
@@ -1964,13 +2058,17 @@ fn flush_text_stream(
             // Search indexes the item at item/started and item/completed only.
             false,
         )?;
-        update_common_agent_fields(agent, "item/agentMessage/delta", &params, observed_at)?;
-        agent.events = Some(
-            agent
-                .events
-                .unwrap_or_default()
-                .saturating_add(count.saturating_sub(1)),
-        );
+        if progress_kind.is_some() {
+            progress::note_event(agent, count, observed_at)?;
+        } else {
+            update_common_agent_fields(agent, "item/agentMessage/delta", &params, observed_at)?;
+            agent.events = Some(
+                agent
+                    .events
+                    .unwrap_or_default()
+                    .saturating_add(count.saturating_sub(1)),
+            );
+        }
         agent.activity = Some(studio_runtime_store::AgentActivity {
             phase: Some("writing".into()),
             at: Some(observed_at),
@@ -2050,12 +2148,36 @@ enum TokenUsageObservation {
     Legacy(studio_runtime_schema::usage::LegacyUsageTotals),
 }
 
+fn apply_context_usage(
+    agent: &mut AgentRecord,
+    context: Option<&studio_runtime_schema::agent_entity_nested_extra::ContextUsageDto>,
+    observed_at: f64,
+) -> DispatchOutcome {
+    if let Some(context) = context {
+        agent.context_usage = Some(studio_runtime_store::AgentContextUsage {
+            tokens: context
+                .tokens
+                .as_ref()
+                .map(|tokens| tokens.as_i64().unsigned_abs()),
+            window: context
+                .window
+                .as_ref()
+                .map(|window| window.as_i64().unsigned_abs()),
+            at: observed_at,
+        });
+    }
+    DispatchOutcome::Written
+}
+
 fn apply_token_usage(
     agent: &mut AgentRecord,
     observation: &TokenUsageObservation,
     observed_at: f64,
 ) -> Result<DispatchOutcome, NotificationDispatchError> {
     use studio_runtime_schema::usage::UsageObservation;
+    if agent.provider.value() == Some(&studio_runtime_schema::ProviderKind::Claude) {
+        return Ok(DispatchOutcome::Written);
+    }
     let observation = match observation {
         TokenUsageObservation::Typed(usage) => usage,
         TokenUsageObservation::Legacy(usage) => {
@@ -2306,6 +2428,84 @@ mod tests {
     };
 
     #[test]
+    fn claude_context_uses_native_occupancy_not_billed_tokens() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        agent.provider = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::ProviderKind::Claude,
+        );
+        AgentRepository::put(&tx, &agent).unwrap();
+        let params = json!({"threadId":"thread","turnId":"turn","studioUsage":{
+            "kind":"response","responseId":"billed","model":"claude-test","evidence":"live",
+            "tokens":{"uncachedInput":10,"cacheReadInput":20,"cacheWriteInput":30,"output":40},"modelContextWindow":2000
+        }});
+        dispatch(&tx, &mut NotificationStreamBuffer::default(), 1,
+            &json!({"method":"thread/contextUsage/updated","params":{"threadId":"thread","turnId":"turn","contextUsage":{"tokens":600,"window":1000}}}), 3.0).unwrap();
+        dispatch(
+            &tx,
+            &mut NotificationStreamBuffer::default(),
+            2,
+            &json!({"method":"thread/tokenUsage/updated","params":params}),
+            4.0,
+        )
+        .unwrap();
+        let context = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap()
+            .context_usage
+            .unwrap();
+        assert_eq!((context.tokens, context.window), (Some(600), Some(1000)));
+        for (cursor, next) in [
+            (3, json!({"threadId":"thread","contextUsage":null})),
+            (4, json!({"threadId":"thread"})),
+        ] {
+            dispatch(
+                &tx,
+                &mut NotificationStreamBuffer::default(),
+                cursor,
+                &json!({"method":"thread/contextUsage/updated","params":next}),
+                5.0,
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            NotificationDispatchRepository::agent_record(&tx, "agent")
+                .unwrap()
+                .unwrap()
+                .context_usage,
+            Some(context)
+        );
+    }
+
+    #[test]
+    fn provider_warning_frames_project_to_visible_transcript_notices() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        for (index, (method, params, text)) in [
+            ("configWarning", json!({"summary":"The provider configuration changed."}), "The provider configuration changed."),
+            ("deprecationNotice", json!({"summary":"This model setting is deprecated."}), "This model setting is deprecated."),
+            ("model/rerouted", json!({"fromModel":"gpt-original","toModel":"gpt-routed","reason":"highRiskCyberActivity"}), "Model changed from gpt-original to gpt-routed (additional safety checks)."),
+        ].into_iter().enumerate() {
+            let mut params = params;
+            params["threadId"] = json!("thread");
+            params["turnId"] = json!("turn");
+            let outcome = dispatch(&tx, &mut NotificationStreamBuffer::default(), index as u64 + 1, &json!({"method":method,"params":params}), 4.0).unwrap();
+            assert_eq!(outcome, DispatchOutcome::Written);
+            let visible = TranscriptRepository::items_for_agent(&tx, "agent")
+                .unwrap()
+                .iter()
+                .any(|item| {
+                    let record = item.record.value();
+                    record["text"] == text && record["nativeNotice"] == "warning"
+                });
+            assert!(visible, "{method} must reach the transcript notice UI");
+        }
+    }
+
+    #[test]
     fn notification_agent_write_preserves_legacy_row_bytes_with_typed_shell_observation() {
         let mut connection = database();
         let tx = connection.transaction().unwrap();
@@ -2420,6 +2620,11 @@ mod tests {
         let frames = [
             (
                 "claude-agent",
+                "thread/contextUsage/updated",
+                json!({"threadId":"claude-agent","turnId":"turn","contextUsage":{"tokens":600,"window":1000}}),
+            ),
+            (
+                "claude-agent",
                 "thread/tokenUsage/updated",
                 response("first", 10, 3, 2, 4),
             ),
@@ -2486,7 +2691,7 @@ mod tests {
         rates.settled().await;
         let rate_rows = rates.snapshot().to_value();
         let db = store.test_reader().unwrap();
-        for (agent, context, output) in [("claude-agent", 33, 12.), ("codex-agent", 46, 6.)] {
+        for (agent, context, output) in [("claude-agent", 600, 12.), ("codex-agent", 46, 6.)] {
             let row = AgentRepository::get(&db, &agent.into())
                 .unwrap()
                 .unwrap()
@@ -2622,8 +2827,7 @@ mod tests {
         for (index, params) in frames.into_iter().enumerate() {
             store
                 .transaction_with(move |tx| {
-                    let notification =
-                        json!({"method":"thread/tokenUsage/updated","params":params});
+                    let notification = params;
                     let result = super::dispatch_notification_with_effects(
                         tx,
                         "agent",
@@ -2637,11 +2841,15 @@ mod tests {
                     .expect("bridge usage dispatch");
                     assert_eq!(result.outcome, DispatchOutcome::Written);
                     let agent = AgentRepository::get(tx, &"agent".into())?.unwrap().value();
-                    assert_eq!(
-                        agent["contextUsage"]["tokens"], 806,
-                        "only final response usage changes the context gauge"
-                    );
-                    assert_eq!(agent["contextUsage"]["window"], 200000);
+                    if index < 2 {
+                        assert!(
+                            agent["contextUsage"].is_null(),
+                            "billed response tokens are not occupancy"
+                        );
+                    } else {
+                        assert_eq!(agent["contextUsage"]["tokens"], 600);
+                        assert_eq!(agent["contextUsage"]["window"], 1000);
+                    }
                     Ok::<_, super::NotificationDispatchError>(())
                 })
                 .await
@@ -2721,6 +2929,7 @@ mod tests {
     }
 
     pub(super) fn database() -> Connection {
+        use studio_db_api::Table as _;
         let connection = Connection::open_in_memory().expect("memory database opens");
         studio_runtime_store::test_fixtures::canvas::install_canonical(&connection)
             .expect("canonical storage");
@@ -2764,6 +2973,12 @@ mod tests {
         )
         .expect("search rollout seed");
         tx.commit().expect("fixture seed commit");
+        studio_runtime_store::planning_work::TaskRow::descriptor()
+            .install_if_absent(&connection)
+            .expect("task schema");
+        studio_runtime_store::context_settings::CompactionsStorageRow::descriptor()
+            .install_if_absent(&connection)
+            .expect("compaction schema");
         studio_runtime_store::receipt_schema::create(&connection).expect("receipt owner tables");
         fixture_attempt(&connection, "attempt");
         let agent_record = json!({"id":"agent","provider":studio_runtime_schema::ProviderKind::Codex,
@@ -3057,7 +3272,11 @@ mod tests {
             let notifications = [
                 json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"one "}}),
                 json!({"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"turn","itemId":"answer","delta":"two "}}),
-                json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"turn","tokenUsage":{"total":{"totalTokens":9,"inputTokens":9,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0},"last":{"totalTokens":9,"inputTokens":9,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0},"modelContextWindow":1000}}}),
+                if provider == "claude" {
+                    json!({"method":"thread/contextUsage/updated","params":{"threadId":"thread","turnId":"turn","contextUsage":{"tokens":9,"window":1000}}})
+                } else {
+                    json!({"method":"thread/tokenUsage/updated","params":{"threadId":"thread","turnId":"turn","tokenUsage":{"total":{"totalTokens":9,"inputTokens":9,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0},"last":{"totalTokens":9,"inputTokens":9,"cachedInputTokens":0,"outputTokens":0,"reasoningOutputTokens":0},"modelContextWindow":1000}}})
+                },
                 json!({"method":"item/started","params":{"threadId":"thread","turnId":"turn","item":{"id":"cmd","type":"commandExecution","command":"ls","status":"inProgress"}}}),
                 json!({"method":"item/completed","params":{"threadId":"thread","turnId":"turn","item":{"id":"cmd","type":"commandExecution","command":"ls","status":"completed","aggregatedOutput":"a","exitCode":0}}}),
             ];
@@ -4841,6 +5060,406 @@ mod tests {
         assert_eq!(agent.events, Some(5));
         assert!(agent.last_event.is_some());
         assert_eq!(streams.pending_bytes(), 0);
+    }
+
+    #[test]
+    fn native_progress_reaches_shared_transcript() {
+        let mut connection = database();
+        let tx = connection.transaction().expect("transaction");
+        let mut streams = NotificationStreamBuffer::default();
+        let events = [
+            json!({"method":"item/plan/delta","params":{"threadId":"thread","turnId":"turn","itemId":"plan","delta":"Inspect the provider"}}),
+            json!({"method":"item/reasoning/summaryPartAdded","params":{"threadId":"thread","turnId":"turn","itemId":"summary","summaryIndex":0}}),
+            json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread","turnId":"turn","itemId":"summary","summaryIndex":0,"delta":"Check the event"}}),
+            json!({"method":"item/reasoning/summaryPartAdded","params":{"threadId":"thread","turnId":"turn","itemId":"summary","summaryIndex":1}}),
+            json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread","turnId":"turn","itemId":"summary","summaryIndex":1,"delta":"Trace the renderer"}}),
+        ];
+        for (index, event) in events.iter().enumerate() {
+            let result = super::dispatch_notification(
+                &tx,
+                "agent",
+                &PublicationContext::default(),
+                &streams,
+                &identity(index as u64 + 1),
+                &native_progress_frame(event),
+                10.,
+            )
+            .expect("native progress");
+            if let Some(update) = result.stream_update {
+                streams = update;
+            }
+        }
+        super::flush_notification_streams(
+            &tx,
+            "agent",
+            &PublicationContext::default(),
+            &streams,
+            11.,
+        )
+        .expect("flush");
+        for (id, text) in [
+            ("plan", "Inspect the provider"),
+            ("summary", "Check the event\n\nTrace the renderer"),
+        ] {
+            let item = TranscriptRepository::item(&tx, "agent", &format!("agent:{id}"))
+                .expect("read")
+                .expect("visible transcript row");
+            assert_eq!(item.record.value()["text"], text);
+            assert_eq!(item.record.value()["role"], "assistant");
+            assert_eq!(item.record.value()["phase"], "commentary");
+        }
+    }
+
+    fn native_progress_frame(value: &Value) -> Frame {
+        let native =
+            studio_runtime_providers::decode_codex_frame(&studio_json::to_vec(value).unwrap())
+                .unwrap();
+        assert!(matches!(native, Frame::CodexNotification(_)));
+        crate::provider_adapter::project_frame(native)
+    }
+
+    fn dispatch_native(
+        tx: &rusqlite::Transaction<'_>,
+        streams: &mut NotificationStreamBuffer,
+        cursor: u64,
+        value: &Value,
+        at: f64,
+    ) -> Result<DispatchOutcome, super::NotificationDispatchError> {
+        dispatch_notification(
+            tx,
+            "agent",
+            "unused",
+            streams,
+            &identity(cursor),
+            &native_progress_frame(value),
+            at,
+        )
+    }
+
+    #[test]
+    fn native_progress_retains_vendor_frames() {
+        for event in [
+            json!({"method":"item/plan/delta","params":{"threadId":"thread","turnId":"turn","itemId":"p","delta":"next"}}),
+            json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread","turnId":"turn","itemId":"r","summaryIndex":0,"delta":"summary"}}),
+            json!({"method":"item/reasoning/summaryPartAdded","params":{"threadId":"thread","turnId":"turn","itemId":"r","summaryIndex":0}}),
+            json!({"method":"item/mcpToolCall/progress","params":{"threadId":"thread","turnId":"turn","itemId":"m","message":"Working"}}),
+        ] {
+            assert!(
+                matches!(native_progress_frame(&event), Frame::CodexNotification(_)),
+                "progress must remain typed through the adapter"
+            );
+        }
+    }
+
+    #[test]
+    fn native_progress_keeps_legacy_receipt_signatures() {
+        for event in [
+            json!({"emittedAtMs":1000,"method":"item/plan/delta","params":{"threadId":"thread","turnId":"turn","itemId":"plan","delta":"next"}}),
+            json!({"emittedAtMs":1000,"method":"item/completed","params":{"completedAtMs":1000,"threadId":"thread","turnId":"turn","item":{"id":"plan","type":"plan","text":"next"}}}),
+            json!({"emittedAtMs":1000,"method":"item/completed","params":{"completedAtMs":1000,"threadId":"thread","turnId":"turn","item":{"id":"reasoning","type":"reasoning","summary":["next"]}}}),
+        ] {
+            assert_eq!(
+                notification_content_signature("agent", &native_progress_frame(&event)).unwrap(),
+                notification_content_signature("agent", &frame(&event)).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn native_progress_resumes_a_legacy_persisted_plan() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        // The base version stores the full provider item as an output row.
+        let text = json!({"id":"plan","type":"plan","text":"Existing plan"}).to_string();
+        let record = json!({"id":"agent:plan","role":"output","title":"plan","text":text,"at":1.,"truncated":false,"toolStatus":"running","turnId":"turn"});
+        NotificationDispatchRepository::put_notification_item(
+            &tx,
+            "agent:plan",
+            "agent",
+            &record,
+            1.,
+            &text,
+            true,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        let tx = connection.transaction().unwrap();
+        let mut streams = NotificationStreamBuffer::default();
+        let frame = native_progress_frame(
+            &json!({"method":"item/plan/delta","params":{"threadId":"thread","turnId":"turn","itemId":"plan","delta":" continued"}}),
+        );
+        dispatch_notification(
+            &tx,
+            "agent",
+            "unused",
+            &mut streams,
+            &identity(1),
+            &frame,
+            2.,
+        )
+        .unwrap();
+        let item = TranscriptRepository::item(&tx, "agent", "agent:plan")
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.record.value()["text"], "Existing plan continued");
+        assert_eq!(item.record.value()["role"], "assistant");
+    }
+
+    #[test]
+    fn native_progress_reasoning_does_not_replace_the_completed_answer() {
+        for summary in [json!(["Public reasoning summary"]), json!([])] {
+            let mut connection = database();
+            let tx = connection.transaction().unwrap();
+            let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+                .unwrap()
+                .unwrap();
+            agent.last_answer = Some("Retained final answer".into());
+            super::persist_agent(&tx, "agent", &mut agent).unwrap();
+            let mut streams = NotificationStreamBuffer::default();
+            let frame = native_progress_frame(
+                &json!({"method":"item/completed","params":{"completedAtMs":2000,"threadId":"thread","turnId":"turn","item":{"id":"reasoning","type":"reasoning","summary":summary,"content":["PRIVATE_REASONING"]}}}),
+            );
+            dispatch_notification(
+                &tx,
+                "agent",
+                "unused",
+                &mut streams,
+                &identity(1),
+                &frame,
+                2.,
+            )
+            .unwrap();
+            let item = TranscriptRepository::item(&tx, "agent", "agent:reasoning")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                item.record.value()["text"],
+                summary
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            );
+            assert_eq!(item.record.value()["streaming"], false);
+            let agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+                .unwrap()
+                .unwrap();
+            assert_eq!(agent.last_answer.as_deref(), Some("Retained final answer"));
+        }
+    }
+
+    #[test]
+    fn native_progress_recovers_retry_without_unbatching_ordinary_deltas() {
+        let mut connection = database();
+        let tx = connection.transaction().unwrap();
+        let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        agent.native_status =
+            Some(studio_json::from_str(r#"{"phase":"retrying","turnId":"turn"}"#).unwrap());
+        super::persist_agent(&tx, "agent", &mut agent).unwrap();
+        let mut streams = NotificationStreamBuffer::default();
+        for (cursor, delta) in [(1, "Resumed"), (2, " summary")] {
+            let before = NotificationDispatchRepository::agent_record(&tx, "agent")
+                .unwrap()
+                .unwrap();
+            let result = super::dispatch_notification(&tx, "agent", &PublicationContext::default(), &streams, &identity(cursor), &native_progress_frame(&json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread","turnId":"turn","itemId":"summary","summaryIndex":0,"delta":delta}})), 2.).unwrap();
+            streams = result.stream_update.unwrap();
+            if cursor == 2 {
+                assert_eq!(
+                    NotificationDispatchRepository::agent_record(&tx, "agent")
+                        .unwrap()
+                        .unwrap(),
+                    before,
+                    "ordinary deltas remain batched"
+                );
+            }
+        }
+        super::flush_notification_streams(
+            &tx,
+            "agent",
+            &PublicationContext::default(),
+            &streams,
+            3.,
+        )
+        .unwrap();
+        let agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+            .unwrap()
+            .unwrap();
+        assert!(
+            agent.native_status.is_none(),
+            "resumed native text clears matching-turn retry UI"
+        );
+        assert_eq!(agent.events, Some(2));
+        let item = TranscriptRepository::item(&tx, "agent", "agent:summary")
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.record.value()["text"], "Resumed summary");
+    }
+
+    #[test]
+    fn native_progress_snapshots_recover_only_the_matching_retry() {
+        for kind in ["plan", "reasoning"] {
+            for method in ["item/started", "item/completed"] {
+                for retry_turn in ["turn", "other-turn"] {
+                    let mut connection = database();
+                    let tx = connection.transaction().unwrap();
+                    let mut agent = NotificationDispatchRepository::agent_record(&tx, "agent")
+                        .unwrap()
+                        .unwrap();
+                    agent.native_status = Some(
+                        studio_json::from_str(
+                            &json!({"phase":"retrying","turnId":retry_turn}).to_string(),
+                        )
+                        .unwrap(),
+                    );
+                    super::persist_agent(&tx, "agent", &mut agent).unwrap();
+                    let item = if kind == "plan" {
+                        json!({"id":"progress","type":"plan","text":"Plan"})
+                    } else {
+                        json!({"id":"progress","type":"reasoning","summary":["Summary"]})
+                    };
+                    let event = json!({"method":method,"params":{"threadId":"thread","turnId":"turn","startedAtMs":1000,"completedAtMs":2000,"item":item}});
+                    let mut streams = NotificationStreamBuffer::default();
+                    dispatch_native(&tx, &mut streams, 1, &event, 2.).unwrap();
+                    let saved = NotificationDispatchRepository::agent_record(&tx, "agent")
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(
+                        saved.native_status.is_none(),
+                        retry_turn == "turn",
+                        "{kind} {method} {retry_turn}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_mcp_progress_updates_the_existing_card() {
+        let mut connection = database();
+        let tx = connection.transaction().expect("transaction");
+        let mut streams = NotificationStreamBuffer::default();
+        dispatch_native(&tx, &mut streams, 1, &json!({"method":"item/started","params":{"startedAtMs":1000,"threadId":"thread","turnId":"turn","item":{"id":"tool","type":"mcpToolCall","server":"docs","tool":"search","arguments":{},"status":"inProgress"}}}), 1.).expect("tool started");
+        dispatch_native(&tx, &mut streams, 2, &json!({"method":"item/mcpToolCall/progress","params":{"threadId":"thread","turnId":"turn","itemId":"tool","message":"Reading documentation"}}), 2.).expect("progress");
+        let item = TranscriptRepository::item(&tx, "agent", "agent:tool")
+            .expect("read")
+            .expect("card");
+        let payload: Value =
+            studio_json::from_str(item.record.value()["text"].as_str().expect("text"))
+                .expect("payload");
+        assert_eq!(payload["progressMessage"], "Reading documentation");
+        assert_eq!(payload["tool"], "search");
+        assert_eq!(item.record.value()["toolStatus"], "running");
+    }
+
+    #[test]
+    fn native_progress_fixture_matches_the_ui_render_input() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../providers/fixtures/native-progress.json");
+        let fixtures: Value =
+            studio_json::from_str(&std::fs::read_to_string(path).expect("shared fixture"))
+                .expect("JSON");
+        for fixture in fixtures.as_array().expect("cases") {
+            let dispatch_event = if fixture["provider"] == "codex" {
+                dispatch_native
+            } else {
+                dispatch
+            };
+            let mut connection = database();
+            let tx = connection.transaction().expect("transaction");
+            let mut streams = NotificationStreamBuffer::default();
+            for (index, event) in fixture["events"]
+                .as_array()
+                .expect("events")
+                .iter()
+                .enumerate()
+            {
+                dispatch_event(
+                    &tx,
+                    &mut streams,
+                    index as u64 + 1,
+                    event,
+                    index as f64 + 1.,
+                )
+                .expect("provider event");
+            }
+            super::flush_notification_streams(
+                &tx,
+                "agent",
+                &PublicationContext::default(),
+                &streams,
+                20.,
+            )
+            .expect("flush");
+            for expected in fixture["rows"].as_array().expect("rows") {
+                let item =
+                    TranscriptRepository::item(&tx, "agent", expected["id"].as_str().expect("id"))
+                        .expect("read")
+                        .expect("UI row");
+                let actual = item.record.value();
+                if expected["kind"] == "text" {
+                    assert_eq!(actual["role"], "assistant");
+                    assert_eq!(actual["text"], expected["text"]);
+                } else {
+                    let payload: Value =
+                        studio_json::from_str(actual["text"].as_str().expect("text"))
+                            .expect("payload");
+                    for (key, value) in expected["payload"].as_object().expect("payload").iter() {
+                        assert_eq!(&payload[key], value, "{} {key}", fixture["provider"]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_progress_completion_uses_public_snapshots_and_closes_the_stream() {
+        for (kind, id, field, body) in [
+            ("plan", "plan", "text", json!("Final plan")),
+            (
+                "reasoning",
+                "summary",
+                "summary",
+                json!(["First summary", "Second summary"]),
+            ),
+        ] {
+            let mut connection = database();
+            let tx = connection.transaction().expect("transaction");
+            let mut streams = NotificationStreamBuffer::default();
+            let method = if kind == "plan" {
+                "item/plan/delta"
+            } else {
+                "item/reasoning/summaryTextDelta"
+            };
+            dispatch_native(&tx, &mut streams, 1, &json!({"method":method,"params":{"threadId":"thread","turnId":"turn","itemId":id,"delta":"Draft","summaryIndex":0}}), 1.).expect("streamed draft");
+            let mut item = json!({"id":id,"type":kind,"content":["PRIVATE_REASONING_SENTINEL"]});
+            item[field] = body;
+            dispatch_native(&tx, &mut streams, 2, &json!({"method":"item/completed","params":{"completedAtMs":2000,"threadId":"thread","turnId":"turn","item":item}}), 2.).expect("snapshot");
+            let saved = TranscriptRepository::item(&tx, "agent", &format!("agent:{id}"))
+                .expect("read")
+                .expect("row");
+            assert_eq!(saved.record.value()["streaming"], false);
+            assert_eq!(
+                saved.record.value()["text"],
+                if kind == "plan" {
+                    "Final plan"
+                } else {
+                    "First summary\n\nSecond summary"
+                }
+            );
+            assert!(
+                !saved
+                    .record
+                    .value()
+                    .to_string()
+                    .contains("PRIVATE_REASONING_SENTINEL")
+            );
+            let outcome = dispatch_native(&tx, &mut streams, 3, &json!({"method":method,"params":{"threadId":"thread","turnId":"turn","itemId":id,"delta":"late","summaryIndex":0}}), 3.).expect("late delta");
+            assert!(matches!(outcome, DispatchOutcome::Ignored { .. }));
+        }
     }
 
     /// Stream flushes write the text once, to the item: no durable base copy

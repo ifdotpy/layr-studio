@@ -43,14 +43,6 @@ export interface components {
       ttl: string;
       warm: boolean;
     };
-    /** @description Managed Claude session extension; omit the whole object for user sessions. */
-    ClaudeBridgeSessionWire: {
-      userMcp?: boolean | undefined;
-    };
-    /** @description Per-turn model override; an unset model is explicitly JSON null. */
-    ClaudeBridgeTurnWire: {
-      model?: string | null | undefined;
-    };
     /**
      * ClaudeCustomModel
      * @description Custom model records are nested in the stored account passthrough.
@@ -533,10 +525,6 @@ export type BackgroundShellPolicySettings =
 export type BucketCreditBalance = components["schemas"]["BucketCreditBalance"];
 export type BucketCredits = components["schemas"]["BucketCredits"];
 export type CacheReport = components["schemas"]["CacheReport"];
-export type ClaudeBridgeSessionWire =
-  components["schemas"]["ClaudeBridgeSessionWire"];
-export type ClaudeBridgeTurnWire =
-  components["schemas"]["ClaudeBridgeTurnWire"];
 export type ClaudeCustomModel = components["schemas"]["ClaudeCustomModel"];
 export type ClaudeFailure = components["schemas"]["ClaudeFailure"];
 export type ClaudeRateInfo = components["schemas"]["ClaudeRateInfo"];

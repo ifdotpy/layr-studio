@@ -210,7 +210,7 @@ impl Accepted {
         codec: studio_runtime_process::provider_seam::ProviderCodec,
     ) -> Result<Frame, WorkerError> {
         let frame = (codec.normalize)(&self.frame()?).map_err(|_| invalid(&self.operation()))?;
-        crate::provider_adapter::project_frame(frame).map_err(|_| invalid(&self.operation()))
+        Ok(crate::provider_adapter::project_frame(frame))
     }
 }
 
@@ -429,6 +429,7 @@ pub(super) async fn admit_reply(
     let operation = operation.to_owned();
     store.transaction_with(move|tx| {
         let wire = crate::callback_reply::prepare_reply(tx, &operation, crate::callback_reply::CallbackReference::Immediate, &frame, control.codec())?;
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/callback_handoff.rs#internal_sender_witness_restart_queries_supervisor_for_saved_callback_attempt
         let prepared = control.prepare_callback_reply(studio_runtime_process::OperationId(operation.clone()), &wire)?;
         let no_write = (|| {
         let Some(mut task)=task(tx,&operation)? else { return Ok(true); };

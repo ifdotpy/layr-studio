@@ -21,9 +21,8 @@ pub const LANE_CAPACITY: usize = 16;
 pub struct ProviderCodec {
     pub normalize: fn(&Frame) -> Result<Frame, CodecError>,
     pub encode: fn(&Frame) -> Result<Vec<u8>, CodecError>,
-    pub decode: fn(&[u8]) -> Result<Frame, CodecError>,
-    pub decode_with_metadata:
-        fn(&[u8]) -> Result<studio_runtime_providers::DecodedFrame, CodecError>,
+    pub kind: Option<studio_runtime_providers::ProviderKind>,
+    pub decode: fn(&[u8]) -> Result<studio_runtime_providers::DecodedFrame, CodecError>,
 }
 
 impl Default for ProviderCodec {
@@ -31,8 +30,8 @@ impl Default for ProviderCodec {
         Self {
             normalize: |frame| Ok(frame.clone()),
             encode: encode_line,
-            decode: studio_runtime_providers::decode_frame,
-            decode_with_metadata: studio_runtime_providers::decode_frame_with_metadata,
+            kind: None,
+            decode: studio_runtime_providers::decode_frame_with_metadata,
         }
     }
 }
@@ -42,8 +41,8 @@ impl ProviderCodec {
         Self {
             normalize: studio_runtime_providers::normalize_codex_frame,
             encode: studio_runtime_providers::encode_codex_line,
-            decode: studio_runtime_providers::decode_codex_frame,
-            decode_with_metadata: studio_runtime_providers::decode_codex_frame_with_metadata,
+            kind: Some(studio_runtime_providers::ProviderKind::Codex),
+            decode: studio_runtime_providers::decode_codex_frame_with_metadata,
         }
     }
 }
@@ -99,8 +98,8 @@ pub enum JournalPayload {
 /// Submitted marker). Private fields prevent arbitrarily large queued writes.
 pub struct PreparedWrite {
     pub(crate) operation_id: OperationId,
-    pub(crate) message: Frame,
-    pub(crate) encode: fn(&Frame) -> Result<Vec<u8>, CodecError>,
+    message: Frame,
+    pub(crate) bytes: Vec<u8>,
 }
 
 impl PreparedWrite {
@@ -130,12 +129,12 @@ impl PreparedWrite {
         let prepared = Self {
             operation_id,
             message: frame.clone(),
-            encode: codec.encode,
+            bytes,
         };
         // Leave space for the supervisor handle, request ID and envelope.
         if prepared.operation_id.0.is_empty()
             || prepared.operation_id.0.len() > 1024
-            || bytes.len() + prepared.operation_id.0.len() + 1024
+            || prepared.bytes.len() + prepared.operation_id.0.len() + 1024
                 > crate::transport::MAX_FRAME_BYTES
         {
             return Err(AdapterError::InvalidConfiguration);

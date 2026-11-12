@@ -43,6 +43,7 @@ impl AccountSessionPort for Provider {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        assert_production_codec(&request);
         self.calls.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             if self.block.swap(false, Ordering::SeqCst) {
@@ -126,6 +127,17 @@ async fn fixture() -> (
     axum::Router,
     Arc<Provider>,
 ) {
+    fixture_for(studio_runtime_schema::ProviderKind::Codex).await
+}
+async fn fixture_for(
+    provider_kind: studio_runtime_schema::ProviderKind,
+) -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    Arc<RuntimeStore>,
+    axum::Router,
+    Arc<Provider>,
+) {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     let cwd = root.path().join("worker");
@@ -146,7 +158,7 @@ async fn fixture() -> (
             .await
             .unwrap(),
     );
-    let agent = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"worker","epoch":1,"cwd":cwd,"status":"paused","inFlight":false,"worktreeReady":true,"threadId":"source","accountKey":"default"});
+    let agent = json!({"compactions":0,"provider":provider_kind,"id":"worker","rootId":"worker","epoch":1,"cwd":cwd,"status":"paused","inFlight":false,"worktreeReady":true,"threadId":"source","accountKey":"default"});
     store
         .transaction(move |tx| {
             AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
@@ -175,8 +187,18 @@ async fn fixture() -> (
     (root, cwd, store, app, provider)
 }
 #[tokio::test]
-async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree() {
-    let (root, cwd, store, app, provider) = fixture().await;
+async fn internal_sender_witness_checkpoint_restore() {
+    for provider in [
+        studio_runtime_schema::ProviderKind::Codex,
+        studio_runtime_schema::ProviderKind::Claude,
+    ] {
+        checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree(provider).await;
+    }
+}
+async fn checkpoint_rewind_preview_and_restore_enforce_idle_and_preserve_before_tree(
+    provider_kind: studio_runtime_schema::ProviderKind,
+) {
+    let (root, cwd, store, app, provider) = fixture_for(provider_kind).await;
     let (status, captured) = post(
         &app,
         "/api/checkpoint",
@@ -528,4 +550,10 @@ async fn cancelled_http_caller_retains_execution_until_restore_settles() {
         std::fs::read_to_string(cwd.join("file.txt")).unwrap(),
         "checkpoint\n"
     );
+}
+
+fn assert_production_codec(
+    request: &studio_runtime_services::account_session_runtime::ProviderRequest,
+) {
+    studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
 }

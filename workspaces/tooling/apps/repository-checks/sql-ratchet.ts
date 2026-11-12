@@ -288,6 +288,306 @@ export const REVIEWED_P2_SQL_ALLOWANCES = [
   },
 ] satisfies (Allowance & { reason: string })[];
 
+// Exact SQL used only to explain captured statements and inject negative plan fixtures.
+// No application SQL or path-wide exemption is admitted.
+export const WRITER_PLAN_WITNESS_SQL_ALLOWANCES = [
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "8708b1c951624b64",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Connection::prepare",
+    fingerprint: "8708b1c951624b64",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "9a3cdd717cab8c66",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "eccf25aa8e9c3bb9",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "94e304b9ff1d5218",
+  },
+
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "b7fec19b9111e13d",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "d5acdbf18d9f5c74",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "2091e49c7f57af57",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::sql-template",
+    fingerprint: "fc31d560967b50a3",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "ca0d451b61b7b799",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::sql-template",
+    fingerprint: "619f5bbe8a8b42d2",
+  },
+
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Statement::query_map",
+    fingerprint: "b7fec19b9111e13d",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Statement::query",
+    fingerprint: "d5acdbf18d9f5c74",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Connection::prepare",
+    fingerprint: "2091e49c7f57af57",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Connection::execute_batch",
+    fingerprint: "ca0d451b61b7b799",
+  },
+] satisfies Allowance[];
+
+// Captured fixture loader only feeds the existing typed seed adapters; no SQL.
+const REVIEWED_LIVE_RESTART_FIXTURE_ALLOWANCES: readonly Allowance[] = [
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/live_restart_fixture.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "f6bdfdc084c443b4",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/live_restart_fixture.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "487a2e54d94a467c",
+  },
+];
+// Exact wave C port approved against the consolidated-storage scanner; no path/API exemptions.
+export const REVIEWED_WAVE_C_SQL_ALLOWANCES = [
+  {
+    file: "workspaces/client/apps/web/tests/rendering/rendering-ux-ui.spec.ts",
+    api: "embedded::sql",
+    fingerprint: "3838cb5a0e38b2a0",
+    reason:
+      "UI expectation or test title contains ordinary English select text, not SQL.",
+  },
+  {
+    file: "workspaces/client/apps/web/tests/rendering/rendering-ux-ui.spec.ts",
+    api: "embedded::sql",
+    fingerprint: "fe6b7bd74460bb42",
+    reason:
+      "UI expectation or test title contains ordinary English select text, not SQL.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-process/src/provider_stdio.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "e0fd1a118b8b6f79",
+    reason:
+      "Reviewed provider projection or test fixture uses the existing JSON facade; no SQLite executor.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-providers/src/codex_codec.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "609b710fe0180d8d",
+    reason:
+      "Reviewed provider projection or test fixture uses the existing JSON facade; no SQLite executor.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-providers/src/codex_codec.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "609b710fe0180d8d",
+    reason:
+      "Reviewed provider projection or test fixture uses the existing JSON facade; no SQLite executor.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/account_worker/submission.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "e63cbd5a3707e26c",
+    reason:
+      "Existing provider control prepare call, not a SQLite prepare call.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/internal_sender_witness.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "f6bdfdc084c443b4",
+    reason:
+      "Reviewed provider projection or test fixture uses the existing JSON facade; no SQLite executor.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/internal_sender_witness.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "487a2e54d94a467c",
+    reason:
+      "Reviewed provider projection or test fixture uses the existing JSON facade; no SQLite executor.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/notification_dispatch/progress.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "ec50204943fc0c2a",
+    reason:
+      "Reviewed provider projection or test fixture uses the existing JSON facade; no SQLite executor.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "b529559325356751",
+    reason:
+      "Existing provider control prepare call, not a SQLite prepare call.",
+  },
+
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "99c8eb58ef6f8c30",
+    reason: "Negative fixture checks a persistent alias inside computed rows.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "da5cf4c4314e1910",
+    reason: "Negative fixture checks a persistent alias inside computed rows.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rust::sql-template",
+    fingerprint: "1a7832dd90d3f826",
+    reason: "Negative fixture checks a persistent alias inside computed rows.",
+  },
+  {
+    file: "workspaces/tooling/apps/repository-checks/tests/internal-sender-witnesses.test.ts",
+    api: "embedded::sql",
+    fingerprint: "6b6c0f9fa63c2170",
+    reason:
+      "UI expectation or test title contains ordinary English select text, not SQL.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "1d712afb936daf63",
+    reason:
+      "Dated infrastructure transition recreates registry-owned durable trigger SQL.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "1be98402a515ea9a",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::sql-template",
+    fingerprint: "dfc5c1595f337a35",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "21dd44283a0e7400",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::sql-template",
+    fingerprint: "43b055e3c5a90927",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::sql-template",
+    fingerprint: "462aa38f8b1e39ad",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "a9efd98b400a09ae",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "db546535ee51f663",
+    reason:
+      "Startup migration witness installs a predecessor trigger, reads its schema and verifies one-time upgrade.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rusqlite::Connection::execute_batch",
+    fingerprint: "1d712afb936daf63",
+    reason:
+      "Compiler identity for the dated transition creating registry-owned durable trigger SQL.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rusqlite::Connection::execute_batch",
+    fingerprint: "1be98402a515ea9a",
+    reason:
+      "Compiler identity for the reviewed predecessor-startup schema and pragma witness.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rusqlite::Connection::query_row",
+    fingerprint: "21dd44283a0e7400",
+    reason:
+      "Compiler identity for the reviewed predecessor-startup schema and pragma witness.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rusqlite::Connection::pragma_query_value",
+    fingerprint: "a9efd98b400a09ae",
+    reason:
+      "Compiler identity for the reviewed predecessor-startup schema and pragma witness.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/migrations/m2026_11_12_direct_durable_keys.rs",
+    api: "rusqlite::Connection::pragma_query_value",
+    fingerprint: "db546535ee51f663",
+    reason:
+      "Compiler identity for the reviewed predecessor-startup schema and pragma witness.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Statement::query",
+    fingerprint: "99c8eb58ef6f8c30",
+    reason:
+      "Compiler identity for the reviewed persistent-alias negative plan fixture.",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-store/src/writer_query_plans.rs",
+    api: "rusqlite::Connection::prepare",
+    fingerprint: "da5cf4c4314e1910",
+    reason:
+      "Compiler identity for the reviewed persistent-alias negative plan fixture.",
+  },
+] satisfies (Allowance & { reason: string })[];
+
 function counts(rows: readonly Allowance[]): Map<string, number> {
   const found = new Map<string, number>();
   for (const row of rows)
@@ -309,6 +609,9 @@ export function checkSqlRatchet(
     ...REVIEWED_CALLBACK_SQL_ALLOWANCES,
     ...WRITER_INDEX_SQL_ALLOWANCES,
     ...REVIEWED_P2_SQL_ALLOWANCES,
+    ...WRITER_PLAN_WITNESS_SQL_ALLOWANCES,
+    ...REVIEWED_LIVE_RESTART_FIXTURE_ALLOWANCES,
+    ...REVIEWED_WAVE_C_SQL_ALLOWANCES,
   ]);
   return actual
     .filter((site) => !consume(remaining, site) && !consume(reviewed, site))
@@ -896,6 +1199,12 @@ export function scanSql() {
   for (const file of files.filter((file) =>
     /\.(?:[cm]?[jt]sx?|py|sql)$/.test(file),
   )) {
+    // Offline anonymized fixture export from a sqlite backup copy; never runtime.
+    if (
+      file ===
+      "workspaces/runtime/packages/runtime-services/fixtures/live-restart/export.ts"
+    )
+      continue;
     const source = readFileSync(path.join(root, file), "utf8");
     if (file.endsWith(".sql")) {
       sites.push({

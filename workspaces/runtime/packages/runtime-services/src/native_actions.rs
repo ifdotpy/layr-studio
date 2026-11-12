@@ -935,7 +935,9 @@ pub async fn execute_provider_prepared(
             .await?;
         let method =
             Method::from_wire(&native_request.method).ok_or(NativeError::Invalid("method"))?;
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/idle_compaction.rs#internal_sender_witness_native_settings
         let provider = port
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/idle_compaction.rs#internal_sender_witness_native_settings
             .provider_request(ProviderRequest {
                 root_request_id: native_request.root_request_id.clone(),
                 admitted_request: native_request.admitted_request.clone(),
@@ -1284,7 +1286,9 @@ pub async fn update_action_settings(
 
         let method =
             Method::from_wire("thread/settings/update").ok_or(NativeError::Invalid("method"))?;
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/idle_compaction.rs#internal_sender_witness_native_settings
         let provider = port
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/idle_compaction.rs#internal_sender_witness_native_settings
             .provider_request(ProviderRequest {
                 root_request_id: settings_request.root_request_id.clone(),
                 admitted_request: settings_request.admitted_request.clone(),

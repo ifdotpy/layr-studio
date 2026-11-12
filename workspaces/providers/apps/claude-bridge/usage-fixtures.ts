@@ -1,4 +1,19 @@
 import type { SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Query } from "@anthropic-ai/claude-agent-sdk";
+export const contextUsage = {
+  totalTokens: 600,
+  maxTokens: 800,
+  rawMaxTokens: 1000,
+  percentage: 60,
+  categories: [],
+  gridRows: [],
+  model: "claude-opus-5-5",
+  memoryFiles: [],
+  mcpTools: [],
+  agents: [],
+  isAutoCompactEnabled: true,
+  apiUsage: null,
+} satisfies Awaited<ReturnType<Query["getContextUsage"]>>;
 type StreamEvent = SDKPartialAssistantMessage["event"];
 export const modelUsage: import("@anthropic-ai/claude-agent-sdk").ModelUsage = {
   inputTokens: 10,

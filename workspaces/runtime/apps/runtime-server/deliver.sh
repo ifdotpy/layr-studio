@@ -15,6 +15,8 @@ readonly UNIT=${layout[0]}
 readonly PORT=${layout[1]}
 # Seconds to wait for the first HTTP 200 after a restart.
 readonly START_TIMEOUT_SECONDS=1800
+# Seconds a worker may wait for another delivery to release the host lock.
+readonly DELIVERY_WAIT_SECONDS=1800
 # Seconds the unit must then stay active without a restart.
 readonly STABLE_SECONDS=30
 # Release directories kept on disk, the current and previous ones included.
@@ -225,7 +227,17 @@ export CARGO_TARGET_DIR=$root/target
 
 mkdir -p "$root/releases"
 exec 9>"$root/deliver.lock"
-flock -n 9 || { echo "another delivery is running" >&2; exit 1; }
+if ! flock -n 9; then
+  running_units=$(systemctl --user list-units "$DELIVERY_UNIT_PREFIX-*.service" \
+    --state=activating,active --no-legend --plain --no-pager |
+    awk -v own="${CODEX_STUDIO_DELIVER_UNIT:-}" '$1 != own {print $1}' |
+    tr '\n' ' ') || running_units=
+  echo "Waiting up to $DELIVERY_WAIT_SECONDS seconds for running delivery: ${running_units:-unit unavailable; lock $root/deliver.lock}" >&2
+  flock -w "$DELIVERY_WAIT_SECONDS" 9 || {
+    echo "Timed out after $DELIVERY_WAIT_SECONDS seconds waiting for delivery lock $root/deliver.lock; delivery $commit has not started" >&2
+    exit 1
+  }
+fi
 
 if [ ! -x "$release/$binary" ]; then
   staging=$release.partial

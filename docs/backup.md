@@ -111,12 +111,17 @@ plus the time to send them.
 ## Write transaction alert
 
 A Canvas write transaction that holds the single writer for `SQLITE_WRITE_TRANSACTION_ALERT_MS`
-(1000 ms, `runtime-schema/src/shared_values.rs`) writes this warning to the server log, when
+(100 ms, `runtime-schema/src/shared_values.rs`) writes this warning to the server log, when
 the transaction ends:
 
 ```text
-warning: Canvas write transaction held the writer for 1234 ms (alert at 1000 ms), caller path/file.rs:123
+warning: Canvas write transaction held the writer for 1234 ms (alert at 100 ms), caller path/file.rs:123; 3 slow transactions since last warning, max 2345 ms
 ```
+
+Warnings are always enabled, limited to one line per call site per minute. Each line
+includes the count and maximum duration since that site's previous warning. The first
+slow transaction at a site logs immediately. The duration starts after SQLite grants
+the write transaction; admission and SQLite busy waits are excluded.
 
 The caller is the `file:line` of the `transaction` call. The same transactions are in the
 diagnostics under `sqliteContention.slowTransactions` (with the caller in `originFrames`). The

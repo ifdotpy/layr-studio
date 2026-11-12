@@ -12,6 +12,7 @@ mod m2026_11_11_strict_native_review;
 mod m2026_11_11_writer_query_indexes;
 mod m2026_11_11_writer_receipt_indexes;
 mod m2026_11_12_changes_label_sequence;
+mod m2026_11_12_direct_durable_keys;
 mod m2026_11_12_writer_window_indexes;
 
 use crate::{StoreError, StoreResult};
@@ -214,6 +215,10 @@ static POST_F1_CATALOG: &[SqlMigration] = &[
             remove_when: "Supported installations and backups all contain the label sequence index",
         },
         apply: m2026_11_12_changes_label_sequence::apply,
+    },
+    SqlMigration {
+        definition: m2026_11_12_direct_durable_keys::DEFINITION,
+        apply: m2026_11_12_direct_durable_keys::apply,
     },
 ];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {

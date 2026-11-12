@@ -117,6 +117,9 @@ struct LocationSequence<'a> {
 }
 
 impl ProjectionPublicationQueries {
+    /// Exact generated registry lookup, for bounded JSON plan witnesses.
+    #[cfg(any(test, feature = "test-support"))]
+    pub const CURRENT_ACCOUNT_IDENTITY_SQL: &'static str = AccountIdentity::QUERY.sql();
     pub fn federation_enabled(db: &rusqlite::Connection) -> rusqlite::Result<Option<bool>> {
         canvas_read(db).named(
             &FederationEnabled::QUERY,

@@ -738,8 +738,10 @@ async fn session_reply(
     let mut last_receipt = None;
     for attempt in 0..2 {
         let receipt = (if let Some(thread_id) = &call.transfer_source_thread {
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs#internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart
             context
                 .session
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs#internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart
                 .transfer_provider_request(TransferProviderRequest {
                     root_request_id: admission.root_request_id.clone(),
                     admitted_request: admission.admitted_request.value().cloned(),
@@ -755,8 +757,10 @@ async fn session_reply(
                 })
                 .await
         } else {
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs#internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart
             context
                 .session
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs#internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart
                 .provider_request(ProviderRequest {
                     root_request_id: admission.root_request_id.clone(),
                     admitted_request: admission.admitted_request.value().cloned(),
@@ -1570,6 +1574,7 @@ impl TransferTransport for AccountTransferExecutor {
                 &ticket.request,
             )
             .await?;
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs#internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart
             let request = ProviderRequest {
                 root_request_id: admission.root_request_id,
                 admitted_request: admission.admitted_request.value().cloned(),
@@ -1585,6 +1590,7 @@ impl TransferTransport for AccountTransferExecutor {
                 params: params.clone(),
                 deadline: Instant::now() + MUTATION_DEADLINE,
             };
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_transfer_executor.rs#internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart
             let session_receipt = self.session.provider_request(request).await;
             match session_receipt {
                 Ok(receipt) => Ok(TransferDispatch::Receipt(receipt)),
@@ -2289,6 +2295,7 @@ mod retained_executor_tests {
             &'a self,
             request: ProviderRequest,
         ) -> crate::account_session_runtime::AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 if request.operation.starts_with("model-list:") {
                     assert_eq!(request.account, "target");
@@ -2342,6 +2349,7 @@ mod retained_executor_tests {
             &'a self,
             request: TransferProviderRequest,
         ) -> crate::account_session_runtime::AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 assert_eq!(request.transfer_id, self.transfer_id);
                 assert_eq!(request.member, "lead");
@@ -2769,7 +2777,8 @@ mod retained_executor_tests {
     }
 
     #[tokio::test]
-    async fn before_start_copies_history_once_and_replays_unknown_fork_after_restart() {
+    async fn internal_sender_witness_before_start_copies_history_once_and_replays_unknown_fork_after_restart()
+     {
         Box::pin(assert_history_transfer_without_duplicate_fork(false)).await;
     }
 

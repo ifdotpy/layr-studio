@@ -2295,6 +2295,7 @@ async function startSession(
     allowed = true;
     admit!();
     active.readyResolve();
+    let contextSample = 0;
     for await (const m of q) {
       const disposition = sdkMessageDiagnostics(m);
       if (disposition.kind === "Ignored") continue;
@@ -2572,6 +2573,38 @@ async function startSession(
         continue;
       }
       if (m.type === "result") {
+        const sample = ++contextSample;
+        const turnId = turn?.id;
+        void Promise.resolve()
+          .then(() => (active.input.closed ? undefined : q.getContextUsage()))
+          .then((usage) => {
+            if (
+              active.input.closed ||
+              !usage ||
+              sample !== contextSample ||
+              closing ||
+              queries.get(s.id) !== active ||
+              active.q !== q ||
+              (active.turn && active.turn.id !== turnId) ||
+              s.turns.at(-1)?.id !== turnId ||
+              !Number.isSafeInteger(usage.totalTokens) ||
+              usage.totalTokens < 0 ||
+              !Number.isSafeInteger(usage.rawMaxTokens) ||
+              usage.rawMaxTokens <= 0
+            )
+              return;
+            emit("thread/contextUsage/updated", {
+              threadId: s.id,
+              turnId,
+              contextUsage: {
+                tokens: usage.totalTokens,
+                window: usage.rawMaxTokens,
+              },
+            });
+          })
+          .catch(() => {
+            // Unavailable controls preserve the last measurement and never hold completion.
+          });
         active.usage.recordModels(m.modelUsage);
         const studioUsage = cumulativeUsage(m, turn?.id);
         if (studioUsage) {

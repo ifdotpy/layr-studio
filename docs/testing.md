@@ -1032,3 +1032,26 @@ Reader-pool tracing is best effort for service page/search queries; inspect the
 captured SQL list before claiming their plans were measured. No payloads, bindings,
 account keys or transcript text are included. CPU has the platform process-counter
 resolution, so a short smoke is unsuitable for CPU comparisons.
+
+### Internal provider sender witnesses
+
+The fast tier discovers outgoing provider request expressions with the Rust AST
+in `internal-sender-witnesses.ts`. Each production sender names its executable
+witness on the immediately preceding line:
+
+```rust
+// internal-sender-witness: workspaces/runtime/packages/runtime-services/src/example.rs#internal_sender_witness_example
+let request = ProviderRequest { /* actual owner parameters */ };
+```
+
+The check reports `file:line` for missing annotations or missing test functions.
+The `internal_sender_witness_` test prefix selects these tests in the fast tier;
+the annotations are the sender registry, so there is no second sender inventory.
+Exercise the production caller, and validate the request at the fixture port
+before supplying a response. The shared services witness uses the same
+`ProviderCodec`, `PreparedWrite` and `SessionState::preflight_frame_with_id` as
+live admission, for both providers when reachable. Claude extension methods use
+the Claude codec. Supervisor operation-status reads must settle through the
+supervisor owner without a vendor write. These worker witnesses explicitly
+select the production codec. Existing generic journal fixtures retain their
+protocol so legacy or deliberately incomplete incoming payloads stay testable.

@@ -80,13 +80,22 @@ inherits = "ci"
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
+# Anonymized live-shaped startup rows and bounded retained monitor recovery.
 default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-http) & (test(snapshot_spooling_and_slow_consumer_release_read_transactions) | test(snapshot_pages_replay_updates_and_tombstones_from_watermark) | test(shutdown_discards_queued_snapshot_frames) | test(delta_pages_reject_pruned_unread_tombstone_before_watermark) | test(projected_pages_replay_main_row_updates_deletes_and_membership))) |
+    (package(=studio-db-api) & test(durable_direct_key_expressions_preserve_insert_delete_and_rename_bytes)) |
+    (package(=studio-runtime-store) & test(startup_schema_upgrades_predecessor_durable_producers_once)) |
+    ((package(=studio-runtime-services) | package(=studio-runtime-process) | package(=studio-runtime-providers)) & (test(frozen_thread_preparation_) | test(frozen_claude_preparation_) | test(a_moved_agent_keeps_its_frozen_native_parameters) | test(prepared_write_encodes_once_) | test(prepared_codex_command_retains_) | test(edit_command_preserves_absent_) | test(correlated_future_result_is_diagnosed_) | test(correlated_result_variants_stop_at_the_diagnostic_key_cap) | test(immediate_reply_uses_accepted_method) | test(known_completion_missing_) | test(incompatible_approval_is_) | test(codex_normalization_refuses_internal_))) |
+    (package(=studio-runtime-store) & kind(lib) & (test(writer_query_plans::tests::) | test(write_alert::tests::))) |
     (package(=studio-runtime-services) & kind(lib) & (test(limits_commit_decodes_only_its_account_and_preserves_projection) | test(deleted_command_query_tests::) | test(rule_success_query_uses_rule_index))) |
     (package(=studio-runtime-store) & test(system_receipt_writer_reads_do_not_probe_schema)) |
     (package(=studio-runtime-store) & (test(limit_agent_queries::tests::) | test(monitor_window_queries::tests::) | test(consolidated_f1_prefix_receives_writer_indexes_once) | test(writer_queries::tests::) | test(sync_policy_target_scheduler_join_preserves_raw_bytes_and_id_order))) |
     (package(=studio-runtime-services) & (test(account_session_runtime::limits::tests::) | test(journal_writer_work_is_independent_of_idle_account_agents) | test(publication_windows_do_not_probe_the_known_schema))) |
+    test(internal_sender_witness_) |
+    (package(=studio-runtime-services) & kind(lib) & test(=account_worker::tests::provider_drift::native_progress_reasoning_turn_preserves_its_final_answer)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/^notification_dispatch::tests::native_(progress|mcp_progress)/)) |
+    ((package(=studio-runtime-services) | package(=studio-runtime-server)) & test(live_restart)) |
     (package(=studio-runtime-services) & kind(lib) & test(host_worker_create::tests::creation_)) |
     (package(=studio-codex-protocol) & kind(lib) & test(=generated::generated_fixtures::every_vendor_method_sample_decodes)) |
     (package(=studio-runtime-providers) & kind(lib) & test(codec::codex_protocol_tests::)) |
@@ -432,7 +441,8 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(agent_move::usage_tests::) | test(typed_usage_conflict_keeps_first_charge_and_dispatches_context))) |
     (package(=studio-runtime-services) & kind(test) & binary(integration) & test(relocation_corpus::python_location_and_move_corpus_through_consumers)) |
     (package(=studio-runtime-services) & kind(test) & binary(integration) & test(/^command_replay::/)) |
-    (package(=studio-runtime-services) & kind(lib) & (test(typed_usage_dispatch_reaches_priced_cost_groups) | test(typed_usage_ledger_journal_))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(typed_usage_dispatch_reaches_priced_cost_groups) | test(typed_usage_ledger_journal_) | test(claude_context_uses_native_occupancy_not_billed_tokens) | test(reroute_is_a_readable_notice_for_the_current_turn) | test(provider_warning_frames_project_to_visible_transcript_notices) | test(typed_usage_bridge_golden_frames_reach_context))) |
+    (package(=studio-runtime-providers) & kind(lib) & test(retired_native_goals_are_deferred_consistently)) |
     (package(=studio-runtime-schema) & kind(lib) & test(usage::legacy_tests::)) |
     (package(=studio-runtime-server) & kind(bin) & test(native_probe::tests::schema_check_refuses_changed_usage_and_error_fragments)) |
     (package(=studio-runtime-services) & kind(lib) & test(continuation::tests::agent_snapshot_)) |
@@ -540,7 +550,7 @@ default-filter = '''
     | (package(=studio-runtime-services) & kind(lib) & test(sync_policy::tests::preference_validation_rejects_unknown_fields_and_scope_leaks))
     | (package(=studio-client-core) & kind(lib) & test(studio_error_entities_reach_native_state_and_dismissal_removes_them))
     | ((package(=studio-runtime-services)) & ((kind(lib) | kind(test))) & (test(/^worktree_root::tests::/) | test(/workspace_cleanup_runtime::tests::(archive_keeps_repository_default_worktrees_manageable_after_configuration|archive_removes_a_worktree_under_the_configured_root|worktree_outside_a_worker_directory_is_not_owned|substituted_worker_link_is_refused_and_target_survives|substituted_worker_ancestor_is_refused_and_target_survives|archive_manages_a_configured_root_named_like_the_default|worker_provisioned_from_a_linked_source_stays_owned|legacy_worker_under_a_linked_default_root_stays_owned)$/) | test(/::(configured_root_places_the_worktree_outside_the_repository|missing_configured_root_fails_closed)$/)))
-    | (package(=studio-runtime-store) & kind(lib) & test(/^diagnostics_hook_tests::(writer_job_timing_separates_queue_and_hold|optional_hook_observes_writer_and_sql_timing_and_can_be_cleared)$/))
+    | (package(=studio-runtime-store) & kind(lib) & test(/^diagnostics_hook_tests::(writer_job_timing_separates_queue_and_hold|optional_hook_observes_writer_and_sql_timing_and_can_be_cleared|writer_alert_excludes_post_commit_diagnostics)$/))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/^wave7_p01_registry::a_commit_without_a_registry_wake_is_flushed_after_one_interval$/))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/^wave7_p01_registry::restart_provider_requests_/))
     | (package(=studio-process-supervisor) & kind(test) & binary(=integration) & test(/^clients::admission::supervisor_admission_/))
@@ -705,10 +715,18 @@ platform = 'cfg(target_os = "linux")'
 default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(=managed_status_watch::tests::rules_pause_writer_work_ignores_unrelated_monitors) | test(=managed_status_watch::tests::rules_cancellation_snapshot_closes_current_admission_and_completion_races) | test(=managed_status_watch::tests::rules_cancellation_queries_search_indexes_without_sorting))) |
     (package(=studio-runtime-http) & (test(snapshot_spooling_and_slow_consumer_release_read_transactions) | test(snapshot_pages_replay_updates_and_tombstones_from_watermark) | test(shutdown_discards_queued_snapshot_frames) | test(delta_pages_reject_pruned_unread_tombstone_before_watermark) | test(projected_pages_replay_main_row_updates_deletes_and_membership))) |
+    (package(=studio-db-api) & test(durable_direct_key_expressions_preserve_insert_delete_and_rename_bytes)) |
+    (package(=studio-runtime-store) & test(startup_schema_upgrades_predecessor_durable_producers_once)) |
+    ((package(=studio-runtime-services) | package(=studio-runtime-process) | package(=studio-runtime-providers)) & (test(frozen_thread_preparation_) | test(frozen_claude_preparation_) | test(a_moved_agent_keeps_its_frozen_native_parameters) | test(prepared_write_encodes_once_) | test(prepared_codex_command_retains_) | test(edit_command_preserves_absent_) | test(correlated_future_result_is_diagnosed_) | test(correlated_result_variants_stop_at_the_diagnostic_key_cap) | test(immediate_reply_uses_accepted_method) | test(known_completion_missing_) | test(incompatible_approval_is_) | test(codex_normalization_refuses_internal_))) |
+    (package(=studio-runtime-store) & kind(lib) & (test(writer_query_plans::tests::) | test(write_alert::tests::))) |
     (package(=studio-runtime-services) & kind(lib) & (test(limits_commit_decodes_only_its_account_and_preserves_projection) | test(deleted_command_query_tests::) | test(rule_success_query_uses_rule_index))) |
     (package(=studio-runtime-store) & test(system_receipt_writer_reads_do_not_probe_schema)) |
     (package(=studio-runtime-store) & (test(limit_agent_queries::tests::) | test(monitor_window_queries::tests::) | test(consolidated_f1_prefix_receives_writer_indexes_once) | test(writer_queries::tests::) | test(sync_policy_target_scheduler_join_preserves_raw_bytes_and_id_order))) |
     (package(=studio-runtime-services) & (test(account_session_runtime::limits::tests::) | test(journal_writer_work_is_independent_of_idle_account_agents) | test(publication_windows_do_not_probe_the_known_schema))) |
+    test(internal_sender_witness_) |
+    (package(=studio-runtime-services) & kind(lib) & test(=account_worker::tests::provider_drift::native_progress_reasoning_turn_preserves_its_final_answer)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/^notification_dispatch::tests::native_(progress|mcp_progress)/)) |
+    ((package(=studio-runtime-services) | package(=studio-runtime-server)) & test(live_restart)) |
     (package(=studio-runtime-services) & kind(lib) & test(host_worker_create::tests::creation_)) |
     (package(=studio-codex-protocol) & kind(lib) & test(=generated::generated_fixtures::every_vendor_method_sample_decodes)) |
     (package(=studio-runtime-providers) & kind(lib) & test(codec::codex_protocol_tests::)) |
@@ -1054,7 +1072,8 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(agent_move::usage_tests::) | test(typed_usage_conflict_keeps_first_charge_and_dispatches_context))) |
     (package(=studio-runtime-services) & kind(test) & binary(integration) & test(relocation_corpus::python_location_and_move_corpus_through_consumers)) |
     (package(=studio-runtime-services) & kind(test) & binary(integration) & test(/^command_replay::/)) |
-    (package(=studio-runtime-services) & kind(lib) & (test(typed_usage_dispatch_reaches_priced_cost_groups) | test(typed_usage_ledger_journal_))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(typed_usage_dispatch_reaches_priced_cost_groups) | test(typed_usage_ledger_journal_) | test(claude_context_uses_native_occupancy_not_billed_tokens) | test(reroute_is_a_readable_notice_for_the_current_turn) | test(provider_warning_frames_project_to_visible_transcript_notices) | test(typed_usage_bridge_golden_frames_reach_context))) |
+    (package(=studio-runtime-providers) & kind(lib) & test(retired_native_goals_are_deferred_consistently)) |
     (package(=studio-runtime-schema) & kind(lib) & test(usage::legacy_tests::)) |
     (package(=studio-runtime-server) & kind(bin) & test(native_probe::tests::schema_check_refuses_changed_usage_and_error_fragments)) |
     (package(=studio-runtime-services) & kind(lib) & test(continuation::tests::agent_snapshot_)) |
@@ -1162,7 +1181,7 @@ default-filter = '''
     | (package(=studio-runtime-services) & kind(lib) & test(sync_policy::tests::preference_validation_rejects_unknown_fields_and_scope_leaks))
     | (package(=studio-client-core) & kind(lib) & test(studio_error_entities_reach_native_state_and_dismissal_removes_them))
     | ((package(=studio-runtime-services)) & ((kind(lib) | kind(test))) & (test(/^worktree_root::tests::/) | test(/workspace_cleanup_runtime::tests::(archive_keeps_repository_default_worktrees_manageable_after_configuration|archive_removes_a_worktree_under_the_configured_root|worktree_outside_a_worker_directory_is_not_owned|substituted_worker_link_is_refused_and_target_survives|substituted_worker_ancestor_is_refused_and_target_survives|archive_manages_a_configured_root_named_like_the_default|worker_provisioned_from_a_linked_source_stays_owned|legacy_worker_under_a_linked_default_root_stays_owned)$/) | test(/::(configured_root_places_the_worktree_outside_the_repository|missing_configured_root_fails_closed)$/)))
-    | (package(=studio-runtime-store) & kind(lib) & test(/^diagnostics_hook_tests::(writer_job_timing_separates_queue_and_hold|optional_hook_observes_writer_and_sql_timing_and_can_be_cleared)$/))
+    | (package(=studio-runtime-store) & kind(lib) & test(/^diagnostics_hook_tests::(writer_job_timing_separates_queue_and_hold|optional_hook_observes_writer_and_sql_timing_and_can_be_cleared|writer_alert_excludes_post_commit_diagnostics)$/))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/^wave7_p01_registry::a_commit_without_a_registry_wake_is_flushed_after_one_interval$/))
     | (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/^wave7_p01_registry::restart_provider_requests_/))
     | (package(=studio-process-supervisor) & kind(test) & binary(=integration) & test(/^clients::admission::supervisor_admission_/))

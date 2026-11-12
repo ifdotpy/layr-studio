@@ -1218,6 +1218,7 @@ impl AccountSessionRuntime {
         let receipt = {
             tokio::time::timeout_at(
                 deadline,
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_session_runtime.rs#internal_sender_witness_login_start_and_cancel
                 session.request(ProviderRequest {
                     root_request_id,
                     admitted_request: None,
@@ -1516,6 +1517,7 @@ impl AccountSessionPort for AccountSessionRuntime {
             match {
                 tokio::time::timeout_at(
                     tokio::time::Instant::from_std(deadline),
+                    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_session_runtime.rs#internal_sender_witness_forced_read_replaces_restored_legacy_null_timestamp
                     session.request(request),
                 )
                 .await
@@ -2053,8 +2055,10 @@ async fn read_limits_with_freshness(
                 .as_nanos(),
             SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_session_runtime.rs#internal_sender_witness_forced_read_replaces_restored_legacy_null_timestamp
         let receipt = AccountSessionPort::provider_request(
             runtime,
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_session_runtime.rs#internal_sender_witness_forced_read_replaces_restored_legacy_null_timestamp
             ProviderRequest {
                 root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
                 admitted_request: None,
@@ -2594,6 +2598,7 @@ mod limits_runtime_tests {
     enum Reply {
         Data(Value),
         Login(Value),
+        Cancel,
         Rejected,
     }
 
@@ -2621,6 +2626,7 @@ mod limits_runtime_tests {
         }
 
         fn request(&self, request: ProviderRequest) -> SessionFuture {
+            crate::internal_sender_witness::request(request.method, &request.params);
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             let scope = self.scope.lock().unwrap().clone();
             let operation = request.operation.clone();
@@ -2635,6 +2641,10 @@ mod limits_runtime_tests {
                 Reply::Login(_) => (
                     Method::AccountLoginStart,
                     json!({"type":"chatgptDeviceCode"}),
+                ),
+                Reply::Cancel => (
+                    Method::AccountLoginCancel,
+                    json!({"loginId":"provider-login"}),
                 ),
                 Reply::Data(_) | Reply::Rejected => (Method::AccountRateLimitsRead, json!({})),
             };
@@ -2651,6 +2661,7 @@ mod limits_runtime_tests {
                 }
                 let result = match reply {
                     Reply::Data(data) | Reply::Login(data) => ProviderResponse::Reply(data),
+                    Reply::Cancel => ProviderResponse::Reply(json!({"status":"canceled"})),
                     Reply::Rejected => ProviderResponse::Rejected(json!({"message":"fixture"})),
                 };
                 Ok(SessionReceipt {
@@ -2991,6 +3002,10 @@ mod limits_runtime_tests {
     }
 
     #[tokio::test]
+    async fn internal_sender_witness_forced_read_replaces_restored_legacy_null_timestamp() {
+        forced_read_replaces_restored_legacy_null_timestamp().await;
+    }
+
     async fn forced_read_replaces_restored_legacy_null_timestamp() {
         let (f, _, _) = fixture([Reply::Data(json!({"accountId":"fresh"}))], false).await;
         f.runtime
@@ -3549,6 +3564,41 @@ mod limits_runtime_tests {
             .unwrap();
         assert_eq!(forced["data"]["accountId"], "fixture-account");
         assert_eq!(fixture.provider.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn internal_sender_witness_login_start_and_cancel() {
+        let (fixture, _, _) = fixture([
+            Reply::Login(json!({"type":"chatgptDeviceCode","loginId":"provider-login","verificationUrl":"https://example.invalid/device","userCode":"fixture-code"})),
+            Reply::Cancel,
+        ], false).await;
+        let login_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        let started = AccountSessionPort::login(
+            fixture.runtime.as_ref(),
+            LoginRequest {
+                login_id: login_id.clone(),
+                account_key: Some("default".into()),
+                email: None,
+                label: None,
+            },
+        )
+        .await
+        .expect("real login start caller");
+        assert_eq!(
+            started.status,
+            studio_runtime_schema::account_registry::LoginStatus::Pending
+        );
+        let cancelled = AccountSessionPort::cancel_login(fixture.runtime.as_ref(), &login_id)
+            .await
+            .expect("real login cancel caller");
+        assert_eq!(
+            cancelled.status,
+            studio_runtime_schema::account_registry::LoginStatus::Cancelled
+        );
+        assert_eq!(fixture.provider.calls.load(Ordering::SeqCst), 2);
+        AccountSessionPort::shutdown_durable_operations(fixture.runtime.as_ref())
+            .await
+            .expect("login owner joined");
     }
 
     #[tokio::test]

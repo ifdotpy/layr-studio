@@ -72,6 +72,7 @@ impl AccountSessionPort for Session<'_> {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
         Box::pin(async move {
             let connection = self
                 .store
@@ -249,6 +250,7 @@ impl AccountSessionPort for StartBlockingSession {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
         Box::pin(async move {
             let raw = self
                 .store
@@ -372,6 +374,7 @@ impl AccountSessionPort for BlockingSession {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
         Box::pin(async move {
             assert_eq!(request.method, Method::ThreadTurnsList);
             assert_eq!(request.expected_scope, Some(self.scope.clone()));
@@ -410,6 +413,11 @@ impl AccountSessionPort for BlockingSession {
 }
 
 #[tokio::test]
+async fn internal_sender_witness_action_runs_python_corpus_stage_path_and_commits_each_intent_before_dispatch()
+ {
+    action_runs_python_corpus_stage_path_and_commits_each_intent_before_dispatch().await;
+}
+
 async fn action_runs_python_corpus_stage_path_and_commits_each_intent_before_dispatch() {
     let (template, corpus) = python_corpus();
     let expected = corpus["path"]["calls"].as_array().expect("Python requests");

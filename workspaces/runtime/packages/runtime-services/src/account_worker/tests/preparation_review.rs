@@ -209,7 +209,7 @@ async fn context_repair_holds_and_complaint_ownership_preserve_input() {
             }).await?;
             let intent=store::claim(Arc::clone(&store),"default",&id,epoch).await?.unwrap();
             let prepared=preparation::prepare(Arc::clone(&store),&test_resources()?,&intent,Method::TurnStart,1).await?;
-            assert_eq!(prepared.params["input"].to_string().contains("important evidence"),retained,"{payload}/{foreign}");
+            assert_eq!(prepared.native.params()["input"].to_string().contains("important evidence"),retained,"{payload}/{foreign}");
             Ok(())
         }).await.unwrap();
     }
@@ -393,7 +393,7 @@ async fn missing_native_effort_uses_shared_catalog_published_after_construction(
                 1,
             )
             .await?;
-            assert_eq!(prepared.params["effort"], "medium");
+            assert_eq!(prepared.native.params()["effort"], "medium");
             Ok(())
         })
         .await

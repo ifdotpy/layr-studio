@@ -15,7 +15,7 @@ use studio_runtime_schema::{
 };
 use studio_runtime_services::checkpoints::{self, CheckpointsError};
 use studio_runtime_services::edit_turn;
-use studio_runtime_services::provider_adapter::{ProviderKind, ThreadRequest, adapter};
+use studio_runtime_services::provider_adapter::{ProviderKind, adapter};
 use studio_runtime_store::StoreError;
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, CheckpointsRepository, TranscriptRepository,
@@ -279,14 +279,18 @@ async fn restore_owned(
     };
     // The adapter of the agent's provider builds the new thread request.
     let agent_value = snapshot.agent.value();
-    let ThreadRequest { method, params, .. } = adapter(provider)
+    let prepared = adapter(provider)
         .encode(
             studio_runtime_services::provider_adapter::ProviderCommand::EditThread {
-                agent: &agent_value,
-                checkpoint: &checkpoint.record,
+                agent: &serde::Deserialize::deserialize(agent_value)
+                    .map_err(|_| ApiError::dependency("provider-session/agent-input"))?,
+                checkpoint: &serde::Deserialize::deserialize(checkpoint.record.clone())
+                    .map_err(|_| ApiError::dependency("provider-session/checkpoint-input"))?,
             },
         )
         .map_err(|_| ApiError::dependency("provider-session/encode"))?;
+    let method = prepared.method();
+    let params = prepared.params();
     let provider_operation = format!("{operation_id}:provider");
     let receipt = {
         let port = port.clone();
@@ -298,7 +302,9 @@ async fn restore_owned(
             epoch: snapshot.agent.epoch,
         };
         let params = params.clone();
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/checkpoint_rewind.rs#internal_sender_witness_checkpoint_restore
         port.provider_request(
+            // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/checkpoint_rewind.rs#internal_sender_witness_checkpoint_restore
             studio_runtime_services::account_session_runtime::ProviderRequest {
                 root_request_id: operation_state.extensions().get("rootRequestId").and_then(Value::as_str).or_else(|| operation_state.extensions().get("providerAdmission").map(|_| "")).ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "The restore request identity is unavailable; inspect workspace recovery"))?.to_owned(),
                 admitted_request: operation_state.extensions().get("providerAdmission").map(Deserialize::deserialize).transpose().map_err(|error| ApiError::json(error.into()))?,

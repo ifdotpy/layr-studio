@@ -251,7 +251,7 @@ pub struct HostWorktree {
     pub fence: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub actor: Actor,
     pub root: Root,
@@ -277,18 +277,52 @@ pub struct Snapshot {
 /// instructions, model and tools it was started with; Python's
 /// `Runtime.new_thread_params` and `Runtime.tool_definitions` apply them in place
 /// of this server's guidance and catalog.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FrozenParams {
     pub base_instructions: Value,
     pub developer_instructions: Value,
     pub model: Value,
-    pub dynamic_tools: Vec<ToolDefinition>,
+    pub dynamic_tools: Vec<FrozenTool>,
     /// Codex reasoning effort; `None` keeps the thread's config value.
     #[serde(default)]
     pub effort: Option<Value>,
     /// Codex reasoning summary; `None` keeps the thread's config value.
     #[serde(default)]
     pub summary: Option<Value>,
+}
+
+/// Decode imported tool contracts once; keep the catalog projection alongside
+/// the native union so an unknown discriminator never becomes a Studio function.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FrozenTool {
+    #[serde(flatten)]
+    pub(crate) definition: ToolDefinition,
+    #[serde(skip)]
+    pub(crate) native: Option<studio_runtime_providers::codex::DynamicToolSpec>,
+}
+
+impl FrozenTool {
+    /// Only checked Codex imports need a native cache; stored receipt snapshots
+    /// deserialize the provider-neutral catalog and never supply new commands.
+    pub(crate) fn from_import(
+        provider: ProviderKind,
+        mut value: Value,
+    ) -> Result<Self, studio_json::Error> {
+        let definition = ToolDefinition::deserialize(value.clone())?;
+        let native = match provider {
+            ProviderKind::Claude => None,
+            ProviderKind::Codex => {
+                // Legacy Studio catalogs omit the vendor function discriminator.
+                value
+                    .as_object_mut()
+                    .expect("tool object")
+                    .entry("type")
+                    .or_insert(json!("function"));
+                Some(studio_runtime_providers::codex::DynamicToolSpec::deserialize(value)?)
+            }
+        };
+        Ok(Self { definition, native })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,8 +345,10 @@ pub enum ArtifactIntent {
     RememberRole { version: String, text: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PreparedAttempt {
+    #[serde(skip)]
+    pub native: Option<crate::provider_adapter::NativeRequest>,
     pub transport_ticket: String,
     pub native_release_id: Option<String>,
     pub request_digest: String,
@@ -328,7 +364,7 @@ pub struct PreparedAttempt {
     pub snapshot: Snapshot,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
     Ready(LoadedIdentity),
     Start(Box<PreparedAttempt>),
@@ -391,7 +427,11 @@ pub fn tool_definitions(s: &Snapshot) -> Result<Vec<ToolDefinition>, Refusal> {
     // Python `Runtime.tool_definitions`: an imported agent keeps its saved tools,
     // without spawn when its root may not delegate.
     if let Some(frozen) = &s.frozen {
-        let mut definitions = frozen.dynamic_tools.clone();
+        let mut definitions: Vec<_> = frozen
+            .dynamic_tools
+            .iter()
+            .map(|tool| tool.definition.clone())
+            .collect();
         if !s.root.can_delegate {
             definitions.retain(|tool| tool.name != "orchestration_spawn");
         }
@@ -573,47 +613,29 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
             "\nBefore the first task, call orchestration_title with a short task title.\n",
         );
     }
-    let mut params = Map::new();
-    params.insert("cwd".into(), json!(s.actor.cwd));
-    params.insert("config".into(), json!(config));
-    params.insert("serviceTier".into(), json!(service_tier(&s.settings)));
-    if let Some(model) = s.settings.model.as_ref().filter(|m| !m.is_empty()) {
-        params.insert("model".into(), json!(model));
-    }
-    match effective_yolo_mode(s.settings.role, s.settings.yolo_mode) {
-        Some(true) => {
-            params.insert("approvalPolicy".into(), json!("never"));
-            params.insert("sandbox".into(), json!("danger-full-access"));
-        }
-        Some(false) => {
-            params.insert("approvalPolicy".into(), json!("on-request"));
-            params.insert(
-                "sandbox".into(),
-                json!(if s.settings.role == Role::Reviewer {
-                    match s.actor.thread_sandbox {
-                        ThreadSandbox::ReadOnly => "read-only",
-                        ThreadSandbox::WorkspaceWrite => "workspace-write",
-                    }
+    let yolo = effective_yolo_mode(s.settings.role, s.settings.yolo_mode);
+    let mut params = crate::provider_adapter::ThreadStartInput {
+        cwd: s.actor.cwd.clone(),
+        config: Some(config),
+        service_tier: service_tier(s.settings.fast_mode).into(),
+        model: s.settings.model.clone().filter(|m| !m.is_empty()).map(Some),
+        approval_policy: yolo.map(|value| Some(crate::provider_adapter::approval(value))),
+        sandbox: yolo.map(|yolo| {
+            Some({
+                if yolo {
+                    studio_runtime_providers::codex::SandboxMode::DangerFullAccess
+                } else if s.settings.role == Role::Reviewer
+                    && s.actor.thread_sandbox == ThreadSandbox::ReadOnly
+                {
+                    studio_runtime_providers::codex::SandboxMode::ReadOnly
                 } else {
-                    "workspace-write"
-                }),
-            );
-        }
-        None => {}
-    }
-    let provider = adapter(s.account.provider);
-    let prepared = provider
-        .encode(crate::provider_adapter::ProviderCommand::StartThread {
-            snapshot: s,
-            method,
-            params,
-            instructions,
-        })
-        .expect("thread preparation is a declared provider capability");
-    let Value::Object(mut params) = prepared.params else {
-        unreachable!("thread params are an object");
+                    studio_runtime_providers::codex::SandboxMode::WorkspaceWrite
+                }
+            })
+        }),
+        ..crate::provider_adapter::ThreadStartInput::default()
     };
-    let mut instructions = prepared.instructions.expect("thread instructions");
+    let provider = adapter(s.account.provider);
     if let Some(text) = s
         .guidance
         .browser
@@ -623,29 +645,39 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         instructions.push('\n');
         instructions.push_str(text);
     }
-    let mut developer_instructions = json!(instructions);
+    let mut developer_instructions = Some(instructions);
     if let Some(frozen) = &s.frozen {
         // Python `Runtime.new_thread_params` applies the saved values last.
-        params.insert("baseInstructions".into(), frozen.base_instructions.clone());
-        developer_instructions = frozen.developer_instructions.clone();
-        params.insert("model".into(), frozen.model.clone());
+        let (Ok(base), Ok(developer), Ok(model)) = (
+            serde::Deserialize::deserialize(frozen.base_instructions.clone()),
+            serde::Deserialize::deserialize(frozen.developer_instructions.clone()),
+            serde::Deserialize::deserialize(frozen.model.clone()),
+        ) else {
+            return Outcome::Refuse(Refusal::FrozenImport);
+        };
+        params.base_instructions = Some(base);
+        developer_instructions = developer;
+        params.model = Some(model);
         if provider
             .descriptor()
             .supports(crate::provider_adapter::ProviderFeature::FrozenReasoningConfig)
-            && let Some(config) = params.get_mut("config").and_then(Value::as_object_mut)
         {
             for (key, value) in [
                 ("model_reasoning_effort", &frozen.effort),
                 ("model_reasoning_summary", &frozen.summary),
             ] {
                 if let Some(value) = value.as_ref().filter(|value| !value.is_null()) {
-                    config.insert(key.into(), value.clone());
+                    params
+                        .config
+                        .as_mut()
+                        .expect("prepared config object")
+                        .insert(key.into(), value.clone());
                 }
             }
         }
     }
     // Python `preparation_context_versions` reads the submitted instructions.
-    let submitted = developer_instructions.as_str().unwrap_or_default();
+    let submitted = developer_instructions.as_deref().unwrap_or_default();
     let mut context_versions = Map::new();
     let mut artifacts = Vec::new();
     let role = role_text(s);
@@ -657,21 +689,30 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
             text: role.to_owned(),
         });
     }
-    params.insert("developerInstructions".into(), developer_instructions);
+    params.developer_instructions = Some(developer_instructions);
     let tool_catalog = if method == Method::Start
         || provider
             .descriptor()
             .supports(crate::provider_adapter::ProviderFeature::ToolsOnEveryTurn)
     {
-        params.insert("dynamicTools".into(), json!(tools));
+        params.dynamic_tools = Some(tools.clone());
         Some(tools)
     } else {
         None
     };
     if let Some(thread_id) = &s.actor.thread_id {
-        params.insert("threadId".into(), json!(thread_id));
-        params.insert("excludeTurns".into(), json!(true));
+        params.thread_id = Some(thread_id.clone());
+        params.exclude_turns = Some(true);
     }
+    let native = provider
+        .encode(crate::provider_adapter::ProviderCommand::StartThread {
+            snapshot: s,
+            input: params,
+        })
+        .expect("typed thread preparation");
+    let Value::Object(params) = native.params() else {
+        unreachable!("thread params object");
+    };
     if let Some(loaded) = &s.loaded
         && loaded.agent_id == s.actor.id
         && loaded.epoch == s.actor.epoch
@@ -721,6 +762,7 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
             .insert("nativeEffort".into(), json!(s.settings.native_effort));
     }
     let attempt = Box::new(PreparedAttempt {
+        native: Some(native),
         transport_ticket: transport_ticket.to_owned(),
         native_release_id: preparation_release_id(s),
         request_digest,
@@ -740,12 +782,8 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
     }
 }
 
-fn service_tier(settings: &Settings) -> &'static str {
-    if settings.fast_mode {
-        "priority"
-    } else {
-        "default"
-    }
+pub(crate) fn service_tier(fast_mode: bool) -> &'static str {
+    if fast_mode { "priority" } else { "default" }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -763,59 +801,70 @@ pub struct TurnEvent {
 
 /// Turn overrides must be sent even when a subscribed thread ignored resume options.
 /// The turn compiler adds ordered input and clientUserMessageId separately.
-pub fn turn_params(s: &Snapshot, input: &TurnInput) -> Result<Map<String, Value>, Refusal> {
+pub fn turn_input(s: &Snapshot) -> Result<crate::provider_adapter::TurnStartInput, Refusal> {
+    use studio_runtime_providers::codex;
     if let Some(reason) = refusal(s) {
         return Err(reason);
     }
-    let mut params = Map::from_iter([
-        ("threadId".into(), json!(s.actor.thread_id)),
-        ("cwd".into(), json!(s.actor.cwd)),
-        ("serviceTier".into(), json!(service_tier(&s.settings))),
-    ]);
-    let Value::Object(wire) = json!(
-        studio_runtime_schema::provider_input::ClaudeBridgeTurnWire {
-            model: Some(s.settings.model.clone()),
-        }
-    ) else {
-        // The wire owner is a struct, so serialization always produces an object.
-        unreachable!("Claude turn wire object");
-    };
-    params.extend(wire);
+    let yolo = effective_yolo_mode(s.settings.role, s.settings.yolo_mode);
     let effort = if s.actor.native_effort_present {
         &s.settings.native_effort
     } else {
         &s.settings.effort
     };
-    if let Some(effort) = effort {
-        params.insert("effort".into(), json!(effort));
-    }
-    if let Some(yolo) = effective_yolo_mode(s.settings.role, s.settings.yolo_mode) {
-        let sandbox = if yolo {
-            json!({"type":"dangerFullAccess"})
-        } else if s.settings.role == Role::Reviewer {
-            json!({"type":"readOnly"})
-        } else {
-            json!({"type":"workspaceWrite","writableRoots":[s.actor.cwd],"networkAccess":false})
-        };
-        params.insert(
-            "approvalPolicy".into(),
-            json!(if yolo { "never" } else { "on-request" }),
-        );
-        params.insert("sandboxPolicy".into(), sandbox);
-    }
-    let provider = adapter(s.account.provider);
-    if provider
+    let effort = effort.clone();
+    let dynamic_tools = if adapter(s.account.provider)
         .descriptor()
         .supports(crate::provider_adapter::ProviderFeature::ToolsOnEveryTurn)
     {
-        params.insert("dynamicTools".into(), json!(tool_definitions(s)?));
-    }
-    let prepared = provider
-        .encode(crate::provider_adapter::ProviderCommand::StartTurn { input, params })
-        .expect("turn preparation is a declared provider capability");
-    let Value::Object(params) = prepared.params else {
-        unreachable!("turn params are an object");
+        Some(tool_definitions(s)?)
+    } else {
+        None
     };
+    Ok(crate::provider_adapter::TurnStartInput {
+        thread_id: s.actor.thread_id.clone().unwrap_or_default(),
+        cwd: Some(s.actor.cwd.clone()),
+        service_tier: service_tier(s.settings.fast_mode).into(),
+        model: s.settings.model.clone(),
+        effort,
+        approval_policy: yolo.map(crate::provider_adapter::approval),
+        sandbox_policy: yolo.map(|yolo| {
+            if yolo {
+                codex::SandboxPolicy::DangerFullAccess
+            } else if s.settings.role == Role::Reviewer {
+                codex::SandboxPolicy::ReadOnly {
+                    network_access: None,
+                }
+            } else {
+                codex::SandboxPolicy::WorkspaceWrite {
+                    writable_roots: Some(vec![s.actor.cwd.clone()]),
+                    network_access: Some(false),
+                    exclude_slash_tmp: None,
+                    exclude_tmpdir_env_var: None,
+                }
+            }
+        }),
+        dynamic_tools,
+        input: Vec::new(),
+        client_user_message_id: None,
+        claude_command: None,
+        idle_compaction_mode: None,
+        idle_summary_roster_included: None,
+    })
+}
+
+/// Legacy native-action settings are a persistence projection of the typed input.
+/// Ordinary turn submission retains the native command through admission.
+pub fn turn_params(s: &Snapshot, input: &TurnInput) -> Result<Map<String, Value>, Refusal> {
+    let params = turn_input(s)?;
+    let native = adapter(s.account.provider)
+        .encode(crate::provider_adapter::ProviderCommand::StartTurn { input, params })
+        .expect("typed turn preparation");
+    let Value::Object(mut params) = native.params() else {
+        unreachable!("turn params object");
+    };
+    params.remove("input");
+    params.remove("clientUserMessageId");
     Ok(params)
 }
 

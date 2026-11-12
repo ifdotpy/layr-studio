@@ -230,8 +230,17 @@ pub fn identifier(name: &str) -> String {
 /// Same framing as `encode_key`, produced entirely by built-in SQLite functions
 /// so every writer can execute the persistent triggers without a connection hook.
 pub fn key_sql(columns: &[&str], alias: &str) -> String {
-    let parts = columns.iter().map(|column| {
-        let value = format!("{}.{}", identifier(alias), identifier(column));
+    let expressions = columns
+        .iter()
+        .map(|column| format!("{}.{}", identifier(alias), identifier(column)))
+        .collect::<Vec<_>>();
+    key_expression_sql(&expressions.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+/// Same key framing for owner-generated SQL expressions, including OLD/NEW cells.
+/// Expressions are trusted schema source, never runtime input.
+pub fn key_expression_sql(expressions: &[&str]) -> String {
+    let parts = expressions.iter().map(|value| {
         format!("(CASE typeof({value}) WHEN 'null' THEN 'n' WHEN 'integer' THEN 'i' WHEN 'text' THEN 't' WHEN 'blob' THEN 'b' ELSE RAISE(ABORT,'unsupported migration key storage') END || printf('%016X',coalesce(length(CAST({value} AS BLOB)),0)) || hex(CAST({value} AS BLOB)))")
     }).collect::<Vec<_>>().join(" || ");
     format!("CAST({parts} AS BLOB)")
@@ -560,6 +569,52 @@ mod tests {
             b"n000000000000000100",
         ] {
             assert!(decode_key::<String>(malformed).is_err());
+        }
+    }
+
+    #[test]
+    fn durable_direct_key_expressions_preserve_insert_delete_and_rename_bytes() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE source(id TEXT PRIMARY KEY, record TEXT); CREATE TABLE compared(old_key BLOB,new_key BLOB)").unwrap();
+        let old = key_sql(&["label", "id"], "source_key");
+        let row = |alias: &str| {
+            let id = format!("{alias}.id");
+            let new = key_expression_sql(&["'runtime_tasks'", &id]);
+            format!(
+                "INSERT INTO compared SELECT {old},{new} FROM (SELECT 'runtime_tasks' AS label,{id} AS id) AS source_key;"
+            )
+        };
+        db.execute_batch(&format!("CREATE TRIGGER source_insert AFTER INSERT ON source BEGIN {} END; CREATE TRIGGER source_update AFTER UPDATE ON source BEGIN {} {} END; CREATE TRIGGER source_delete AFTER DELETE ON source BEGIN {} END;", row("NEW"), row("OLD"), row("NEW"), row("OLD"))).unwrap();
+        let before = "old:\0✓";
+        let after = "renamed:'✓";
+        let record = "{\"opaque\": [ 1, null ], \"future\":true}";
+        db.execute("INSERT INTO source VALUES(?1,?2)", (before, record))
+            .unwrap();
+        db.execute("UPDATE source SET id=?1 WHERE id=?2", (after, before))
+            .unwrap();
+        assert_eq!(
+            db.query_row("SELECT record FROM source", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            record
+        );
+        db.execute("DELETE FROM source WHERE id=?1", [after])
+            .unwrap();
+        let rows = db
+            .prepare("SELECT old_key,new_key FROM compared ORDER BY rowid")
+            .unwrap()
+            .query_map([], |r| {
+                Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(rows.len(), 4);
+        for ((old, new), id) in rows.into_iter().zip([before, before, after, after]) {
+            assert_eq!(old, new);
+            assert_eq!(
+                new,
+                encode_key(&("runtime_tasks".to_owned(), id.to_owned()))
+            );
         }
     }
 

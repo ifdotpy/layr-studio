@@ -374,15 +374,23 @@ const JOURNAL_FRAME_PAYLOAD_PREFIX: &[u8] = b"{\"frame\":";
 const JOURNAL_FRAME_PAYLOAD_SUFFIX: &[u8] = b"}";
 
 fn journal_frame_payload(frame: &Frame, operation: &str) -> Result<Vec<u8>, WorkerError> {
-    let encoded = studio_runtime_providers::encode_line(frame).map_err(|_| invalid(operation))?;
-    let encoded = encoded
-        .strip_suffix(b"\n")
-        .ok_or_else(|| invalid(operation))?;
+    // This persistence boundary retains the canonical object ordering of the
+    // earlier stored projection, including receipts replayed after an update.
+    let encoded = if crate::notification_dispatch::progress::native(frame).is_some() {
+        studio_json::to_vec(&json!(frame)).map_err(|_| invalid(operation))?
+    } else {
+        let mut encoded =
+            studio_runtime_providers::encode_line(frame).map_err(|_| invalid(operation))?;
+        if encoded.pop() != Some(b'\n') {
+            return Err(invalid(operation));
+        }
+        encoded
+    };
     let mut payload = Vec::with_capacity(
         encoded.len() + JOURNAL_FRAME_PAYLOAD_PREFIX.len() + JOURNAL_FRAME_PAYLOAD_SUFFIX.len(),
     );
     payload.extend_from_slice(JOURNAL_FRAME_PAYLOAD_PREFIX);
-    payload.extend_from_slice(encoded);
+    payload.extend_from_slice(&encoded);
     payload.extend_from_slice(JOURNAL_FRAME_PAYLOAD_SUFFIX);
     Ok(payload)
 }
@@ -2077,7 +2085,7 @@ pub(super) async fn journal_batch(
     let entries = entries
         .into_iter()
         .map(crate::provider_adapter::project_entry)
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Vec<_>>();
     if entries.is_empty() && outcome.is_none() {
         return Ok(JournalBatch {
             streams: streams.clone(),
@@ -2503,6 +2511,7 @@ fn journal_one(
     let mut effect = None;
     let mut publications = Vec::new();
     if let JournalPayload::Frame(frame) = &entry.payload {
+        let native_progress = crate::notification_dispatch::progress::native(frame);
         let notice = match frame {
             Frame::Notification(f) => {
                 Some((f.method.as_str(), f.params.as_ref().unwrap_or(&Value::Null)))
@@ -2607,12 +2616,22 @@ fn journal_one(
             && complete_deleted_command(tx, account, entry.generation.0, method, params)?
         {
             // The exact deleted command completion updates only its existing task.
-        } else if let Some((method, params)) = notice
-            && let Some(thread) = params["threadId"].as_str()
+        } else if let Some((method, thread, turn)) = native_progress
+            .as_ref()
+            .map(|progress| progress.route())
+            .or_else(|| {
+                notice.and_then(|(method, params)| {
+                    Some((
+                        method,
+                        params["threadId"].as_str()?,
+                        params["turn"]["id"]
+                            .as_str()
+                            .or_else(|| params["turnId"].as_str()),
+                    ))
+                })
+            })
         {
-            let turn = params["turn"]["id"]
-                .as_str()
-                .or_else(|| params["turnId"].as_str());
+            let params = notice.map_or(&Value::Null, |(_, params)| params);
             let (_, attempt) = SchedulerRepository::find_attempt_for_thread(
                 tx,
                 account,

@@ -936,6 +936,7 @@ impl AccountSessionPort for MockAccountSession {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
         Box::pin(async move {
             self.calls
                 .lock()
@@ -1039,7 +1040,8 @@ impl CallbackReplyPort for LiveCallbackReplyPort {
 }
 
 #[tokio::test]
-async fn account_session_voice_adapter_preserves_scope_identity_and_unknown_once() {
+async fn internal_sender_witness_account_session_voice_adapter_preserves_scope_identity_and_unknown_once()
+ {
     let (_root, store) = seeded_store().await;
     let scope = ConnectionScope {
         account: "account".into(),
@@ -1087,30 +1089,49 @@ async fn account_session_voice_adapter_preserves_scope_identity_and_unknown_once
     assert_eq!(context.generation, scope.generation);
 
     let deadline = Instant::now() + Duration::from_secs(30);
+    // Adapter-only fixture; production private builders are covered in voice/provider.rs.
+    let start = voice::provider::VoiceRpcCall {
+        context: context.clone(),
+        operation_id: "voice:start:voice-session".into(),
+        root_request_id: "voice-session".into(),
+        admitted_request: None,
+        method: Method::ThreadRealtimeStart,
+        params: json!({"threadId":"thread","version":"v3","outputModality":"audio","realtimeSessionId":"voice-session","clientManagedHandoffs":false,"flushTranscriptTailOnSessionEnd":false,"transport":{"type":"webrtc","sdp":"v=0"}}),
+        deadline,
+    };
     let started = adapter
         .request(
-            context.clone(),
+            start.context,
             studio_runtime_services::voice_runtime::VoiceOperation {
-                id: "voice:start:voice-session".into(),
-                root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                admitted_request: None,
+                id: start.operation_id,
+                root_request_id: start.root_request_id,
+                admitted_request: start.admitted_request,
             },
-            Method::ThreadRealtimeStart,
-            json!({"threadId":"thread","realtimeSessionId":"voice-session"}),
+            start.method,
+            start.params,
             deadline,
         )
         .await;
     assert_eq!(started.certainty, VoiceWriteCertainty::Written);
+    let speech = voice::provider::VoiceRpcCall {
+        context: context.clone(),
+        operation_id: "voice:speech:voice-session:record".into(),
+        root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
+        admitted_request: None,
+        method: Method::ThreadRealtimeAppendSpeech,
+        params: json!({"threadId":"thread","text":"Speech text"}),
+        deadline,
+    };
     let unknown = adapter
         .request(
-            context.clone(),
+            speech.context,
             studio_runtime_services::voice_runtime::VoiceOperation {
-                id: "voice:speech:voice-session:record".into(),
-                root_request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                admitted_request: None,
+                id: speech.operation_id,
+                root_request_id: speech.root_request_id,
+                admitted_request: speech.admitted_request,
             },
-            Method::ThreadRealtimeAppendSpeech,
-            json!({"threadId":"thread","audio":"encoded"}),
+            speech.method,
+            speech.params,
             deadline,
         )
         .await;

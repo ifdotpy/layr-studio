@@ -2192,13 +2192,16 @@ impl Worker {
         prepared: Option<preparation::RequestPreparation>,
         receipt_checked: bool,
     ) -> submission::Commit {
-        let (intent, method, params, submission, guard, thread, compiled) = if let Some(prepared) =
-            prepared
+        let (intent, method, params, native, submission, guard, thread, compiled) = if let Some(
+            prepared,
+        ) = prepared
         {
+            let params = prepared.stored_params();
             (
                 prepared.intent,
                 prepared.method,
-                prepared.params,
+                params,
+                Some(prepared.native),
                 prepared.submission,
                 Some(prepared.guard),
                 prepared.thread,
@@ -2207,7 +2210,7 @@ impl Worker {
         } else {
             let params =
                 json!({"threadId":intent.thread_id,"turnId":interrupt_turn.as_ref().map(|(t,_)|t)});
-            (intent, method, params, None, None, None, None)
+            (intent, method, params, None, None, None, None, None)
         };
         let mut operation = format!(
             "account:{}:{}:{}",
@@ -2233,6 +2236,7 @@ impl Worker {
                 operation,
             },
             params,
+            native,
             interrupt_turn,
             submission,
             guard,
@@ -2399,6 +2403,7 @@ impl Worker {
         };
         let control = self.control.clone();
         let prepared = self
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
             .drive(control.prepare(RequestSpec {
                 id: id.clone(),
                 operation_id: OperationId(operation),
@@ -2495,6 +2500,7 @@ impl Worker {
         let prepared = self
             .pump_until(tokio::time::timeout(
                 timeout,
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/browser_skill.rs#internal_sender_witness_thread_requests_register_the_chrome_skill_until_one_reply_confirms_it
                 control.prepare(RequestSpec {
                     id: RequestId::String(operation.clone()),
                     operation_id: OperationId(operation.clone()),

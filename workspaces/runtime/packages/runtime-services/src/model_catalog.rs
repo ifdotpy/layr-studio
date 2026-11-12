@@ -165,6 +165,7 @@ async fn read_account_session_catalog(
             cursor.as_deref().unwrap_or("first")
         );
         use crate::account_session_runtime::{ProviderRequest, ProviderResponse};
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/model_catalog.rs#internal_sender_witness_claude_catalog_uses_retained_session_and_paginates_python_params
         let request = session_clone.provider_request(ProviderRequest {
             root_request_id: String::new(),
             admitted_request: None,
@@ -1082,6 +1083,7 @@ pub(crate) mod tests {
             'a,
             crate::account_session_runtime::SessionReceipt,
         > {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
                 use crate::account_session_runtime::{ProviderResponse, SessionReceipt};
@@ -1119,7 +1121,8 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn claude_catalog_uses_retained_session_and_paginates_python_params() {
+    async fn internal_sender_witness_claude_catalog_uses_retained_session_and_paginates_python_params()
+     {
         let session = Arc::new(AccountSessionPages::new(vec![
             json!({"data":[{"model":"one"}],"nextCursor":"next","metadata":true}),
             json!({"data":[{"model":"two"}],"nextCursor":null}),
@@ -1188,6 +1191,7 @@ pub(crate) mod tests {
             'a,
             crate::account_session_runtime::SessionReceipt,
         > {
+            crate::internal_sender_witness::request(request.method, &request.params);
             self.inner.provider_request(request)
         }
     }
@@ -1249,6 +1253,7 @@ pub(crate) mod tests {
             'a,
             crate::account_session_runtime::SessionReceipt,
         > {
+            crate::internal_sender_witness::request(request.method, &request.params);
             let outcome = (self.0)();
             Box::pin(async move {
                 Ok(crate::account_session_runtime::SessionReceipt {

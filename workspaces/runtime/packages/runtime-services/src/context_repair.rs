@@ -1678,7 +1678,9 @@ async fn broker_read(
         deadline,
     } = request;
     let operation = format!("context-repair:{root}:{suffix}");
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/context_repair.rs#internal_sender_witness_context_native_queue_reads_pass_the_real_retained_validator_before_effects
     match broker
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/context_repair.rs#internal_sender_witness_context_native_queue_reads_pass_the_real_retained_validator_before_effects
         .provider_request(ProviderRequest {
             root_request_id: String::new(),
             admitted_request: None,
@@ -1845,6 +1847,7 @@ mod native_queue_admission_tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 let scope = request
                     .expected_scope
@@ -1887,7 +1890,8 @@ mod native_queue_admission_tests {
     }
 
     #[tokio::test]
-    async fn context_native_queue_reads_pass_the_real_retained_validator_before_effects() {
+    async fn internal_sender_witness_context_native_queue_reads_pass_the_real_retained_validator_before_effects()
+     {
         let session = ValidatedReads(Mutex::new(vec![]));
         let scope = ConnectionScope {
             account: "account".into(),

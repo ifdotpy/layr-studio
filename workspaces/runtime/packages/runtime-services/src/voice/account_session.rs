@@ -88,7 +88,9 @@ impl VoiceRequestPort for AccountSessionVoicePort {
             }
 
             let operation = format!("voice:prepare:{session_id}");
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs#internal_sender_witness_account_session_voice_adapter_preserves_scope_identity_and_unknown_once
             let receipt = session
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs#internal_sender_witness_account_session_voice_adapter_preserves_scope_identity_and_unknown_once
                 .provider_request(ProviderRequest {
                     account: account_key.clone(),
                     root_request_id: session_id.clone(),
@@ -155,7 +157,9 @@ impl VoiceRequestPort for AccountSessionVoicePort {
                 .flatten()
                 .filter(|session_id| !session_id.is_empty())
                 .map(str::to_owned);
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs#internal_sender_witness_account_session_voice_adapter_preserves_scope_identity_and_unknown_once
             let receipt = match session
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/voice_provider_corpus.rs#internal_sender_witness_account_session_voice_adapter_preserves_scope_identity_and_unknown_once
                 .provider_request(ProviderRequest {
                     account: scope.account_key,
                     root_request_id: operation.root_request_id,

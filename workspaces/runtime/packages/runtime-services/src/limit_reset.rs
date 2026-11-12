@@ -433,7 +433,9 @@ pub async fn consume_reset(
             Ok::<_, ResetError>(reserved)
         })
         .await?;
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/limit_reset.rs#internal_sender_witness_not_sent_retry_changes_transport_identity_and_preserves_charge_identity
     let receipt = session
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/limit_reset.rs#internal_sender_witness_not_sent_retry_changes_transport_identity_and_preserves_charge_identity
         .provider_request(ProviderRequest {
             account: account_key.to_owned(),
             root_request_id: attempt.root_request_id.clone(),
@@ -599,6 +601,7 @@ mod tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 assert_eq!(request.method, Method::AccountRateLimitResetCreditConsume);
                 let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
@@ -722,7 +725,8 @@ mod tests {
     }
 
     #[test]
-    fn not_sent_retry_changes_transport_identity_and_preserves_charge_identity() {
+    fn internal_sender_witness_not_sent_retry_changes_transport_identity_and_preserves_charge_identity()
+     {
         let (_root, store) = store();
         let provider = FakeProvider::new([Reply::NotSent, Reply::Outcome("reset")]);
         let request_id = RequestIdentity::issue_root();

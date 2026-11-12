@@ -187,8 +187,44 @@ pub fn decode_probe_response(
 /// Convert shared request preparation at the adapter boundary, before admission.
 pub fn normalize_codex_frame(frame: &Frame) -> Result<Frame, CodecError> {
     match frame {
-        Frame::Request(_) | Frame::Notification(_) => {
-            decode_codex_frame(&crate::encode_line(frame)?)
+        Frame::Request(request) => {
+            let id = vendor_request_id(&request.id)?;
+            let params = request.params.clone().unwrap_or(studio_json::Value::Null);
+            let decoded = if let Some(method) =
+                codex::ServerRequestMethod::from_wire(request.method.as_str())
+            {
+                codex::ServerRequest::from_deserializer(id, method, params)
+                    .map(|request| Frame::CodexServerRequest(Box::new(request)))
+            } else if let Some(method) =
+                codex::ClientRequestMethod::from_wire(request.method.as_str())
+            {
+                codex::ClientRequest::from_deserializer(id, method, params)
+                    .map(|request| Frame::CodexClientRequest(Box::new(request)))
+            } else {
+                return Err(CodecError::MalformedFrame("not a Codex request method"));
+            };
+            Ok(match decoded {
+                Ok(frame) => frame,
+                Err(_) => {
+                    let studio_json::Value::Object(fields) = studio_json::json!(frame) else {
+                        unreachable!("request object");
+                    };
+                    Frame::KnownMethodUnparsed(UnknownMethodFrame {
+                        method: request.method.as_str().into(),
+                        fields,
+                    })
+                }
+            })
+        }
+        Frame::Notification(notification) => {
+            if notification.method != crate::Method::Initialized {
+                return Err(CodecError::MalformedFrame(
+                    "not a Codex client notification",
+                ));
+            }
+            Ok(Frame::CodexClientNotification(Box::new(
+                codex::ClientNotification::Initialized,
+            )))
         }
         Frame::CodexClientRequest(_)
         | Frame::CodexServerRequest(_)

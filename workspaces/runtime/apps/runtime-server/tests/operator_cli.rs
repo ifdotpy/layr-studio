@@ -391,6 +391,18 @@ exit $?
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
+    fn timeout_delivery_lock(&self) {
+        // Keep real locking for history records; only the contended delivery wait is simulated.
+        fs::remove_file(self.root.path().join("tools/flock")).unwrap();
+        self.tool(
+            "flock",
+            r#"#!/bin/sh
+if [ "$1" = -w ] && [ "$3" = 9 ]; then exit 1; fi
+exec /usr/bin/flock "$@"
+"#,
+        );
+    }
+
     fn command(&self) -> Command {
         let mut command = Command::new("/bin/bash");
         command
@@ -566,6 +578,7 @@ fn invocation_record_budget() -> usize {
 fn delivery_bounds_invocation_history_and_preserves_active_and_latest_records() {
     let fixture = DeliveryFixture::new();
     let kept = invocation_record_budget();
+    fixture.timeout_delivery_lock();
     let directory = fixture.release_root.join("delivery-invocations");
     fs::create_dir(&directory).unwrap();
     let active = directory.join("active-fixture");
@@ -575,7 +588,7 @@ fn delivery_bounds_invocation_history_and_preserves_active_and_latest_records() 
         .set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
         .unwrap();
     let lock = fs::File::create(fixture.release_root.join("deliver.lock")).unwrap();
-    // Successful, lock-refused, and failed-build attempts must all prune.
+    // Successful, wait-timed-out, and failed-build attempts must all prune.
     let binary = fixture.release.join("bin/studio-runtime-server");
     for mode in 0..3 {
         // Seed excess history directly; each outcome still has to prune an
@@ -734,15 +747,31 @@ fn delivery_propagates_failed_unit_status_and_refuses_missing_runner() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn delivery_unit_refuses_another_delivery_holding_the_release_lock() {
+fn delivery_unit_bounds_wait_for_another_delivery_holding_the_release_lock() {
     let fixture = DeliveryFixture::new();
+    fixture.timeout_delivery_lock();
     let lock = fs::File::create(fixture.release_root.join("deliver.lock")).unwrap();
     lock.try_lock().unwrap();
     let output = fixture.command().output().unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("another delivery is running"));
+    let logs = String::from_utf8_lossy(&output.stdout);
+    let script = fixture.read("deliver.sh");
+    let wait = script
+        .lines()
+        .find_map(|line| line.strip_prefix("readonly DELIVERY_WAIT_SECONDS="))
+        .unwrap();
+    assert!(logs.contains(&format!(
+        "Waiting up to {wait} seconds for running delivery"
+    )));
+    assert!(logs.contains(&format!(
+        "Timed out after {wait} seconds waiting for delivery lock"
+    )));
     assert!(fixture.root.path().join("run-args").exists());
-    assert!(!fixture.root.path().join("calls").exists());
+    assert!(
+        !fixture
+            .read("calls")
+            .contains("restart codex-studio.service")
+    );
 }
 
 #[test]

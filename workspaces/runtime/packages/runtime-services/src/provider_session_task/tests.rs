@@ -145,7 +145,7 @@ async fn native_codec_is_used_by_session_admission_and_result_correlation() {
             },
         ))),
     };
-    let frame =
+    let (frame, _) =
         (ProviderCodec::codex().decode)(&studio_runtime_providers::encode_line(&response).unwrap())
             .unwrap();
     entries
@@ -585,4 +585,174 @@ fn payload_readiness_and_retained_delivery_do_not_clone_before_eligibility() {
         !retained.contains("pending.result.clone()"),
         "eligibility must borrow the result until a committed reply has a waiter"
     );
+}
+
+#[test]
+fn correlated_future_result_is_diagnosed_by_the_session_once() {
+    for shutdown_tail in [false, true] {
+        use studio_runtime_providers::codex;
+        let (mut state, initial) = SessionState::new_codex_with_recovered_and_prefix(
+            1,
+            0,
+            1000,
+            studio_runtime_providers::codex_initialize_params(
+                studio_runtime_providers::ClientName::AccountSession,
+            ),
+            vec![],
+            None,
+        )
+        .unwrap();
+        let Action::Write(init) = &initial[0] else {
+            panic!("initialize")
+        };
+        state
+            .receive_at(
+                Frame::Response {
+                    id: init.id().unwrap(),
+                    fields: Map::new(),
+                    body: ResponseBody::CodexResult(codex::ClientRequestResult::Initialize(
+                        Box::new(codex::InitializeResponse {
+                            codex_home: "/fixture".into(),
+                            platform_family: "fixture".into(),
+                            platform_os: "fixture".into(),
+                            user_agent: "fixture/1".into(),
+                        }),
+                    )),
+                },
+                0,
+            )
+            .unwrap();
+        state.mark_initialized_notification_written().unwrap();
+        let request = codex::ClientRequest::from_method_params(
+            codex::RequestId::Variant2(Box::new(2)),
+            codex::ClientRequestMethod::TurnStart,
+            &studio_json::json!({"threadId":"t","input":[]}),
+        )
+        .unwrap();
+        let (ticket, _) = state
+            .submit_codex(request, 0, 1000, Some("t".into()))
+            .unwrap();
+        let raw = studio_json::to_vec(&studio_json::json!({"id":ticket.id,"result":{"turn":{"id":"r","status":"inProgress","items":[{"type":"futureItem","id":"i"},{"type":"futureItem","id":"j"},{"type":"futureOther","id":"k"}]}}})).unwrap();
+        let frame = studio_runtime_providers::decode_codex_frame(&raw).unwrap();
+        let (_, commands) = mpsc::channel(1);
+        let (_, priority) = mpsc::channel(1);
+        let (_, settled) = mpsc::channel(1);
+        let (events, _) = mpsc::channel(1);
+        let handle = ProviderHandle::for_account("future-result");
+        let (status, _) = watch::channel(SessionStatus {
+            generation: Generation(1),
+            initialization: InitializationStatus::Ready,
+            initialized_at: None,
+            initialize_result: None,
+            supervisor_write_deduplication: false,
+            barrier_set: false,
+            held_entries: 0,
+            attachment: AttachmentStatus {
+                handle: handle.clone(),
+                open_attempted: true,
+                info: None,
+                initialization: InitializationStatus::Ready,
+            },
+        });
+        let mut actor = SessionTask {
+            codec: ProviderCodec::codex(),
+            state,
+            diagnostics: Default::default(),
+            clock: SessionClock::default(),
+            handle,
+            records: BTreeMap::new(),
+            commands,
+            priority,
+            settled,
+            events,
+            status,
+            stop: Shutdown::default(),
+            seen: BTreeMap::new(),
+            attachment_known: true,
+            acknowledged: EventCursor(0),
+            ack_target: None,
+            barrier_set: false,
+            retained: Retained {
+                pending: Some(SessionEvent {
+                    journal: Some(JournalEntry {
+                        received_at_ms: 0,
+                        boundary_at: None,
+                        cursor: EventCursor(1),
+                        generation: Generation(1),
+                        payload: JournalPayload::Frame(frame),
+                    }),
+                    outcomes: vec![],
+                }),
+                ..Default::default()
+            },
+        };
+        actor.records.insert(
+            ticket.id.clone(),
+            Record {
+                ticket: ticket.clone(),
+                operation: OperationId("future:turn".into()),
+                thread_id: Some("t".into()),
+                lightweight: false,
+                send: SendState::Written,
+                write: None,
+                ready: false,
+                unknown_reported: false,
+                boundary_timing: None,
+            },
+        );
+        actor.diagnostics.initialize(Some("fixture/1"));
+        if shutdown_tail {
+            let journal = actor
+                .retained
+                .pending
+                .as_mut()
+                .unwrap()
+                .journal
+                .take()
+                .unwrap();
+            let outcome = actor
+                .tail_reply(&journal)
+                .expect("tail reply must correlate");
+            actor
+                .retained
+                .pending
+                .as_mut()
+                .unwrap()
+                .outcomes
+                .push(outcome);
+        } else {
+            actor.process_journal().unwrap();
+        }
+        let event = actor.retained.pending.as_ref().unwrap();
+        let body = event.outcomes.iter().find_map(|outcome| match outcome {
+            SessionOutcome::Resolved {
+                outcome: RequestOutcome::Reply { body, .. },
+                ..
+            } => Some(body.clone()),
+            SessionOutcome::Write { .. }
+            | SessionOutcome::Resolved { .. }
+            | SessionOutcome::GenerationClosed { .. } => None,
+        });
+        let body = body.expect("correlated result must reach the caller");
+        let correlated = Frame::Response {
+            id: ticket.id,
+            fields: Map::new(),
+            body,
+        };
+        assert!(
+            actor.diagnostics.observe(&correlated).is_none(),
+            "session must already have diagnosed the correlated result"
+        );
+        let mut independent =
+            studio_runtime_process::provider_stdio::CodexMethodDiagnostics::default();
+        independent.initialize(Some("fixture/1"));
+        let line = independent.observe(&correlated).unwrap();
+        let text = String::from_utf8(line).unwrap();
+        assert!(text.contains("ThreadItem:futureItem"));
+        assert!(text.contains("turn/start"));
+        assert!(text.contains("fixture/1"));
+        let second = String::from_utf8(independent.observe(&correlated).unwrap()).unwrap();
+        assert!(second.contains("ThreadItem:futureOther"));
+        assert!(independent.observe(&correlated).is_none());
+    }
 }

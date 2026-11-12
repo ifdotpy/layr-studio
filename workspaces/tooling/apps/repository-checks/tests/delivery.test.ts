@@ -683,7 +683,14 @@ test("the Mac delivery entry point works under Python isolated mode", async () =
   assert.ok(output.includes("--commit"));
 });
 
-for (const mode of ["slow", "exit", "restart", "timeout"] as const) {
+for (const mode of [
+  "slow",
+  "exit",
+  "restart",
+  "timeout",
+  "wait",
+  "wait-timeout",
+] as const) {
   // deliver.sh runs on the Linux server: it needs bash 4 (mapfile) and flock.
   test(
     `Linux delivery handles ${mode} startup`,
@@ -724,9 +731,10 @@ for (const mode of ["slow", "exit", "restart", "timeout"] as const) {
         path.join(fixture, "bash-env"),
         `
     git() { case "$*" in *--show-toplevel*) echo "$PROJECT";; *--verify*) echo fixture-commit;; *) return 1;; esac; }
-    systemctl() { echo "$*" >> "$HOME/calls"; case "$*" in *NRestarts*) if [ "$MODE" = restart ] && [ "$SECONDS" -ge 5 ]; then echo 1; else echo 0; fi;; *MainPID*) echo 1234;; *is-active*) if [ "$MODE" = exit ] && [ "$SECONDS" -ge 5 ]; then return 1; fi;; esac; }
+    flock() { if [[ "$MODE" == wait* ]]; then echo "flock $*" >> "$HOME/calls"; case "$*" in '-n 9') return 1;; '-w 1800 9') [ "$MODE" = wait ]; return;; *) return 1;; esac; else command flock "$@"; fi; }
+    systemctl() { echo "$*" >> "$HOME/calls"; case "$*" in *list-units*) echo 'codex-studio-deliver-aaaaaaaaaaaa-fixture.service loaded active running';; *NRestarts*) if [ "$MODE" = restart ] && [ "$SECONDS" -ge 5 ]; then echo 1; else echo 0; fi;; *MainPID*) echo 1234;; *is-active*) if [ "$MODE" = exit ] && [ "$SECONDS" -ge 5 ]; then return 1; fi;; esac; }
     readlink() { if [ "$1" = -f ]; then echo "$RELEASE/bin/studio-runtime-server"; else command readlink "$@"; fi; }
-    curl() { [ "$MODE" = slow ] && [ "$SECONDS" -ge 121 ]; }
+    curl() { [ "$MODE" = wait ] || { [ "$MODE" = slow ] && [ "$SECONDS" -ge 121 ]; }; }
     sleep() { SECONDS=$((SECONDS + $1)); }
   `,
       );
@@ -752,6 +760,28 @@ for (const mode of ["slow", "exit", "restart", "timeout"] as const) {
       const calls = fs
         .readFileSync(path.join(fixture, "calls"), "utf8")
         .split("\n");
+      if (mode.startsWith("wait")) {
+        assert.match(
+          output.stderr,
+          /Waiting up to 1800 seconds for running delivery: codex-studio-deliver-aaaaaaaaaaaa-fixture\.service/,
+        );
+        assert.equal(output.stderr.match(/Waiting up to/g)?.length, 1);
+        assert.ok(calls.includes("flock -w 1800 9"));
+        if (mode === "wait-timeout") {
+          assert.equal(output.status, 1);
+          assert.match(
+            output.stderr,
+            /Timed out after 1800 seconds waiting for delivery lock/,
+          );
+          assert.ok(!calls.some((line) => line.includes(" restart ")));
+          assert.ok(!fs.existsSync(path.join(root, "current")));
+          return;
+        }
+        assert.ok(
+          calls.findIndex((line) => line.includes(" restart ")) >
+            calls.indexOf("flock -w 1800 9"),
+        );
+      }
       assert.equal(
         calls.filter((line) => line.includes(" restart ")).length,
         1,
@@ -770,7 +800,7 @@ for (const mode of ["slow", "exit", "restart", "timeout"] as const) {
         "utf8",
       );
       assert.match(dropin, /^Environment="MALLOC_ARENA_MAX=2"$/m);
-      if (mode === "slow") {
+      if (mode === "slow" || mode === "wait") {
         assert.equal(output.status, 0, output.stderr);
         assert.match(output.stdout, /delivered fixture-commit/);
       } else {

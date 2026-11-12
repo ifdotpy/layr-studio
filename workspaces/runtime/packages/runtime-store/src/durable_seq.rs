@@ -154,7 +154,6 @@ pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> S
     let cutoff = format!("{now}-{TOMBSTONE_RETENTION_SECONDS}");
     let scope =
         crate::entity_scopes::deleted_scope_sql(table, "OLD").unwrap_or_else(|| "NULL".into());
-    let key_sql = studio_db_api::migration::key_sql(&[label, id], "source_key");
     let rowid_high =
         format!("(SELECT COALESCE(MAX({rowid}),0) FROM {changes} WHERE {kind}={durable_kind})");
     let put = |source_id: &str, is_deleted: u8, timestamp: &str, condition: &str| {
@@ -163,14 +162,16 @@ pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> S
         } else {
             "NULL"
         };
+        let key_sql =
+            studio_db_api::migration::key_expression_sql(&[&format!("'{table}'"), source_id]);
         let increment = format!("{rowid_high}+1");
         format!(
             "INSERT INTO {changes}({kind},{identity},{rowid},{label},{id},{seq},{deleted},{at},{scope_column})
              SELECT {durable_kind},{key_sql},
                COALESCE((SELECT {rowid} FROM {changes} WHERE {kind}={durable_kind} AND {identity}={key_sql}),
                  CASE WHEN typeof({increment})='integer' THEN {increment} ELSE RAISE(ABORT,'durable source rowid exhausted') END),
-               {label},{id},{next},{is_deleted},{timestamp},{snapshot}
-             FROM (SELECT '{table}' AS {label},{source_id} AS {id}) AS source_key WHERE {condition}
+               '{table}',{source_id},{next},{is_deleted},{timestamp},{snapshot}
+             WHERE {condition}
              ON CONFLICT({kind},{identity}) DO UPDATE SET {seq}=excluded.{seq},{deleted}=excluded.{deleted},{at}=excluded.{at},{scope_column}=excluded.{scope_column};"
         )
     };

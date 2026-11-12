@@ -534,6 +534,7 @@ async fn branch(
                 .cloned()
                 .unwrap_or_else(|| json!({}));
         }
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/branches.rs#internal_sender_witness_branch_history_and_fork
         let request = ProviderRequest {
             root_request_id: operation
                 .as_ref()
@@ -571,6 +572,7 @@ async fn branch(
             params,
             deadline: Instant::now() + Duration::from_secs(60),
         };
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/branches.rs#internal_sender_witness_branch_history_and_fork
         let result = port.provider_request(request).await;
         match result {
             Ok(studio_runtime_services::account_session_runtime::SessionReceipt {
@@ -705,6 +707,7 @@ async fn provider_request(
     method: Method,
     params: Value,
 ) -> Result<Value, ApiError> {
+    // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/branches.rs#internal_sender_witness_branch_history_and_fork
     let mut request = ProviderRequest {
         root_request_id: String::new(),
         admitted_request: None,
@@ -719,6 +722,7 @@ async fn provider_request(
     };
     let initial_request = request.clone();
     let mut receipt =
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/branches.rs#internal_sender_witness_branch_history_and_fork
         port.provider_request(initial_request)
             .await
             .map_err(|error| match error {
@@ -742,6 +746,7 @@ async fn provider_request(
                 format!("Could not ensure account session: {error}"),
             )
         })?);
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/branches.rs#internal_sender_witness_branch_history_and_fork
         receipt = port
             .provider_request(request)
             .await
@@ -1288,6 +1293,12 @@ inventory::submit! { crate::routes::manifest::RouteModuleRegistration { name:"br
 
 #[cfg(test)]
 mod tests {
+    fn assert_production_codec(
+        request: &studio_runtime_services::account_session_runtime::ProviderRequest,
+    ) {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
+    }
+
     use super::*;
 
     #[test]
@@ -1768,6 +1779,7 @@ mod tests {
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
             Box::pin(async move {
+                assert_production_codec(&request);
                 self.requests
                     .lock()
                     .expect("requests")
@@ -1996,7 +2008,7 @@ mod tests {
         );
     }
     #[tokio::test]
-    async fn branch_before_handles_same_page_first_and_missing_turns() {
+    async fn internal_sender_witness_branch_history_and_fork() {
         for (selected, predecessor, pages, expected_method) in [
             (95, Some("turn-94"), 1, Some(Method::ThreadFork)),
             (1, None, 10, Some(Method::ThreadStart)),

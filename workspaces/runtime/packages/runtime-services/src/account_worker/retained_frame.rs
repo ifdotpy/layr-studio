@@ -162,6 +162,7 @@ impl Worker {
                             frame.clone()
                         };
                         let prepared =
+                            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/native_requests.rs#internal_sender_witness_a_lead_question_waits_for_the_user_and_its_answer_reaches_the_provider_once
                             control.prepare_frame(OperationId(operation.clone()), &wire)?;
                         let replay = crate::provider_callbacks::begin_frame(
                             tx, &stream, generation, &operation, &frame,

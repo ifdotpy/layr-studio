@@ -285,7 +285,6 @@ impl StdioProviderTaskFactory {
                         output_limit,
                         ReaderProtocol {
                             codec: options.launch.codec,
-                            provider: options.launch.provider,
                             reply_witness,
                         },
                     )
@@ -674,7 +673,7 @@ where
         // Register before the write: the reply can arrive before the flush returns.
         timing.pending_replies.register(&write, method);
     }
-    let bytes = (write.encode)(&write.message).map_err(|_| AdapterError::InvalidConfiguration)?;
+    let bytes = &write.bytes;
     while receipt.bytes_written < bytes.len() {
         let count = stdin
             .write(&bytes[receipt.bytes_written..])
@@ -719,7 +718,6 @@ where
 #[derive(Default)]
 struct ReaderProtocol {
     codec: ProviderCodec,
-    provider: Option<ProviderKind>,
     reply_witness: Option<ReplyWitness>,
 }
 
@@ -737,20 +735,25 @@ struct UnknownMethodDiagnostic<'a> {
     unparsed: Option<bool>,
 }
 
+/// Maximum retained unknown diagnostic keys per session; unit: entries.
+/// Bounds provider-controlled method/variant retention before diagnostics stop.
+const MAX_UNKNOWN_DIAGNOSTIC_KEYS: usize = 256;
+
 #[derive(Default)]
-pub(crate) struct CodexMethodDiagnostics {
+pub struct CodexMethodDiagnostics {
     user_agent: Option<String>,
     unknown: HashSet<(Option<String>, String, Option<String>)>,
+    saturation_reported: bool,
 }
 
 impl CodexMethodDiagnostics {
-    pub(crate) fn initialize(&mut self, user_agent: Option<&str>) {
+    pub fn initialize(&mut self, user_agent: Option<&str>) {
         if self.user_agent.is_none() {
             self.user_agent = user_agent.map(str::to_owned);
         }
     }
 
-    pub(crate) fn record(&mut self, provider: Option<ProviderKind>, frame: &Frame) {
+    pub fn record(&mut self, provider: Option<ProviderKind>, frame: &Frame) {
         match provider {
             Some(ProviderKind::Codex) => {
                 while let Some(line) = self.observe(frame) {
@@ -761,66 +764,64 @@ impl CodexMethodDiagnostics {
         }
     }
 
-    pub(crate) fn observe(&mut self, frame: &Frame) -> Option<Vec<u8>> {
-        if let Frame::Response {
-            body:
-                ResponseBody::CodexResult(
-                    studio_runtime_providers::codex::ClientRequestResult::Initialize(result),
-                ),
-            ..
-        } = frame
-        {
-            self.initialize(Some(&result.user_agent));
-        }
-        if self.user_agent.is_none()
-            && let Frame::Response {
-                body: ResponseBody::Uncorrelated(result),
-                ..
-            } = frame
-            && let Ok(result) = studio_json::from_str::<
-                studio_runtime_providers::codex::InitializeResponse,
-            >(result.as_str())
-        {
-            self.initialize(Some(&result.user_agent));
-        }
-        let method = match frame {
-            Frame::Response {
-                body: ResponseBody::CodexResult(result),
-                ..
-            } => Some(result.method().as_str()),
-            Frame::Response {
-                body: ResponseBody::CodexUnparsedResult { method, .. },
-                ..
-            } => Some(method.as_str()),
-            Frame::Response {
-                body: ResponseBody::CodexServerResult(result),
-                ..
-            } => Some(result.method().as_str()),
-            Frame::Response {
-                body:
-                    ResponseBody::CodexError(_)
-                    | ResponseBody::Uncorrelated(_)
-                    | ResponseBody::Result(_)
-                    | ResponseBody::Error(_),
-                ..
+    /// Observe a correlated reply without cloning its potentially large payload.
+    pub fn record_reply(&mut self, provider: Option<ProviderKind>, body: &ResponseBody) {
+        if provider == Some(ProviderKind::Codex) {
+            while let Some(line) = self.observe_parts(None, Some(body)) {
+                write_provider_diagnostic_best_effort(&line);
             }
+        }
+    }
+
+    pub fn observe(&mut self, frame: &Frame) -> Option<Vec<u8>> {
+        let body = match frame {
+            Frame::Response { body, .. } => Some(body),
+            Frame::KnownMethodUnparsed(_)
             | Frame::CodexClientRequest(_)
             | Frame::CodexServerRequest(_)
             | Frame::CodexNotification(_)
             | Frame::CodexClientNotification(_)
             | Frame::Request(_)
             | Frame::Notification(_)
-            | Frame::UnknownMethod(_)
-            | Frame::KnownMethodUnparsed(_) => frame.method(),
+            | Frame::UnknownMethod(_) => None,
         };
-        if matches!(
-            frame,
-            Frame::KnownMethodUnparsed(_)
-                | Frame::Response {
-                    body: ResponseBody::CodexUnparsedResult { .. },
-                    ..
-                }
-        ) {
+        self.observe_parts(Some(frame), body)
+    }
+
+    fn observe_parts(
+        &mut self,
+        frame: Option<&Frame>,
+        body: Option<&ResponseBody>,
+    ) -> Option<Vec<u8>> {
+        if self.unknown.len() >= MAX_UNKNOWN_DIAGNOSTIC_KEYS {
+            if self.saturation_reported {
+                return None;
+            }
+            self.saturation_reported = true;
+            return diagnostic_line(
+                b"studio_provider_diagnostics_saturated ",
+                &studio_json::json!({
+                    "provider": ProviderKind::Codex,
+                    "cliVersion": self.user_agent.as_deref(),
+                    "maxEntries": MAX_UNKNOWN_DIAGNOSTIC_KEYS,
+                }),
+            );
+        }
+        if let Some(ResponseBody::CodexResult(
+            studio_runtime_providers::codex::ClientRequestResult::Initialize(result),
+        )) = body
+        {
+            self.initialize(Some(&result.user_agent));
+        }
+        let method = match body {
+            Some(ResponseBody::CodexResult(result)) => Some(result.method().as_str()),
+            Some(ResponseBody::CodexUnparsedResult { method, .. }) => Some(method.as_str()),
+            Some(ResponseBody::CodexServerResult(result)) => Some(result.method().as_str()),
+            _ => frame.and_then(Frame::method),
+        };
+        if matches!(frame, Some(Frame::KnownMethodUnparsed(_)))
+            || matches!(body, Some(ResponseBody::CodexUnparsedResult { .. }))
+        {
             let method = method?;
             if !self
                 .unknown
@@ -840,7 +841,7 @@ impl CodexMethodDiagnostics {
             );
         }
         let mut nested = None;
-        frame.visit_unknown_variants(&mut |kind, variant| {
+        let mut visitor = |kind, variant: &str| {
             if nested.is_none()
                 && let Some(method) = method
             {
@@ -853,7 +854,19 @@ impl CodexMethodDiagnostics {
                     nested = Some(variant);
                 }
             }
-        });
+        };
+        if let Some(frame) = frame {
+            frame.visit_unknown_variants(&mut visitor);
+        } else {
+            use studio_runtime_providers::codex::VisitUnknown;
+            match body {
+                Some(ResponseBody::CodexResult(result)) => result.visit_unknowns(&mut visitor),
+                Some(ResponseBody::CodexServerResult(result)) => {
+                    result.visit_unknowns(&mut visitor)
+                }
+                _ => {}
+            }
+        }
         if let Some(variant) = nested {
             return diagnostic_line(
                 b"studio_provider_unknown_method ",
@@ -866,8 +879,7 @@ impl CodexMethodDiagnostics {
                 },
             );
         }
-        let incoming = frame.codex_incoming_method()?;
-        let _disposition = incoming.disposition();
+        let incoming = frame?.codex_incoming_method()?;
         let CodexIncomingMethod::Unknown { method } = incoming else {
             return None;
         };
@@ -899,7 +911,6 @@ async fn read_entries(
     output_limit: Option<usize>,
     protocol: ReaderProtocol,
 ) -> Result<(), AdapterError> {
-    let mut diagnostics = CodexMethodDiagnostics::default();
     let mut reader = BufReader::new(stdout);
     let mut total = 0_usize;
     let mut cursor = 0_u64;
@@ -922,11 +933,10 @@ async fn read_entries(
             cursor,
             generation.0,
             &line,
-            protocol.codec.decode_with_metadata,
+            protocol.codec.decode,
         );
         let payload = match decoded.payload {
             DecodedJournalPayload::Frame(frame) => {
-                diagnostics.record(protocol.provider, &frame);
                 if let Some(line) = protocol
                     .reply_witness
                     .as_ref()
@@ -1008,6 +1018,57 @@ async fn read_stdout_line<R: AsyncRead + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn correlated_result_variants_stop_at_the_diagnostic_key_cap() {
+        let mut diagnostics = CodexMethodDiagnostics::default();
+        diagnostics.initialize(Some("fixture/1"));
+        let mut warnings = 0;
+        let mut saturation = 0;
+        for index in 0..MAX_UNKNOWN_DIAGNOSTIC_KEYS + 16 {
+            let raw = studio_json::OwnedRawJson::from_string(
+                studio_json::json!({
+                    "turn": {"id":"r", "status":"inProgress", "items":[{
+                        "type":format!("futureItem{index}"), "id":"i"
+                    }]}
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let body = ResponseBody::CodexResult(
+                studio_runtime_providers::correlate_codex_result(Method::TurnStart, &raw).unwrap(),
+            );
+            while let Some(line) = diagnostics.observe_parts(None, Some(&body)) {
+                if line.starts_with(b"studio_provider_diagnostics_saturated ") {
+                    saturation += 1;
+                    let value: studio_json::Value = studio_json::from_slice(
+                        line.strip_prefix(b"studio_provider_diagnostics_saturated ")
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(value["maxEntries"], MAX_UNKNOWN_DIAGNOSTIC_KEYS);
+                    assert_eq!(value["provider"], "codex");
+                    assert_eq!(value["cliVersion"], "fixture/1");
+                } else {
+                    assert!(line.starts_with(b"studio_provider_unknown_method "));
+                    warnings += 1;
+                }
+            }
+            assert!(
+                diagnostics.unknown.len() <= MAX_UNKNOWN_DIAGNOSTIC_KEYS,
+                "distinct correlated result variants must not grow diagnostics past the cap"
+            );
+        }
+        assert_eq!(diagnostics.unknown.len(), MAX_UNKNOWN_DIAGNOSTIC_KEYS);
+        assert_eq!(warnings, MAX_UNKNOWN_DIAGNOSTIC_KEYS);
+        assert_eq!(saturation, 1);
+        let frame = studio_runtime_providers::decode_codex_frame(
+            br#"{"method":"future/afterSaturation","params":{}}"#,
+        )
+        .unwrap();
+        assert!(diagnostics.observe(&frame).is_none());
+        assert_eq!(diagnostics.unknown.len(), MAX_UNKNOWN_DIAGNOSTIC_KEYS);
+    }
 
     #[test]
     fn malformed_known_notification_stays_routable_and_is_diagnosed_once() {
@@ -1119,7 +1180,17 @@ mod tests {
         assert!(!String::from_utf8(before).unwrap().contains("must not log"));
         assert!(diagnostics.observe(&unknown).is_none());
         let initialized = studio_runtime_providers::decode_codex_frame(br#"{"id":1,"result":{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":"codex-cli/0.167.1"}}"#).unwrap();
-        assert!(diagnostics.observe(&initialized).is_none());
+        let Frame::Response {
+            body: ResponseBody::Uncorrelated(raw),
+            ..
+        } = initialized
+        else {
+            panic!("raw initialize")
+        };
+        let body = ResponseBody::CodexResult(
+            studio_runtime_providers::correlate_codex_result(Method::Initialize, &raw).unwrap(),
+        );
+        diagnostics.record_reply(Some(ProviderKind::Codex), &body);
         let after = diagnostics.observe(&unknown).expect("new version key");
         assert_eq!(parse(&after).cli_version, Some("codex-cli/0.167.1"));
         assert!(diagnostics.observe(&unknown).is_none());
@@ -1144,7 +1215,6 @@ mod tests {
             None,
             ReaderProtocol {
                 codec: ProviderCodec::codex(),
-                provider: Some(ProviderKind::Codex),
                 reply_witness: None,
             },
         )
@@ -1603,6 +1673,33 @@ mod tests {
         .await
         .expect("write succeeds");
         emitted.lock().expect("sink").clone()
+    }
+
+    #[tokio::test]
+    async fn prepared_write_encodes_once_through_the_actual_stdio_writer() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ENCODINGS: AtomicUsize = AtomicUsize::new(0);
+        fn encode(frame: &Frame) -> Result<Vec<u8>, studio_runtime_providers::CodecError> {
+            ENCODINGS.fetch_add(1, Ordering::SeqCst);
+            studio_runtime_providers::encode_line(frame)
+        }
+        let frame = request_write("turn/start", "encode-once").frame().clone();
+        let write = PreparedWrite::new_with_codec(
+            OperationId("encode-once".into()),
+            &frame,
+            ProviderCodec {
+                encode,
+                ..ProviderCodec::default()
+            },
+        )
+        .expect("preflight");
+        assert_eq!(ENCODINGS.load(Ordering::SeqCst), 1);
+        write_with(write, false, &PendingReplies::default()).await;
+        assert_eq!(
+            ENCODINGS.load(Ordering::SeqCst),
+            1,
+            "the writer must reuse preflight bytes"
+        );
     }
 
     #[tokio::test]

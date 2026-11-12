@@ -116,6 +116,7 @@ impl Worker {
             let deadline = tokio::time::Instant::from_std(request.deadline);
             let status = self
                 .drive(async {
+                    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/retained.rs#internal_sender_witness_typed_codex_monitor_status_routes_to_supervisor_without_vendor_write
                     tokio::time::timeout_at(deadline, control.operation_status(operation))
                         .await
                         .unwrap_or(Err(SessionTaskError::Closed))
@@ -146,6 +147,7 @@ impl Worker {
         let remaining = tokio::time::Instant::from_std(request.deadline)
             .saturating_duration_since(tokio::time::Instant::now());
         let deadline = tokio::time::Instant::from_std(request.deadline);
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/retained.rs#internal_sender_witness_retained_vendor_prepare
         let prepare = control.prepare(RequestSpec {
             id: RequestId::String(key.clone()),
             operation_id: OperationId(key),

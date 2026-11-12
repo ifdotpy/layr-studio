@@ -297,6 +297,11 @@ export interface components {
         }
       | {
           /** @constant */
+          method: "thread/contextUsage/updated";
+          params: components["schemas"]["NotificationThreadContextUsageUpdated"];
+        }
+      | {
+          /** @constant */
           method: "account/rateLimits/updated";
           params: components["schemas"]["RateLimits"];
         }
@@ -344,6 +349,7 @@ export interface components {
       "item/started": components["schemas"]["ItemEvent"];
       "provider/generationStarted": components["schemas"]["NotificationProviderGenerationStarted"];
       "serverRequest/resolved": components["schemas"]["NotificationServerRequestResolved"];
+      "thread/contextUsage/updated": components["schemas"]["NotificationThreadContextUsageUpdated"];
       "thread/idleCompaction/updated": components["schemas"]["NotificationThreadIdleCompactionUpdated"];
       "thread/shellPolicy/updated": components["schemas"]["NotificationThreadShellPolicyUpdated"];
       "thread/tokenUsage/updated": components["schemas"]["NotificationThreadTokenUsageUpdated"];
@@ -939,6 +945,12 @@ export interface components {
       taskId: string;
       threadId: string;
     };
+    ContextUsageDto: {
+      /** Format: double */
+      at?: number | null | undefined;
+      tokens: number | null;
+      window: number | null;
+    };
     /** @description One model's cumulative contribution to a Claude query. */
     CumulativeModelUsage: {
       /** @description Provider model identifier; dimensionless. */
@@ -1445,6 +1457,15 @@ export interface components {
       threadId: string;
     };
     NotificationServerRequestResolvedRequestId: string | number;
+    NotificationThreadContextUsageUpdated: {
+      /** @description Native main-loop occupancy, independent of billing. */
+      contextUsage?:
+        | components["schemas"]["ContextUsageDto"]
+        | null
+        | undefined;
+      threadId: string;
+      turnId?: string | null | undefined;
+    };
     NotificationThreadIdleCompactionUpdated: {
       preparedSummary?:
         | components["schemas"]["NotificationThreadIdleCompactionUpdatedPreparedSummary"]
@@ -2704,6 +2725,7 @@ export type ClaudeShellPolicyResult =
 export type ClaudeState = components["schemas"]["ClaudeState"];
 export type ClaudeStopTaskParams =
   components["schemas"]["ClaudeStopTaskParams"];
+export type ContextUsageDto = components["schemas"]["ContextUsageDto"];
 export type CumulativeModelUsage =
   components["schemas"]["CumulativeModelUsage"];
 export type CwdParams = components["schemas"]["CwdParams"];
@@ -2776,6 +2798,8 @@ export type NotificationServerRequestResolved =
   components["schemas"]["NotificationServerRequestResolved"];
 export type NotificationServerRequestResolvedRequestId =
   components["schemas"]["NotificationServerRequestResolvedRequestId"];
+export type NotificationThreadContextUsageUpdated =
+  components["schemas"]["NotificationThreadContextUsageUpdated"];
 export type NotificationThreadIdleCompactionUpdated =
   components["schemas"]["NotificationThreadIdleCompactionUpdated"];
 export type NotificationThreadIdleCompactionUpdatedPreparedSummary =

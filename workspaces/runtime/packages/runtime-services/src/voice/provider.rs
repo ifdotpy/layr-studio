@@ -784,6 +784,7 @@ pub async fn speech(
         return stored_speech_receipt(&store, session_id, record_id, receipt_id).await;
     };
     let thread_id = context.thread_id.clone();
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/voice/provider.rs#internal_sender_witness_private_voice_builders
     let call = VoiceRpcCall {
         operation_id: format!("voice:speech:{receipt_id}"),
         root_request_id,
@@ -2169,6 +2170,7 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VoiceSessionRow
 }
 
 fn start_call(context: VoiceProviderContext, session_id: &str, offer: &str) -> VoiceRpcCall {
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/voice/provider.rs#internal_sender_witness_private_voice_builders
     VoiceRpcCall {
         operation_id: format!("voice:start:{session_id}"),
         root_request_id: session_id.to_owned(),
@@ -2366,6 +2368,7 @@ mod tests {
             params: Value,
             deadline: Instant,
         ) -> VoiceFuture<'a, VoiceRequestReceipt> {
+            crate::internal_sender_witness::request(method, &params);
             Box::pin(async move {
                 self.calls.lock().expect("calls").push(VoiceRpcCall {
                     operation_id: operation.id,
@@ -2492,6 +2495,11 @@ mod tests {
         assert_eq!(provider.calls.lock().expect("calls").len(), 1);
     }
     #[tokio::test]
+    async fn internal_sender_witness_voice_outbox_late_stop_proof_settles_deleted_owner_atomically()
+    {
+        voice_outbox_late_stop_proof_settles_deleted_owner_atomically().await;
+    }
+
     async fn voice_outbox_late_stop_proof_settles_deleted_owner_atomically() {
         for certainty in [
             VoiceWriteCertainty::NotSent,
@@ -2825,6 +2833,7 @@ mod tests {
             params: Value,
             deadline: Instant,
         ) -> VoiceFuture<'a, VoiceRequestReceipt> {
+            crate::internal_sender_witness::request(method, &params);
             Box::pin(async move {
                 self.calls
                     .lock()
@@ -2879,7 +2888,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scripted_provider_receives_native_webrtc_start_contract() {
+    async fn internal_sender_witness_private_voice_builders() {
         let provider = Arc::new(ScriptedProvider {
             calls: Mutex::new(vec![]),
         });
@@ -2894,12 +2903,30 @@ mod tests {
         let call = start_call(context, "session", "v=0\r\n...");
         let receipt = request(provider.as_ref(), call.clone()).await;
         assert_eq!(receipt.certainty, VoiceWriteCertainty::Written);
-        let calls = provider.calls.lock().expect("scripted calls lock");
-        assert_eq!(calls.as_slice(), &[call]);
-        assert_eq!(calls[0].method, Method::ThreadRealtimeStart);
-        assert_eq!(calls[0].params["transport"]["type"], "webrtc");
-        assert_eq!(calls[0].params["transport"]["sdp"], "v=0\r\n...");
-        assert_eq!(calls[0].params["clientManagedHandoffs"], false);
+        {
+            let calls = provider.calls.lock().expect("scripted calls lock");
+            assert_eq!(calls.as_slice(), &[call]);
+            assert_eq!(calls[0].method, Method::ThreadRealtimeStart);
+            assert_eq!(calls[0].params["transport"]["type"], "webrtc");
+            assert_eq!(calls[0].params["transport"]["sdp"], "v=0\r\n...");
+            assert_eq!(calls[0].params["clientManagedHandoffs"], false);
+        }
+        let (_directory, store) = voice_outbox_fixture().await;
+        let spoken = crate::voice::speak(crate::voice::SpeakRequest {
+            store,
+            provider: Some(provider.clone()),
+            agent_id: "agent".into(),
+            text: "Speech fixture".into(),
+            request_id: "speech-fixture".into(),
+            epoch: None,
+        })
+        .await
+        .expect("real speech reservation and dispatch");
+        assert_eq!(spoken["state"], "submitted");
+        let calls = provider.calls.lock().expect("voice calls");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].method, Method::ThreadRealtimeAppendSpeech);
+        assert_eq!(calls[1].params["text"], "Speech fixture");
     }
 
     #[tokio::test]

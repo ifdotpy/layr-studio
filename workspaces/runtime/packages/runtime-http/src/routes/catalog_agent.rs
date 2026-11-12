@@ -139,6 +139,7 @@ async fn skills(
     let responses = account_provider_exchange(
         state.account_session.clone(),
         account,
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
         vec![ProviderRequest {
             method: "skills/list".to_owned(),
             params: json!({"cwds":[cwd],"forceReload":false}),
@@ -231,10 +232,12 @@ async fn capabilities(
             session.clone(),
             account.clone(),
             vec![
+                // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
                 ProviderRequest {
                     method: "skills/list".to_owned(),
                     params: json!({"cwds":[cwd],"forceReload":true}),
                 },
+                // internal-sender-witness: workspaces/runtime/packages/runtime-http/tests/mcp_reconnect.rs#internal_sender_witness_catalog_discovery
                 ProviderRequest {
                     method: "mcpServerStatus/list".to_owned(),
                     params: server_params,
@@ -599,7 +602,9 @@ pub(super) async fn provider_call(
     let account = ticket.account.clone();
     let operation = operation.to_owned();
     let expected_operation = operation.clone();
+    // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/catalog_agent.rs#internal_sender_witness_native_terminal_cancel
     let receipt = port
+        // internal-sender-witness: workspaces/runtime/packages/runtime-http/src/routes/catalog_agent.rs#internal_sender_witness_native_terminal_cancel
         .provider_request(ProviderRequest {
             root_request_id: request_identity.0.to_owned(),
             admitted_request: request_identity.1.cloned(),
@@ -832,6 +837,12 @@ inventory::submit! {
 
 #[cfg(test)]
 mod native_command_tests {
+    fn assert_production_codec(
+        request: &studio_runtime_services::account_session_runtime::ProviderRequest,
+    ) {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
+    }
+
     use super::*;
 
     struct PagePort {
@@ -860,6 +871,7 @@ mod native_command_tests {
             studio_runtime_services::account_session_runtime::SessionReceipt,
         > {
             Box::pin(async move {
+                assert_production_codec(&request);
                 use studio_runtime_services::account_session_runtime::{
                     ProviderResponse, SessionOutcome, SessionReceipt,
                 };
@@ -931,7 +943,7 @@ mod native_command_tests {
     }
 
     #[tokio::test]
-    async fn native_terminal_pagination_preserves_provider_calls_and_permissive_cursor() {
+    async fn internal_sender_witness_native_terminal_cancel() {
         for cursor in [
             json!(null),
             json!(""),

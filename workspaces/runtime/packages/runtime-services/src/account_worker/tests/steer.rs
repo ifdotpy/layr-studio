@@ -49,6 +49,15 @@ async fn running_turn_in_state(
     mut peer: Peer,
     state: State,
 ) -> (State, Peer, AccountHandle) {
+    peer.wire = provider
+        .parse::<studio_runtime_providers::ProviderKind>()
+        .unwrap()
+        .wire();
+    peer.codec = if provider == "codex" {
+        ProviderCodec::codex()
+    } else {
+        ProviderCodec::default()
+    };
     let worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
@@ -1520,4 +1529,11 @@ async fn private_answer_waits_while_shared_turn_holds_floor() {
             Ok::<_, WorkerError>(())
         }).await
     }).await.unwrap();
+}
+
+#[tokio::test]
+async fn internal_sender_witness_steer() {
+    for provider in ["codex", "claude"] {
+        acknowledged_steer_is_delivered_to_the_running_turn_once(provider).await;
+    }
 }

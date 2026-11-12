@@ -101,6 +101,16 @@ fn present_scope<'de, D: serde::Deserializer<'de>>(
 ) -> Result<Option<generated::TransferScope>, D::Error> {
     generated::TransferScope::deserialize(input).map(Some)
 }
+fn transfer_provider(
+    profile: Option<ProviderKind>,
+    account: Option<&str>,
+) -> Result<String, TransferError> {
+    profile
+        .map(|provider| provider.key().to_owned())
+        .or_else(|| account.map(str::to_owned))
+        .ok_or(TransferError::Refused("Unknown account provider"))
+}
+
 async fn transfer(
     State(state): State<HttpState>,
     ApiJson(body): ApiJson<Request>,
@@ -169,19 +179,18 @@ async fn transfer(
                 "This account is not available for transfer",
             )));
         }
-        let target_provider = state
-            .model_catalog
-            .account_profile(target)
-            .map(|(_, provider)| provider.key().to_owned())
-            .or_else(|| {
-                accounts
-                    .accounts
-                    .iter()
-                    .find(|account| account.id.as_str() == Some(target))
-                    .and_then(|account| account.provider.as_str().map(str::to_owned))
-            })
-            .or_else(|| (target == "default").then(|| ProviderKind::Codex.key().to_owned()))
-            .ok_or_else(|| error(TransferError::Refused("Unknown account provider")))?;
+        let target_provider = transfer_provider(
+            state
+                .model_catalog
+                .account_profile(target)
+                .map(|(_, provider)| provider),
+            accounts
+                .accounts
+                .iter()
+                .find(|account| account.id.as_str() == Some(target))
+                .and_then(|account| account.provider.as_str()),
+        )
+        .map_err(error)?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| ApiError::internal())?
@@ -516,5 +525,22 @@ mod replay_tests {
             conflict.1["error"],
             "This transfer id has different content"
         );
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn transfer_provider_requires_explicit_identity_even_for_default() {
+        assert!(matches!(
+            transfer_provider(None, None),
+            Err(TransferError::Refused("Unknown account provider"))
+        ));
+        assert_eq!(
+            transfer_provider(Some(ProviderKind::Claude), None).unwrap(),
+            "claude"
+        );
+        assert_eq!(transfer_provider(None, Some("claude")).unwrap(), "claude");
     }
 }

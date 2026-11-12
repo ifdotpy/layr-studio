@@ -163,6 +163,21 @@ async fn answered_tool_call(state: &State, peer: &mut Peer, index: usize) {
     callbacks_retired(state).await;
 }
 
+#[tokio::test]
+async fn internal_sender_witness_callback_reply() {
+    for provider in [
+        studio_runtime_providers::ProviderKind::Codex,
+        studio_runtime_providers::ProviderKind::Claude,
+    ] {
+        let state = State::new().await;
+        let mut peer = Peer::new();
+        peer.codec = ProviderCodec::codex();
+        let mut worker = running_tool_turn(&state, &mut peer, provider).await;
+        answered_tool_call(&state, &mut peer, 0).await;
+        worker.shutdown().await.unwrap();
+    }
+}
+
 /// Former leak: 128 unwritten replies of the live turn made the next call
 /// report "Too many unresolved provider replies" after its effect committed.
 async fn scenario_prepared_replies_of_the_live_turn_do_not_fail_a_tool_call(

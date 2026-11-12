@@ -36,7 +36,7 @@ pub(crate) struct Admission {
 pub(crate) struct RequestPreparation {
     pub intent: TurnIntent,
     pub method: Method,
-    pub params: Value,
+    pub native: crate::provider_adapter::NativeRequest,
     pub thread: Option<thread::PreparedAttempt>,
     pub compiled: Option<turn::PreparedSubmission>,
     pub submission: Option<crate::notification_dispatch::PreparedSubmission>,
@@ -44,6 +44,17 @@ pub(crate) struct RequestPreparation {
     pub connection_id: String,
 }
 impl RequestPreparation {
+    /// Reuse the one persistence projection produced during preparation.
+    pub(crate) fn stored_params(&self) -> Value {
+        if let Some(thread) = &self.thread {
+            Value::Object(thread.params.clone())
+        } else {
+            self.guard
+                .native_params
+                .clone()
+                .expect("prepared turn persistence projection")
+        }
+    }
     /// The workspace token this request's commit validates.
     pub(crate) fn workspace_token(&self) -> crate::workspace_ready::ReadyToken {
         self.guard.token.clone()
@@ -1231,7 +1242,14 @@ fn execution_cwd(record: &Value, validated_workspace_cwd: &Path) -> Option<Strin
 }
 
 /// Keep native Layr reviewers read-only except for their private scratch folder.
-fn layr_reviewer_permissions(record: &Value) -> Option<Value> {
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeReviewPermissions {
+    approval_policy: studio_runtime_providers::codex::AskForApproval,
+    sandbox_policy: studio_runtime_providers::codex::SandboxPolicy,
+}
+
+fn layr_reviewer_permissions(record: &Value) -> Option<NativeReviewPermissions> {
     if record["role"] != "reviewer" {
         return None;
     }
@@ -1246,23 +1264,34 @@ fn layr_reviewer_permissions(record: &Value) -> Option<Value> {
     } else {
         return None;
     };
-    let sandbox = match scratch {
-        Some(scratch) => {
-            json!({"type":"workspaceWrite","writableRoots":[scratch],"networkAccess":false})
-        }
-        None => json!({"type":"readOnly"}),
-    };
-    Some(json!({"approvalPolicy":"never","sandboxPolicy":sandbox}))
+    use studio_runtime_providers::codex::SandboxPolicy;
+    Some(NativeReviewPermissions {
+        approval_policy: crate::provider_adapter::approval(true),
+        sandbox_policy: match scratch {
+            Some(scratch) => SandboxPolicy::WorkspaceWrite {
+                writable_roots: Some(vec![scratch]),
+                network_access: Some(false),
+                exclude_slash_tmp: None,
+                exclude_tmpdir_env_var: None,
+            },
+            None => SandboxPolicy::ReadOnly {
+                network_access: None,
+            },
+        },
+    })
 }
 
 fn apply_native_reviewer_permissions(
     params: &mut studio_json::Map<String, Value>,
-    native_reviewer: Option<&Value>,
+    native_reviewer: Option<&NativeReviewPermissions>,
 ) {
-    if let Some(Value::Object(permissions)) = native_reviewer {
-        for (key, value) in permissions {
-            params.insert(key.clone(), value.clone());
-        }
+    if let Some(permissions) = native_reviewer {
+        params.extend(
+            json!(permissions)
+                .as_object()
+                .expect("permissions object")
+                .clone(),
+        );
     }
 }
 
@@ -1275,7 +1304,7 @@ fn monitor_command_settings(
     let permissions = if let Some(permissions) =
         layr_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
     {
-        permissions
+        json!(permissions)
     } else {
         match thread::effective_yolo_mode(role, yolo_mode) {
             Some(true) => {
@@ -1731,21 +1760,11 @@ pub(crate) async fn prepare_ready(
     let (turn_snapshot, events, compiled) =
         compile_with_artifacts(&store, turn_snapshot, events).await?;
     guard.compiler_snapshot = Some(turn_snapshot.clone());
-    let mut params = thread::turn_params(
-        &snapshot,
-        &thread::TurnInput {
-            events: events
-                .iter()
-                .map(|e| thread::TurnEvent {
-                    kind: e.kind.clone(),
-                    text: e.text.clone(),
-                })
-                .collect(),
-            has_assets: events.iter().any(|e| !e.metadata.assets.is_empty()),
-        },
-    )
-    .map_err(thread_refusal)?;
-    apply_native_reviewer_permissions(&mut params, native_reviewer.as_ref());
+    let mut params = thread::turn_input(&snapshot).map_err(thread_refusal)?;
+    if let Some(permissions) = native_reviewer.as_ref() {
+        params.approval_policy = Some(permissions.approval_policy.clone());
+        params.sandbox_policy = Some(permissions.sandbox_policy.clone());
+    }
     if crate::provider_adapter::adapter(snapshot.account.provider)
         .descriptor()
         .supports(crate::provider_adapter::ProviderFeature::IdleSummaryReturn)
@@ -1765,25 +1784,34 @@ pub(crate) async fn prepare_ready(
                 },
             )
             .await?;
-        params.insert("idleCompactionMode".into(), json!(mode));
-        params.insert(
-            "idleSummaryRosterIncluded".into(),
-            json!(turn_snapshot.idle_summary_return),
-        );
+        params.idle_compaction_mode = Some(mode);
+        params.idle_summary_roster_included = Some(turn_snapshot.idle_summary_return);
         guard.idle_compaction_mode = Some(mode);
     }
-    params.insert("input".into(), json!(compiled.provider_inputs));
-    params.insert(
-        "clientUserMessageId".into(),
-        json!(compiled.event_ids.first()),
-    );
+    params.input = compiled.provider_inputs.clone();
+    params.client_user_message_id = compiled.event_ids.first().cloned();
+    let params = crate::provider_adapter::adapter(snapshot.account.provider).encode(
+        crate::provider_adapter::ProviderCommand::StartTurn {
+            input: &thread::TurnInput {
+                events: events
+                    .iter()
+                    .map(|e| thread::TurnEvent {
+                        kind: e.kind.clone(),
+                        text: e.text.clone(),
+                    })
+                    .collect(),
+                has_assets: events.iter().any(|e| !e.metadata.assets.is_empty()),
+            },
+            params,
+        },
+    )?;
     let submission = compiled_submission(&prepared_intent, &compiled);
-    guard.native_params = Some(Value::Object(params.clone()));
+    guard.native_params = Some(params.params());
     prepared_intent.thread_id = snapshot.actor.thread_id;
     Ok(RequestPreparation {
         intent: prepared_intent,
         method,
-        params: json!(params),
+        native: params,
         thread: None,
         compiled: Some(compiled),
         submission: Some(submission),
@@ -1796,7 +1824,7 @@ async fn thread_request(
     store: &RuntimeStore,
     intent: TurnIntent,
     method: Method,
-    attempt: thread::PreparedAttempt,
+    mut attempt: thread::PreparedAttempt,
     guard: CommitGuard,
     connection_id: &str,
 ) -> Result<RequestPreparation, WorkerError> {
@@ -1815,7 +1843,10 @@ async fn thread_request(
     Ok(RequestPreparation {
         intent,
         method,
-        params: json!(attempt.params),
+        native: attempt
+            .native
+            .take()
+            .expect("fresh thread preparation retains its native request"),
         thread: Some(attempt),
         compiled: None,
         submission: None,

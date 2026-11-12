@@ -13,12 +13,12 @@ use crate::provider_callbacks::{CallbackContext, Reply};
 const QUESTION: &str = "claude:question-1";
 const ORCHESTRATOR_ONLY: &str = "Only the orchestrator can ask the user. Send your question with orchestration_message target=lead; the orchestrator decides whether to contact the user.";
 
-/// The bridge's AskUserQuestion request (`permissions` in bridge.mjs).
+/// A native question compatible with both provider sessions.
 fn question(id: &str) -> Value {
     json!({"id":id,"method":"item/tool/requestUserInput","params":{
-        "threadId":"fake-thread-0","turnId":"turn","itemId":"toolu_question",
+        "threadId":"fake-thread-0","turnId":"turn","itemId":"toolu_question","isBlocking":true,
         "questions":[{"id":"0","header":"Disk","question":"Which disk test first?",
-            "options":[{"label":"APFS clone","description":"Copy on write"},{"label":"btrfs"}],
+            "options":[{"label":"APFS clone","description":"Copy on write"},{"label":"btrfs","description":"Copy on write"}],
             "multiSelect":false,"isOther":true,"isSecret":false}]}})
 }
 
@@ -107,11 +107,39 @@ async fn set_lead(state: &State, lead: bool) {
 
 /// A running turn on a fresh worker.
 async fn running(state: &State) -> (Peer, AccountHandle) {
+    running_with_codec(state, ProviderCodec::default()).await
+}
+
+async fn running_with_codec(state: &State, codec: ProviderCodec) -> (Peer, AccountHandle) {
     let mut peer = Peer::new();
+    peer.codec = codec;
     let worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
     (peer, worker)
+}
+
+/// Native transport decodes before journaling; generic journal injection keeps
+/// extra fixture fields that the pinned DTO would have removed before admission.
+async fn native_frame(peer: &mut Peer, value: Value) -> u64 {
+    let bytes = studio_json::to_vec(&value).unwrap();
+    let (frame, boundary_at) = (peer.codec.decode)(&bytes).unwrap();
+    assert!(matches!(
+        frame,
+        Frame::CodexServerRequest(_) | Frame::Request(_)
+    ));
+    peer.cursor += 1;
+    peer.entries
+        .send(JournalEntry {
+            boundary_at,
+            received_at_ms: peer.clock.now_ms(),
+            cursor: EventCursor(peer.cursor),
+            generation: peer.generation,
+            payload: JournalPayload::Frame(frame),
+        })
+        .await
+        .unwrap();
+    peer.cursor
 }
 
 /// Answer `card` as the user and return the frame the provider received.
@@ -150,10 +178,38 @@ async fn answer_once(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_lead_question_waits_for_the_user_and_its_answer_reaches_the_provider_once() {
+async fn internal_sender_witness_a_lead_question_waits_for_the_user_and_its_answer_reaches_the_provider_once()
+ {
+    for provider in [
+        studio_runtime_providers::ProviderKind::Codex,
+        studio_runtime_providers::ProviderKind::Claude,
+    ] {
+        native_question_round_trip(provider).await;
+    }
+}
+
+async fn native_question_round_trip(provider: studio_runtime_providers::ProviderKind) {
     let state = State::new().await;
-    let (mut peer, mut worker) = running(&state).await;
-    let cursor = peer.frame(question(QUESTION)).await;
+    let (mut peer, mut worker) = match provider {
+        studio_runtime_providers::ProviderKind::Codex => {
+            running_with_codec(&state, ProviderCodec::codex()).await
+        }
+        studio_runtime_providers::ProviderKind::Claude => {
+            let mut peer = Peer::new();
+            let worker = provider_worker(&state, &mut peer, provider).await;
+            let start = state.start(&mut peer, &worker).await;
+            peer.accepted(&start).await;
+            (peer, worker)
+        }
+    };
+    let mut incoming = question(QUESTION);
+    if provider == studio_runtime_providers::ProviderKind::Claude {
+        incoming["params"]
+            .as_object_mut()
+            .unwrap()
+            .remove("isBlocking");
+    }
+    let cursor = native_frame(&mut peer, incoming).await;
     peer.acknowledged(cursor).await;
     let card = card_of(&state, &mut peer, QUESTION).await;
     assert_eq!(card["method"], "item/tool/requestUserInput");

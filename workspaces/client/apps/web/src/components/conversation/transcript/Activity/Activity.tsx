@@ -289,6 +289,11 @@ export const ToolCard = observer(function ToolCard({
         </span>
         <span className={`tool-title${limit ? " tool-title-limit" : ""}`}>
           <span className={limit ? "activity-limit" : undefined}>{label}</span>
+          {state === "running" && typeof p.progressMessage === "string" && (
+            <small className="tool-read-summary" title={p.progressMessage}>
+              {p.progressMessage}
+            </small>
+          )}
           {limit && (
             <small className="tool-limit-message">{limit.message}</small>
           )}

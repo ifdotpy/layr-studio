@@ -87,11 +87,15 @@ pub mod host_project_runtime;
 pub mod host_worker_create;
 pub mod idle_compaction;
 mod idle_gate;
+#[cfg(any(test, feature = "test-support"))]
+pub mod internal_sender_witness;
 pub mod layr_native;
 pub(crate) mod layr_read;
 pub mod legacy_image_workspace;
 pub mod lifecycle_effects;
 pub mod limit_reset;
+#[cfg(any(test, feature = "test-support"))]
+pub mod live_restart_fixture;
 pub mod liveness;
 pub mod maintenance;
 #[allow(dead_code)] // The managed-tools callback caller is integrated by its owning package.

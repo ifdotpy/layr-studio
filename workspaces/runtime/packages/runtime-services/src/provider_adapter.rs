@@ -24,6 +24,12 @@ use studio_runtime_providers::Method;
 use studio_runtime_providers::codex;
 pub use studio_runtime_providers::{ProviderCapability, ProviderKind};
 use studio_runtime_store::path_identity::CanonicalPath;
+mod command;
+pub(crate) use command::approval;
+pub use command::{
+    BridgeCommand, Checkpoint, EditAgent, NativeRequest, ThreadStartInput, TitleInput,
+    TurnStartInput,
+};
 
 /// Inputs for launching the retained provider session of one host account.
 pub struct CheckedLaunch<'a> {
@@ -50,7 +56,7 @@ pub struct ProviderLaunch {
     pub executable: Option<String>,
 }
 
-/// Provider operations and runtime policies. Missing entries grant no behavior.
+/// Provider operations and runtime policies, decided exhaustively for every provider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderFeature {
     StartThread,
@@ -79,48 +85,138 @@ pub enum ProviderFeature {
     NativeRelease,
 }
 
+impl ProviderFeature {
+    /// Single owner of internal operation and policy availability.
+    #[must_use]
+    pub const fn support(
+        self,
+        provider: ProviderKind,
+    ) -> studio_runtime_schema::provider_kind::ProviderSupport {
+        use studio_runtime_schema::provider_kind::ProviderSupport::{Supported, Unsupported};
+        match provider {
+            ProviderKind::Codex => match self {
+                Self::StartThread => Supported,
+                Self::StartTurn => Supported,
+                Self::SetTitle => Supported,
+                Self::EditThread => Supported,
+                Self::NativeHistory => Supported,
+                Self::ToolsOnEveryTurn => Unsupported {
+                    reason: "Codex registers tools at thread preparation instead of repeating them on every turn",
+                },
+                Self::VoiceTools => Supported,
+                Self::Daybreak => Supported,
+                Self::WritableSandboxRoots => Supported,
+                Self::TurnEndClosesSteer => Supported,
+                Self::FrozenReasoningConfig => Supported,
+                Self::PreserveContextOnReattach => Unsupported {
+                    reason: "Codex reads native token usage instead of retaining bridge context state",
+                },
+                Self::UnsubmittedInspection => Supported,
+                Self::SteerCompletionReceipts => Unsupported {
+                    reason: "Codex closes steer admission at native turn completion without bridge receipts",
+                },
+                Self::NativeMcpConfiguration => Supported,
+                Self::BrowserConfiguration => Supported,
+                Self::HostWorktreeFence => Unsupported {
+                    reason: "Codex enforces writable paths through its native sandbox configuration",
+                },
+                Self::IdleSummaryReturn => Unsupported {
+                    reason: "Codex has no bridge resume-return dialog to answer when idle",
+                },
+                Self::PinnedAccountLaunch => Unsupported {
+                    reason: "Codex selects its executable and home without a Claude login profile",
+                },
+                Self::BundledExecutable => Supported,
+                Self::AccountSessionLogin => Supported,
+                Self::TurnCommitGuard => Unsupported {
+                    reason: "Codex persists native turns without the bridge commit guard",
+                },
+                Self::AttributedInput => Unsupported {
+                    reason: "Codex user input does not use bridge account-attribution fields",
+                },
+                Self::NativeRelease => Supported,
+            },
+            ProviderKind::Claude => match self {
+                Self::StartThread => Supported,
+                Self::StartTurn => Supported,
+                Self::SetTitle => Supported,
+                Self::EditThread => Supported,
+                Self::NativeHistory => Unsupported {
+                    reason: "Claude history is read from SDK transcripts rather than Codex thread history",
+                },
+                Self::ToolsOnEveryTurn => Supported,
+                Self::VoiceTools => Unsupported {
+                    reason: "Studio voice tools require the Codex realtime session integration",
+                },
+                Self::Daybreak => Unsupported {
+                    reason: "Daybreak is a native Codex turn policy",
+                },
+                Self::WritableSandboxRoots => Unsupported {
+                    reason: "Claude permissions use the bridge tool policy instead of Codex sandbox roots",
+                },
+                Self::TurnEndClosesSteer => Unsupported {
+                    reason: "Claude keeps steer admission open until bridge completion receipts arrive",
+                },
+                Self::FrozenReasoningConfig => Unsupported {
+                    reason: "Claude applies reasoning through session flag settings instead of Codex thread config",
+                },
+                Self::PreserveContextOnReattach => Supported,
+                Self::UnsubmittedInspection => Unsupported {
+                    reason: "Unsubmitted inspection uses native Codex thread requests",
+                },
+                Self::SteerCompletionReceipts => Supported,
+                Self::NativeMcpConfiguration => Unsupported {
+                    reason: "Claude configures MCP through SDK options instead of native Codex configuration",
+                },
+                Self::BrowserConfiguration => Unsupported {
+                    reason: "Studio browser configuration is supplied through native Codex thread config",
+                },
+                Self::HostWorktreeFence => Supported,
+                Self::IdleSummaryReturn => Supported,
+                Self::PinnedAccountLaunch => Supported,
+                Self::BundledExecutable => Unsupported {
+                    reason: "Claude launches the explicitly configured SDK executable rather than the bundled Codex executable",
+                },
+                Self::AccountSessionLogin => Unsupported {
+                    reason: "Claude authenticates through its login profile instead of Codex account-session login",
+                },
+                Self::TurnCommitGuard => Supported,
+                Self::AttributedInput => Supported,
+                Self::NativeRelease => Unsupported {
+                    reason: "Claude releases retained bridge queries instead of sending native Codex thread release",
+                },
+            },
+        }
+    }
+}
+
 /// Provider-neutral request preparation. Runtime traffic stays on this boundary.
 pub enum ProviderCommand<'a> {
     StartThread {
         snapshot: &'a Snapshot,
-        method: crate::thread_prepare::Method,
-        params: Map<String, Value>,
-        instructions: String,
+        input: ThreadStartInput,
     },
     StartTurn {
         input: &'a TurnInput,
-        params: Map<String, Value>,
+        params: TurnStartInput,
     },
     SetTitle {
-        params: Map<String, Value>,
+        input: TitleInput,
     },
     EditThread {
-        agent: &'a Value,
-        checkpoint: &'a Value,
+        agent: &'a EditAgent,
+        checkpoint: &'a Checkpoint,
     },
-}
-
-impl ProviderCommand<'_> {
-    fn feature(&self) -> ProviderFeature {
-        match self {
-            Self::StartThread { .. } => ProviderFeature::StartThread,
-            Self::StartTurn { .. } => ProviderFeature::StartTurn,
-            Self::SetTitle { .. } => ProviderFeature::SetTitle,
-            Self::EditThread { .. } => ProviderFeature::EditThread,
-        }
-    }
 }
 
 /// Static metadata and local policy. Wire shaping belongs to encode.
 pub struct ProviderDescriptor {
     pub kind: ProviderKind,
-    pub controls: &'static [ProviderCapability],
-    pub features: &'static [ProviderFeature],
     pub default_model: &'static str,
     pub pricing_vendor: &'static str,
     pub sign_in_message: &'static str,
     pub account_changed_message: &'static str,
-    pub diagnostics: fn() -> ThreadRequest,
+    pub diagnostics: fn() -> NativeRequest,
     pub project_diagnostics: fn(Value, u64) -> (Value, u64),
     pub configured_binary:
         fn(&crate::account_policy::PublicAccount, Option<String>) -> Option<Option<String>>,
@@ -135,7 +231,7 @@ pub struct ProviderDescriptor {
 impl ProviderDescriptor {
     #[must_use]
     pub fn supports(&self, feature: ProviderFeature) -> bool {
-        self.features.contains(&feature)
+        feature.support(self.kind).is_supported()
     }
 }
 
@@ -143,97 +239,17 @@ impl ProviderDescriptor {
 pub trait ProviderAdapter: Send + Sync + 'static {
     fn descriptor(&self) -> &'static ProviderDescriptor;
     fn launch(&self, input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError>;
-    fn encode(&self, command: ProviderCommand<'_>) -> Result<ThreadRequest, WorkerError>;
-    fn decode(&self, bytes: &[u8]) -> Result<ProviderEvent, studio_runtime_providers::CodecError>;
-}
-
-/// A native thread request: the method and its params.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ThreadRequest {
-    pub method: Method,
-    pub params: Value,
-    /// Session instructions returned alongside a prepared thread request.
-    pub instructions: Option<String>,
-}
-
-/// `thread/fork` from the checkpoint's turn. The params keep the fields that every
-/// thread of the agent carries: folder, service tier, model, config and, for a fork,
-/// the approval policy and sandbox. `model` is omitted when the agent has none,
-/// because a null model differs from a missing one.
-fn checkpoint_turn(checkpoint: &Value) -> Option<&str> {
-    checkpoint.get("turnId").and_then(Value::as_str)
-}
-
-fn fork_from_checkpoint(agent: &Value, checkpoint: &Value) -> ThreadRequest {
-    let fork = checkpoint_turn(checkpoint).is_some();
-    let config = agent
-        .get("threadConfig")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let mut params = json!({
-        "cwd": agent.get("cwd").cloned().unwrap_or(Value::Null),
-        "serviceTier": if agent.get("fastMode").and_then(Value::as_bool) == Some(true) { "priority" } else { "default" },
-        "config": config,
-    });
-    if let Some(model) = agent
-        .get("model")
-        .and_then(Value::as_str)
-        .filter(|model| !model.is_empty())
-    {
-        params["model"] = json!(model);
-    }
-    if !fork {
-        return ThreadRequest {
-            method: Method::ThreadStart,
-            params,
-            instructions: None,
-        };
-    }
-    params["threadId"] = checkpoint.get("threadId").cloned().unwrap_or(Value::Null);
-    params["lastTurnId"] = json!(checkpoint_turn(checkpoint));
-    for key in ["approvalPolicy", "sandbox"] {
-        if let Some(value) = agent.get(key) {
-            params[key] = value.clone();
-        }
-    }
-    ThreadRequest {
-        method: Method::ThreadFork,
-        params,
-        instructions: None,
-    }
-}
-
-fn read_params<T: serde::de::DeserializeOwned>(
-    params: &Map<String, Value>,
-) -> Result<T, WorkerError> {
-    T::deserialize(Value::Object(params.clone())).map_err(|_| refused("provider/invalid-request"))
+    fn encode(&self, command: ProviderCommand<'_>) -> Result<NativeRequest, WorkerError>;
 }
 
 /// The store consumes JSON projections; native protocol parsing remains typed.
-pub(crate) fn project_frame(
-    frame: studio_runtime_providers::Frame,
-) -> Result<studio_runtime_providers::Frame, studio_runtime_providers::CodecError> {
-    use studio_runtime_providers::{Frame, ResponseBody};
-    let mut unknown_variant = false;
-    frame.visit_unknown_variants(&mut |_, _| unknown_variant = true);
-    if (matches!(frame, Frame::KnownMethodUnparsed(_)) || unknown_variant)
-        && matches!(
-            &frame,
-            Frame::KnownMethodUnparsed(_) | Frame::CodexServerRequest(_)
-        )
-        && frame.id().is_some()
-    {
-        let method = frame.method().expect("native request method").to_owned();
-        let fields = serde::Serialize::serialize(&frame, studio_json::value::Serializer).map_err(
-            |error| studio_runtime_providers::CodecError::Serialization(error.to_string()),
-        )?;
-        let Value::Object(fields) = fields else {
-            unreachable!("request object");
-        };
-        return Ok(Frame::KnownMethodUnparsed(
-            studio_runtime_providers::UnknownMethodFrame { method, fields },
-        ));
+pub(crate) fn project_frame(frame: ProviderEvent) -> ProviderEvent {
+    if crate::notification_dispatch::progress::native(&frame).is_some() {
+        return frame;
     }
+    use studio_runtime_providers::{
+        Frame, NotificationFrame, RequestFrame, ResponseBody, UnknownMethodFrame,
+    };
     match &frame {
         Frame::Request(_)
         | Frame::Notification(_)
@@ -241,54 +257,75 @@ pub(crate) fn project_frame(
         | Frame::Response {
             body: ResponseBody::Result(_) | ResponseBody::Error(_),
             ..
-        } => Ok(frame),
+        } => return frame,
         Frame::KnownMethodUnparsed(_)
         | Frame::CodexClientRequest(_)
         | Frame::CodexServerRequest(_)
         | Frame::CodexNotification(_)
         | Frame::CodexClientNotification(_)
-        | Frame::Response { .. } => {
-            studio_runtime_providers::decode_frame(&studio_runtime_providers::encode_line(&frame)?)
+        | Frame::Response { .. } => {}
+    }
+    let mut unknown = matches!(frame, Frame::KnownMethodUnparsed(_));
+    frame.visit_unknown_variants(&mut |_, _| unknown = true);
+    let Value::Object(mut fields) = json!(frame) else {
+        unreachable!("frame object");
+    };
+    if unknown
+        && matches!(
+            frame,
+            Frame::KnownMethodUnparsed(_) | Frame::CodexServerRequest(_)
+        )
+        && frame.id().is_some()
+    {
+        return Frame::KnownMethodUnparsed(UnknownMethodFrame {
+            method: frame.method().expect("native request method").into(),
+            fields,
+        });
+    }
+    if let Some(method) = frame.method() {
+        let method = Method::from_wire(method).expect("known native method");
+        fields.remove("method");
+        let params = fields.remove("params");
+        if let Some(id) = frame.id() {
+            fields.remove("id");
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/provider_adapter.rs#internal_sender_witness_native_commands_and_diagnostics
+            Frame::Request(RequestFrame {
+                id,
+                method,
+                params,
+                fields,
+            })
+        } else {
+            Frame::Notification(NotificationFrame {
+                method,
+                params,
+                fields,
+            })
         }
+    } else {
+        let id = frame.id().expect("response id");
+        fields.remove("id");
+        let body = if let Some(error) = fields.remove("error") {
+            ResponseBody::Error(error)
+        } else {
+            ResponseBody::Result(fields.remove("result").expect("result payload"))
+        };
+        Frame::Response { id, body, fields }
     }
 }
 
 pub(crate) fn project_entry(
-    entry: studio_runtime_process::provider_seam::JournalEntry,
-) -> Result<studio_runtime_process::provider_seam::JournalEntry, WorkerError> {
-    use studio_runtime_process::provider_seam::{JournalEntry, JournalPayload};
-    let JournalEntry {
-        received_at_ms,
-        boundary_at,
-        cursor,
-        generation,
-        payload,
-    } = entry;
-    let payload = match payload {
-        JournalPayload::Frame(frame) => JournalPayload::Frame(
-            project_frame(frame).map_err(|_| refused("provider/invalid-event-projection"))?,
-        ),
-        other @ JournalPayload::RawStdout { .. }
-        | other @ JournalPayload::Stderr(_)
-        | other @ JournalPayload::Exit(_)
-        | other @ JournalPayload::Other { .. } => other,
+    mut entry: studio_runtime_process::provider_seam::JournalEntry,
+) -> studio_runtime_process::provider_seam::JournalEntry {
+    use studio_runtime_process::provider_seam::JournalPayload;
+    entry.payload = match entry.payload {
+        JournalPayload::Frame(frame) => JournalPayload::Frame(project_frame(frame)),
+        other @ (JournalPayload::RawStdout { .. }
+        | JournalPayload::Stderr(_)
+        | JournalPayload::Exit(_)
+        | JournalPayload::Other { .. }) => other,
     };
-    Ok(JournalEntry {
-        received_at_ms,
-        boundary_at,
-        cursor,
-        generation,
-        payload,
-    })
-}
-
-fn write_params(params: &impl serde::Serialize) -> Result<Map<String, Value>, WorkerError> {
-    let Value::Object(params) = serde::Serialize::serialize(params, studio_json::value::Serializer)
-        .map_err(|_| refused("provider/invalid-request"))?
-    else {
-        unreachable!("generated request params are structs");
-    };
-    Ok(params)
+    entry
 }
 
 /// The agent's provider keeps a native rollout history. An unknown provider
@@ -370,77 +407,18 @@ const CLAUDE_DEFAULT_MODEL: &str = "default";
 const CLAUDE_MODEL_ALIASES: [&str; 4] = [CLAUDE_DEFAULT_MODEL, "sonnet", "opus", "haiku"];
 
 impl CodexAdapter {
-    fn shape_thread_params(
-        s: &Snapshot,
-        method: crate::thread_prepare::Method,
-        params: &mut Map<String, Value>,
-        _: &mut String,
-    ) -> Result<(), WorkerError> {
-        match method {
-            crate::thread_prepare::Method::Start => {
-                let mut native: codex::ThreadStartParams = read_params(params)?;
-                native.cwd = Some(Some(s.actor.cwd.clone()));
-                params.extend(write_params(&native)?);
-            }
-            crate::thread_prepare::Method::Resume => {
-                let mut template = Map::new();
-                template.insert(
-                    codex::ThreadResumeParams::FIELD_THREAD_ID.into(),
-                    json!(s.actor.thread_id.as_deref().unwrap_or_default()),
-                );
-                let mut native: codex::ThreadResumeParams = read_params(&template)?;
-                native.cwd = Some(Some(s.actor.cwd.clone()));
-                let mut fields = write_params(&native)?;
-                fields.remove(codex::ThreadResumeParams::FIELD_THREAD_ID);
-                params.extend(fields);
-            }
-        }
-        Ok(())
-    }
-
-    fn shape_title_thread_params(params: &mut Map<String, Value>) -> Result<(), WorkerError> {
-        let mut native: codex::ThreadStartParams = read_params(params)?;
-        native.approval_policy = Some(Some(codex::AskForApproval::Variant1(Box::new(
-            codex::AskForApprovalVariant1::Never,
-        ))));
-        native.sandbox = Some(Some(codex::SandboxMode::ReadOnly));
-        params.extend(write_params(&native)?);
-        Ok(())
-    }
-
-    fn shape_turn_params(
-        _input: &TurnInput,
-        params: &mut Map<String, Value>,
-    ) -> Result<(), WorkerError> {
-        // Input and thread identity are filled by shared preparation after these
-        // overrides. The template is never sent or persisted.
-        let template = Map::from_iter([
-            (codex::TurnStartParams::FIELD_THREAD_ID.into(), json!("")),
-            (codex::TurnStartParams::FIELD_INPUT.into(), json!([])),
-        ]);
-        let mut native: codex::TurnStartParams = read_params(&template)?;
-        native.cyber_access_program = Some(Some(codex::CyberAccessProgram::Standard));
-        let mut fields = write_params(&native)?;
-        fields.remove(codex::TurnStartParams::FIELD_THREAD_ID);
-        fields.remove(codex::TurnStartParams::FIELD_INPUT);
-        params.extend(fields);
-        Ok(())
-    }
-
-    fn edit_thread(agent: &Value, checkpoint: &Value) -> Result<ThreadRequest, WorkerError> {
-        let mut request = fork_from_checkpoint(agent, checkpoint);
-        request.params = if let Some(turn) = checkpoint_turn(checkpoint) {
-            let mut native: codex::ThreadForkParams =
-                serde::Deserialize::deserialize(request.params)
-                    .map_err(|_| refused("provider/invalid-request"))?;
-            native.last_turn_id = Some(Some(turn.to_owned()));
-            Value::Object(write_params(&native)?)
-        } else {
-            let native: codex::ThreadStartParams = serde::Deserialize::deserialize(request.params)
-                .map_err(|_| refused("provider/invalid-request"))?;
-            Value::Object(write_params(&native)?)
-        };
-        Ok(request)
+    fn title(input: TitleInput) -> NativeRequest {
+        let mut params = codex::ThreadStartParams::new();
+        params.cwd = Some(Some(input.cwd));
+        params.model = Some(Some(input.model));
+        params.ephemeral = Some(Some(true));
+        params.approval_policy = Some(Some(command::approval(true)));
+        params.sandbox = Some(Some(codex::SandboxMode::ReadOnly));
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/provider_adapter.rs#internal_sender_witness_native_commands_and_diagnostics
+        NativeRequest::Codex(Box::new(codex::ClientRequest::ThreadStart {
+            id: codex::RequestId::Variant1(Box::default()),
+            params,
+        }))
     }
 
     fn host_launch(input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
@@ -495,18 +473,15 @@ impl CodexAdapter {
 }
 
 impl ClaudeAdapter {
-    fn shape_thread_params(
+    fn start_thread(
         s: &Snapshot,
-        _: crate::thread_prepare::Method,
-        params: &mut Map<String, Value>,
-        instructions: &mut String,
-    ) -> Result<(), WorkerError> {
-        instructions.push_str(CLAUDE_SESSION_INSTRUCTIONS);
+        mut input: ThreadStartInput,
+    ) -> Result<NativeRequest, WorkerError> {
         let mut options = s.settings.claude_options.clone();
         if s.settings.role == crate::thread_prepare::Role::Reviewer {
             options.insert("permissionMode".into(), json!("plan"));
-            params.insert("approvalPolicy".into(), json!("on-request"));
-            params.insert("sandbox".into(), json!("read-only"));
+            input.approval_policy = Some(Some(command::approval(false)));
+            input.sandbox = Some(Some(codex::SandboxMode::ReadOnly));
         }
         if let Some(worktree) = &s.host_worktree {
             let mut environment = options
@@ -542,46 +517,74 @@ impl ClaudeAdapter {
         if !native_env.is_empty() {
             options.insert("env".into(), json!(native_env));
         }
-        params.insert("claude".into(), json!(options));
-        // A managed worker (a child agent) runs without the user's MCP servers.
+
+        input.claude = Some(options);
         if s.actor.parent_id.is_some() {
-            let Value::Object(wire) = json!(
-                studio_runtime_schema::provider_input::ClaudeBridgeSessionWire {
-                    user_mcp: Some(false)
-                }
-            ) else {
-                // The wire owner is a struct, so serialization always produces an object.
-                unreachable!("Claude session wire object");
-            };
-            params.extend(wire);
+            input.user_mcp = Some(false);
         }
-        Ok(())
-    }
-
-    fn shape_title_thread_params(_: &mut Map<String, Value>) -> Result<(), WorkerError> {
-        Ok(())
-    }
-
-    /// A single-line `/` or `$` user message is passed to Claude Code as a command.
-    fn shape_turn_params(
-        input: &TurnInput,
-        params: &mut Map<String, Value>,
-    ) -> Result<(), WorkerError> {
-        if let [event] = input.events.as_slice()
-            && event.kind == "user"
-            && !input.has_assets
-            && !event.text.contains('\n')
+        if s.frozen.is_none()
+            && let Some(Some(instructions)) = &mut input.developer_instructions
         {
-            let command = crate::event_write::python_strip(&event.text);
-            if command.starts_with(['/', '$']) {
-                params.insert("claudeCommand".into(), json!(command));
+            let browser = s
+                .guidance
+                .browser
+                .as_ref()
+                .and_then(|browser| browser.instructions.as_deref());
+            if let Some(browser) = browser {
+                let offset = instructions.len() - browser.len() - 1;
+                instructions.insert_str(offset, CLAUDE_SESSION_INSTRUCTIONS);
+            } else {
+                instructions.push_str(CLAUDE_SESSION_INSTRUCTIONS);
             }
         }
-        Ok(())
+        Ok(NativeRequest::Claude(BridgeCommand::Thread(Box::new(
+            input,
+        ))))
     }
-
-    fn edit_thread(agent: &Value, checkpoint: &Value) -> Result<ThreadRequest, WorkerError> {
-        Ok(fork_from_checkpoint(agent, checkpoint))
+    fn start_turn(
+        events: &TurnInput,
+        mut input: TurnStartInput,
+    ) -> Result<NativeRequest, WorkerError> {
+        if let [event] = events.events.as_slice()
+            && event.kind == "user"
+            && !events.has_assets
+            && !event.text.contains('\n')
+        {
+            let text = crate::event_write::python_strip(&event.text);
+            if text.starts_with(['/', '$']) {
+                input.claude_command = Some(text.into());
+            }
+        }
+        Ok(NativeRequest::Claude(BridgeCommand::Turn(Box::new(input))))
+    }
+    fn title(input: TitleInput) -> NativeRequest {
+        NativeRequest::Claude(BridgeCommand::Title {
+            cwd: input.cwd,
+            model: input.model,
+            ephemeral: true,
+        })
+    }
+    fn edit_thread(
+        agent: &EditAgent,
+        checkpoint: &Checkpoint,
+    ) -> Result<NativeRequest, WorkerError> {
+        let mut settings = command::edit_settings(agent);
+        Ok(if let Some(turn) = &checkpoint.turn_id {
+            settings.thread_id = Some(
+                checkpoint
+                    .thread_id
+                    .clone()
+                    .ok_or_else(|| refused("provider/missing-checkpoint-thread"))?,
+            );
+            settings.approval_policy = agent.approval_policy.clone();
+            settings.sandbox = agent.sandbox.clone();
+            NativeRequest::Claude(BridgeCommand::Fork {
+                settings: Box::new(settings),
+                last_turn_id: turn.clone(),
+            })
+        } else {
+            NativeRequest::Claude(BridgeCommand::Thread(Box::new(settings)))
+        })
     }
 
     fn host_launch(input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
@@ -643,7 +646,7 @@ impl ClaudeAdapter {
 }
 
 macro_rules! provider_adapter {
-    ($adapter:ident, $descriptor:ident, $decoder:path, $codec:path) => {
+    ($adapter:ident, $descriptor:ident, $codec:path) => {
         impl ProviderAdapter for $adapter {
             fn descriptor(&self) -> &'static ProviderDescriptor {
                 &$descriptor
@@ -651,58 +654,22 @@ macro_rules! provider_adapter {
             fn launch(&self, input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
                 let mut launch = Self::host_launch(input)?;
                 launch.spec.codec = $codec();
-                launch.spec.codec.decode = |bytes| $adapter.decode(bytes);
                 Ok(launch)
             }
-            fn encode(&self, command: ProviderCommand<'_>) -> Result<ThreadRequest, WorkerError> {
-                if !self.descriptor().supports(command.feature()) {
-                    return Err(refused("provider/unsupported-command"));
-                }
-                let (method, params, instructions) = match command {
-                    ProviderCommand::StartThread {
-                        snapshot,
-                        method,
-                        mut params,
-                        mut instructions,
-                    } => {
-                        Self::shape_thread_params(
-                            snapshot,
-                            method,
-                            &mut params,
-                            &mut instructions,
-                        )?;
-                        (
-                            match method {
-                                crate::thread_prepare::Method::Start => Method::ThreadStart,
-                                crate::thread_prepare::Method::Resume => Method::ThreadResume,
-                            },
-                            params,
-                            Some(instructions),
-                        )
+            fn encode(&self, command: ProviderCommand<'_>) -> Result<NativeRequest, WorkerError> {
+                let native = match command {
+                    ProviderCommand::StartThread { snapshot, input } => {
+                        Self::start_thread(snapshot, input)?
                     }
-                    ProviderCommand::StartTurn { input, mut params } => {
-                        Self::shape_turn_params(input, &mut params)?;
-                        (Method::TurnStart, params, None)
+                    ProviderCommand::StartTurn { input, params } => {
+                        Self::start_turn(input, params)?
                     }
-                    ProviderCommand::SetTitle { mut params } => {
-                        Self::shape_title_thread_params(&mut params)?;
-                        (Method::ThreadStart, params, None)
-                    }
+                    ProviderCommand::SetTitle { input } => Self::title(input),
                     ProviderCommand::EditThread { agent, checkpoint } => {
-                        return Self::edit_thread(agent, checkpoint);
+                        Self::edit_thread(agent, checkpoint)?
                     }
                 };
-                Ok(ThreadRequest {
-                    method,
-                    params: Value::Object(params),
-                    instructions,
-                })
-            }
-            fn decode(
-                &self,
-                bytes: &[u8],
-            ) -> Result<ProviderEvent, studio_runtime_providers::CodecError> {
-                $decoder(bytes)
+                Ok(native)
             }
         }
     };
@@ -710,33 +677,19 @@ macro_rules! provider_adapter {
 
 static CODEX_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
     kind: ProviderKind::Codex,
-    controls: ProviderKind::Codex.capabilities(),
-    features: &[
-        ProviderFeature::StartThread,
-        ProviderFeature::StartTurn,
-        ProviderFeature::SetTitle,
-        ProviderFeature::EditThread,
-        ProviderFeature::NativeHistory,
-        ProviderFeature::NativeRelease,
-        ProviderFeature::VoiceTools,
-        ProviderFeature::Daybreak,
-        ProviderFeature::WritableSandboxRoots,
-        ProviderFeature::TurnEndClosesSteer,
-        ProviderFeature::FrozenReasoningConfig,
-        ProviderFeature::UnsubmittedInspection,
-        ProviderFeature::NativeMcpConfiguration,
-        ProviderFeature::BrowserConfiguration,
-        ProviderFeature::BundledExecutable,
-        ProviderFeature::AccountSessionLogin,
-    ],
     default_model: studio_runtime_schema::provider_kind::CODEX_INITIAL_MODEL,
     pricing_vendor: "openai",
     sign_in_message: "Sign in to this Codex account first",
     account_changed_message: "The Codex account changed during authentication",
-    diagnostics: || ThreadRequest {
-        method: Method::ThreadLoadedList,
-        params: json!({"limit":100}),
-        instructions: None,
+    diagnostics: || {
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/provider_adapter.rs#internal_sender_witness_native_commands_and_diagnostics
+        NativeRequest::Codex(Box::new(codex::ClientRequest::ThreadLoadedList {
+            id: codex::RequestId::Variant1(Box::default()),
+            params: codex::ThreadLoadedListParams {
+                cursor: None,
+                limit: Some(Some(100)),
+            },
+        }))
     },
     project_diagnostics: |value, _| {
         let count = value
@@ -758,30 +711,11 @@ static CODEX_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
 };
 static CLAUDE_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
     kind: ProviderKind::Claude,
-    controls: ProviderKind::Claude.capabilities(),
-    features: &[
-        ProviderFeature::StartThread,
-        ProviderFeature::StartTurn,
-        ProviderFeature::SetTitle,
-        ProviderFeature::EditThread,
-        ProviderFeature::ToolsOnEveryTurn,
-        ProviderFeature::PreserveContextOnReattach,
-        ProviderFeature::SteerCompletionReceipts,
-        ProviderFeature::HostWorktreeFence,
-        ProviderFeature::IdleSummaryReturn,
-        ProviderFeature::PinnedAccountLaunch,
-        ProviderFeature::TurnCommitGuard,
-        ProviderFeature::AttributedInput,
-    ],
     default_model: CLAUDE_DEFAULT_MODEL,
     pricing_vendor: "anthropic",
     sign_in_message: studio_runtime_store::account_state::CLAUDE_SIGN_IN_MESSAGE,
     account_changed_message: "The Claude account changed during authentication",
-    diagnostics: || ThreadRequest {
-        method: Method::ClaudeDiagnostics,
-        params: json!({}),
-        instructions: None,
-    },
+    diagnostics: || NativeRequest::Claude(BridgeCommand::Diagnostics {}),
     project_diagnostics: |value, idle_limit| {
         let mut row = Map::new();
         row.insert("provider".into(), json!(ProviderKind::Claude.key()));
@@ -814,13 +748,11 @@ static CLAUDE_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
 provider_adapter!(
     CodexAdapter,
     CODEX_DESCRIPTOR,
-    studio_runtime_providers::decode_codex_frame,
     studio_runtime_process::provider_seam::ProviderCodec::codex
 );
 provider_adapter!(
     ClaudeAdapter,
     CLAUDE_DESCRIPTOR,
-    studio_runtime_providers::decode_frame,
     studio_runtime_process::provider_seam::ProviderCodec::default
 );
 
@@ -983,7 +915,35 @@ mod tests {
     use studio_json::json;
 
     #[test]
-    fn commands_are_declared_and_title_encoding_preserves_the_caller_fields() {
+    fn prepared_codex_command_retains_native_dto_and_exact_request_identity() {
+        use studio_runtime_providers::{Frame, RequestId};
+        let native = adapter(ProviderKind::Codex)
+            .encode(super::ProviderCommand::SetTitle {
+                input: super::TitleInput {
+                    cwd: "/project".into(),
+                    model: "chosen".into(),
+                },
+            })
+            .expect("typed command");
+        assert!(matches!(native, super::NativeRequest::Codex(_)));
+        let id = RequestId::String("durable:title:thread".into());
+        let first = native.frame(id.clone()).expect("native frame");
+        let retry = native.frame(id.clone()).expect("same request");
+        assert_eq!(first, retry);
+        assert_eq!(first.id(), Some(id));
+        let Frame::CodexClientRequest(request) = first else {
+            panic!("typed egress");
+        };
+        let super::codex::ClientRequest::ThreadStart { params, .. } = *request else {
+            panic!("native start");
+        };
+        assert_eq!(params.cwd, Some(Some("/project".into())));
+        assert_eq!(params.model, Some(Some("chosen".into())));
+        assert_eq!(params.ephemeral, Some(Some(true)));
+    }
+
+    #[test]
+    fn internal_sender_witness_native_commands_and_diagnostics() {
         use super::{ProviderCommand, ProviderFeature};
         for kind in ProviderKind::ALL {
             let adapter = adapter(kind);
@@ -995,28 +955,29 @@ mod tests {
             ] {
                 assert!(adapter.descriptor().supports(feature));
             }
-            let params = super::Map::from_iter([
-                (
-                    super::codex::ThreadStartParams::FIELD_CWD.into(),
-                    json!("/work"),
-                ),
-                (
-                    super::codex::ThreadStartParams::FIELD_MODEL.into(),
-                    json!("chosen"),
-                ),
-                (
-                    super::codex::ThreadStartParams::FIELD_EPHEMERAL.into(),
-                    json!(true),
-                ),
-            ]);
             let request = adapter
-                .encode(ProviderCommand::SetTitle { params })
+                .encode(ProviderCommand::SetTitle {
+                    input: super::TitleInput {
+                        cwd: "/work".into(),
+                        model: "chosen".into(),
+                    },
+                })
                 .expect("title command");
-            assert_eq!(request.method, super::Method::ThreadStart);
-            assert_eq!(request.params["cwd"], "/work");
-            assert_eq!(request.params["model"], "chosen");
-            assert_eq!(request.params["ephemeral"], true);
-            assert!(request.instructions.is_none());
+            crate::internal_sender_witness::request(request.method(), &request.params());
+            let projected = super::project_frame(
+                request
+                    .frame(studio_runtime_providers::RequestId::String(
+                        "projected".into(),
+                    ))
+                    .unwrap(),
+            );
+            assert_eq!(projected.method(), Some(request.method().as_str()));
+            let diagnostics = (adapter.descriptor().diagnostics)();
+            crate::internal_sender_witness::request(diagnostics.method(), &diagnostics.params());
+            assert_eq!(request.method(), super::Method::ThreadStart);
+            assert_eq!(request.params()["cwd"], "/work");
+            assert_eq!(request.params()["model"], "chosen");
+            assert_eq!(request.params()["ephemeral"], true);
         }
         assert!(!super::supports_record(
             &json!({"provider":"future"}),
@@ -1035,7 +996,7 @@ mod tests {
         };
         for kind in ProviderKind::ALL {
             assert_eq!(
-                adapter(kind).descriptor().controls,
+                adapter(kind).descriptor().kind.capabilities(),
                 [
                     Steer,
                     Rewind,
@@ -1051,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn both_adapters_fork_the_thread_from_the_turn_of_the_checkpoint() {
+    fn internal_sender_witness_both_adapters_fork_the_checkpoint() {
         use super::Method;
         let agent = json!({
             "cwd": "/work", "model": "m", "fastMode": true,
@@ -1061,13 +1022,15 @@ mod tests {
         for kind in ProviderKind::ALL {
             let request = adapter(kind)
                 .encode(super::ProviderCommand::EditThread {
-                    agent: &agent,
-                    checkpoint: &checkpoint,
+                    agent: &serde::Deserialize::deserialize(agent.clone()).expect("agent input"),
+                    checkpoint: &serde::Deserialize::deserialize(checkpoint.clone())
+                        .expect("checkpoint input"),
                 })
                 .expect("edit command");
-            assert_eq!(request.method, Method::ThreadFork, "{kind}");
+            crate::internal_sender_witness::request(request.method(), &request.params());
+            assert_eq!(request.method(), Method::ThreadFork, "{kind}");
             assert_eq!(
-                request.params,
+                request.params(),
                 json!({
                     "cwd": "/work", "serviceTier": "priority", "model": "m",
                     "config": {"k": 1}, "threadId": "t1", "lastTurnId": "u2",
@@ -1079,20 +1042,48 @@ mod tests {
     }
 
     #[test]
-    fn a_checkpoint_without_a_turn_starts_a_new_thread() {
+    fn internal_sender_witness_checkpoint_without_a_turn_starts_a_thread() {
         use super::Method;
         let agent = json!({"cwd": "/work", "model": ""});
         let request = adapter(ProviderKind::Codex)
             .encode(super::ProviderCommand::EditThread {
-                agent: &agent,
-                checkpoint: &json!({"turnId": null}),
+                agent: &serde::Deserialize::deserialize(agent).expect("agent input"),
+                checkpoint: &serde::Deserialize::deserialize(json!({"turnId": null}))
+                    .expect("checkpoint input"),
             })
             .expect("edit command");
-        assert_eq!(request.method, Method::ThreadStart);
+        crate::internal_sender_witness::request(request.method(), &request.params());
+        assert_eq!(request.method(), Method::ThreadStart);
         assert_eq!(
-            request.params,
+            request.params(),
             json!({"cwd": "/work", "serviceTier": "default", "config": {}})
         );
+    }
+
+    #[test]
+    fn edit_command_preserves_absent_and_null_permission_settings() {
+        for kind in ProviderKind::ALL {
+            for source in [
+                json!({"cwd":"/work"}),
+                json!({"cwd":"/work", "approvalPolicy":null, "sandbox":null}),
+            ] {
+                let agent =
+                    serde::Deserialize::deserialize(source.clone()).expect("stored edit input");
+                let checkpoint =
+                    serde::Deserialize::deserialize(json!({"threadId":"thread", "turnId":"turn"}))
+                        .expect("checkpoint");
+                let params = adapter(kind)
+                    .encode(super::ProviderCommand::EditThread {
+                        agent: &agent,
+                        checkpoint: &checkpoint,
+                    })
+                    .expect("edit command")
+                    .params();
+                for field in ["approvalPolicy", "sandbox"] {
+                    assert_eq!(params.get(field), source.get(field), "{kind}: {field}");
+                }
+            }
+        }
     }
 
     #[test]

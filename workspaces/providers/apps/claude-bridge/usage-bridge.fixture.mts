@@ -15,6 +15,7 @@ import {
   zeroResult,
   assistant,
   interruptedDelta,
+  contextUsage,
 } from "./usage-fixtures.ts";
 export function query({ prompt, options }: FixtureQuery) {
   const abort = new AbortController();
@@ -42,6 +43,7 @@ export function query({ prompt, options }: FixtureQuery) {
   ) => ({ type: "stream_event", event, parent_tool_use_id: parent });
   return {
     mcpServerStatus: async () => [],
+    getContextUsage: async () => contextUsage,
     reconnectMcpServer: async () => {},
     supportedModels: async () => [
       {

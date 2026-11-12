@@ -150,6 +150,7 @@ macro_rules! runtime_methods {
     Write => "write",
     ThreadIdleCompactionUpdated => "thread/idleCompaction/updated",
     ThreadShellPolicyUpdated => "thread/shellPolicy/updated",
+    ThreadContextUsageUpdated => "thread/contextUsage/updated",
     ProviderGenerationStarted => "provider/generationStarted",
         }
     };

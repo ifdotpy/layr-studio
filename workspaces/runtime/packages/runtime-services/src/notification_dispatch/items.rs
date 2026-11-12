@@ -345,6 +345,13 @@ pub(super) fn non_text(
         agent.tail = Some(suffix(review, 300));
     }
     let mut displayed = item.clone();
+    if started
+        && let Some(seconds) = item["elapsedSeconds"]
+            .as_f64()
+            .filter(|seconds| seconds.is_finite() && *seconds >= 0.)
+    {
+        displayed["progressMessage"] = json!(format!("Running for {seconds}s"));
+    }
     if kind == "commandExecution"
         && !started
         && item["aggregatedOutput"].is_null()
@@ -406,13 +413,21 @@ pub(super) fn tool_status(item: &Value, started: bool) -> TaskStatus {
 }
 
 pub(super) fn advance_reasoning(agent: &mut AgentRecord, params: &Value, at: f64) {
+    advance_reasoning_for_turn(agent, params["turnId"].as_str(), at);
+}
+
+pub(super) fn advance_reasoning_for_turn(
+    agent: &mut AgentRecord,
+    turn: Option<&str>,
+    at: f64,
+) -> bool {
     if agent.native_status.as_ref().and_then(|status| status.phase)
         == Some(studio_runtime_schema::agent_entity_nested::NativeStatusPhase::Retrying)
         && agent
             .native_status
             .as_ref()
             .and_then(|status| status.turn_id.as_deref())
-            == params["turnId"].as_str()
+            == turn
     {
         agent.native_status = None;
         agent.activity = Some(AgentActivity {
@@ -420,6 +435,9 @@ pub(super) fn advance_reasoning(agent: &mut AgentRecord, params: &Value, at: f64
             at: Some(at),
             ..Default::default()
         });
+        true
+    } else {
+        false
     }
 }
 

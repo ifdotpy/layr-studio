@@ -9,6 +9,7 @@ export default {
     name: "fast",
     exclude: HTTP_FIXTURE_TESTS,
     include: [
+      "src/components/conversation/transcript/Activity/Activity.progress.test.ts",
       "src/observed.test.ts",
       "src/observedNetwork.test.ts",
       "src/observedSites.test.ts",
@@ -223,6 +224,7 @@ export default {
       "src/components/agents/support/WorkerModelPicker.test.ts",
       "src/app/projects/newChatSettings.test.ts",
       "src/components/shell/integration-support/generatedAgentConsumers.render.test.ts",
+      "src/components/shell/NativeNotice/NativeNotice.provider.test.ts",
       "src/components/settings/models/support/modelOption.test.ts",
       "src/components/agents/ChatStatus/ChatStatus.chatActivity.test.ts",
       "src/sync/send.independent.test.ts",

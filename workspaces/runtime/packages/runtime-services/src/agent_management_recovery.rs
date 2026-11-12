@@ -700,7 +700,9 @@ async fn request(
             .as_str()
             .ok_or(Error::Invalid("Invalid release identity"))?
     );
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/agent_management_recovery.rs#internal_sender_witness_manual_tool_reset_unsubscribes_once_and_reports_unconfirmed_closure
     let receipt = session
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/agent_management_recovery.rs#internal_sender_witness_manual_tool_reset_unsubscribes_once_and_reports_unconfirmed_closure
         .provider_request(ProviderRequest {
             root_request_id: if method == Method::ThreadUnsubscribe {
                 auth.root_request_id.clone()
@@ -1031,6 +1033,7 @@ mod tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 crate::account_worker::retained::validate(
                     &crate::account_worker::retained::SessionRequest {
@@ -1543,7 +1546,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_tool_reset_unsubscribes_once_and_reports_unconfirmed_closure() {
+    async fn internal_sender_witness_manual_tool_reset_unsubscribes_once_and_reports_unconfirmed_closure()
+     {
         let (_directory, store, actor, session) = fixture().await;
         let session = Arc::new(session);
         let first = execute(

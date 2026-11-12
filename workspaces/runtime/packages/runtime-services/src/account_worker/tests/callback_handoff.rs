@@ -598,7 +598,7 @@ impl ProviderTaskFactory for WrittenStatusFactory {
 }
 
 #[tokio::test]
-async fn restart_queries_supervisor_for_saved_callback_attempt() {
+async fn internal_sender_witness_restart_queries_supervisor_for_saved_callback_attempt() {
     tokio::time::timeout(std::time::Duration::from_secs(15), async {
         #[derive(serde::Serialize)]
         struct Response {
@@ -652,6 +652,7 @@ async fn restart_queries_supervisor_for_saved_callback_attempt() {
             .await
             .expect("held callback");
         let mut peer = Peer::new();
+    peer.codec = ProviderCodec::codex();
         let queries = Arc::new(std::sync::Mutex::new(Vec::new()));
         peer.factory = Arc::new(WrittenStatusFactory {
             inner: peer.factory.clone(),

@@ -51,8 +51,12 @@ impl AccountSessionPort for Session {
                     assert_eq!(request.params, json!({"threadId":"thread","name":"server"}));
                     json!({})
                 }
-                "skills/list" => json!({"data":[]}),
+                "skills/list" => {
+                    assert_production_codec(&request);
+                    json!({"data":[]})
+                }
                 "mcpServerStatus/list" => {
+                    assert_production_codec(&request);
                     if request.params["cursor"] == "next" {
                         json!({"data":[{"name":"second","status":"connected"}],"nextCursor":null})
                     } else {
@@ -400,8 +404,15 @@ async fn mcp_reconnect_missing_account_is_not_classified_as_codex() {
 }
 
 #[tokio::test]
-async fn mcp_inventory_follows_cursor_and_returns_session_binding() {
-    let (_root, _store, app, session) = fixture("claude", false).await;
+async fn internal_sender_witness_catalog_discovery() {
+    for provider in ["codex", "claude"] {
+        catalog_discovery(provider).await;
+    }
+}
+async fn catalog_discovery(provider: &str) {
+    let (_root, _store, app, session) = fixture(provider, false).await;
+    let skills = request(&app, "/api/skills?agent=agent", None, true).await;
+    assert_eq!(skills.0, 200, "{skills:?}");
     let first = request(&app, "/api/capabilities?agent=agent", None, true).await;
     assert_eq!(first.0, 200, "{first:?}");
     assert_eq!(first.1["serversCursor"], "next");
@@ -531,4 +542,10 @@ async fn mcp_reconnect_migrated_raw_v4_key_replays_after_authorization() {
         409
     );
     assert!(session.calls.lock().unwrap().is_empty());
+}
+
+fn assert_production_codec(
+    request: &studio_runtime_services::account_session_runtime::ProviderRequest,
+) {
+    studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
 }

@@ -190,7 +190,9 @@ pub async fn dispatch_reserved_via_broker(
         connection: request.ticket.connection.clone(),
         generation: request.ticket.generation,
     };
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/context_repair_corpus.rs#internal_sender_witness_stop_then_repair_preserves_historical_attempt_ownership
     let receipt = port
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/context_repair_corpus.rs#internal_sender_witness_stop_then_repair_preserves_historical_attempt_ownership
         .provider_request(ProviderRequest {
             root_request_id: request.root_request_id.clone(),
             admitted_request: request.admitted_request.clone(),

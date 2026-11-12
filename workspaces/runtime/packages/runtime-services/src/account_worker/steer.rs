@@ -120,6 +120,7 @@ pub(super) fn validate_transport(
     turn: &str,
     compiled: &crate::turn_prepare::PreparedSubmission,
 ) -> Result<(), WorkerError> {
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
     let frame = Frame::Request(studio_runtime_providers::RequestFrame {
         id: RequestId::String(operation(&intent.account_key, &intent.attempt_id)),
         method: Method::TurnSteer,

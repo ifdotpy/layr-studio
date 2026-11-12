@@ -49,6 +49,7 @@ async fn enable_unload(state: &State, peer: &mut Peer) {
 
 async fn answer(peer: &mut Peer, method: &str, params: Value, result: Value) {
     let request = progress(peer.write(method)).await;
+    crate::internal_sender_witness::request(Method::from_wire(method).unwrap(), &request["params"]);
     assert_eq!(request["params"], params, "{method}");
     progress(peer.reply(&request, result)).await;
 }
@@ -59,6 +60,7 @@ async fn loaded(peer: &mut Peer) {
         .expect("loaded-thread snapshot is event-driven")
         .expect("provider session remains open");
     assert_eq!(wire.value["method"], "thread/loaded/list");
+    crate::internal_sender_witness::request(Method::ThreadLoadedList, &wire.value["params"]);
     assert_eq!(wire.value["params"], json!({"limit": 100}));
     let _ignored = wire.receipt.send(CommandReceipt::Written {
         written_at: None,
@@ -473,9 +475,11 @@ async fn typed_idle_evidence_preserves_pagination_extensions_and_unload_statuses
 }
 
 #[tokio::test]
-async fn idle_thread_unloads_then_the_session_stops_and_a_new_turn_resumes_it() {
+async fn internal_sender_witness_idle_thread_unloads_then_the_session_stops_and_a_new_turn_resumes_it()
+ {
     let state = State::new().await;
     let mut peer = Peer::new();
+    peer.codec = ProviderCodec::codex();
     let mut worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
@@ -493,6 +497,7 @@ async fn idle_thread_unloads_then_the_session_stops_and_a_new_turn_resumes_it() 
     idle_checks(&mut peer).await;
     // A failed unsubscribe proves nothing; the thread stays loaded.
     let unsubscribe = progress(peer.write("thread/unsubscribe")).await;
+    crate::internal_sender_witness::request(Method::ThreadUnsubscribe, &unsubscribe["params"]);
     let cursor = peer
         .frame(json!({"id": unsubscribe["id"], "error": {"code": -32000, "message": "busy"}}))
         .await;
@@ -1042,7 +1047,7 @@ async fn unrelated_request_in_flight(
     use crate::account_worker::retained::{DIAGNOSTICS_OPERATION_PREFIX, SessionRequest};
     let adapter = crate::provider_adapter::adapter(provider);
     let diagnostics = (adapter.descriptor().diagnostics)();
-    let method = diagnostics.method;
+    let method = diagnostics.method();
     let port = worker.retained_session();
     let call = SessionRequest {
         root_request_id: String::new(),
@@ -1054,7 +1059,7 @@ async fn unrelated_request_in_flight(
         transfer: None,
         deleted_actor_session: None,
         method,
-        params: diagnostics.params,
+        params: diagnostics.params(),
         deadline: (tokio::time::Instant::now() + Duration::from_secs(600)).into_std(),
     };
     let task = tokio::spawn(async move { port.request(call).await });

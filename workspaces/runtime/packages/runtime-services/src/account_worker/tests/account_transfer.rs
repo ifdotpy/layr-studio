@@ -42,6 +42,7 @@ impl AccountSessionPort for SuccessfulTransferSession {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        crate::internal_sender_witness::request(request.method, &request.params);
         use crate::account_session_runtime::{ProviderResponse, SessionOutcome};
         use studio_runtime_providers::{Method, RequestId, RequestTicket};
         self.requests
@@ -85,6 +86,7 @@ impl AccountSessionPort for SuccessfulTransferSession {
         &'a self,
         request: crate::account_session_runtime::TransferProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        crate::internal_sender_witness::request(request.method, &request.params);
         use crate::account_session_runtime::{ProviderResponse, SessionOutcome};
         use studio_runtime_providers::{Method, RequestId, RequestTicket};
         assert_eq!(request.method, Method::ThreadQueueList);
@@ -111,10 +113,13 @@ impl AccountSessionPort for SuccessfulTransferSession {
 }
 
 #[tokio::test]
-async fn transfer_completes_before_next_turn_on_destination() {
+async fn internal_sender_witness_transfer_completes_before_next_turn_on_destination() {
     let state = State::new().await;
     edit_agent(&state, |row| {
         row.account_key = "source".into();
+        row.worker_defaults = studio_runtime_schema::queue_command::Field::Value(
+            studio_json::from_str(r#"{"effort":"medium"}"#).unwrap(),
+        );
         row.execution_settings_account_key =
             studio_runtime_schema::queue_command::Field::Value("source".into());
     })
@@ -146,6 +151,7 @@ async fn transfer_completes_before_next_turn_on_destination() {
         .model_catalog
         .set_account_session(Some(session.clone()));
     let mut peer = Peer::new();
+    peer.codec = ProviderCodec::codex();
     let mut worker = peer
         .open_worker_with_resources(state.bridge.clone(), resources)
         .await;
@@ -165,6 +171,13 @@ async fn transfer_completes_before_next_turn_on_destination() {
         )
     });
     assert_eq!(turn["method"], "turn/start");
+    let transfer = stored_transfer(&state).await;
+    let defaults = &transfer["members"][state.agent.as_str()]["targetSettings"]["workerDefaults"];
+    assert!(
+        defaults.is_object(),
+        "destination settings preserve the nested workerDefaults object: {transfer}"
+    );
+    assert_eq!(defaults["effort"], "medium");
     assert_eq!(state.record().await["accountKey"], "default");
     assert_eq!(
         stored_transfer(&state).await["members"][state.agent.as_str()]["phase"],
@@ -414,6 +427,7 @@ impl AccountSessionPort for RefusingReads {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        crate::internal_sender_witness::request(request.method, &request.params);
         self.0
             .lock()
             .unwrap()

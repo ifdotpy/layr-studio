@@ -209,7 +209,7 @@ pub struct PreparationSnapshot {
     pub prepared_at: f64,
     pub operation_id: String,
 }
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ProviderInput {
     #[serde(rename = "text")]

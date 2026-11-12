@@ -20,6 +20,7 @@ pub(super) enum NoticeKind {
     Guardian,
     Config,
     Deprecation,
+    Rerouted,
     McpStartup,
     McpLogin,
     StrictReview,
@@ -55,6 +56,7 @@ impl NoticeKind {
             "guardianWarning" => Self::Guardian,
             "configWarning" => Self::Config,
             "deprecationNotice" => Self::Deprecation,
+            "model/rerouted" => Self::Rerouted,
             "mcpServer/startupStatus/updated" => Self::McpStartup,
             "mcpServer/oauthLogin/completed" => Self::McpLogin,
             "autoApprovalReview/strictReviewRequired" => Self::StrictReview,
@@ -104,6 +106,11 @@ fn notice(key: String, text: String, severity: &str, mut metadata: Value) -> Not
 pub(super) fn warning_text(kind: NoticeKind, params: &Value) -> String {
     let text = nonempty(params, "message", nonempty(params, "summary", ""));
     match kind {
+        NoticeKind::Rerouted => format!(
+            "Model changed from {} to {} (additional safety checks).",
+            nonempty(params, "fromModel", "the requested model"),
+            nonempty(params, "toModel", "another model"),
+        ),
         NoticeKind::StrictReview => {
             "Codex requires additional safety checks. Some tools may take longer.".into()
         }
@@ -408,6 +415,7 @@ pub(super) fn decide(
         | NoticeKind::Guardian
         | NoticeKind::Config
         | NoticeKind::Deprecation
+        | NoticeKind::Rerouted
         | NoticeKind::McpStartup
         | NoticeKind::McpLogin
         | NoticeKind::StrictReview
@@ -423,7 +431,7 @@ pub(super) fn decide(
                 key[..24].into(),
                 text,
                 "warning",
-                json!({"details":params["details"],"accountWide":params["threadId"].as_str().is_none_or(str::is_empty)}),
+                json!({"details":params.get("details").unwrap_or(&params["reason"]),"accountWide":params["threadId"].as_str().is_none_or(str::is_empty)}),
             ));
         }
     }
@@ -821,6 +829,40 @@ mod provider_label_tests {
 mod tests {
     use super::*;
     use crate::notification_dispatch::snapshot::NotificationSnapshot;
+
+    #[test]
+    fn reroute_is_a_readable_notice_for_the_current_turn() {
+        let snapshot = NotificationSnapshot::from_records(
+            AgentRecord::from_value(json!({"id":"agent","rootId":"agent","epoch":1,"status":"running","threadId":"thread","accountKey":"default","provider":"codex","turnId":"turn","inFlight":true,"compactions":0})).unwrap(), None, None,
+        ).unwrap();
+        let params = json!({"threadId":"thread","turnId":"turn","fromModel":"gpt-original","toModel":"gpt-routed","reason":"highRiskCyberActivity"});
+        let kind = NoticeKind::parse("model/rerouted").expect("reroutes have a notice projection");
+        let notice = decide(
+            &snapshot,
+            "model/rerouted",
+            kind,
+            &params,
+            "default",
+            1,
+            1.0,
+        )
+        .unwrap()
+        .item
+        .unwrap();
+        assert_eq!(
+            notice.text,
+            "Model changed from gpt-original to gpt-routed (additional safety checks)."
+        );
+        assert_eq!(notice.metadata["nativeNotice"], "warning");
+        let mut stale = params;
+        stale["turnId"] = json!("old-turn");
+        assert!(
+            decide(&snapshot, "model/rerouted", kind, &stale, "default", 1, 2.0)
+                .unwrap()
+                .item
+                .is_none()
+        );
+    }
 
     #[test]
     fn encoded_biological_error_is_normalized_in_published_notice() {

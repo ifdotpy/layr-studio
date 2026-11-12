@@ -91,10 +91,12 @@ async fn change_settings(state: &State, instructions: &str, input: &str) {
 }
 
 #[tokio::test]
-async fn thread_requests_register_the_chrome_skill_until_one_reply_confirms_it() {
+async fn internal_sender_witness_thread_requests_register_the_chrome_skill_until_one_reply_confirms_it()
+ {
     let homes = crate::browser::browser_homes();
     let state = State::new().await;
     let mut peer = Peer::new();
+    peer.codec = ProviderCodec::codex();
     let mut worker = ready_worker(&peer, &state, &homes).await;
 
     // An error leaves the roots unconfirmed; the thread request still goes out.

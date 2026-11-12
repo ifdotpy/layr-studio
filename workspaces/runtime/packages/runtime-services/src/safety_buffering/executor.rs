@@ -458,6 +458,7 @@ async fn drive(
             {
                 return operation_public(&operation);
             }
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/wave9_safety_buffering_executor.rs#internal_sender_witness_action_runs_python_corpus_stage_path_and_commits_each_intent_before_dispatch
             let request = ProviderRequest {
                 root_request_id: operation.initial.root_request_id.clone(),
                 admitted_request: operation.dispatch.admitted_request.clone(),
@@ -475,6 +476,7 @@ async fn drive(
             };
             let mut sent_retry = 0;
             let receipt = loop {
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/tests/wave9_safety_buffering_executor.rs#internal_sender_witness_action_runs_python_corpus_stage_path_and_commits_each_intent_before_dispatch
                 match provider.provider_request(request.clone()).await {
                     Ok(receipt) => {
                         validate_receipt(&receipt, &operation_id, &saved_scope)?;

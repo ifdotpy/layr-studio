@@ -133,6 +133,7 @@ async fn probe_provider_calls(
         }
         let status = tokio::time::timeout(
             std::time::Duration::from_secs(2),
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/callback_handoff.rs#internal_sender_witness_restart_queries_supervisor_for_saved_callback_attempt
             control.operation_status(studio_runtime_process::OperationId(row.id.clone())),
         )
         .await;
@@ -181,6 +182,7 @@ async fn probe_provider_callbacks(
     for operation in operations {
         let status = tokio::time::timeout(
             std::time::Duration::from_secs(2),
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/callback_handoff.rs#internal_sender_witness_restart_queries_supervisor_for_saved_callback_attempt
             control.operation_status(studio_runtime_process::OperationId(operation.clone())),
         )
         .await;

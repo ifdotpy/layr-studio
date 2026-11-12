@@ -58,8 +58,12 @@ impl AccountSessionPort for Session {
         &'a self,
         request: ProviderRequest,
     ) -> AccountSessionFuture<'a, SessionReceipt> {
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
         Box::pin(async move {
-            assert_eq!(request.method, Method::ThreadCompactStart);
+            assert!(matches!(
+                request.method,
+                Method::ThreadCompactStart | Method::ThreadSettingsUpdate
+            ));
             self.calls.lock().unwrap().push(request.params);
             Ok(SessionReceipt {
                 scope: Self::scope(),
@@ -374,7 +378,7 @@ async fn idle_claude_dispatches_once_and_restart_does_not_repeat() {
 }
 
 #[tokio::test]
-async fn a_dormant_account_worker_is_started_before_the_native_action() {
+async fn internal_sender_witness_a_dormant_account_worker_is_started_before_the_native_action() {
     // The account worker exits after its idle deadline. A native action (idle
     // compaction here, Compact or Review from /api/action through the same owner)
     // must start it again instead of answering "Not implemented".
@@ -735,4 +739,55 @@ async fn default_mode_arms_leads_only_and_an_explicit_mode_wins() {
         .await
         .unwrap();
     assert!(armed(false).await, "explicit Compact arms a worker");
+}
+
+#[tokio::test]
+async fn internal_sender_witness_native_settings() {
+    struct Settings;
+    impl native::Preparation for Settings {
+        fn prepare<'a>(
+            &'a self,
+            store: &'a RuntimeStore,
+            provider: &'a dyn AccountSessionPort,
+            request: &'a native::Request,
+            ticket: &'a studio_runtime_schema::start_attempt::ProviderTicket,
+            scope: &'a ConnectionScope,
+        ) -> native::PreparationFuture<'a> {
+            Box::pin(async move {
+                native::update_action_settings(
+                    store,
+                    provider,
+                    request,
+                    ticket,
+                    scope,
+                    json!({"threadId":ticket.thread}),
+                )
+                .await
+            })
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (store, episode) = fixture(root.path(), Mode::Compact).await;
+    let session = Session::default();
+    native::execute_provider_prepared(
+        &store,
+        &session,
+        &native::Request {
+            agent: "claude".into(),
+            request_id: episode.id,
+            action: Action::Compact,
+            context: episode.identity,
+        },
+        idle::wall_now(),
+        Arc::new(Gate),
+        Arc::new(studio_runtime_services::native_action_ports::NativeActionAcceptance),
+        &Settings,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        session.calls.lock().unwrap().len(),
+        2,
+        "settings and compact both dispatch through the actual owner"
+    );
 }

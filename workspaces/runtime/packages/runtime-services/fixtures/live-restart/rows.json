@@ -1,0 +1,2332 @@
+{
+  "runtime_account_transfers": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "leadId": "00000000-0000-4000-8000-000000000002",
+      "targetAccountKey": "fixture-3",
+      "status": "cancelled",
+      "created": 1793746604.7751586,
+      "members": {
+        "00000000-0000-4000-8000-000000000002": {
+          "phase": "blocked",
+          "sourceAccountKey": "fixture-4",
+          "sourceThreadId": "00000000-0000-4000-8000-000000000005",
+          "provider": "claude",
+          "name": "redacted",
+          "lazy": true,
+          "error": "redacted",
+          "source": {
+            "accountKey": "fixture-3",
+            "threadId": "00000000-0000-4000-8000-000000000005",
+            "epoch": 0,
+            "cwd": "/fixture/fixture-6"
+          },
+          "settings": {
+            "provider": "claude",
+            "model": "fixture-7",
+            "permissionMode": "bypassPermissions",
+            "effort": "medium",
+            "nativeEffort": "medium",
+            "fastMode": false,
+            "daybreakEnabled": false,
+            "cyberAccessProgram": "standard",
+            "workerDefaults": {
+              "model": "fixture-8",
+              "effort": "medium",
+              "fastMode": false,
+              "daybreakEnabled": false,
+              "delegationDepth": 1,
+              "cyberAccessProgram": "standard"
+            },
+            "claudeOptions": null,
+            "role": "orchestrator",
+            "profileInstructions": ""
+          },
+          "pendingSettings": null,
+          "sourcePendingSettings": null,
+          "pendingSettingsAccountKey": null,
+          "sourceClaudeOptions": null,
+          "providerReadIntents": {
+            "fixture-9": {
+              "operation": "fixture-9",
+              "account": "fixture-3",
+              "scope": {
+                "account": "fixture-3",
+                "connection": "00000000-0000-4000-8000-000000000010",
+                "generation": 49
+              },
+              "method": "model/list",
+              "params": {
+                "limit": 100
+              }
+            },
+            "fixture-11": {
+              "operation": "fixture-11",
+              "account": "fixture-4",
+              "scope": {
+                "account": "fixture-4",
+                "connection": "00000000-0000-4000-8000-000000000012",
+                "generation": 43
+              },
+              "method": "thread/read",
+              "params": {
+                "includeTurns": false,
+                "threadId": "00000000-0000-4000-8000-000000000005"
+              }
+            },
+            "fixture-13": {
+              "operation": "fixture-13",
+              "account": "fixture-4",
+              "scope": {
+                "account": "fixture-4",
+                "connection": "00000000-0000-4000-8000-000000000012",
+                "generation": 43
+              },
+              "method": "thread/backgroundTerminals/list",
+              "params": {
+                "limit": 100,
+                "threadId": "00000000-0000-4000-8000-000000000005"
+              }
+            },
+            "fixture-14": {
+              "operation": "fixture-14",
+              "account": "fixture-4",
+              "scope": {
+                "account": "fixture-4",
+                "connection": "00000000-0000-4000-8000-000000000012",
+                "generation": 43
+              },
+              "method": "claude/moveExport",
+              "params": {
+                "threadId": "00000000-0000-4000-8000-000000000005"
+              }
+            },
+            "fixture-15": {
+              "operation": "fixture-15",
+              "account": "fixture-4",
+              "scope": {
+                "account": "fixture-4",
+                "connection": "00000000-0000-4000-8000-000000000012",
+                "generation": 43
+              },
+              "method": "thread/queue/list",
+              "params": {
+                "threadId": "00000000-0000-4000-8000-000000000005"
+              }
+            },
+            "fixture-16": {
+              "operation": "fixture-16",
+              "account": "fixture-4",
+              "scope": {
+                "account": "fixture-4",
+                "connection": "00000000-0000-4000-8000-000000000012",
+                "generation": 43
+              },
+              "method": "thread/queue/list",
+              "params": {
+                "threadId": "00000000-0000-4000-8000-000000000005"
+              }
+            },
+            "fixture-17": {
+              "operation": "fixture-17",
+              "account": "fixture-4",
+              "scope": {
+                "account": "fixture-4",
+                "connection": "00000000-0000-4000-8000-000000000012",
+                "generation": 43
+              },
+              "method": "thread/unsubscribe",
+              "params": {
+                "threadId": "00000000-0000-4000-8000-000000000005"
+              }
+            }
+          },
+          "providerReadAdmissions": {
+            "fixture-17": {
+              "rootRequestId": "00000000-0000-4000-8000-000000000018",
+              "admittedRequest": null
+            }
+          },
+          "providerReadReceipts": {
+            "fixture-9": {
+              "certainty": "written",
+              "receipt": {
+                "operation": "fixture-9",
+                "scope": {
+                  "account": "fixture-3",
+                  "connection": "00000000-0000-4000-8000-000000000010",
+                  "generation": 49
+                },
+                "certainty": "written",
+                "ticket": {
+                  "generation": 49,
+                  "id": "fixture-19",
+                  "method": "model/list"
+                },
+                "notSentReason": null
+              },
+              "result": {
+                "kind": "reply",
+                "value": {
+                  "data": [
+                    {
+                      "defaultReasoningEffort": "medium",
+                      "description": "redacted",
+                      "displayName": "redacted",
+                      "hidden": false,
+                      "id": "fixture-20",
+                      "isDefault": true,
+                      "model": "default",
+                      "resolvedModel": "fixture-7",
+                      "serviceTiers": [
+                        {
+                          "id": "fixture-21",
+                          "name": "redacted"
+                        }
+                      ],
+                      "supportedReasoningEfforts": [
+                        {
+                          "description": "redacted",
+                          "reasoningEffort": "low"
+                        },
+                        {
+                          "description": "redacted",
+                          "reasoningEffort": "medium"
+                        }
+                      ]
+                    },
+                    {
+                      "defaultReasoningEffort": "medium",
+                      "description": "redacted",
+                      "displayName": "redacted",
+                      "hidden": false,
+                      "id": "fixture-22",
+                      "isDefault": false,
+                      "model": "fixture-22",
+                      "resolvedModel": "fixture-7",
+                      "serviceTiers": [
+                        {
+                          "id": "fixture-21",
+                          "name": "redacted"
+                        }
+                      ],
+                      "supportedReasoningEfforts": [
+                        {
+                          "description": "redacted",
+                          "reasoningEffort": "low"
+                        },
+                        {
+                          "description": "redacted",
+                          "reasoningEffort": "medium"
+                        }
+                      ]
+                    }
+                  ],
+                  "nextCursor": null
+                }
+              }
+            },
+            "fixture-11": {
+              "certainty": "written",
+              "receipt": {
+                "operation": "fixture-11",
+                "scope": {
+                  "account": "fixture-4",
+                  "connection": "00000000-0000-4000-8000-000000000012",
+                  "generation": 43
+                },
+                "certainty": "written",
+                "ticket": {
+                  "generation": 43,
+                  "id": "fixture-23",
+                  "method": "thread/read"
+                },
+                "notSentReason": null
+              },
+              "result": {
+                "kind": "reply",
+                "value": {
+                  "activePermissionProfile": null,
+                  "approvalPolicy": "never",
+                  "model": "fixture-7",
+                  "sandbox": null,
+                  "thread": {
+                    "createdAt": 1793703875,
+                    "cwd": "/fixture/fixture-6",
+                    "historyVersion": "fixture-24",
+                    "id": "00000000-0000-4000-8000-000000000005",
+                    "modelProvider": "claude",
+                    "name": null,
+                    "preview": "fixture-25",
+                    "status": {
+                      "type": "idle"
+                    },
+                    "turns": [],
+                    "updatedAt": 1793746608
+                  }
+                }
+              }
+            },
+            "fixture-13": {
+              "certainty": "written",
+              "receipt": {
+                "operation": "fixture-13",
+                "scope": {
+                  "account": "fixture-4",
+                  "connection": "00000000-0000-4000-8000-000000000012",
+                  "generation": 43
+                },
+                "certainty": "written",
+                "ticket": {
+                  "generation": 43,
+                  "id": "fixture-26",
+                  "method": "thread/backgroundTerminals/list"
+                },
+                "notSentReason": null
+              },
+              "result": {
+                "kind": "reply",
+                "value": {
+                  "data": [],
+                  "nextCursor": null,
+                  "terminals": []
+                }
+              }
+            },
+            "fixture-15": {
+              "certainty": "written",
+              "receipt": {
+                "operation": "fixture-15",
+                "scope": {
+                  "account": "fixture-4",
+                  "connection": "00000000-0000-4000-8000-000000000012",
+                  "generation": 43
+                },
+                "certainty": "written",
+                "ticket": {
+                  "generation": 43,
+                  "id": "fixture-27",
+                  "method": "thread/queue/list"
+                },
+                "notSentReason": null
+              },
+              "result": {
+                "kind": "reply",
+                "value": {
+                  "data": [],
+                  "items": [],
+                  "nextCursor": null
+                }
+              }
+            },
+            "fixture-16": {
+              "certainty": "written",
+              "receipt": {
+                "operation": "fixture-16",
+                "scope": {
+                  "account": "fixture-4",
+                  "connection": "00000000-0000-4000-8000-000000000012",
+                  "generation": 43
+                },
+                "certainty": "written",
+                "ticket": {
+                  "generation": 43,
+                  "id": "fixture-28",
+                  "method": "thread/queue/list"
+                },
+                "notSentReason": null
+              },
+              "result": {
+                "kind": "reply",
+                "value": {
+                  "data": [],
+                  "items": [],
+                  "nextCursor": null
+                }
+              }
+            },
+            "fixture-17": {
+              "certainty": "written",
+              "receipt": {
+                "operation": "fixture-17",
+                "scope": {
+                  "account": "fixture-4",
+                  "connection": "00000000-0000-4000-8000-000000000012",
+                  "generation": 43
+                },
+                "certainty": "written",
+                "ticket": {
+                  "generation": 43,
+                  "id": "fixture-29",
+                  "method": "thread/unsubscribe"
+                },
+                "notSentReason": null
+              },
+              "result": {
+                "kind": "reply",
+                "value": {
+                  "status": "unsubscribed"
+                }
+              }
+            }
+          }
+        }
+      },
+      "targetProvider": "claude",
+      "updated": 1793750383.1014645,
+      "scope": "team",
+      "requests": {
+        "00000000-0000-4000-8000-000000000001": {
+          "leadId": "00000000-0000-4000-8000-000000000002",
+          "targetAccountKey": "fixture-3",
+          "scope": "team",
+          "savedResponse": {
+            "id": "00000000-0000-4000-8000-000000000001",
+            "leadId": "00000000-0000-4000-8000-000000000002",
+            "targetAccountKey": "fixture-3",
+            "status": "pending",
+            "created": 1793746604.7751586,
+            "scope": "team",
+            "members": {
+              "00000000-0000-4000-8000-000000000002": {
+                "phase": "waiting",
+                "sourceAccountKey": "fixture-4",
+                "sourceThreadId": "00000000-0000-4000-8000-000000000005",
+                "provider": "claude",
+                "name": "redacted",
+                "error": null,
+                "waiting": "fixture-30",
+                "lazy": false
+              }
+            },
+            "total": 1,
+            "completed": 0,
+            "moved": 0,
+            "nativeHistoryPending": 0,
+            "movingNow": 0,
+            "canFinishHistory": false,
+            "waitingCount": 1,
+            "needsAttention": false,
+            "canRetry": false,
+            "interrupted": [],
+            "leftOnSource": [],
+            "blocked": [],
+            "targetProvider": "claude",
+            "updated": 1793746604.7751586
+          }
+        }
+      }
+    }
+  ],
+  "runtime_monitors": [
+    {
+      "activityAt": 1793621752.897445,
+      "activityGeneration": 0,
+      "agent": "00000000-0000-4000-8000-000000000031",
+      "bytes": 0,
+      "command": "redacted",
+      "configurationPending": false,
+      "created": 1793621752.8916106,
+      "cwd": "/fixture/fixture-32",
+      "epoch": 0,
+      "exitCode": 0,
+      "finished": 1793621757.8047895,
+      "id": "00000000-0000-4000-8000-000000000033",
+      "streamQueue": [],
+      "streamAckCursor": "fixture-34",
+      "rootRequestId": "00000000-0000-4000-8000-000000000035",
+      "requestId": "00000000-0000-4000-8000-000000000036",
+      "turnId": "00000000-0000-4000-8000-000000000037",
+      "outputEventCount": 0,
+      "outputEventIds": [],
+      "outputEventSequence": 0,
+      "outputPatterns": [],
+      "outputUtf8Pending": {},
+      "interactive": false,
+      "livenessCommand": "",
+      "log": "/fixture/fixture-38",
+      "operation": {
+        "accountKey": "default",
+        "agent": "00000000-0000-4000-8000-000000000031",
+        "connectionId": "00000000-0000-4000-8000-000000000039",
+        "epoch": 0,
+        "rootRequestId": "00000000-0000-4000-8000-000000000035",
+        "providerGeneration": 3
+      },
+      "stallTimeoutSeconds": 1800,
+      "stallWakeGeneration": -1,
+      "status": "completed",
+      "successExitCodes": [0],
+      "tail": "",
+      "timeout_ms": 3600000,
+      "wakeOn": "exit"
+    }
+  ],
+  "runtime_tasks": [
+    {
+      "id": "fixture-40",
+      "agent": "00000000-0000-4000-8000-000000000041",
+      "created": 1793632842.209004,
+      "itemId": "fixture-42",
+      "kind": "tool",
+      "outputTruncated": false,
+      "status": "interrupted",
+      "tail": "{\"content\":[{\"text\":\"redacted\",\"type\":\"text\"}]}",
+      "turnId": "00000000-0000-4000-8000-000000000043",
+      "type": "mcpToolCall",
+      "name": "redacted",
+      "arguments": "{\"description\":\"redacted\"}",
+      "finished": 1793632848.8286269,
+      "ownerEpoch": 0,
+      "server": "claude",
+      "sourceAccountKey": "fixture-4",
+      "sourceConnectionId": "00000000-0000-4000-8000-000000000044",
+      "sourceProvider": "claude",
+      "sourceThreadId": "00000000-0000-4000-8000-000000000045"
+    }
+  ],
+  "runtime_rules": [
+    {
+      "agent": "00000000-0000-4000-8000-000000000046",
+      "at": 1793725962.5007043,
+      "checks": 0,
+      "command": "redacted",
+      "created": 1793725932.5007043,
+      "epoch": 0,
+      "event": "worker_completed",
+      "fileActivityAt": 1793725932.5007043,
+      "fileGeneration": 0,
+      "id": "00000000-0000-4000-8000-000000000047",
+      "inFlight": false,
+      "intervalSeconds": 30,
+      "kind": "interval",
+      "livenessCommand": "",
+      "name": "redacted",
+      "nextAt": 1793725983.9312959,
+      "rootId": "00000000-0000-4000-8000-000000000002",
+      "stallTimeoutSeconds": 0,
+      "stallWakeGeneration": -1,
+      "status": "paused",
+      "text": "redacted",
+      "wakes": 0
+    }
+  ],
+  "runtime_tool_requests": [
+    {
+      "id": "00000000-0000-4000-8000-000000000048",
+      "originKey": "fixture-49",
+      "status": "queued",
+      "updated": 1794443075077,
+      "payload": {
+        "identity": {
+          "context": {
+            "agent": "00000000-0000-4000-8000-000000000050",
+            "account": "default",
+            "stream_id": "default",
+            "connection": "00000000-0000-4000-8000-000000000051",
+            "generation": 201,
+            "epoch": 0,
+            "thread": "00000000-0000-4000-8000-000000000052",
+            "turn": "00000000-0000-4000-8000-000000000053"
+          },
+          "rpc_id": 21,
+          "attempt": ""
+        },
+        "signature": "redacted",
+        "card": null,
+        "tool_request": "00000000-0000-4000-8000-000000000054",
+        "admission": {
+          "id": "[\"provider_callback\",[\"fixture-49\"]]",
+          "signature": "redacted",
+          "created": 1794443075077
+        },
+        "credential_refresh_admission": null,
+        "reply_identity": null,
+        "frame_fingerprint": null
+      },
+      "kind": "provider_callback"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000055",
+      "originKey": "fixture-56",
+      "status": "running",
+      "updated": 1793933081916,
+      "payload": {
+        "identity": {
+          "context": {
+            "agent": "",
+            "account": "default",
+            "stream_id": "default",
+            "connection": "fixture-57",
+            "generation": 73,
+            "epoch": 0,
+            "thread": "00000000-0000-4000-8000-000000000058",
+            "turn": "00000000-0000-4000-8000-000000000059"
+          },
+          "rpc_id": 35,
+          "attempt": ""
+        },
+        "signature": "redacted",
+        "card": null,
+        "tool_request": null,
+        "admission": {
+          "id": "[\"provider_callback\",[\"fixture-56\"]]",
+          "signature": "redacted",
+          "created": 1793933081916
+        },
+        "credential_refresh_admission": null,
+        "reply_identity": {
+          "context": {
+            "agent": "",
+            "account": "default",
+            "stream_id": "default",
+            "connection": "fixture-57",
+            "generation": 73,
+            "epoch": 0,
+            "thread": "00000000-0000-4000-8000-000000000058",
+            "turn": "00000000-0000-4000-8000-000000000059"
+          },
+          "rpc_id": 35,
+          "attempt": "00000000-0000-4000-8000-000000000060"
+        },
+        "frame_fingerprint": null
+      },
+      "kind": "provider_callback"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000061",
+      "originKey": "fixture-62",
+      "status": "unknown",
+      "updated": 1794194193724,
+      "payload": {
+        "identity": {
+          "context": {
+            "agent": "00000000-0000-4000-8000-000000000063",
+            "account": "default",
+            "stream_id": "default",
+            "connection": "00000000-0000-4000-8000-000000000064",
+            "generation": 137,
+            "epoch": 0,
+            "thread": "00000000-0000-4000-8000-000000000065",
+            "turn": "00000000-0000-4000-8000-000000000066"
+          },
+          "rpc_id": 531,
+          "attempt": ""
+        },
+        "signature": "redacted",
+        "card": null,
+        "tool_request": "00000000-0000-4000-8000-000000000067",
+        "admission": {
+          "id": "[\"provider_callback\",[\"fixture-62\"]]",
+          "signature": "redacted",
+          "created": 1794194193724
+        },
+        "credential_refresh_admission": null,
+        "reply_identity": {
+          "context": {
+            "agent": "00000000-0000-4000-8000-000000000063",
+            "account": "default",
+            "stream_id": "default",
+            "connection": "00000000-0000-4000-8000-000000000064",
+            "generation": 137,
+            "epoch": 0,
+            "thread": "00000000-0000-4000-8000-000000000065",
+            "turn": "00000000-0000-4000-8000-000000000066"
+          },
+          "rpc_id": 531,
+          "attempt": "00000000-0000-4000-8000-000000000068"
+        },
+        "frame_fingerprint": null
+      },
+      "kind": "provider_callback"
+    }
+  ],
+  "runtime_execution_runs": [
+    {
+      "id": "fixture-69",
+      "agent": "00000000-0000-4000-8000-000000000041",
+      "account": "fixture-4",
+      "epoch": 0,
+      "thread": "00000000-0000-4000-8000-000000000045",
+      "turn": "00000000-0000-4000-8000-000000000070",
+      "created": 1793581021.973124,
+      "record": "{\"id\":\"fixture-69\",\"agent\":\"00000000-0000-4000-8000-000000000041\",\"accountKey\":\"fixture-4\",\"epoch\":0,\"created\":1793581021.973124,\"status\":\"completed\",\"threadId\":\"00000000-0000-4000-8000-000000000045\",\"turnId\":\"00000000-0000-4000-8000-000000000070\",\"firstAttemptId\":\"fixture-71\",\"rootAttemptId\":\"fixture-71\",\"latestAttemptId\":\"fixture-71\",\"error\":null,\"finished\":1793581061.0927334,\"result\":\"\",\"resultItemId\":null}",
+      "status": "completed"
+    }
+  ],
+  "runtime_execution_attempts": [
+    {
+      "id": "fixture-71",
+      "run": "fixture-69",
+      "record": "{\"id\":\"fixture-71\",\"epoch\":0,\"accountKey\":\"fixture-4\",\"threadId\":\"00000000-0000-4000-8000-000000000045\",\"turnId\":\"00000000-0000-4000-8000-000000000070\",\"observedTurnId\":\"00000000-0000-4000-8000-000000000070\",\"events\":[\"00000000-0000-4000-8000-000000000072\"],\"submitted\":true,\"activeAtReservation\":false,\"created\":1793581021.973124,\"requestTicket\":\"fixture-73\",\"connectionId\":\"00000000-0000-4000-8000-000000000074\",\"connectionGeneration\":1,\"nativeOperationId\":\"fixture-75\",\"claudeInputRequest\":{\"clientUserMessageId\":\"00000000-0000-4000-8000-000000000072\",\"configuration\":{\"approvalPolicy\":\"never\",\"cwd\":\"/fixture/fixture-76\",\"effort\":\"medium\",\"idleCompactionMode\":\"compact_on_return\",\"idleSummaryRosterIncluded\":false,\"model\":\"fixture-22\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"serviceTier\":\"default\",\"threadId\":\"00000000-0000-4000-8000-000000000045\"},\"input\":[{\"inputOrigin\":\"human\",\"text\":\"redacted\",\"type\":\"text\"},{\"inputOrigin\":\"studio_event\",\"text\":\"redacted\",\"type\":\"text\"}],\"source\":{\"cwd\":\"/fixture/fixture-76\",\"rootId\":\"00000000-0000-4000-8000-000000000041\",\"parentId\":null,\"role\":\"orchestrator\",\"isLead\":true,\"model\":\"fixture-22\",\"effort\":\"medium\",\"nativeEffort\":\"medium\",\"fastMode\":false,\"permissionMode\":\"bypassPermissions\",\"compactions\":0},\"events\":[{\"id\":\"00000000-0000-4000-8000-000000000072\",\"kind\":\"user\",\"created\":1793581021.9671507,\"assets\":[],\"textHash\":\"redacted\"}],\"textHash\":\"redacted\",\"transcriptItemId\":\"fixture-77\"},\"settingsFixed\":true,\"admission\":{\"created\":1793581021974,\"id\":\"[\\\"fixture-78\\\",[\\\"00000000-0000-4000-8000-000000000041\\\"]]\",\"signature\":\"{\\\"agent\\\":\\\"00000000-0000-4000-8000-000000000041\\\",\\\"attempt\\\":\\\"fixture-71\\\",\\\"epoch\\\":0}\"},\"claimResult\":{\"agent\":{\"accountKey\":\"fixture-4\",\"agentMode\":\"multi\",\"agentModeRevision\":0,\"agentModeSupported\":true,\"autoWake\":true,\"capacity\":{\"kind\":\"automatic\",\"max\":64},\"compactions\":0,\"concurrency\":32,\"created\":1793580979.1557868,\"cwd\":\"/fixture/fixture-76\",\"cyberAccessProgram\":\"standard\",\"daybreakEnabled\":false,\"effort\":\"medium\",\"environment\":\"host\",\"epoch\":0,\"error\":null,\"events\":0,\"executionMode\":\"native\",\"executionSettingsAccountKey\":\"fixture-4\",\"fastMode\":false,\"hostProjectPath\":\"/fixture/fixture-76\",\"id\":\"00000000-0000-4000-8000-000000000041\",\"inFlight\":true,\"isLead\":true,\"layrReady\":false,\"model\":\"fixture-22\",\"name\":\"redacted\",\"naming\":\"pending_title\",\"permissionMode\":\"bypassPermissions\",\"profileId\":null,\"profileInstructions\":\"\",\"projectFolder\":null,\"projectId\":\"fixture-76\",\"projectServerId\":\"fixture-79\",\"prompt\":\"\",\"provider\":\"claude\",\"quickCreate\":true,\"quickCreateRequest\":\"{\\\"cwd\\\":\\\"/fixture/fixture-76\\\",\\\"daybreak_enabled\\\":false,\\\"effort\\\":\\\"medium\\\",\\\"fast_mode\\\":false,\\\"model\\\":\\\"fixture-22\\\",\\\"previous\\\":null,\\\"project_id\\\":\\\"fixture-76\\\",\\\"project_server_id\\\":\\\"fixture-79\\\",\\\"reuse_empty\\\":false,\\\"review_defaults\\\":{\\\"model\\\":\\\"fixture-80\\\",\\\"effort\\\":null},\\\"worker_defaults\\\":{\\\"model\\\":\\\"fixture-8\\\",\\\"effort\\\":\\\"high\\\",\\\"fast_mode\\\":false,\\\"daybreak_enabled\\\":false,\\\"account_key\\\":null,\\\"delegation_depth\\\":1},\\\"workspaceMode\\\":\\\"worktree\\\"}\",\"reviewDefaults\":{\"effort\":null,\"model\":\"fixture-80\"},\"role\":\"orchestrator\",\"rootId\":\"00000000-0000-4000-8000-000000000041\",\"startAttempt\":{\"accountKey\":\"fixture-4\",\"activeAtReservation\":false,\"created\":1793581021.973124,\"epoch\":0,\"events\":[\"00000000-0000-4000-8000-000000000072\"],\"id\":\"fixture-71\",\"submitted\":false},\"status\":\"starting\",\"subagentConcurrencyVersion\":2,\"tail\":\"\",\"turnEpoch\":0,\"usageResumeEnabled\":true,\"workerBaseBehindMain\":null,\"workerBaseCommit\":null,\"workerBaseMainRef\":null,\"workerBaseRef\":null,\"workerDefaults\":{\"cyberAccessProgram\":\"standard\",\"daybreakEnabled\":false,\"delegationDepth\":1,\"effort\":\"high\",\"fastMode\":false,\"model\":\"fixture-8\"},\"workspaceInGit\":false,\"workspaceMode\":\"worktree\",\"workspaceModeExplicit\":false,\"worktree\":false,\"worktreeReady\":false,\"worktreeWarning\":null},\"metadata\":{\"00000000-0000-4000-8000-000000000072\":{\"acceptedAt\":1793581021.9671507,\"assets\":[],\"delivery\":\"current_turn\",\"requestedDelivery\":\"current_turn\",\"timing\":{\"enqueuedAt\":1549924610986}}}},\"inputIdentity\":[{\"agent\":\"00000000-0000-4000-8000-000000000041\",\"created\":1793581021.9671507,\"epoch\":0,\"error\":null,\"id\":\"00000000-0000-4000-8000-000000000072\",\"kind\":\"user\",\"metadata\":{\"fixture-81\":1793581021.9671507,\"fixture-82\":[],\"fixture-83\":\"current_turn\",\"fixture-84\":\"current_turn\"},\"text\":\"redacted\"}],\"prepareAttemptId\":\"fixture-71\",\"providerSubmission\":{\"admission\":{\"created\":1793581021974,\"id\":\"[\\\"fixture-85\\\",\\\"fixture-86\\\"]\",\"signature\":\"redacted\"},\"attemptId\":\"fixture-71\",\"firstEventId\":\"00000000-0000-4000-8000-000000000072\",\"publicationOutcome\":{\"status\":\"written\"}},\"resultRunId\":\"fixture-69\",\"rootRequestId\":\"00000000-0000-4000-8000-000000000087\",\"runId\":\"fixture-69\",\"submission\":\"accepted\",\"turnStatus\":\"completed\"}",
+      "submission": "accepted",
+      "turn_status": "completed"
+    }
+  ],
+  "runtime_execution_nodes": [
+    {
+      "id": "fixture-88",
+      "run": "fixture-89",
+      "record": "{\"agentId\":\"00000000-0000-4000-8000-000000000090\",\"id\":\"fixture-88\",\"kind\":\"fixture-91\",\"runId\":\"fixture-89\",\"status\":\"queued\"}",
+      "status": "queued"
+    }
+  ],
+  "runtime_execution_effects": [
+    {
+      "id": "fixture-92",
+      "run": "fixture-89",
+      "kind": "spawn",
+      "reference": "00000000-0000-4000-8000-000000000090",
+      "record": "{\"attemptId\":\"fixture-93\",\"id\":\"fixture-92\",\"kind\":\"spawn\",\"referenceId\":\"00000000-0000-4000-8000-000000000090\",\"requestId\":\"00000000-0000-4000-8000-000000000094\",\"runId\":\"fixture-89\",\"status\":\"queued\"}",
+      "status": "queued",
+      "receipt_enum_guard": null
+    }
+  ],
+  "runtime_execution_inputs": [
+    {
+      "run": "fixture-69",
+      "event": "00000000-0000-4000-8000-000000000072"
+    }
+  ],
+  "runtime_account_state": [
+    {
+      "account": "fixture-3",
+      "next_generation": 31946,
+      "connection_generation": 31945,
+      "connection_id": "00000000-0000-4000-8000-000000000095",
+      "journal_ack": 1495,
+      "recovery_required": 0,
+      "streams": "{\"revision\":\"00000000-0000-4000-8000-000000000096\",\"metadata\":{\"fixture-97\":[],\"fixture-98\":[],\"fixture-99\":[],\"fixture-100\":[],\"fixture-101\":508780,\"fixture-102\":0,\"fixture-103\":[]}}",
+      "limits_observation": "{\"scope\":{\"account\":\"fixture-3\",\"connection\":\"00000000-0000-4000-8000-000000000095\",\"generation\":31945},\"cursor\":1490,\"at\":1794443022.7969944,\"readAt\":1794442938.6081347}",
+      "start_failure": null
+    },
+    {
+      "account": "fixture-4",
+      "next_generation": 206,
+      "connection_generation": 205,
+      "connection_id": "00000000-0000-4000-8000-000000000104",
+      "journal_ack": 3,
+      "recovery_required": 0,
+      "streams": "{\"revision\":\"00000000-0000-4000-8000-000000000105\",\"metadata\":{\"fixture-97\":[],\"fixture-98\":[],\"fixture-99\":[],\"fixture-100\":[],\"fixture-101\":691100,\"fixture-102\":0,\"fixture-103\":[]}}",
+      "limits_observation": "{\"scope\":{\"account\":\"fixture-4\",\"connection\":\"00000000-0000-4000-8000-000000000104\",\"generation\":205},\"cursor\":0,\"at\":1794442201.09327,\"readAt\":1794442201.09327}",
+      "start_failure": null
+    },
+    {
+      "account": "default",
+      "next_generation": 202,
+      "connection_generation": 201,
+      "connection_id": "00000000-0000-4000-8000-000000000051",
+      "journal_ack": 1491,
+      "recovery_required": 0,
+      "streams": "{\"revision\":\"00000000-0000-4000-8000-000000000106\",\"metadata\":{\"fixture-97\":[],\"fixture-98\":[{\"agent_id\":\"00000000-0000-4000-8000-000000000050\",\"account\":\"default\",\"generation\":201,\"thread\":\"00000000-0000-4000-8000-000000000052\",\"turn\":\"00000000-0000-4000-8000-000000000053\",\"item\":\"fixture-107\",\"method\":\"item/agentMessage/delta\"},{\"agent_id\":\"00000000-0000-4000-8000-000000000050\",\"account\":\"default\",\"generation\":201,\"thread\":\"00000000-0000-4000-8000-000000000052\",\"turn\":\"00000000-0000-4000-8000-000000000053\",\"item\":\"fixture-108\",\"method\":\"item/commandExecution/outputDelta\"}],\"fixture-99\":[],\"fixture-100\":[],\"fixture-101\":1241431,\"fixture-102\":0,\"fixture-103\":[]}}",
+      "limits_observation": "{\"scope\":{\"account\":\"default\",\"connection\":\"00000000-0000-4000-8000-000000000051\",\"generation\":201},\"cursor\":1483,\"at\":1794443072.2078874,\"readAt\":1794409562.4879916}",
+      "start_failure": null
+    },
+    {
+      "account": "fixture-109",
+      "next_generation": 0,
+      "connection_generation": null,
+      "connection_id": null,
+      "journal_ack": 0,
+      "recovery_required": 0,
+      "streams": "null",
+      "limits_observation": "{\"scope\":null,\"cursor\":0,\"checkedAt\":1793581042.9484136}",
+      "start_failure": "{\"at\":1793581042.9483037,\"reason\":\"fixture-110\"}"
+    }
+  ],
+  "runtime_outbox": [
+    {
+      "id": "fixture-111",
+      "kind": "provider_call",
+      "owner_kind": "agent",
+      "owner_id": "00000000-0000-4000-8000-000000000112",
+      "request_id": "[\"fixture-113\",[\"default\",\"00000000-0000-4000-8000-000000000112\"]]",
+      "signature": "redacted",
+      "status": "unknown",
+      "account": "default",
+      "stream_id": "default",
+      "generation": 3,
+      "ordinal": null,
+      "next_at": null,
+      "payload": "{\"family\":\"retained\",\"payload\":{\"call\":{\"root_request_id\":\"00000000-0000-4000-8000-000000000114\",\"admitted_request\":{\"id\":\"[\\\"fixture-113\\\",[\\\"default\\\",\\\"00000000-0000-4000-8000-000000000112\\\"]]\",\"signature\":\"redacted\",\"created\":1793632091250},\"scope\":{\"account\":\"default\",\"connection\":\"00000000-0000-4000-8000-000000000039\",\"generation\":3},\"operation\":\"fixture-115\",\"actor\":{\"agent\":\"00000000-0000-4000-8000-000000000112\",\"epoch\":0},\"transfer\":null,\"deleted_actor_session\":null,\"method\":\"command/exec\",\"params\":{\"command\":[\"redacted\",\"redacted\"],\"cwd\":\"/fixture/fixture-116\",\"processId\":\"00000000-0000-4000-8000-000000000117\",\"sandboxPolicy\":{\"type\":\"dangerFullAccess\"},\"streamStdoutStderr\":true,\"timeoutMs\":1800000}},\"request\":{\"id\":\"fixture-111\",\"generation\":3,\"method\":\"command/exec\",\"operation\":\"fixture-111\",\"thread\":null,\"lightweight\":true,\"deadline\":14795627,\"unknown\":false,\"remoteId\":null},\"admitted\":{\"id\":\"[\\\"fixture-113\\\",[\\\"default\\\",\\\"00000000-0000-4000-8000-000000000112\\\"]]\",\"signature\":\"redacted\",\"created\":1793632091250},\"written\":true,\"outcome\":{\"result\":\"Unknown\",\"cursor\":0,\"committed_ack\":{\"stream_id\":\"default\",\"generation\":3,\"cursor\":0}}}}",
+      "created": 1793632091250,
+      "target": null
+    },
+    {
+      "id": "fixture-56",
+      "kind": "provider_callback",
+      "owner_kind": "task",
+      "owner_id": "00000000-0000-4000-8000-000000000055",
+      "request_id": "[\"provider_callback\",[\"fixture-56\"]]",
+      "signature": "redacted",
+      "status": "submitted",
+      "account": "default",
+      "stream_id": "default",
+      "generation": 73,
+      "ordinal": null,
+      "next_at": null,
+      "payload": "{\"identity\":{\"context\":{\"agent\":\"\",\"account\":\"default\",\"stream_id\":\"default\",\"connection\":\"fixture-57\",\"generation\":73,\"epoch\":0,\"thread\":\"00000000-0000-4000-8000-000000000058\",\"turn\":\"00000000-0000-4000-8000-000000000059\"},\"rpc_id\":35,\"attempt\":\"00000000-0000-4000-8000-000000000060\"},\"body\":{\"result\":{\"contentItems\":[{\"text\":\"{\\\"limit\\\":5,\\\"query\\\":\\\"fixture-118\\\",\\\"results\\\":[]}\",\"type\":\"inputText\"},{\"text\":\"redacted\",\"type\":\"inputText\"}],\"success\":true}},\"card\":null,\"tool_request\":null,\"reopen\":null,\"delete_requested_at\":null,\"frame_fingerprint\":\"fixture-119\"}",
+      "created": 1793933081916,
+      "target": null
+    },
+    {
+      "id": "fixture-62",
+      "kind": "provider_callback",
+      "owner_kind": "task",
+      "owner_id": "00000000-0000-4000-8000-000000000061",
+      "request_id": "[\"provider_callback\",[\"fixture-62\"]]",
+      "signature": "redacted",
+      "status": "unknown",
+      "account": "default",
+      "stream_id": "default",
+      "generation": 137,
+      "ordinal": null,
+      "next_at": null,
+      "payload": "{\"identity\":{\"context\":{\"agent\":\"00000000-0000-4000-8000-000000000063\",\"account\":\"default\",\"stream_id\":\"default\",\"connection\":\"00000000-0000-4000-8000-000000000064\",\"generation\":137,\"epoch\":0,\"thread\":\"00000000-0000-4000-8000-000000000065\",\"turn\":\"00000000-0000-4000-8000-000000000066\"},\"rpc_id\":531,\"attempt\":\"00000000-0000-4000-8000-000000000068\"},\"body\":{\"result\":{\"contentItems\":[{\"text\":\"redacted\",\"type\":\"inputText\"},{\"text\":\"redacted\",\"type\":\"inputText\"}],\"success\":false}},\"card\":null,\"tool_request\":\"00000000-0000-4000-8000-000000000067\",\"reopen\":null,\"delete_requested_at\":null,\"frame_fingerprint\":null}",
+      "created": 1794194193724,
+      "target": null
+    }
+  ],
+  "runtime_events": [
+    {
+      "id": "00000000-0000-4000-8000-000000000120",
+      "agent": "00000000-0000-4000-8000-000000000002",
+      "kind": "user",
+      "text": "redacted",
+      "status": "delivered",
+      "created": 1793709481.3338764,
+      "epoch": 0,
+      "turn_id": "00000000-0000-4000-8000-000000000121",
+      "error": null
+    }
+  ],
+  "approvals": [
+    {
+      "id": "00000000-0000-4000-8000-000000000122",
+      "agent": "00000000-0000-4000-8000-000000000123",
+      "turn": "00000000-0000-4000-8000-000000000124",
+      "created": 1793631133.5294015,
+      "epoch": 0,
+      "kind": "question",
+      "request": "{\"kind\":\"question\",\"questions\":[{\"id\":\"fixture-125\",\"question\":\"fixture-126\",\"header\":\"fixture-127\",\"options\":[{\"label\":\"fixture-128\",\"description\":\"redacted\",\"preview\":null},{\"label\":\"fixture-129\",\"description\":\"redacted\",\"preview\":null}],\"is_secret\":false,\"multi_select\":false,\"is_other\":true}]}",
+      "delivery": "{\"rpc_id\":{\"kind\":\"text\",\"value\":\"fixture-130\"},\"account\":\"fixture-4\",\"connection\":\"00000000-0000-4000-8000-000000000131\",\"supervisor\":{\"generation\":11,\"state_dir\":null,\"handle\":null}}",
+      "detail": "{\"params\":{\"itemId\":\"fixture-132\",\"threadId\":\"00000000-0000-4000-8000-000000000133\"},\"preview\":{\"arguments\":{\"questions\":[{\"header\":\"fixture-127\",\"multiSelect\":false,\"options\":[{\"description\":\"redacted\",\"label\":\"fixture-128\"},{\"description\":\"redacted\",\"label\":\"fixture-129\"}],\"question\":\"fixture-126\"}]},\"id\":\"fixture-132\",\"server\":\"claude\",\"status\":\"inProgress\",\"tool\":\"fixture-134\",\"type\":\"mcpToolCall\"},\"answer_error\":null,\"host_close_reason\":null}",
+      "state": "answered",
+      "answer": "{\"kind\":\"answers\",\"answers\":[{\"id\":\"fixture-125\",\"answer\":[\"fixture-129\"]}]}",
+      "command": null,
+      "answered_by": "{\"kind\":\"owner\"}",
+      "at": 1793631299.2235246,
+      "since": null,
+      "reason": null,
+      "deferral_active": null,
+      "deferral_at": null,
+      "deferral_by": null,
+      "fire_at": null,
+      "hidden_at": null,
+      "hidden_by": null
+    }
+  ],
+  "runtime_agents": [
+    {
+      "accountKey": "fixture-4",
+      "activeExecution": {
+        "attemptId": "fixture-135",
+        "runId": "fixture-136"
+      },
+      "agentMode": "multi",
+      "agentModeRevision": 0,
+      "agentModeSupported": true,
+      "approvalPolicy": "never",
+      "autoWake": true,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 7,
+      "concurrency": 32,
+      "connectionRecovery": {
+        "at": 1794365442.3123138,
+        "outcome": "completed",
+        "previousError": "redacted",
+        "source": "fixture-137",
+        "turnId": "00000000-0000-4000-8000-000000000138"
+      },
+      "created": 1793703842.0498018,
+      "cwd": "/fixture/fixture-6",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "disconnectRecovery": {
+        "accountKey": "fixture-3",
+        "at": 1794365419.457725,
+        "autoWake": true,
+        "epoch": 1,
+        "source": "restart",
+        "startAttempt": {
+          "accountKey": "fixture-3",
+          "activeAtReservation": false,
+          "claudeInputRequest": {
+            "clientUserMessageId": "fixture-139",
+            "configuration": {
+              "approvalPolicy": "never",
+              "cwd": "/fixture/fixture-6",
+              "effort": "medium",
+              "idleCompactionMode": "compact_on_return",
+              "idleSummaryRosterIncluded": false,
+              "model": "fixture-7",
+              "sandboxPolicy": {
+                "type": "dangerFullAccess"
+              },
+              "serviceTier": "default",
+              "threadId": "00000000-0000-4000-8000-000000000005"
+            },
+            "events": [
+              {
+                "assets": [],
+                "created": 1794365257.6928763,
+                "id": "fixture-139",
+                "kind": "agent_message",
+                "textHash": "redacted"
+              },
+              {
+                "assets": [],
+                "created": 1794365260.5191724,
+                "id": "00000000-0000-4000-8000-000000000140",
+                "kind": "user",
+                "textHash": "redacted"
+              }
+            ],
+            "input": [
+              {
+                "inputOrigin": "studio_event",
+                "text": "redacted",
+                "type": "text"
+              },
+              {
+                "inputOrigin": "human",
+                "text": "redacted",
+                "type": "text"
+              }
+            ],
+            "source": {
+              "compactions": 6,
+              "cwd": "/fixture/fixture-6",
+              "effort": "medium",
+              "fastMode": false,
+              "isLead": true,
+              "model": "fixture-7",
+              "nativeEffort": "medium",
+              "parentId": null,
+              "permissionMode": "bypassPermissions",
+              "role": "orchestrator",
+              "rootId": "00000000-0000-4000-8000-000000000002"
+            },
+            "textHash": "redacted",
+            "transcriptItemId": "fixture-141"
+          },
+          "connectionGeneration": 31905,
+          "connectionId": "00000000-0000-4000-8000-000000000142",
+          "created": 1794365290.281162,
+          "epoch": 1,
+          "events": ["fixture-139", "00000000-0000-4000-8000-000000000140"],
+          "id": "fixture-143",
+          "nativeOperationId": "fixture-144",
+          "observedTurnId": "00000000-0000-4000-8000-000000000138",
+          "requestTicket": "fixture-145",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000005",
+          "turnId": "00000000-0000-4000-8000-000000000138"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000005",
+        "turnId": "00000000-0000-4000-8000-000000000138"
+      },
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 1,
+      "error": null,
+      "executionMode": "native",
+      "executionSettingsAccountKey": "fixture-4",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-146",
+      "id": "00000000-0000-4000-8000-000000000002",
+      "idleCache": {
+        "compactionEnabled": true,
+        "contextTokens": 648257,
+        "idleCompactionEnabled": true,
+        "lastActivityAt": 1794414025978,
+        "prefix": "fixture-147",
+        "requestId": "fixture-148",
+        "ttl": "fixture-149",
+        "warm": true
+      },
+      "idleCompactionEpisode": {
+        "attempt": "fixture-135",
+        "before": null,
+        "cache": {
+          "compactionEnabled": true,
+          "contextTokens": 648257,
+          "idleCompactionEnabled": true,
+          "lastActivityAt": 1794414025978,
+          "prefix": "fixture-147",
+          "requestId": "fixture-148",
+          "ttl": "fixture-149",
+          "warm": true
+        },
+        "expiresAt": 1794417625.978,
+        "fireAt": 1794417265.978,
+        "fired": true,
+        "firedAt": 1794417270.4421246,
+        "id": "00000000-0000-4000-8000-000000000150",
+        "identity": {
+          "accountKey": "fixture-4",
+          "epoch": 1,
+          "threadId": "00000000-0000-4000-8000-000000000005"
+        },
+        "limits": null,
+        "outcome": "newer_request",
+        "prefixInputs": ["fixture-6", "fixture-7"],
+        "unloadAt": null
+      },
+      "inFlight": false,
+      "isLead": true,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000151",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrCacheWarning": null,
+      "layrLine": "fixture-152",
+      "layrProjectId": "fixture-153",
+      "layrReady": true,
+      "layrStateId": "fixture-154",
+      "layrStoreRoot": "fixture-155",
+      "layrTurnSaves": {
+        "00000000-0000-4000-8000-000000000156": {
+          "stateId": "fixture-157",
+          "status": "saved"
+        }
+      },
+      "layrVersionWarning": null,
+      "model": "fixture-7",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-158",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-159",
+        "threadId": "00000000-0000-4000-8000-000000000005"
+      },
+      "nativeToolSource": "current",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-135",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000005", 7],
+        "versions": {
+          "roleSkill": "fixture-160"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "projectFolder": null,
+      "projectId": "fixture-146",
+      "projectServerId": "fixture-79",
+      "prompt": "",
+      "provider": "claude",
+      "quickCreate": true,
+      "quickCreateRequest": "{\"cwd\":\"/fixture/fixture-146\",\"effort\":\"medium\",\"model\":\"fixture-7\",\"previous\":\"00000000-0000-4000-8000-000000000161\",\"project_id\":\"fixture-146\",\"project_server_id\":\"fixture-79\",\"reuse_empty\":false,\"review_defaults\":{\"model\":\"fixture-80\",\"effort\":null},\"worker_defaults\":{\"model\":\"fixture-8\",\"effort\":\"medium\",\"fast_mode\":false,\"daybreak_enabled\":false,\"account_key\":null,\"delegation_depth\":1},\"workspaceMode\":\"layr-native\"}",
+      "readState": {
+        "read": true,
+        "revision": 327,
+        "threadId": "00000000-0000-4000-8000-000000000005",
+        "turnId": "00000000-0000-4000-8000-000000000151"
+      },
+      "restartRecovery": {
+        "accountKey": "fixture-3",
+        "at": 1794365419.457725,
+        "autoWake": true,
+        "automaticCheck": "fixture-162",
+        "epoch": 1,
+        "reconciledAt": 1794365442.3123138,
+        "stage": "finished",
+        "startAttempt": {
+          "accountKey": "fixture-3",
+          "activeAtReservation": false,
+          "claudeInputRequest": {
+            "clientUserMessageId": "fixture-139",
+            "configuration": {
+              "approvalPolicy": "never",
+              "cwd": "/fixture/fixture-6",
+              "effort": "medium",
+              "idleCompactionMode": "compact_on_return",
+              "idleSummaryRosterIncluded": false,
+              "model": "fixture-7",
+              "sandboxPolicy": {
+                "type": "dangerFullAccess"
+              },
+              "serviceTier": "default",
+              "threadId": "00000000-0000-4000-8000-000000000005"
+            },
+            "events": [
+              {
+                "assets": [],
+                "created": 1794365257.6928763,
+                "id": "fixture-139",
+                "kind": "agent_message",
+                "textHash": "redacted"
+              },
+              {
+                "assets": [],
+                "created": 1794365260.5191724,
+                "id": "00000000-0000-4000-8000-000000000140",
+                "kind": "user",
+                "textHash": "redacted"
+              }
+            ],
+            "input": [
+              {
+                "inputOrigin": "studio_event",
+                "text": "redacted",
+                "type": "text"
+              },
+              {
+                "inputOrigin": "human",
+                "text": "redacted",
+                "type": "text"
+              }
+            ],
+            "source": {
+              "compactions": 6,
+              "cwd": "/fixture/fixture-6",
+              "effort": "medium",
+              "fastMode": false,
+              "isLead": true,
+              "model": "fixture-7",
+              "nativeEffort": "medium",
+              "parentId": null,
+              "permissionMode": "bypassPermissions",
+              "role": "orchestrator",
+              "rootId": "00000000-0000-4000-8000-000000000002"
+            },
+            "textHash": "redacted",
+            "transcriptItemId": "fixture-141"
+          },
+          "connectionGeneration": 31905,
+          "connectionId": "00000000-0000-4000-8000-000000000142",
+          "created": 1794365290.281162,
+          "epoch": 1,
+          "events": ["fixture-139", "00000000-0000-4000-8000-000000000140"],
+          "id": "fixture-143",
+          "nativeOperationId": "fixture-144",
+          "observedTurnId": "00000000-0000-4000-8000-000000000138",
+          "requestTicket": "fixture-145",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000005",
+          "turnId": "00000000-0000-4000-8000-000000000138"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000005",
+        "turnId": "00000000-0000-4000-8000-000000000138"
+      },
+      "reviewDefaults": {
+        "model": "fixture-80"
+      },
+      "role": "orchestrator",
+      "rootId": "00000000-0000-4000-8000-000000000002",
+      "shellPolicyLastActiveAt": 1794414028.8154302,
+      "status": "completed",
+      "subagentConcurrencyVersion": 2,
+      "threadId": "00000000-0000-4000-8000-000000000005",
+      "turnEpoch": 1,
+      "usageResume": {
+        "accountKey": "fixture-3",
+        "authAttempt": 0,
+        "authRefreshMarker": null,
+        "cause": "rate_limit",
+        "dueAt": null,
+        "epoch": 1,
+        "failedAt": 1794353812.7024987,
+        "id": "fixture-163",
+        "plannedAt": null,
+        "reason": "fixture-164",
+        "resetAt": 1794361199.522,
+        "startedAt": 1794361201.3607924,
+        "status": "cancelled",
+        "taskClaims": [],
+        "threadId": "00000000-0000-4000-8000-000000000005",
+        "turnId": "00000000-0000-4000-8000-000000000165",
+        "updatedAt": 1794408696.0371146
+      },
+      "usageResumeEnabled": true,
+      "workerDefaults": {
+        "cyberAccessProgram": "standard",
+        "daybreakEnabled": false,
+        "delegationDepth": 1,
+        "effort": "medium",
+        "fastMode": false,
+        "model": "fixture-166"
+      },
+      "workspaceInGit": false,
+      "workspaceMode": "layr-native",
+      "workspaceModeExplicit": false,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountKey": "default",
+      "activeExecution": {
+        "attemptId": "fixture-167",
+        "runId": "fixture-168"
+      },
+      "approvalPolicy": "never",
+      "autoWake": false,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 0,
+      "created": 1793621349.6748693,
+      "cwd": "/fixture/fixture-32",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "deletedArchive": {
+        "at": 1793626390.3959773,
+        "by": "00000000-0000-4000-8000-000000000123",
+        "cleanupPending": false,
+        "epoch": 1,
+        "reason": "fixture-169",
+        "unassignedWork": [],
+        "unknownToolRequests": []
+      },
+      "deletedAt": 1793626390.3959773,
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 2,
+      "error": "redacted",
+      "executionMode": "native",
+      "executionSettingsAccountKey": "default",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-32",
+      "id": "00000000-0000-4000-8000-000000000031",
+      "inFlight": false,
+      "isLead": false,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000170",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrReady": false,
+      "model": "fixture-8",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-171",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-172",
+        "threadId": "00000000-0000-4000-8000-000000000173"
+      },
+      "nativeToolSource": "current",
+      "parentId": "00000000-0000-4000-8000-000000000123",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-174",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000173", 0],
+        "versions": {
+          "roleSkill": "fixture-175"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "prompt": "redacted",
+      "provider": "codex",
+      "role": "implementer",
+      "rootId": "00000000-0000-4000-8000-000000000123",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      },
+      "shellPolicyLastActiveAt": 1793624623.5698807,
+      "status": "paused",
+      "threadId": "00000000-0000-4000-8000-000000000173",
+      "turnEpoch": 0,
+      "usageResumeEnabled": true,
+      "workspaceInGit": true,
+      "workspaceMode": "shared",
+      "workspaceModeExplicit": true,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountKey": "fixture-4",
+      "activeExecution": {
+        "attemptId": "fixture-176",
+        "runId": "fixture-177"
+      },
+      "agentMode": "multi",
+      "agentModeRevision": 0,
+      "agentModeSupported": true,
+      "approvalPolicy": "never",
+      "autoWake": false,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 0,
+      "concurrency": 32,
+      "created": 1793580979.1557868,
+      "cwd": "/fixture/fixture-76",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "deletedAt": 1793717938.151151,
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 1,
+      "error": "redacted",
+      "executionMode": "native",
+      "executionSettingsAccountKey": "fixture-4",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-76",
+      "id": "00000000-0000-4000-8000-000000000041",
+      "idleCache": {
+        "compactionEnabled": true,
+        "contextTokens": 283783,
+        "idleCompactionEnabled": true,
+        "lastActivityAt": 1793636765277,
+        "prefix": "fixture-178",
+        "requestId": "fixture-179",
+        "ttl": "fixture-149",
+        "warm": true
+      },
+      "idleCompactionEpisode": {
+        "attempt": "fixture-176",
+        "before": null,
+        "cache": {
+          "compactionEnabled": true,
+          "contextTokens": 283783,
+          "idleCompactionEnabled": true,
+          "lastActivityAt": 1793636765277,
+          "prefix": "fixture-178",
+          "requestId": "fixture-179",
+          "ttl": "fixture-149",
+          "warm": true
+        },
+        "expiresAt": 1793640365.277,
+        "fireAt": 1793640005.277,
+        "fired": true,
+        "firedAt": 1793640005.854695,
+        "id": "00000000-0000-4000-8000-000000000180",
+        "identity": {
+          "accountKey": "fixture-4",
+          "epoch": 0,
+          "threadId": "00000000-0000-4000-8000-000000000045"
+        },
+        "limits": null,
+        "outcome": "newer_request",
+        "prefixInputs": ["fixture-76", "fixture-22"],
+        "unloadAt": null
+      },
+      "inFlight": false,
+      "isLead": true,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000181",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrReady": false,
+      "model": "fixture-22",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-182",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-183",
+        "threadId": "00000000-0000-4000-8000-000000000045"
+      },
+      "nativeToolSource": "current",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-176",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000045", 0],
+        "versions": {
+          "roleSkill": "fixture-184"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "projectFolder": null,
+      "projectId": "fixture-76",
+      "projectServerId": "fixture-79",
+      "prompt": "",
+      "provider": "claude",
+      "quickCreate": true,
+      "quickCreateRequest": "{\"cwd\":\"/fixture/fixture-76\",\"daybreak_enabled\":false,\"effort\":\"medium\",\"fast_mode\":false,\"model\":\"fixture-22\",\"previous\":null,\"project_id\":\"fixture-76\",\"project_server_id\":\"fixture-79\",\"reuse_empty\":false,\"review_defaults\":{\"model\":\"fixture-80\",\"effort\":null},\"worker_defaults\":{\"model\":\"fixture-8\",\"effort\":\"high\",\"fast_mode\":false,\"daybreak_enabled\":false,\"account_key\":null,\"delegation_depth\":1},\"workspaceMode\":\"worktree\"}",
+      "readState": {
+        "read": true,
+        "revision": 23,
+        "threadId": "00000000-0000-4000-8000-000000000045",
+        "turnId": "00000000-0000-4000-8000-000000000181"
+      },
+      "reviewDefaults": {
+        "model": "fixture-80"
+      },
+      "role": "orchestrator",
+      "rootId": "00000000-0000-4000-8000-000000000041",
+      "shellPolicyLastActiveAt": 1793636768.925197,
+      "status": "paused",
+      "subagentConcurrencyVersion": 2,
+      "threadId": "00000000-0000-4000-8000-000000000045",
+      "turnEpoch": 0,
+      "usageResumeEnabled": true,
+      "workerDefaults": {
+        "cyberAccessProgram": "standard",
+        "daybreakEnabled": false,
+        "delegationDepth": 1,
+        "effort": "high",
+        "fastMode": false,
+        "model": "fixture-8"
+      },
+      "workspaceInGit": false,
+      "workspaceMode": "worktree",
+      "workspaceModeExplicit": false,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountKey": "fixture-185",
+      "activeExecution": {
+        "attemptId": "fixture-186",
+        "runId": "fixture-187"
+      },
+      "agentArchive": {
+        "at": 1793756318.0167794,
+        "by": "00000000-0000-4000-8000-000000000002",
+        "cleanupPending": false,
+        "epoch": 1,
+        "reason": "fixture-188",
+        "unassignedWork": [],
+        "unknownToolRequests": []
+      },
+      "approvalPolicy": "never",
+      "autoWake": false,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 2,
+      "created": 1793725036.713906,
+      "cwd": "/fixture/fixture-189",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "deletedAt": 1793756318.0167794,
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 1,
+      "error": null,
+      "executionMode": "native",
+      "executionSettingsAccountKey": "fixture-185",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-146",
+      "id": "00000000-0000-4000-8000-000000000046",
+      "inFlight": false,
+      "isLead": false,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000190",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrBaseState": "fixture-191",
+      "layrCacheWarning": null,
+      "layrLine": "fixture-192",
+      "layrProjectId": "fixture-153",
+      "layrReady": false,
+      "layrStateId": "fixture-193",
+      "layrStoreRoot": "fixture-155",
+      "layrTurnSaves": {
+        "00000000-0000-4000-8000-000000000194": {
+          "stateId": "fixture-195",
+          "status": "saved"
+        }
+      },
+      "layrVersionWarning": null,
+      "model": "fixture-8",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-196",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-197",
+        "threadId": "00000000-0000-4000-8000-000000000198"
+      },
+      "nativeToolSource": "current",
+      "parentId": "00000000-0000-4000-8000-000000000002",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-186",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000198", 2],
+        "versions": {
+          "roleSkill": "fixture-199"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "prompt": "redacted",
+      "provider": "codex",
+      "role": "implementer",
+      "rootId": "00000000-0000-4000-8000-000000000002",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      },
+      "shellPolicyLastActiveAt": 1793743557.5976782,
+      "status": "paused",
+      "threadId": "00000000-0000-4000-8000-000000000198",
+      "turnEpoch": 0,
+      "usageResumeEnabled": true,
+      "workspaceInGit": false,
+      "workspaceMode": "layr-native",
+      "workspaceModeExplicit": true,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountKey": "default",
+      "activeExecution": {
+        "attemptId": "fixture-200",
+        "runId": "fixture-201"
+      },
+      "approvalPolicy": "never",
+      "autoWake": true,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 1,
+      "connectionRecovery": {
+        "at": 1794442192.7722988,
+        "fixture-202": true,
+        "fixture-203": true,
+        "outcome": "interrupted",
+        "previousError": "redacted",
+        "source": "fixture-137",
+        "turnId": "00000000-0000-4000-8000-000000000204"
+      },
+      "created": 1794430559.1867073,
+      "cwd": "/fixture/fixture-205",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "disconnectRecovery": {
+        "accountKey": "default",
+        "at": 1794442134.6018114,
+        "autoWake": true,
+        "epoch": 0,
+        "source": "restart",
+        "startAttempt": {
+          "accountKey": "default",
+          "activeAtReservation": false,
+          "connectionGeneration": 199,
+          "connectionId": "00000000-0000-4000-8000-000000000206",
+          "created": 1794441863.387312,
+          "epoch": 0,
+          "events": ["00000000-0000-4000-8000-000000000207"],
+          "id": "fixture-208",
+          "nativeOperationId": "fixture-209",
+          "observedTurnId": "00000000-0000-4000-8000-000000000204",
+          "requestTicket": "fixture-210",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000052",
+          "turnId": "00000000-0000-4000-8000-000000000204"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000052",
+        "turnId": "00000000-0000-4000-8000-000000000204"
+      },
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 0,
+      "error": null,
+      "executionMode": "native",
+      "executionSettingsAccountKey": "default",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-76",
+      "id": "00000000-0000-4000-8000-000000000050",
+      "inFlight": true,
+      "isLead": false,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000204",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "interrupted",
+      "layrBaseState": "fixture-211",
+      "layrCacheWarning": null,
+      "layrLine": "fixture-212",
+      "layrProjectId": "fixture-213",
+      "layrReady": true,
+      "layrStateId": "fixture-214",
+      "layrStoreRoot": "fixture-155",
+      "layrTurnSaves": {
+        "00000000-0000-4000-8000-000000000215": {
+          "stateId": "fixture-216",
+          "status": "saved"
+        }
+      },
+      "layrVersionWarning": null,
+      "model": "fixture-166",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeResponseTurn": "00000000-0000-4000-8000-000000000053",
+      "nativeRoleGuidance": "fixture-217",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-218",
+        "threadId": "00000000-0000-4000-8000-000000000052"
+      },
+      "nativeToolSource": "current",
+      "parentId": "00000000-0000-4000-8000-000000000219",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-200",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000052", 0],
+        "versions": {
+          "roleSkill": "fixture-220"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "prompt": "redacted",
+      "provider": "codex",
+      "restartRecovery": {
+        "accountKey": "default",
+        "at": 1794442134.6018114,
+        "autoWake": true,
+        "automaticCheck": "fixture-221",
+        "epoch": 0,
+        "fixture-222": "fixture-223",
+        "reconciledAt": 1794442192.7722988,
+        "stage": "fixture-203",
+        "startAttempt": {
+          "accountKey": "default",
+          "activeAtReservation": false,
+          "connectionGeneration": 199,
+          "connectionId": "00000000-0000-4000-8000-000000000206",
+          "created": 1794441863.387312,
+          "epoch": 0,
+          "events": ["00000000-0000-4000-8000-000000000207"],
+          "id": "fixture-208",
+          "nativeOperationId": "fixture-209",
+          "observedTurnId": "00000000-0000-4000-8000-000000000204",
+          "requestTicket": "fixture-210",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000052",
+          "turnId": "00000000-0000-4000-8000-000000000204"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000052",
+        "turnId": "00000000-0000-4000-8000-000000000204"
+      },
+      "role": "implementer",
+      "rootId": "00000000-0000-4000-8000-000000000219",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      },
+      "shellPolicyLastActiveAt": 1794442195.3493567,
+      "startAttempt": {
+        "accountKey": "default",
+        "activeAtReservation": false,
+        "connectionGeneration": 201,
+        "connectionId": "00000000-0000-4000-8000-000000000051",
+        "created": 1794442194.633526,
+        "epoch": 0,
+        "events": ["fixture-223"],
+        "id": "fixture-200",
+        "nativeOperationId": "fixture-224",
+        "observedTurnId": "00000000-0000-4000-8000-000000000053",
+        "requestTicket": "fixture-225",
+        "settingsFixed": true,
+        "submitted": true,
+        "threadId": "00000000-0000-4000-8000-000000000052",
+        "turnId": "00000000-0000-4000-8000-000000000053"
+      },
+      "status": "running",
+      "threadId": "00000000-0000-4000-8000-000000000052",
+      "turnEpoch": 0,
+      "turnId": "00000000-0000-4000-8000-000000000053",
+      "usageResumeEnabled": true,
+      "workspaceInGit": false,
+      "workspaceMode": "layr-native",
+      "workspaceModeExplicit": false,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountKey": "default",
+      "agentArchive": {
+        "at": 1794205207.049721,
+        "by": "00000000-0000-4000-8000-000000000002",
+        "cleanupPending": false,
+        "epoch": 1,
+        "reason": "fixture-226",
+        "unassignedWork": [],
+        "unknownToolRequests": []
+      },
+      "approvalPolicy": "never",
+      "autoWake": false,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 0,
+      "created": 1794193796.5611289,
+      "cwd": "/fixture/fixture-227",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "deletedAt": 1794205207.049721,
+      "disconnectRecovery": {
+        "accountKey": "default",
+        "at": 1794205208.057329,
+        "autoWake": false,
+        "epoch": 0,
+        "startAttempt": {
+          "accountKey": "default",
+          "activeAtReservation": false,
+          "connectionGeneration": 137,
+          "connectionId": "00000000-0000-4000-8000-000000000064",
+          "created": 1794204971.7468433,
+          "epoch": 0,
+          "events": ["fixture-228"],
+          "id": "fixture-229",
+          "nativeOperationId": "fixture-230",
+          "observedTurnId": "00000000-0000-4000-8000-000000000231",
+          "requestTicket": "fixture-232",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000065",
+          "turnId": "00000000-0000-4000-8000-000000000231"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000065",
+        "turnId": "00000000-0000-4000-8000-000000000231"
+      },
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 1,
+      "error": null,
+      "executionMode": "native",
+      "executionSettingsAccountKey": "default",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-146",
+      "id": "00000000-0000-4000-8000-000000000063",
+      "inFlight": false,
+      "isLead": false,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000231",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrCacheWarning": null,
+      "layrLine": "fixture-233",
+      "layrProjectId": "fixture-153",
+      "layrReady": false,
+      "layrStateId": "fixture-234",
+      "layrStoreRoot": "fixture-155",
+      "layrTurnSaves": {
+        "00000000-0000-4000-8000-000000000066": {
+          "stateId": "fixture-235",
+          "status": "saved"
+        }
+      },
+      "layrVersionWarning": null,
+      "model": "fixture-166",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-236",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-218",
+        "threadId": "00000000-0000-4000-8000-000000000065"
+      },
+      "nativeToolSource": "current",
+      "parentId": "00000000-0000-4000-8000-000000000002",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-237",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000065", 0],
+        "versions": {
+          "roleSkill": "fixture-238"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "prompt": "redacted",
+      "provider": "codex",
+      "role": "implementer",
+      "rootId": "00000000-0000-4000-8000-000000000002",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      },
+      "shellPolicyLastActiveAt": 1794205124.890064,
+      "status": "paused",
+      "threadId": "00000000-0000-4000-8000-000000000065",
+      "turnEpoch": 0,
+      "usageResumeEnabled": true,
+      "workspaceInGit": false,
+      "workspaceMode": "layr-native",
+      "workspaceModeExplicit": true,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountKey": "default",
+      "activeExecution": {
+        "attemptId": "fixture-239",
+        "runId": "fixture-240"
+      },
+      "approvalPolicy": "never",
+      "autoWake": false,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 0,
+      "created": 1793631405.490324,
+      "cwd": "/fixture/fixture-116",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "deletedArchive": {
+        "at": 1793633493.9234178,
+        "by": "00000000-0000-4000-8000-000000000123",
+        "cleanupPending": false,
+        "epoch": 1,
+        "reason": "fixture-241",
+        "unassignedWork": [],
+        "unknownToolRequests": []
+      },
+      "deletedAt": 1793633493.9234178,
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 2,
+      "error": "redacted",
+      "executionMode": "native",
+      "executionSettingsAccountKey": "default",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-116",
+      "id": "00000000-0000-4000-8000-000000000112",
+      "inFlight": false,
+      "isLead": false,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000242",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrReady": false,
+      "model": "fixture-8",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-171",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-172",
+        "threadId": "00000000-0000-4000-8000-000000000243"
+      },
+      "nativeToolSource": "current",
+      "parentId": "00000000-0000-4000-8000-000000000123",
+      "permissionMode": "bypassPermissions",
+      "prepareAttempt": "fixture-244",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000243", 0],
+        "versions": {
+          "roleSkill": "fixture-175"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "prompt": "redacted",
+      "provider": "codex",
+      "role": "implementer",
+      "rootId": "00000000-0000-4000-8000-000000000123",
+      "sandbox": {
+        "type": "dangerFullAccess"
+      },
+      "shellPolicyLastActiveAt": 1793633490.7021322,
+      "status": "paused",
+      "threadId": "00000000-0000-4000-8000-000000000243",
+      "turnEpoch": 0,
+      "usageResumeEnabled": true,
+      "workspaceInGit": true,
+      "workspaceMode": "shared",
+      "workspaceModeExplicit": true,
+      "worktree": false,
+      "worktreeReady": false
+    },
+    {
+      "accountHistory": [
+        {
+          "accountKey": "fixture-4",
+          "provider": "claude",
+          "result": {
+            "approvalPolicy": "never",
+            "claude": {
+              "permissionMode": "bypassPermissions"
+            },
+            "config": {
+              "fixture-245": false,
+              "fixture-246": "fixture-247",
+              "fixture-248": true,
+              "fixture-249": "system",
+              "fixture-250": "fixture-251",
+              "fixture-252": true,
+              "fixture-253": 0,
+              "fixture-254": false,
+              "fixture-255": false,
+              "fixture-256": false,
+              "fixture-257": true,
+              "model_reasoning_effort": "medium"
+            },
+            "cwd": "/fixture/fixture-76",
+            "developerInstructions": "redacted",
+            "dynamicTools": [
+              {
+                "description": "redacted",
+                "inputSchema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "fixture-258": {
+                      "enum": ["submit", "read"],
+                      "type": "string"
+                    },
+                    "fixture-259": {
+                      "type": "string"
+                    },
+                    "fixture-260": {
+                      "enum": ["in_progress", "resolved"],
+                      "type": "string"
+                    },
+                    "fixture-261": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["action"],
+                  "type": "object"
+                },
+                "name": "redacted",
+                "type": "function"
+              },
+              {
+                "description": "redacted",
+                "inputSchema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "fixture-262": {
+                      "type": "string"
+                    },
+                    "fixture-263": {
+                      "maximum": 50,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "fixture-264": {
+                      "enum": ["team"],
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "type": "object"
+                },
+                "name": "redacted",
+                "type": "function"
+              }
+            ],
+            "model": "fixture-7",
+            "portableHistory": {
+              "bytes": 10043014,
+              "counts": {
+                "header": 1,
+                "native_thread": 1,
+                "native_turn_page": 26,
+                "studio_item": 2040
+              },
+              "path": "/fixture/fixture-265",
+              "sha256": "fixture-266",
+              "source": {
+                "accountKey": "fixture-4",
+                "agentId": "00000000-0000-4000-8000-000000000123",
+                "epoch": 0,
+                "threadId": "00000000-0000-4000-8000-000000000133"
+              },
+              "transferId": "00000000-0000-4000-8000-000000000267",
+              "version": 1
+            },
+            "sandbox": null,
+            "serviceTier": "default",
+            "thread": {
+              "createdAt": 1793651787,
+              "cwd": "/fixture/fixture-76",
+              "historyVersion": "fixture-268",
+              "id": "00000000-0000-4000-8000-000000000269",
+              "modelProvider": "claude",
+              "name": null,
+              "preview": "",
+              "status": {
+                "type": "idle"
+              },
+              "turns": [],
+              "updatedAt": 1793651787
+            }
+          },
+          "targetAccountKey": "fixture-3",
+          "targetProvider": "claude",
+          "targetThreadId": "00000000-0000-4000-8000-000000000269",
+          "threadId": "00000000-0000-4000-8000-000000000133",
+          "transferId": "00000000-0000-4000-8000-000000000267"
+        }
+      ],
+      "accountKey": "fixture-3",
+      "accountTransfer": {
+        "id": "00000000-0000-4000-8000-000000000267",
+        "targetAccountKey": "fixture-3",
+        "status": "completed",
+        "updated": 1793651786.9261525,
+        "scope": "team",
+        "finishHistory": true,
+        "total": 1,
+        "completed": 1,
+        "moved": 1,
+        "nativeHistoryPending": 0,
+        "movingNow": 0,
+        "canFinishHistory": false,
+        "waitingCount": 0,
+        "needsAttention": false,
+        "canRetry": false,
+        "interrupted": [],
+        "leftOnSource": [],
+        "blocked": [],
+        "waiting": null
+      },
+      "activeExecution": {
+        "attemptId": "fixture-270",
+        "runId": "fixture-271"
+      },
+      "agentMode": "multi",
+      "agentModeRevision": 0,
+      "agentModeSupported": true,
+      "approvalPolicy": "never",
+      "autoWake": false,
+      "capacity": {
+        "kind": "automatic",
+        "max": 64
+      },
+      "compactions": 1,
+      "concurrency": 32,
+      "connectionRecovery": {
+        "at": 1793632261.5796843,
+        "outcome": "uncertain",
+        "previousError": "redacted",
+        "source": "fixture-137",
+        "turnId": "00000000-0000-4000-8000-000000000272"
+      },
+      "created": 1793619524.0706599,
+      "cwd": "/fixture/fixture-76",
+      "cyberAccessProgram": "standard",
+      "daybreakEnabled": false,
+      "deletedAt": 1793699575.3873854,
+      "disconnectRecovery": {
+        "accountKey": "fixture-4",
+        "at": 1793632260.4740112,
+        "autoWake": true,
+        "epoch": 0,
+        "source": "restart",
+        "startAttempt": {
+          "accountKey": "fixture-4",
+          "activeAtReservation": false,
+          "claudeInputRequest": {
+            "clientUserMessageId": "fixture-273",
+            "configuration": {
+              "approvalPolicy": "never",
+              "cwd": "/fixture/fixture-76",
+              "effort": "medium",
+              "idleCompactionMode": "compact_on_return",
+              "idleSummaryRosterIncluded": false,
+              "model": "fixture-7",
+              "sandboxPolicy": {
+                "type": "dangerFullAccess"
+              },
+              "serviceTier": "default",
+              "threadId": "00000000-0000-4000-8000-000000000133"
+            },
+            "events": [
+              {
+                "assets": [],
+                "created": 1793632257.497065,
+                "id": "fixture-273",
+                "kind": "child_result",
+                "textHash": "redacted"
+              }
+            ],
+            "input": [
+              {
+                "inputOrigin": "studio_event",
+                "text": "redacted",
+                "type": "text"
+              }
+            ],
+            "source": {
+              "compactions": 0,
+              "cwd": "/fixture/fixture-76",
+              "effort": "medium",
+              "fastMode": false,
+              "isLead": true,
+              "model": "fixture-7",
+              "nativeEffort": "medium",
+              "parentId": null,
+              "permissionMode": "bypassPermissions",
+              "role": "orchestrator",
+              "rootId": "00000000-0000-4000-8000-000000000123"
+            },
+            "textHash": "redacted",
+            "transcriptItemId": "fixture-274"
+          },
+          "connectionGeneration": 11,
+          "connectionId": "00000000-0000-4000-8000-000000000131",
+          "created": 1793632257.510303,
+          "epoch": 0,
+          "events": ["fixture-273"],
+          "id": "fixture-275",
+          "nativeOperationId": "fixture-276",
+          "observedTurnId": "00000000-0000-4000-8000-000000000272",
+          "requestTicket": "fixture-277",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000133",
+          "turnId": "00000000-0000-4000-8000-000000000272"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000133",
+        "turnId": "00000000-0000-4000-8000-000000000272"
+      },
+      "effort": "medium",
+      "environment": "host",
+      "epoch": 1,
+      "error": "redacted",
+      "executionMode": "native",
+      "executionSettingsAccountKey": "fixture-3",
+      "fastMode": false,
+      "hostProjectPath": "/fixture/fixture-76",
+      "id": "00000000-0000-4000-8000-000000000123",
+      "idleCache": {
+        "compactionEnabled": true,
+        "contextTokens": 103560,
+        "idleCompactionEnabled": true,
+        "lastActivityAt": 1793694322601,
+        "prefix": "fixture-278",
+        "requestId": "fixture-279",
+        "ttl": "fixture-149",
+        "warm": true
+      },
+      "idleCompactionEpisode": {
+        "attempt": "fixture-270",
+        "before": null,
+        "cache": {
+          "compactionEnabled": true,
+          "contextTokens": 103560,
+          "idleCompactionEnabled": true,
+          "lastActivityAt": 1793694322601,
+          "prefix": "fixture-278",
+          "requestId": "fixture-279",
+          "ttl": "fixture-149",
+          "warm": true
+        },
+        "expiresAt": 1793697922.601,
+        "fireAt": 1793695202.7888525,
+        "fired": true,
+        "firedAt": 1793695203.4268813,
+        "id": "00000000-0000-4000-8000-000000000280",
+        "identity": {
+          "accountKey": "fixture-3",
+          "epoch": 0,
+          "threadId": "00000000-0000-4000-8000-000000000269"
+        },
+        "limits": null,
+        "outcome": "small",
+        "prefixInputs": ["fixture-76", "fixture-7"],
+        "unloadAt": 1793695232.7888525
+      },
+      "inFlight": false,
+      "isLead": true,
+      "lastCompletedTurn": "00000000-0000-4000-8000-000000000281",
+      "lastCompletedTurnError": null,
+      "lastCompletedTurnStatus": "completed",
+      "layrReady": false,
+      "model": "fixture-7",
+      "name": "redacted",
+      "naming": "automatic",
+      "nativeEffort": "medium",
+      "nativeRoleGuidance": "fixture-282",
+      "nativeTeleportTool": "orchestration_teleport",
+      "nativeToolCatalog": {
+        "digest": "fixture-183",
+        "threadId": "00000000-0000-4000-8000-000000000133"
+      },
+      "nativeToolSource": "current",
+      "pendingSettingsAccountKey": null,
+      "permissionMode": "bypassPermissions",
+      "portableHistory": {
+        "bytes": 10043014,
+        "counts": {
+          "header": 1,
+          "native_thread": 1,
+          "native_turn_page": 26,
+          "studio_item": 2040
+        },
+        "path": "/fixture/fixture-265",
+        "sha256": "fixture-266",
+        "source": {
+          "accountKey": "fixture-4",
+          "agentId": "00000000-0000-4000-8000-000000000123",
+          "epoch": 0,
+          "threadId": "00000000-0000-4000-8000-000000000133"
+        },
+        "transferId": "00000000-0000-4000-8000-000000000267",
+        "version": 1
+      },
+      "prepareAttempt": "fixture-283",
+      "preparedContext": {
+        "epoch": ["00000000-0000-4000-8000-000000000269", 1],
+        "versions": {
+          "roleSkill": "fixture-284"
+        }
+      },
+      "profile": null,
+      "profileId": null,
+      "profileInstructions": "",
+      "projectFolder": null,
+      "projectId": "fixture-76",
+      "projectServerId": "fixture-79",
+      "prompt": "",
+      "provider": "claude",
+      "quickCreate": true,
+      "quickCreateRequest": "{\"cwd\":\"/fixture/fixture-76\",\"effort\":\"medium\",\"model\":\"fixture-7\",\"previous\":\"00000000-0000-4000-8000-000000000041\",\"project_id\":\"fixture-76\",\"project_server_id\":\"fixture-79\",\"reuse_empty\":false,\"review_defaults\":{\"model\":\"fixture-80\",\"effort\":null},\"worker_defaults\":{\"model\":\"fixture-8\",\"effort\":\"medium\",\"fast_mode\":false,\"daybreak_enabled\":false,\"account_key\":null,\"delegation_depth\":1},\"workspaceMode\":\"worktree\"}",
+      "readState": {
+        "read": true,
+        "revision": 70,
+        "threadId": "00000000-0000-4000-8000-000000000269",
+        "turnId": "00000000-0000-4000-8000-000000000281"
+      },
+      "restartRecovery": {
+        "accountKey": "fixture-4",
+        "at": 1793632260.4740112,
+        "autoWake": true,
+        "automaticCheck": "fixture-285",
+        "epoch": 0,
+        "reconciledAt": 1793632261.5796843,
+        "stage": "finished",
+        "startAttempt": {
+          "accountKey": "fixture-4",
+          "activeAtReservation": false,
+          "claudeInputRequest": {
+            "clientUserMessageId": "fixture-273",
+            "configuration": {
+              "approvalPolicy": "never",
+              "cwd": "/fixture/fixture-76",
+              "effort": "medium",
+              "idleCompactionMode": "compact_on_return",
+              "idleSummaryRosterIncluded": false,
+              "model": "fixture-7",
+              "sandboxPolicy": {
+                "type": "dangerFullAccess"
+              },
+              "serviceTier": "default",
+              "threadId": "00000000-0000-4000-8000-000000000133"
+            },
+            "events": [
+              {
+                "assets": [],
+                "created": 1793632257.497065,
+                "id": "fixture-273",
+                "kind": "child_result",
+                "textHash": "redacted"
+              }
+            ],
+            "input": [
+              {
+                "inputOrigin": "studio_event",
+                "text": "redacted",
+                "type": "text"
+              }
+            ],
+            "source": {
+              "compactions": 0,
+              "cwd": "/fixture/fixture-76",
+              "effort": "medium",
+              "fastMode": false,
+              "isLead": true,
+              "model": "fixture-7",
+              "nativeEffort": "medium",
+              "parentId": null,
+              "permissionMode": "bypassPermissions",
+              "role": "orchestrator",
+              "rootId": "00000000-0000-4000-8000-000000000123"
+            },
+            "textHash": "redacted",
+            "transcriptItemId": "fixture-274"
+          },
+          "connectionGeneration": 11,
+          "connectionId": "00000000-0000-4000-8000-000000000131",
+          "created": 1793632257.510303,
+          "epoch": 0,
+          "events": ["fixture-273"],
+          "id": "fixture-275",
+          "nativeOperationId": "fixture-276",
+          "observedTurnId": "00000000-0000-4000-8000-000000000272",
+          "requestTicket": "fixture-277",
+          "settingsFixed": true,
+          "submitted": true,
+          "threadId": "00000000-0000-4000-8000-000000000133",
+          "turnId": "00000000-0000-4000-8000-000000000272"
+        },
+        "supervisor": null,
+        "threadId": "00000000-0000-4000-8000-000000000133",
+        "turnId": "00000000-0000-4000-8000-000000000272"
+      },
+      "reviewDefaults": {
+        "model": "fixture-80"
+      },
+      "role": "orchestrator",
+      "rootId": "00000000-0000-4000-8000-000000000123",
+      "shellPolicyLastActiveAt": 1793694332.7741086,
+      "status": "paused",
+      "subagentConcurrencyVersion": 2,
+      "threadId": "00000000-0000-4000-8000-000000000269",
+      "threadProvenance": {
+        "00000000-0000-4000-8000-000000000269": {
+          "actor": {
+            "agent": "00000000-0000-4000-8000-000000000123",
+            "epoch": 0
+          },
+          "operation": "fixture-286",
+          "scope": {
+            "account": "fixture-3",
+            "connection": "00000000-0000-4000-8000-000000000287",
+            "generation": 29
+          }
+        }
+      },
+      "turnEpoch": 0,
+      "usageResumeEnabled": true,
+      "workerDefaults": {
+        "cyberAccessProgram": "standard",
+        "daybreakEnabled": false,
+        "delegationDepth": 1,
+        "effort": "medium",
+        "fastMode": false,
+        "model": "fixture-8"
+      },
+      "workspaceInGit": false,
+      "workspaceMode": "worktree",
+      "workspaceModeExplicit": false,
+      "worktree": false,
+      "worktreeReady": false,
+      "workerExcludedAccountKeys": [],
+      "reviewerExcludedAccountKeys": []
+    }
+  ]
+}

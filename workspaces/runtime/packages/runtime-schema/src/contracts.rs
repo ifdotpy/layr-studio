@@ -2098,8 +2098,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .into_generator();
         generator.subschema_for::<crate::provider_input::ToolDefinition>();
         generator.subschema_for::<crate::model_catalog::ProviderModel>();
-        generator.subschema_for::<crate::provider_input::ClaudeBridgeSessionWire>();
-        generator.subschema_for::<crate::provider_input::ClaudeBridgeTurnWire>();
         generator.subschema_for::<crate::provider_input::UnsupportedClaudeRateLimit>();
         generator.subschema_for::<crate::provider_input::items::FreshItem>();
         generator.subschema_for::<crate::provider_lifecycle::TerminalTurn>();
@@ -2391,41 +2389,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn bridge_wire_preserves_omission_and_explicit_model_null() {
-        use crate::provider_input::{ClaudeBridgeSessionWire, ClaudeBridgeTurnWire};
-        let mut generator = schemars::generate::SchemaSettings::draft2020_12()
-            .for_serialize()
-            .into_generator();
-        let session = generator.subschema_for::<ClaudeBridgeSessionWire>();
-        let model = generator.subschema_for::<ClaudeBridgeTurnWire>();
-        let definitions = generator.take_definitions(true);
-        let schema = |value| studio_json::json!({"$defs":definitions,"allOf":[value]});
-        let session_schema = schema(session);
-        let model_schema = schema(model);
-        let session = jsonschema::validator_for(&session_schema).expect("session schema");
-        let model = jsonschema::validator_for(&model_schema).expect("model schema");
-        for value in [
-            studio_json::json!(ClaudeBridgeSessionWire { user_mcp: None }),
-            studio_json::json!(ClaudeBridgeSessionWire {
-                user_mcp: Some(false)
-            }),
-        ] {
-            assert!(session.is_valid(&value), "{value}");
-        }
-        assert!(!session.is_valid(&studio_json::json!({"userMcp":null})));
-        for value in [
-            studio_json::json!(ClaudeBridgeTurnWire { model: None }),
-            studio_json::json!(ClaudeBridgeTurnWire { model: Some(None) }),
-            studio_json::json!(ClaudeBridgeTurnWire {
-                model: Some(Some("model".into()))
-            }),
-        ] {
-            assert!(model.is_valid(&value), "{value}");
-        }
-        assert!(!model.is_valid(&studio_json::json!({"model":false})));
     }
 
     #[test]

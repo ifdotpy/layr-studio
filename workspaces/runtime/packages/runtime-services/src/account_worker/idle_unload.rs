@@ -1220,6 +1220,7 @@ impl Worker {
         // frame to this worker, so keep reading events while it waits.
         let prepared = match self
             .pump_until(
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/idle_unload.rs#internal_sender_witness_idle_thread_unloads_then_the_session_stops_and_a_new_turn_resumes_it
                 control.prepare(RequestSpec {
                     id: RequestId::String(operation.clone()),
                     operation_id: OperationId(operation.clone()),

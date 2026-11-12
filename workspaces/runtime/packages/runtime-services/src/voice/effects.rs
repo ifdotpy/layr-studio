@@ -679,6 +679,7 @@ pub(crate) async fn end_voice_sessions_tracked(
             else {
                 return Err(VoiceProviderError::ContextChanged);
             };
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/voice/provider.rs#internal_sender_witness_voice_outbox_late_stop_proof_settles_deleted_owner_atomically
             let call = VoiceRpcCall {
                 operation_id: operation(kind, &row.payload.session_id)?,
                 root_request_id: root_request_id.clone(),

@@ -20,6 +20,7 @@ mod journal_publication;
 mod late_thread_reply;
 mod limits_updates;
 mod live_deltas;
+mod live_restart;
 mod login_completion;
 mod manual_release_closure;
 #[cfg(unix)]
@@ -657,7 +658,11 @@ impl Peer {
     ) -> AccountHandle {
         let mut launch =
             ProviderLaunchSpec::new(vec!["fake".into()], BTreeMap::new(), std::env::temp_dir());
-        launch.codec = self.codec;
+        launch.codec = if self.wire.per_thread_serialized {
+            studio_runtime_process::provider_seam::ProviderCodec::default()
+        } else {
+            self.codec
+        };
         start_account_worker_with_publication_sink(
             bridge,
             self.account.clone(),

@@ -333,6 +333,7 @@ impl SessionHandle {
         }
         let clock = options.clock.clone();
         let codec = options.launch.codec;
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
         let initial_frame = (codec.normalize)(&Frame::Request(RequestFrame {
             id: RequestId::Number(0),
             method: Method::Initialize,
@@ -435,6 +436,7 @@ impl SessionHandle {
         let actor = SessionTask {
             codec,
             state,
+            diagnostics: Default::default(),
             clock: clock.clone(),
             handle,
             records,
@@ -507,6 +509,7 @@ impl SessionControl {
         studio_runtime_providers::supervisor_protocol::ProviderOperationStatus,
         SessionTaskError,
     > {
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
         Ok(self
             .factory
             .operation_status(self.handle.clone(), operation, self.stop.clone())
@@ -522,7 +525,7 @@ impl SessionControl {
         (status.barrier_set, status.held_entries)
     }
 
-    pub async fn prepare(&self, spec: RequestSpec) -> Result<PreparedRequest, SessionTaskError> {
+    fn validate_request_spec(&self, spec: &RequestSpec) -> Result<(), SessionTaskError> {
         if *self.stop.subscribe().borrow() {
             return Err(SessionTaskError::Closed);
         }
@@ -539,12 +542,35 @@ impl SessionControl {
         {
             return Err(SessionTaskError::Invalid);
         }
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
+        Ok(())
+    }
+
+    pub async fn prepare(&self, spec: RequestSpec) -> Result<PreparedRequest, SessionTaskError> {
+        self.validate_request_spec(&spec)?;
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
         let frame = (self.codec.normalize)(&Frame::Request(RequestFrame {
             id: spec.id.clone(),
             method: spec.method,
             params: Some(spec.params.clone()),
             fields: Map::new(),
         }))?;
+        Box::pin(self.prepare_request_frame(spec, frame)).await
+    }
+
+    /// Admit a native request with the caller's exact durable identity.
+    pub async fn prepare_request_frame(
+        &self,
+        spec: RequestSpec,
+        frame: Frame,
+    ) -> Result<PreparedRequest, SessionTaskError> {
+        if frame.id().as_ref() != Some(&spec.id)
+            || frame.method() != Some(spec.method.as_str())
+            || !matches!(frame, Frame::Request(_) | Frame::CodexClientRequest(_))
+        {
+            return Err(SessionTaskError::Invalid);
+        }
+        self.validate_request_spec(&spec)?;
         let write = PreparedWrite::new_with_codec(spec.operation_id.clone(), &frame, self.codec)?;
         let spec_method = spec.method;
         let boundary_timing = (spec_method == Method::TurnStart).then(|| {
@@ -628,6 +654,7 @@ impl SessionControl {
         if !matches!(frame, Frame::Response { .. }) {
             return Err(SessionTaskError::Invalid);
         }
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/steer.rs#internal_sender_witness_steer
         let mut prepared = self.prepare_frame(operation, frame)?;
         prepared.callback_reply = true;
         Ok(prepared)
@@ -789,6 +816,7 @@ type InFlight = Pin<Box<dyn Future<Output = (Flight, CommandReceipt)> + Send>>;
 struct SessionTask {
     codec: ProviderCodec,
     state: SessionState,
+    diagnostics: studio_runtime_process::provider_stdio::CodexMethodDiagnostics,
     clock: SessionClock,
     handle: ProviderHandle,
     records: BTreeMap<RequestId, Record>,
@@ -925,6 +953,11 @@ impl SessionTask {
     /// it. Only the reply is kept; the terminal path writes nothing, so a
     /// request this reply would release stays queued and is reported unsent.
     fn tail_reply(&mut self, entry: &JournalEntry) -> Option<SessionOutcome> {
+        if let JournalPayload::Frame(frame) = &entry.payload
+            && !matches!(frame, Frame::Response { .. })
+        {
+            self.diagnostics.record(self.codec.kind, frame);
+        }
         let JournalPayload::Frame(frame @ Frame::Response { .. }) = &entry.payload else {
             return None;
         };
@@ -935,6 +968,15 @@ impl SessionTask {
             .state
             .receive_at(frame.clone(), entry.received_at_ms)
             .ok()?;
+        for action in &actions {
+            if let Action::Resolve {
+                outcome: RequestOutcome::Reply { body, .. },
+                ..
+            } = action
+            {
+                self.diagnostics.record_reply(self.codec.kind, body);
+            }
+        }
         actions.into_iter().find_map(|action| match action {
             Action::Resolve {
                 ticket,
@@ -1205,6 +1247,16 @@ impl SessionTask {
         tests::panic_at(4);
         self.apply_actions(false)?;
         if generation.0 == self.state.generation() {
+            if let Some(JournalPayload::Frame(frame)) = self
+                .retained
+                .pending
+                .as_ref()
+                .and_then(|event| event.journal.as_ref())
+                .map(|entry| &entry.payload)
+                && !matches!(frame, Frame::Response { .. })
+            {
+                self.diagnostics.record(self.codec.kind, frame);
+            }
             // Only a response changes session state; every other frame would
             // come back as a `Dispatch` action that this task ignores, so it is
             // neither cloned nor offered to the state machine.
@@ -1432,6 +1484,9 @@ impl SessionTask {
                     }
                 },
                 Action::Resolve { ticket, outcome } => {
+                    if let RequestOutcome::Reply { body, .. } = outcome {
+                        self.diagnostics.record_reply(self.codec.kind, body);
+                    }
                     let ticket = ticket.clone();
                     let outcome = outcome.clone();
                     if ticket.method == Method::Initialize

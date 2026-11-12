@@ -1,6 +1,37 @@
 use studio_runtime_providers::{Frame, decode_codex_line, encode_line};
 
 #[test]
+fn retained_codex_callbacks_keep_typed_and_unparsed_outcomes() {
+    for (wire, parsed) in [
+        (
+            br#"{"id":7,"method":"currentTime/read","params":{"threadId":"thread"}}"#.as_slice(),
+            true,
+        ),
+        (
+            br#"{"id":7,"method":"currentTime/read","params":{"threadId":42}}"#.as_slice(),
+            false,
+        ),
+    ] {
+        let stored = studio_runtime_providers::decode_frame(wire).unwrap();
+        let frame = studio_runtime_providers::normalize_codex_frame(&stored)
+            .expect("retained callback revalidation");
+        assert_eq!(frame.id(), stored.id());
+        assert_eq!(frame.method(), stored.method());
+        assert_eq!(matches!(frame, Frame::CodexServerRequest(_)), parsed);
+        assert_eq!(matches!(frame, Frame::KnownMethodUnparsed(_)), !parsed);
+    }
+}
+
+#[test]
+fn codex_normalization_refuses_internal_studio_methods() {
+    let frame = studio_runtime_providers::decode_frame(
+        br#"{"id":7,"method":"operationStatus","params":{"operation":"same-operation"}}"#,
+    )
+    .unwrap();
+    assert!(studio_runtime_providers::normalize_codex_frame(&frame).is_err());
+}
+
+#[test]
 fn probe_rejects_vendor_field_type_changes() {
     let malformed = br#"{"id":1,"result":{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":42}}"#;
     assert!(

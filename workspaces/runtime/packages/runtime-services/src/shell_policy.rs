@@ -465,6 +465,7 @@ async fn sweep(
                 scope: scope.clone(), operation: operation.clone(), actor: actor.clone(),
                 transfer: None, deleted_actor_session: None, method, params: params.clone(),
             })?;
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/shell_policy.rs#internal_sender_witness_sweep_reserves_scoped_actor_then_discards_exact_unsent_receipt
             Ok::<_,crate::account_worker::WorkerError>(ProviderRequest {
                 root_request_id, admitted_request: Some(admitted), account, operation, actor,
                 expected_scope: Some(scope), deleted_actor_session: None, method, params,
@@ -477,6 +478,7 @@ async fn sweep(
         if let (Some(admitted), Some(expected_scope), Ok(receipt)) = (
             admitted,
             expected_scope,
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/shell_policy.rs#internal_sender_witness_sweep_reserves_scoped_actor_then_discards_exact_unsent_receipt
             port.provider_request(request).await,
         ) && receipt.scope == expected_scope
             && receipt.operation == operation
@@ -512,6 +514,7 @@ mod receipt_tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 Ok(SessionReceipt {
                     scope: request.expected_scope.unwrap(),
@@ -549,6 +552,7 @@ mod receipt_tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 let mut scope = request.expected_scope.unwrap();
                 scope.generation += 1;
@@ -625,6 +629,7 @@ mod receipt_tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 let actor = request.actor.as_ref().unwrap();
                 let scope = request.expected_scope.clone().unwrap();
@@ -662,6 +667,11 @@ mod receipt_tests {
     }
 
     #[tokio::test]
+    async fn internal_sender_witness_sweep_reserves_scoped_actor_then_discards_exact_unsent_receipt()
+     {
+        sweep_reserves_scoped_actor_then_discards_exact_unsent_receipt().await;
+    }
+
     async fn sweep_reserves_scoped_actor_then_discards_exact_unsent_receipt() {
         let directory = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(directory.path())).await.unwrap();

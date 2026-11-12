@@ -19,6 +19,7 @@ pub(super) struct Commit {
     pub id: RequestId,
     pub context: Pending,
     pub params: Value,
+    pub native: Option<crate::provider_adapter::NativeRequest>,
     pub interrupt_turn: Option<(String, i64)>,
     pub submission: Option<crate::notification_dispatch::PreparedSubmission>,
     pub guard: Option<preparation::CommitGuard>,
@@ -88,6 +89,7 @@ impl Commit {
             id,
             context,
             params,
+            native,
             interrupt_turn,
             submission,
             guard,
@@ -97,15 +99,25 @@ impl Commit {
         let method = context.method;
         let mut prepared = match crate::diagnostics::measure_runtime_stage_async(
             "turn_submission.prepare",
-            control.prepare(RequestSpec {
-                id: id.clone(),
-                operation_id: OperationId(context.operation.clone()),
-                method,
-                params,
-                thread_id: context.intent.thread_id.clone(),
-                lightweight: method == Method::TurnInterrupt,
-                timeout_ms,
-            }),
+            async {
+                // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/account_worker/tests/account_transfer.rs#internal_sender_witness_transfer_completes_before_next_turn_on_destination
+                let spec = RequestSpec {
+                    id: id.clone(),
+                    operation_id: OperationId(context.operation.clone()),
+                    method,
+                    params,
+                    thread_id: context.intent.thread_id.clone(),
+                    lightweight: method == Method::TurnInterrupt,
+                    timeout_ms,
+                };
+                match native {
+                    Some(native) => {
+                        let frame = native.frame(spec.id.clone())?;
+                        control.prepare_request_frame(spec, frame).await
+                    }
+                    None => control.prepare(spec).await,
+                }
+            },
         )
         .await
         {

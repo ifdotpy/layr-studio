@@ -23,6 +23,8 @@ mod publication_collection;
 pub mod publication_payload;
 mod publication_schema;
 pub mod writer_queries;
+#[cfg(any(test, feature = "test-support"))]
+pub mod writer_query_plans;
 pub use cached_sql::{CachedSql, STATEMENT_CACHE_CAPACITY};
 pub use entity_publication::{EntityPublisher, PendingEntities, StudioErrorSources};
 mod feature_schema;
@@ -2288,118 +2290,122 @@ impl RuntimeStore {
         #[cfg(test)]
         let simulate_unknown_commit_after_success =
             Arc::clone(&self.simulate_unknown_commit_after_success);
-        let transaction_job =
-            move |writer: &mut Connection| -> Result<WriterTransactionOutcome<T, E>, StoreError> {
-                let _identity_registry_lease = identity_registry_lease;
-                table_change_flags.store(0, Ordering::Release);
-                resource_receipt_update_count.store(0, Ordering::Release);
-                resource_entity_update_count.store(0, Ordering::Release);
-                // Row precision is kept only for tables observed when this transaction starts.
-                CHANGED_ROWS.with_borrow_mut(|rows| {
-                    *rows = ChangedRowHints {
-                        complete: table_row_interest.load(Ordering::Acquire),
-                        ..ChangedRowHints::default()
-                    }
-                });
-                let transaction = writer
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .map_err(StoreError::from)?;
-                let initial_changes = transaction.total_changes();
-                if entity_publisher.is_some() {
-                    entity_publication::begin();
+        let transaction_job = move |writer: &mut Connection,
+                                    held: &mut Option<Duration>|
+              -> Result<WriterTransactionOutcome<T, E>, StoreError> {
+            let _identity_registry_lease = identity_registry_lease;
+            table_change_flags.store(0, Ordering::Release);
+            resource_receipt_update_count.store(0, Ordering::Release);
+            resource_entity_update_count.store(0, Ordering::Release);
+            // Row precision is kept only for tables observed when this transaction starts.
+            CHANGED_ROWS.with_borrow_mut(|rows| {
+                *rows = ChangedRowHints {
+                    complete: table_row_interest.load(Ordering::Acquire),
+                    ..ChangedRowHints::default()
                 }
-                let outcome = sql_callback(|| operation(&transaction));
-                let journal = entity_publication::finish();
-                // Publish the rows the operation changed before the commit, in its transaction.
-                let outcome = match (outcome, &entity_publisher) {
-                    (Ok(value), Some(publisher)) => sql_callback(|| {
-                        let pending = entity_publication::pending(&transaction, journal)?;
-                        if !pending.is_empty() {
-                            publisher.publish(&transaction, &pending)?;
-                        }
-                        Ok::<_, StoreError>(())
-                    })
-                    .map(|()| value)
-                    .map_err(E::from),
-                    (outcome, _) => outcome,
-                };
-                match outcome {
-                    Ok(value) => {
-                        let final_changes = transaction.total_changes();
-                        let changed = final_changes != initial_changes;
-                        let total_changes = final_changes.checked_sub(initial_changes);
-                        let receipt_updates = resource_receipt_update_count.load(Ordering::Acquire);
-                        let transaction_rows = CHANGED_ROWS.with_borrow_mut(std::mem::take);
-                        let resource_change = transaction_resource_change(
-                            total_changes,
-                            receipt_updates,
-                            resource_entity_update_count.load(Ordering::Acquire),
-                            transaction_rows.entity_metadata_updates,
-                        );
-                        table_change_flags
-                            .fetch_or(transaction_rows.explicit_table_changes, Ordering::Release);
-                        if transaction_rows.agent_components_recorded {
-                            table_change_flags
-                                .fetch_or(ObservedTable::Agents.change_bit(), Ordering::Release);
-                        }
-                        let commit_started = diagnostics_enabled.then(Instant::now);
-                        if let Err(error) = transaction.commit() {
-                            return Ok(WriterTransactionOutcome::CommitOutcomeUnknown {
-                                error: StoreError::commit_outcome_unknown(error),
-                                possible_table_changes: table_change_flags
-                                    .swap(0, Ordering::AcqRel),
-                            });
-                        }
-                        #[cfg(test)]
-                        if simulate_unknown_commit_after_success.swap(false, Ordering::AcqRel) {
-                            return Ok(WriterTransactionOutcome::CommitOutcomeUnknown {
-                                error: StoreError::CommitOutcomeUnknown(
-                                    rusqlite::Error::InvalidQuery,
-                                ),
-                                possible_table_changes: table_change_flags
-                                    .swap(0, Ordering::AcqRel),
-                            });
-                        }
-                        if let Some(started) = commit_started {
-                            emit_diagnostic(StoreDiagnosticsEvent::CommitDuration {
-                                database: StoreDatabaseKind::Canvas,
-                                elapsed: started.elapsed(),
-                            });
-                        }
-                        let commit_generation = if changed {
-                            generation.fetch_add(1, Ordering::Release) + 1
-                        } else {
-                            generation.load(Ordering::Acquire)
-                        };
-                        let changed_tables = table_change_flags.swap(0, Ordering::AcqRel);
-                        Ok(WriterTransactionOutcome::Known {
-                            result: Ok(value),
-                            generation: commit_generation,
-                            changed,
-                            changed_tables,
-                            changed_rows: Box::new(transaction_rows),
-                            resource_change,
-                        })
+            });
+            let transaction = writer
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(StoreError::from)?;
+            let hold_started = Instant::now();
+            let initial_changes = transaction.total_changes();
+            if entity_publisher.is_some() {
+                entity_publication::begin();
+            }
+            let outcome = sql_callback(|| operation(&transaction));
+            let journal = entity_publication::finish();
+            // Publish the rows the operation changed before the commit, in its transaction.
+            let outcome = match (outcome, &entity_publisher) {
+                (Ok(value), Some(publisher)) => sql_callback(|| {
+                    let pending = entity_publication::pending(&transaction, journal)?;
+                    if !pending.is_empty() {
+                        publisher.publish(&transaction, &pending)?;
                     }
-                    Err(error) => {
-                        // Dropping rolls back best-effort; preserve the operation error.
-                        drop(transaction);
-                        table_change_flags.store(0, Ordering::Release);
-                        resource_receipt_update_count.store(0, Ordering::Release);
-                        resource_entity_update_count.store(0, Ordering::Release);
-                        Ok(WriterTransactionOutcome::Known {
-                            result: Err(error),
-                            generation: generation.load(Ordering::Acquire),
-                            changed: false,
-                            changed_tables: 0,
-                            changed_rows: Box::default(),
-                            resource_change: None,
-                        })
-                    }
-                }
+                    Ok::<_, StoreError>(())
+                })
+                .map(|()| value)
+                .map_err(E::from),
+                (outcome, _) => outcome,
             };
+            match outcome {
+                Ok(value) => {
+                    let final_changes = transaction.total_changes();
+                    let changed = final_changes != initial_changes;
+                    let total_changes = final_changes.checked_sub(initial_changes);
+                    let receipt_updates = resource_receipt_update_count.load(Ordering::Acquire);
+                    let transaction_rows = CHANGED_ROWS.with_borrow_mut(std::mem::take);
+                    let resource_change = transaction_resource_change(
+                        total_changes,
+                        receipt_updates,
+                        resource_entity_update_count.load(Ordering::Acquire),
+                        transaction_rows.entity_metadata_updates,
+                    );
+                    table_change_flags
+                        .fetch_or(transaction_rows.explicit_table_changes, Ordering::Release);
+                    if transaction_rows.agent_components_recorded {
+                        table_change_flags
+                            .fetch_or(ObservedTable::Agents.change_bit(), Ordering::Release);
+                    }
+                    let commit_started = diagnostics_enabled.then(Instant::now);
+                    let commit_result = transaction.commit();
+                    // Freeze after commit and its best-effort rollback/drop, before observers.
+                    *held = Some(hold_started.elapsed());
+                    if let Err(error) = commit_result {
+                        return Ok(WriterTransactionOutcome::CommitOutcomeUnknown {
+                            error: StoreError::commit_outcome_unknown(error),
+                            possible_table_changes: table_change_flags.swap(0, Ordering::AcqRel),
+                        });
+                    }
+                    #[cfg(test)]
+                    if simulate_unknown_commit_after_success.swap(false, Ordering::AcqRel) {
+                        return Ok(WriterTransactionOutcome::CommitOutcomeUnknown {
+                            error: StoreError::CommitOutcomeUnknown(rusqlite::Error::InvalidQuery),
+                            possible_table_changes: table_change_flags.swap(0, Ordering::AcqRel),
+                        });
+                    }
+                    if let Some(started) = commit_started {
+                        emit_diagnostic(StoreDiagnosticsEvent::CommitDuration {
+                            database: StoreDatabaseKind::Canvas,
+                            elapsed: started.elapsed(),
+                        });
+                    }
+                    let commit_generation = if changed {
+                        generation.fetch_add(1, Ordering::Release) + 1
+                    } else {
+                        generation.load(Ordering::Acquire)
+                    };
+                    let changed_tables = table_change_flags.swap(0, Ordering::AcqRel);
+                    Ok(WriterTransactionOutcome::Known {
+                        result: Ok(value),
+                        generation: commit_generation,
+                        changed,
+                        changed_tables,
+                        changed_rows: Box::new(transaction_rows),
+                        resource_change,
+                    })
+                }
+                Err(error) => {
+                    // Dropping rolls back best-effort; preserve the operation error.
+                    drop(transaction);
+                    *held = Some(hold_started.elapsed());
+                    table_change_flags.store(0, Ordering::Release);
+                    resource_receipt_update_count.store(0, Ordering::Release);
+                    resource_entity_update_count.store(0, Ordering::Release);
+                    Ok(WriterTransactionOutcome::Known {
+                        result: Err(error),
+                        generation: generation.load(Ordering::Acquire),
+                        changed: false,
+                        changed_tables: 0,
+                        changed_rows: Box::default(),
+                        resource_change: None,
+                    })
+                }
+            }
+        };
         let write_alert = Arc::clone(&self.write_alert);
         let operation = move |writer: &mut Connection| {
+            let mut held = None;
+            #[cfg(feature = "perf-reporting")]
             let started = Instant::now();
             #[cfg(feature = "perf-reporting")]
             let outcome = studio_json::perf_reporting::with_job(
@@ -2407,7 +2413,7 @@ impl RuntimeStore {
                 || {
                     perf_reporting::sweep_sql(writer, false);
                     let outcome = timed_writer_job(submitted, &job_timing, Instant::now, || {
-                        transaction_job(writer)
+                        transaction_job(writer, &mut held)
                     });
                     perf_reporting::sweep_sql(writer, true);
                     outcome
@@ -2415,14 +2421,16 @@ impl RuntimeStore {
             );
             #[cfg(not(feature = "perf-reporting"))]
             let outcome = timed_writer_job(submitted, &job_timing, Instant::now, || {
-                transaction_job(writer)
+                transaction_job(writer, &mut held)
             });
             #[cfg(feature = "perf-reporting")]
             perf_reporting::record_wait(
                 &format!("sqlite write {}:{}", origin.file(), origin.line()),
                 started.elapsed(),
             );
-            write_alert.observe(origin, started.elapsed());
+            if let Some(held) = held {
+                write_alert.observe(origin, held);
+            }
             outcome
         };
         let abandoned_notifiers = Arc::clone(&self.commit_notifiers);
@@ -3522,6 +3530,44 @@ mod diagnostics_hook_tests {
     fn record_event(event: StoreDiagnosticsEvent) {
         EVENTS.lock().expect("diagnostic events lock").push(event);
         EVENTS_READY.notify_all();
+    }
+
+    #[tokio::test]
+    async fn writer_alert_excludes_post_commit_diagnostics() {
+        let _test_guard = TEST_LOCK.lock().await;
+        let directory = tempfile::tempdir().expect("temporary state directory");
+        let store = RuntimeStore::open(Some(directory.path()))
+            .await
+            .expect("store");
+        // A generous threshold avoids treating scheduler jitter as writer work.
+        // Only the observer sleeps, after SQLite has released its writer.
+        store.set_write_alert_threshold(Duration::from_secs(1));
+        store
+            .set_diagnostics_callback(Some(|event| {
+                if matches!(event, StoreDiagnosticsEvent::CommitDuration { .. }) {
+                    #[allow(
+                        clippy::disallowed_methods,
+                        reason = "This synchronous observer runs on the dedicated SQLite actor thread after commit; the regression deliberately delays only that callback"
+                    )]
+                    std::thread::sleep(Duration::from_millis(1100));
+                }
+            }))
+            .await
+            .expect("install delayed observer");
+        let before = store.write_alerts();
+        store
+            .transaction(|_| Ok(()))
+            .await
+            .expect("short transaction");
+        let after = store.write_alerts();
+        store
+            .set_diagnostics_callback(None)
+            .await
+            .expect("clear observer");
+        assert_eq!(
+            after, before,
+            "post-commit observer time must not be charged to the writer"
+        );
     }
 
     fn wait_for_event(predicate: impl Fn(&StoreDiagnosticsEvent) -> bool) -> bool {

@@ -3,7 +3,7 @@ use crate::account_worker::WorkerError;
 use rusqlite::{OptionalExtension, Transaction, params};
 use studio_runtime_process::provider_seam::ProviderCodec;
 use studio_runtime_providers::codex::{ServerRequestMethod, ServerRequestResult};
-use studio_runtime_providers::{Frame, ResponseBody, encode_line};
+use studio_runtime_providers::{Frame, ProviderKind, ResponseBody};
 use studio_runtime_schema::{approvals::RequestKind, persistence::ToolRequestKind};
 
 #[derive(Clone, Copy, Debug)]
@@ -26,13 +26,11 @@ pub(crate) fn prepare_reply(
     frame: &Frame,
     codec: ProviderCodec,
 ) -> Result<Frame, WorkerError> {
-    let bytes = encode_line(frame).map_err(|_| refused("frame-shape"))?;
-    let decoded = (codec.decode)(&bytes).map_err(|_| refused("frame-shape"))?;
-    let Frame::Response { id, body, fields } = decoded else {
+    let Frame::Response { id, body, fields } = frame else {
         return Err(refused("expected-response"));
     };
     // Generic provider replies retain their existing protocol and need no Codex correlation.
-    if matches!(body, ResponseBody::Result(_) | ResponseBody::Error(_)) {
+    if codec.kind != Some(ProviderKind::Codex) {
         return Ok(frame.clone());
     }
     let body = match body {
@@ -40,16 +38,28 @@ pub(crate) fn prepare_reply(
             ServerRequestResult::decode(method(tx, origin_key, reference)?, raw.as_str())
                 .map_err(|_| refused("result-shape"))?,
         ),
+        ResponseBody::Result(value) => ResponseBody::CodexServerResult(
+            ServerRequestResult::from_deserializer(
+                method(tx, origin_key, reference)?,
+                value.clone(),
+            )
+            .map_err(|_| refused("result-shape"))?,
+        ),
         // Error replies reject traffic without interpreting a successful payload.
         // Admission still validates the durable callback identity and request id.
-        ResponseBody::CodexError(error) => ResponseBody::CodexError(error),
+        ResponseBody::CodexError(error) => ResponseBody::CodexError(error.clone()),
+        ResponseBody::Error(error) => ResponseBody::CodexError(
+            serde::Deserialize::deserialize(error.clone()).map_err(|_| refused("frame-shape"))?,
+        ),
         ResponseBody::CodexResult(_)
         | ResponseBody::CodexUnparsedResult { .. }
-        | ResponseBody::CodexServerResult(_)
-        | ResponseBody::Result(_)
-        | ResponseBody::Error(_) => return Err(refused("unexpected-response-body")),
+        | ResponseBody::CodexServerResult(_) => return Err(refused("unexpected-response-body")),
     };
-    Ok(Frame::Response { id, body, fields })
+    Ok(Frame::Response {
+        id: id.clone(),
+        body,
+        fields: fields.clone(),
+    })
 }
 
 fn method(

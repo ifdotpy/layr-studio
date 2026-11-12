@@ -90,7 +90,9 @@ pub async fn account_session_exchange(
         );
         let method =
             Method::from_wire(&request.method).ok_or(CatalogReadError::ProviderExchangeFailed)?;
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/catalog_reads.rs#internal_sender_witness_catalog_account_session_exchange
         let receipt = session
+            // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/catalog_reads.rs#internal_sender_witness_catalog_account_session_exchange
             .provider_request(SessionRequest {
                 root_request_id: String::new(),
                 admitted_request: None,
@@ -393,6 +395,7 @@ mod tests {
             crate::account_session_runtime::SessionReceipt,
         > {
             Box::pin(async move {
+                crate::internal_sender_witness::request(request.method, &request.params);
                 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
                 use crate::account_session_runtime::{ProviderResponse, SessionReceipt};
                 let scope = request
@@ -554,7 +557,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn account_session_discovery_uses_bound_written_read_receipts() {
+    async fn internal_sender_witness_catalog_account_session_exchange() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let session = RetainedDiscovery {
             calls: Arc::clone(&calls),

@@ -128,7 +128,7 @@ pub const SQLITE_WAL_JOURNAL_SIZE_LIMIT_BYTES: i64 = 16777216;
 /// Longest time one Canvas write transaction may hold the single writer before the
 /// server logs a warning with the caller and lists it in the slow transaction
 /// diagnostics, in milliseconds.
-pub const SQLITE_WRITE_TRANSACTION_ALERT_MS: u64 = 1000;
+pub const SQLITE_WRITE_TRANSACTION_ALERT_MS: u64 = 100;
 
 // WAL backup to a paired server (docs/backup.md).
 /// Most WAL bytes that one checkpoint pause copies into the backup outbox, in bytes.

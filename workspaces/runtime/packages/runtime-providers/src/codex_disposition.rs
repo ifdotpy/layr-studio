@@ -55,12 +55,14 @@ pub const fn client_request(method: ClientRequestMethod) -> Disposition {
         ClientRequestMethod::ThreadPredictionRequest => Disposition::Ignored {
             reason: "Studio does not issue this vendor request.",
         },
-        ClientRequestMethod::ThreadGoalSet => Disposition::Handled,
+        ClientRequestMethod::ThreadGoalSet => Disposition::Ignored {
+            reason: "Studio retired goals/budgets in m2026_11_11_retired_agent_keys; native goals are deferred until an owner design exists.",
+        },
         ClientRequestMethod::ThreadGoalGet => Disposition::Ignored {
-            reason: "Studio does not issue this vendor request.",
+            reason: "Studio retired goals/budgets in m2026_11_11_retired_agent_keys; native goals are deferred until an owner design exists.",
         },
         ClientRequestMethod::ThreadGoalClear => Disposition::Ignored {
-            reason: "Studio does not issue this vendor request.",
+            reason: "Studio retired goals/budgets in m2026_11_11_retired_agent_keys; native goals are deferred until an owner design exists.",
         },
         ClientRequestMethod::ThreadQueueAdd => Disposition::Ignored {
             reason: "Studio does not issue this vendor request.",
@@ -498,12 +500,14 @@ pub const fn server_notification(method: ServerNotificationMethod) -> Dispositio
         ServerNotificationMethod::ThreadAttachmentUpdated => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
-        ServerNotificationMethod::ThreadGoalUpdated => Disposition::Handled,
+        ServerNotificationMethod::ThreadGoalUpdated => Disposition::Ignored {
+            reason: "Studio retired goals/budgets in m2026_11_11_retired_agent_keys; native goals are deferred until an owner design exists.",
+        },
         ServerNotificationMethod::ThreadPredictionUpdated => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
         ServerNotificationMethod::ThreadGoalCleared => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
+            reason: "Studio retired goals/budgets in m2026_11_11_retired_agent_keys; native goals are deferred until an owner design exists.",
         },
         ServerNotificationMethod::ThreadQueueChanged => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
@@ -546,9 +550,7 @@ pub const fn server_notification(method: ServerNotificationMethod) -> Dispositio
         },
         ServerNotificationMethod::ItemCompleted => Disposition::Handled,
         ServerNotificationMethod::ItemAgentMessageDelta => Disposition::Handled,
-        ServerNotificationMethod::ItemPlanDelta => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
+        ServerNotificationMethod::ItemPlanDelta => Disposition::Handled,
         ServerNotificationMethod::CommandExecOutputDelta => Disposition::Handled,
         ServerNotificationMethod::ProcessOutputDelta => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
@@ -569,9 +571,7 @@ pub const fn server_notification(method: ServerNotificationMethod) -> Dispositio
         ServerNotificationMethod::ServerRequestResolved => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
-        ServerNotificationMethod::ItemMcpToolCallProgress => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
+        ServerNotificationMethod::ItemMcpToolCallProgress => Disposition::Handled,
         ServerNotificationMethod::McpServerOauthLoginCompleted => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
@@ -601,19 +601,13 @@ pub const fn server_notification(method: ServerNotificationMethod) -> Dispositio
         ServerNotificationMethod::FsChanged => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
-        ServerNotificationMethod::ItemReasoningSummaryTextDelta => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
-        ServerNotificationMethod::ItemReasoningSummaryPartAdded => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
+        ServerNotificationMethod::ItemReasoningSummaryTextDelta => Disposition::Handled,
+        ServerNotificationMethod::ItemReasoningSummaryPartAdded => Disposition::Handled,
         ServerNotificationMethod::ItemReasoningTextDelta => Disposition::Handled,
         ServerNotificationMethod::ThreadCompacted => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
-        ServerNotificationMethod::ModelRerouted => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
+        ServerNotificationMethod::ModelRerouted => Disposition::Handled,
         ServerNotificationMethod::ModelVerification => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
@@ -627,18 +621,10 @@ pub const fn server_notification(method: ServerNotificationMethod) -> Dispositio
             reason: "Studio retains this notification without interpreting its payload.",
         },
         ServerNotificationMethod::ModelSafetyBufferingUpdated => Disposition::Handled,
-        ServerNotificationMethod::Warning => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
-        ServerNotificationMethod::GuardianWarning => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
-        ServerNotificationMethod::DeprecationNotice => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
-        ServerNotificationMethod::ConfigWarning => Disposition::Ignored {
-            reason: "Studio retains this notification without interpreting its payload.",
-        },
+        ServerNotificationMethod::Warning => Disposition::Handled,
+        ServerNotificationMethod::GuardianWarning => Disposition::Handled,
+        ServerNotificationMethod::DeprecationNotice => Disposition::Handled,
+        ServerNotificationMethod::ConfigWarning => Disposition::Handled,
         ServerNotificationMethod::FuzzyFileSearchSessionUpdated => Disposition::Ignored {
             reason: "Studio retains this notification without interpreting its payload.",
         },
@@ -703,5 +689,26 @@ pub const fn server_request(method: ServerRequestMethod) -> Disposition {
 pub const fn client_notification(method: ClientNotificationMethod) -> Disposition {
     match method {
         ClientNotificationMethod::Initialized => Disposition::Handled,
+    }
+}
+
+#[cfg(test)]
+mod goal_disposition_tests {
+    use super::*;
+
+    #[test]
+    fn retired_native_goals_are_deferred_consistently() {
+        for decision in [
+            client_request(ClientRequestMethod::ThreadGoalSet),
+            client_request(ClientRequestMethod::ThreadGoalGet),
+            client_request(ClientRequestMethod::ThreadGoalClear),
+            server_notification(ServerNotificationMethod::ThreadGoalUpdated),
+            server_notification(ServerNotificationMethod::ThreadGoalCleared),
+        ] {
+            let Disposition::Ignored { reason } = decision else {
+                panic!("retired goals cannot be advertised as handled");
+            };
+            assert!(reason.contains("m2026_11_11_retired_agent_keys"));
+        }
     }
 }

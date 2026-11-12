@@ -617,7 +617,9 @@ async fn request_stop_work(
     admitted: Option<studio_runtime_store::request_results::AdmittedRequest>,
 ) -> InterruptWriteResult {
     let expected = request.scope.clone();
+    // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/lifecycle_effects.rs#internal_sender_witness_interrupt_dispatch_binds_expected_scope_and_actor
     let receipt = port
+        // internal-sender-witness: workspaces/runtime/packages/runtime-services/src/lifecycle_effects.rs#internal_sender_witness_interrupt_dispatch_binds_expected_scope_and_actor
         .provider_request(ProviderRequest {
             account: request.scope.account.clone(),
             root_request_id: request.root_request_id.clone(),
@@ -1799,6 +1801,7 @@ mod tests {
             &'a self,
             request: ProviderRequest,
         ) -> AccountSessionFuture<'a, SessionReceipt> {
+            crate::internal_sender_witness::request(request.method, &request.params);
             Box::pin(async move {
                 let certainty = if self.scope.is_none() {
                     RequestCertainty::NotSent
@@ -1871,7 +1874,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interrupt_dispatch_binds_expected_scope_and_actor() {
+    async fn internal_sender_witness_interrupt_dispatch_binds_expected_scope_and_actor() {
         let request = request();
         let broker = Broker {
             scope: Some(request.scope.clone()),

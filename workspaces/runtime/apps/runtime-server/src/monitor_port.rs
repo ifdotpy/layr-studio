@@ -2024,7 +2024,9 @@ async fn provider_request(
                 }
             })?
         };
+    // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/monitor_port.rs#internal_sender_witness_monitor_requests
     let receipt = session
+        // internal-sender-witness: workspaces/runtime/apps/runtime-server/src/monitor_port.rs#internal_sender_witness_monitor_requests
         .provider_request(ProviderRequest {
             root_request_id,
             admitted_request,
@@ -2114,6 +2116,41 @@ fn apply_turn_permissions(
 
 #[cfg(test)]
 mod tests {
+    fn assert_production_codec(
+        request: &studio_runtime_services::account_session_runtime::ProviderRequest,
+    ) {
+        if request.method == Method::OperationStatus {
+            assert!(
+                request.params["operationId"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("monitor:") && id.len() > "monitor:".len())
+            );
+            let frame =
+                studio_runtime_providers::Frame::Request(studio_runtime_providers::RequestFrame {
+                    id: studio_runtime_providers::RequestId::Number(99),
+                    method: request.method,
+                    params: Some(request.params.clone()),
+                    fields: Default::default(),
+                });
+            let codec = studio_runtime_process::provider_seam::ProviderCodec::codex();
+            assert!(
+                (codec.normalize)(&frame).is_err(),
+                "internal supervisor methods must be refused by the vendor codec"
+            );
+            assert!(
+                studio_runtime_process::provider_seam::PreparedWrite::new_with_codec(
+                    studio_runtime_process::OperationId("monitor:fixture".into()),
+                    &frame,
+                    codec,
+                )
+                .is_err(),
+                "supervisor reads must stay off the vendor write path"
+            );
+            return;
+        }
+        studio_runtime_services::internal_sender_witness::request(request.method, &request.params);
+    }
+
     use super::*;
     trait TestJson {
         fn value(&self) -> Value;
@@ -2126,6 +2163,14 @@ mod tests {
     use studio_runtime_services::account_session_runtime::SessionOutcome as ReceiptOutcome;
     use studio_runtime_services::rules_engine::RuleSnapshot;
     use studio_runtime_store::{AgentRecord, AgentRepository, RuleRecord, RulesRepository};
+
+    #[tokio::test]
+    async fn internal_sender_witness_monitor_requests() {
+        internal_sender_witness_monitor_input().await;
+        internal_sender_witness_monitor_start().await;
+        internal_sender_witness_monitor_cancel().await;
+        rule_reconciliation_preserves_partial_status_and_exit_receipts().await;
+    }
 
     struct NoSession;
     impl AccountSessionPort for NoSession {}
@@ -2288,6 +2333,7 @@ mod tests {
             SessionReceipt,
         > {
             Box::pin(async move {
+                assert_production_codec(&request);
                 if request.method == Method::CommandExec {
                     std::future::pending::<()>().await;
                 }
@@ -2485,8 +2531,7 @@ mod tests {
             .expect("commit exact retained answer and checkpoint");
     }
 
-    #[tokio::test]
-    async fn http_input_retains_the_full_ticket_through_the_real_monitor_adapter() {
+    async fn internal_sender_witness_monitor_input() {
         let root = tempfile::tempdir().expect("state root");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         let mut watch = starting_watch(root.path(), "watch:with:colons");
@@ -2542,12 +2587,33 @@ mod tests {
             )
             .await
             .expect("managed callback keeps its complete original identity");
+        for input in [
+            studio_runtime_services::monitor_policy::Input {
+                text: String::new(),
+                rows: Some(24),
+                cols: Some(80),
+                close_stdin: false,
+            },
+            studio_runtime_services::monitor_policy::Input {
+                text: String::new(),
+                rows: None,
+                cols: None,
+                close_stdin: true,
+            },
+        ] {
+            let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+            let reply = runtime
+                .input_http("watch:with:colons", &id, &input, 2003.0)
+                .await
+                .expect("resize or close stdin");
+            assert_eq!(reply["status"], "acknowledged");
+        }
         assert_eq!(
             session
                 .input_writes
                 .load(std::sync::atomic::Ordering::SeqCst),
-            3,
-            "two deliberate HTTP inputs and one managed input, no HTTP replay write"
+            5,
+            "HTTP writes, resize, close stdin and managed input, without replay writes"
         );
         assert!(
             lock(&port.input_replies).is_empty(),
@@ -2654,7 +2720,7 @@ mod tests {
         let effect = Effect::Native {
             identity: "monitor:watch".into(),
             method: "command/exec",
-            params: json!({"processId":"watch","timeoutMs":60000}),
+            params: json!({"command":["true"],"processId":"watch","timeoutMs":60000}),
         };
         let submit_port = Arc::clone(&port);
         let submission = tokio::spawn(async move {
@@ -2890,6 +2956,7 @@ mod tests {
                 SessionReceipt,
             > {
                 Box::pin(async move {
+                    assert_production_codec(&request);
                     let scope = request.expected_scope.clone().expect("scope");
                     let (result, replayed) = match request.method {
                         Method::ConfigRead => {
@@ -3052,8 +3119,7 @@ mod tests {
         assert_eq!(agent.value()["turnId"], Value::Null);
     }
 
-    #[tokio::test]
-    async fn queued_command_without_turn_fresh() {
+    async fn internal_sender_witness_monitor_start() {
         Box::pin(queued_command_without_live_turn(false, false)).await;
     }
 
@@ -3773,7 +3839,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn monitor_status_receipt_timeout_finishes_recovery_once() {
+    async fn live_restart_monitor_status_receipt_timeout_finishes_recovery_once() {
         struct DeadlineSession(std::sync::atomic::AtomicUsize);
         impl AccountSessionPort for DeadlineSession {
             fn current_scope(
@@ -3818,23 +3884,36 @@ mod tests {
         }
         let root = tempfile::tempdir().unwrap();
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.unwrap());
-        let actor = owner(root.path(), true);
-        let mut watch = starting_watch(root.path(), "watch");
+        studio_runtime_services::live_restart_fixture::seed(&store).await;
+        let fixture = studio_runtime_services::live_restart_fixture::rows();
+        let mut watch = fixture["runtime_monitors"][0].clone();
+        let id = watch["id"].as_str().unwrap().to_owned();
+        let mut actor = fixture["runtime_agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == watch["agent"])
+            .expect("captured monitor owner")
+            .clone();
+        actor["status"] = json!("idle");
+        actor["epoch"] = watch["epoch"].clone();
+        actor["accountKey"] = watch["operation"]["accountKey"].clone();
+        actor["archived"] = json!(false);
+        actor["autoWake"] = json!(true);
+        actor["deletedAt"] = json!(null);
+        // Replay the captured command as in-flight at the restart boundary.
+        // Only lifecycle fields change; operation and nested evidence stay captured.
         watch["status"] = json!("running");
-        watch["operation"] = json!(Operation {
-            agent: "owner".to_owned().try_into().unwrap(),
-            epoch: 0.try_into().unwrap(),
-            account_key: "default".to_owned().try_into().unwrap(),
-            connection_id: "old".to_owned().try_into().unwrap(),
-            evidence: Default::default()
-        });
+        for field in ["finished", "exitCode", "error", "reattachRecovery"] {
+            watch.as_object_mut().unwrap().remove(field);
+        }
         store
             .transaction(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(actor)?)?;
-                studio_runtime_store::Table::new(tx).put(&studio_json::from_value::<
+                studio_runtime_store::Table::new(tx).put(&studio_json::from_str::<
                     studio_runtime_store::MonitorRecord,
-                >(watch)?)?;
-                Ok::<_, studio_runtime_store::StoreError>(())
+                >(&watch.to_string())?)?;
+                Ok(())
             })
             .await
             .unwrap();
@@ -3851,10 +3930,13 @@ mod tests {
         runtime.tick(2.0).await.unwrap();
         runtime.tick(3.0).await.unwrap();
         let (watch, event) = store
-            .read_async("test/status-timeout-outcome", |tx| {
+            .read_async("test/status-timeout-outcome", move |tx| {
                 Ok::<_, studio_runtime_store::StoreError>((
-                    MonitorsRepository::get(tx, "watch")?.unwrap().value(),
-                    studio_runtime_store::QueueEventRepository::get(tx, &"monitor:watch".into())?,
+                    MonitorsRepository::get(tx, &id)?.unwrap().value(),
+                    studio_runtime_store::QueueEventRepository::get(
+                        tx,
+                        &format!("monitor:{id}").into(),
+                    )?,
                 ))
             })
             .await
@@ -4007,8 +4089,7 @@ mod tests {
 
     /// 2026-10-20: cancelled watches whose command/exec reply was lost stayed
     /// "running" with a written terminate, and blocked the owner's archive.
-    #[tokio::test]
-    async fn terminate_without_a_waiting_exit_reply_completes_the_cancellation() {
+    async fn internal_sender_witness_monitor_cancel() {
         let root = tempfile::tempdir().expect("state root");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         let session = Arc::new(ExecSession::default());
@@ -4163,7 +4244,6 @@ mod tests {
         check
     }
 
-    #[tokio::test]
     async fn rule_reconciliation_preserves_partial_status_and_exit_receipts() {
         for (response, submitted, exits) in [
             (json!({"accepted":true,"response":{"exitCode":0}}), true, 1),

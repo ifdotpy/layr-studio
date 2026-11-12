@@ -1634,8 +1634,8 @@ async fn diagnostics_probe_of_each_provider_replies_without_a_receipt() {
         call.actor = None;
         call.expected_scope = Some(port.scope().clone());
         let diagnostics = (provider.descriptor().diagnostics)();
-        call.method = diagnostics.method;
-        call.params = diagnostics.params;
+        call.method = diagnostics.method();
+        call.params = diagnostics.params();
         let sender = port.clone();
         let task = tokio::spawn(async move { sender.request(call).await });
         let wire = peer.write(wire_method).await;
@@ -4820,7 +4820,8 @@ async fn thread_unload_ends_a_running_turn_as_interrupted() {
 }
 
 #[tokio::test]
-async fn typed_codex_monitor_status_routes_to_supervisor_without_vendor_write() {
+async fn internal_sender_witness_typed_codex_monitor_status_routes_to_supervisor_without_vendor_write()
+ {
     use studio_runtime_providers::supervisor_protocol::{NativeId, ProviderOperationState};
     use studio_runtime_store::supervisor_journal::SupervisorJournal;
     struct StatusFactory {
@@ -5016,4 +5017,51 @@ async fn typed_codex_monitor_status_routes_to_supervisor_without_vendor_write() 
         "status never enters provider stdin"
     );
     worker.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn internal_sender_witness_retained_vendor_prepare() {
+    for provider in [
+        studio_runtime_providers::ProviderKind::Codex,
+        studio_runtime_providers::ProviderKind::Claude,
+    ] {
+        let state = State::new().await;
+        retained_schema(&state).await;
+        let mut peer = Peer::new();
+        peer.codec = match provider {
+            studio_runtime_providers::ProviderKind::Codex => {
+                studio_runtime_process::provider_seam::ProviderCodec::codex()
+            }
+            studio_runtime_providers::ProviderKind::Claude => {
+                studio_runtime_process::provider_seam::ProviderCodec::default()
+            }
+        };
+        peer.wire = provider.wire();
+        let mut resources = test_resources().unwrap();
+        if provider == studio_runtime_providers::ProviderKind::Claude {
+            resources.claude_account_pin =
+                json!({"provider":studio_runtime_schema::ProviderKind::Claude});
+        }
+        let mut worker = peer
+            .open_worker_with_resources(state.bridge.clone(), resources)
+            .await;
+        let mut ready = peer.ready.clone();
+        while !*ready.borrow_and_update() {
+            ready.changed().await.unwrap();
+        }
+        let port = worker.retained_session();
+        let call = durable_request(&state, &port, "retained-codec-witness");
+        let pending = tokio::spawn(async move { port.request(call).await });
+        let write =
+            tokio::time::timeout(FIRST_PASS_TEST_DEADLINE, peer.write("thread/compact/start"))
+                .await
+                .expect("real retained preparation must produce a vendor write");
+        peer.reply(&write, json!({"thread":{"id":"fake-thread-0"}}))
+            .await;
+        assert!(matches!(
+            pending.await.unwrap().unwrap().result,
+            RequestResult::Reply(_)
+        ));
+        worker.shutdown().await.unwrap();
+    }
 }

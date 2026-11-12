@@ -26,10 +26,16 @@ Keep native SDK, credentials, transcript formats, and provider-specific semantic
 in their owning adapters. Shared callers consume normalized values or the
 adapter's explicit capabilities.
 
-Each adapter reports a typed capability list (`ProviderKind::capabilities`:
-steer, rewind, fork, model change, effort, compaction, approvals). The UI shows
+Each provider decides every user control through an exhaustive match in
+`ProviderKind::capability`, returning `Supported` or `Unsupported { reason }`.
+`ProviderKind::capabilities` derives the generated UI list from those decisions:
+
+steer, rewind, fork, model change, effort, compaction, approvals. The UI shows
 only the controls in that list, through the generated `providerSupports`. Do not
-test for a provider name to show or hide a control.
+test for a provider name to show or hide a control. Internal operations and
+runtime policies have their own exhaustive owner, `ProviderFeature::support`;
+they are not additional UI controls. Implemented command arms establish command
+support without a second runtime capability check.
 
 `edit(turn)` serves every provider: the server hides the items after the turn,
 snapshots and restores the files of the turn, and forks the provider thread

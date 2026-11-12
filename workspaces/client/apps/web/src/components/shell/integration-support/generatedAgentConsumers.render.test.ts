@@ -685,117 +685,125 @@ it("keeps worker error and native menu leaves isolated from detail activity", as
   }
 });
 
-it("updates settings, context usage and native actions when the owning detail slot arrives and changes", async () => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const f = observableFixture([record]);
-  const agent = required(f.mirror.current.agents.get("lead"));
-  const detail = required(f.details.get("lead"));
-  type Current = ReturnType<typeof f.store.agentDetail>["current"];
-  const current = observable.box<Current>(
-    { status: "loading" },
-    { deep: false },
-  );
-  const store = {
-    ...f.store,
-    agentDetail: () => ({
-      get current() {
-        return current.get();
-      },
-    }),
-  };
-  // This test covers detail-slot updates of a live server, so mutations are ready.
-  const liveActions = conversationActionsFixture();
-  liveActions.scope.services.api.mutationReady = () => true;
-  const host = document.createElement("div");
-  document.body.append(host);
-  const root = createRoot(host);
-  try {
-    await act(async () =>
-      root.render(
-        createElement(
-          MantineProvider,
-          { env: "test" },
+it.each([ProviderKind.codex, ProviderKind.claude])(
+  "updates %s settings, context usage and native actions from SSE detail",
+  async (provider) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const f = observableFixture([{ ...record, provider }]);
+    const agent = required(f.mirror.current.agents.get("lead"));
+    const detail = required(f.details.get("lead"));
+    type Current = ReturnType<typeof f.store.agentDetail>["current"];
+    const current = observable.box<Current>(
+      { status: "loading" },
+      { deep: false },
+    );
+    const store = {
+      ...f.store,
+      agentDetail: () => ({
+        get current() {
+          return current.get();
+        },
+      }),
+    };
+    // This test covers detail-slot updates of a live server, so mutations are ready.
+    const liveActions = conversationActionsFixture();
+    liveActions.scope.services.api.mutationReady = () => true;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () =>
+        root.render(
           createElement(
-            ServerStoreProvider,
-            { value: store },
-            createElement(OwnedUnifiedAgentSettings, {
-              agent,
-              state: accounts,
-              notify: () => {},
-              catalog,
-            }),
-            usageElement(store, {
-              agent,
-              stateDir: "loading-owner",
-              limits: null,
-              reload: () => {},
-              visible: false,
-            }),
+            MantineProvider,
+            { env: "test" },
             createElement(
-              ConversationProvider,
-              { value: liveActions },
+              ServerStoreProvider,
+              { value: store },
+              createElement(OwnedUnifiedAgentSettings, {
+                agent,
+                state: accounts,
+                notify: () => {},
+                catalog,
+              }),
+              usageElement(store, {
+                agent,
+                stateDir: "loading-owner",
+                limits: null,
+                reload: () => {},
+                visible: false,
+              }),
               createElement(
-                Menu,
-                { opened: true, withinPortal: false },
+                ConversationProvider,
+                { value: liveActions },
                 createElement(
-                  Menu.Target,
-                  null,
-                  createElement("button", null, "Actions"),
-                ),
-                createElement(
-                  Menu.Dropdown,
-                  null,
-                  createElement(NativeModelActions, { agent }),
+                  Menu,
+                  { opened: true, withinPortal: false },
+                  createElement(
+                    Menu.Target,
+                    null,
+                    createElement("button", null, "Actions"),
+                  ),
+                  createElement(
+                    Menu.Dropdown,
+                    null,
+                    createElement(NativeModelActions, { agent }),
+                  ),
                 ),
               ),
             ),
           ),
         ),
-      ),
-    );
-    expect(host.textContent).not.toContain("xhigh");
-    expect(required(h.pickers.at(-1)).disabled).toBe(true);
-    expect(host.textContent).not.toContain("Context 25%");
-    expect(
-      required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
-        .disabled,
-    ).toBe(true);
-    await act(async () =>
-      runInAction(() => current.set({ status: "live", data: detail.current })),
-    );
-    expect(host.textContent).toContain("xhigh");
-    expect(required(h.pickers.at(-1)).disabled).toBe(false);
-    expect(host.textContent).toContain("Context 25%");
-    expect(
-      required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
-        .disabled,
-    ).toBe(false);
-    await act(async () =>
-      detail.apply({
-        ...record,
-        effort: "low",
-        contextUsage: { tokens: 500, window: 1000 },
-        nativeThreadBlock: {
-          threadId: "thread",
-          error: { message: "Safety block" },
-        },
-      }),
-    );
-    expect(host.textContent).toContain("low");
-    expect(host.textContent).toContain("Context 50%");
-    expect(
-      required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
-        .disabled,
-    ).toBe(true);
-    expect(f.mirror.current.agents.get("lead")).toBe(agent);
-    expect("effort" in agent).toBe(false);
-  } finally {
-    await act(async () => root.unmount());
-    f.store.dispose();
-    host.remove();
-    vi.unstubAllGlobals();
-  }
-});
+      );
+      expect(host.textContent).not.toContain("xhigh");
+      expect(required(h.pickers.at(-1)).disabled).toBe(true);
+      expect(host.textContent).not.toContain("Context 25%");
+      expect(
+        required(
+          host.querySelector<HTMLButtonElement>('[data-action="compact"]'),
+        ).disabled,
+      ).toBe(true);
+      await act(async () =>
+        runInAction(() =>
+          current.set({ status: "live", data: detail.current }),
+        ),
+      );
+      expect(host.textContent).toContain("xhigh");
+      expect(required(h.pickers.at(-1)).disabled).toBe(false);
+      expect(host.textContent).toContain("Context 25%");
+      expect(
+        required(
+          host.querySelector<HTMLButtonElement>('[data-action="compact"]'),
+        ).disabled,
+      ).toBe(false);
+      await act(async () =>
+        detail.apply({
+          ...record,
+          effort: "low",
+          contextUsage: { tokens: 600, window: 1000 },
+          nativeThreadBlock: {
+            threadId: "thread",
+            error: { message: "Safety block" },
+          },
+        }),
+      );
+      expect(host.textContent).toContain("low");
+      expect(host.textContent).toContain("Context 60%");
+      expect(
+        required(
+          host.querySelector<HTMLButtonElement>('[data-action="compact"]'),
+        ).disabled,
+      ).toBe(true);
+      expect(f.mirror.current.agents.get("lead")).toBe(agent);
+      expect("effort" in agent).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      f.store.dispose();
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 it("keeps request approval disabled until its native-thread detail is known", () => {
   const f = observableFixture([record]);

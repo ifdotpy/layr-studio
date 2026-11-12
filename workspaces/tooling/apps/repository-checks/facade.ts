@@ -1140,6 +1140,9 @@ export function gateSteps(root: string, name: string): GateStep[] {
         "workspaces/tooling/apps/repository-checks/tests/writer-schema-probes.test.ts",
         "workspaces/tooling/apps/repository-checks/tests/sql-ratchet.test.ts",
       ]),
+      nodeTest("internal-senders", "production provider sender witnesses", [
+        "workspaces/tooling/apps/repository-checks/tests/internal-sender-witnesses.test.ts",
+      ]),
       nodeTest("sse-policy", "SSE and browser persistence ratchet", [
         "workspaces/tooling/apps/repository-checks/tests/sse-policy.test.ts",
       ]),
