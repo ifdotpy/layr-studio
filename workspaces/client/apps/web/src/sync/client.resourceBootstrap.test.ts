@@ -740,20 +740,18 @@ it("reloads a scoped projection before exposing its resume cursor", async () => 
       api: {
         syncGet: mocks.syncGet,
         syncPost: vi.fn(),
-        saved: vi
-          .fn()
-          .mockImplementation((key, fallback) =>
-            key === "codex-sync-cache-scope"
-              ? {
-                  serverId: "local",
-                  credentialId: "",
-                  tokenFingerprint: "fixture",
-                  workspaceId: f.workspaceId,
-                }
-              : key === "codex-sync-workspace"
-                ? f.workspaceId
-                : fallback,
-          ),
+        saved: vi.fn().mockImplementation((key, fallback) =>
+          key === "codex-sync-cache-scope"
+            ? {
+                serverId: "local",
+                credentialId: "",
+                tokenFingerprint: "fixture",
+                workspaceId: f.workspaceId,
+              }
+            : key === "codex-sync-workspace"
+              ? f.workspaceId
+              : fallback,
+        ),
         save: vi.fn(),
         setWorkspace: vi.fn(),
         isApiSchemaMismatch: () => false,
@@ -1005,20 +1003,18 @@ it("heals a truncated ready cache on reload and recovers the missing chat", asyn
     api: {
       syncGet: mocks.syncGet,
       syncPost: vi.fn(),
-      saved: vi
-        .fn()
-        .mockImplementation((key, fallback) =>
-          key === "codex-sync-cache-scope"
-            ? {
-                serverId: "local",
-                credentialId: "",
-                tokenFingerprint: "fixture",
-                workspaceId: f.workspaceId,
-              }
-            : key === "codex-sync-workspace"
-              ? f.workspaceId
-              : fallback,
-        ),
+      saved: vi.fn().mockImplementation((key, fallback) =>
+        key === "codex-sync-cache-scope"
+          ? {
+              serverId: "local",
+              credentialId: "",
+              tokenFingerprint: "fixture",
+              workspaceId: f.workspaceId,
+            }
+          : key === "codex-sync-workspace"
+            ? f.workspaceId
+            : fallback,
+      ),
       save: vi.fn(),
       setWorkspace: vi.fn(),
       isApiSchemaMismatch: () => false,
@@ -1107,6 +1103,131 @@ it.each([false, true])(
     });
   },
 );
+
+it("paged snapshot replay preserves sequence guards, scope pruning and update-then-delete", async () => {
+  const f = await setup();
+  const tasks = { kind: "tasks", agentId: "lead" } as const;
+  type Documents = components["schemas"]["EntityChangeBatch"]["documents"];
+  const row = (id: string, seq: number, agent = "lead"): Documents[number] => ({
+    collection: "task",
+    op: "upsert",
+    id,
+    seq,
+    value: {
+      id,
+      agent,
+      kind: TaskKind.command,
+      status: TaskStatus.running,
+      created: 1,
+      display: backgroundDisplay(),
+    },
+  });
+  const event = (
+    resource: ResourceChangeEvent["resources"][number],
+    through: number,
+    documents: Documents,
+    after?: number,
+  ): ResourceChangeEvent => ({
+    ...f.frame(through),
+    resources: [resource],
+    resourceVersions: [
+      {
+        resource,
+        revision: through,
+        cursor: { workspaceId: f.workspaceId, seq: through },
+        replyKind:
+          after === undefined
+            ? SubscriptionReplyKind.snapshot
+            : SubscriptionReplyKind.delta,
+        entityChanges: { after: after ?? 0, through, documents },
+      },
+    ],
+  });
+  await f.client.persistResourceEntityChanges(
+    event(tasks, 9, [row("gone", 9)]),
+    () => true,
+  );
+  await f.client.persistResourceEntityChanges(
+    event({ kind: "task", taskId: "newer" }, 12, [row("newer", 12)]),
+    () => true,
+  );
+  await f.client.persistResourceEntityChanges(
+    event({ kind: "task", taskId: "other" }, 11, [
+      row("other", 11, "other-root"),
+    ]),
+    () => true,
+  );
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
+  const assembler = new EntityTransferAssembler();
+  let interval: Awaited<ReturnType<typeof assembler.receive>>;
+  try {
+    const pages = [
+      { after: 0, through: 10, documents: [row("newer", 10)] },
+      { after: 10, through: 11, documents: [] },
+    ];
+    for (const [pageIndex, page] of pages.entries()) {
+      interval = await assembler.receive({
+        protocol: SYNC_PROTOCOL_VERSION,
+        workspaceId: f.workspaceId,
+        epoch: "first",
+        revision: 11,
+        reason: "reconnect",
+        resource: tasks,
+        cursor: { workspaceId: f.workspaceId, seq: 11 },
+        replyKind: SubscriptionReplyKind.snapshot,
+        transferId: "snapshot-replay-sequence-guards",
+        payloadKind: "entity",
+        pageIndex,
+        partIndex: 0,
+        partCount: 1,
+        complete: pageIndex === 1,
+        data: JSON.stringify(page),
+      });
+    }
+    assert.ok(interval);
+    await f.client.persistStagedEntityTransfer(interval, () => true);
+    expect(
+      (await f.db.projections.findOne("entity:task:newer").exec())?.seq,
+    ).toBe(12);
+    expect(
+      (await f.db.projections.getRows(["entity:task:gone"], true))[0],
+    ).toMatchObject({ _deleted: true, evicted: true });
+    expect(
+      (await f.db.projections.findOne("entity:task:other").exec())?.seq,
+    ).toBe(11);
+    const updated = row("newer", 13);
+    if (updated.op === "upsert" && updated.collection === "task")
+      updated.value.status = TaskStatus.completed;
+    await f.client.persistResourceEntityChanges(
+      event(tasks, 13, [updated], 11),
+      () => true,
+    );
+    const deleted = event(
+      tasks,
+      14,
+      [{ collection: "task", id: "newer", op: "delete", seq: 14 }],
+      13,
+    );
+    await f.client.persistResourceEntityChanges(deleted, () => true);
+    await f.client.persistResourceEntityChanges(deleted, () => true);
+    // A separately subscribed stale source version cannot resurrect the tombstone.
+    await f.client.persistResourceEntityChanges(
+      event({ kind: "task", taskId: "newer" }, 15, [row("newer", 13)]),
+      () => true,
+    );
+    expect(
+      (await f.db.projections.getRows(["entity:task:newer"], true))[0],
+    ).toMatchObject({ seq: 14, _deleted: true });
+    expect(await f.client.readSubscriptionCursor(tasks)).toEqual({
+      workspaceId: f.workspaceId,
+      seq: 14,
+    });
+    expect(f.pulls()).toEqual([]);
+  } finally {
+    await interval?.dispose();
+    await assembler.invalidate();
+  }
+});
 
 it.each([false, true])(
   "snapshot staged=%s preserves a newer independently subscribed row and evicts only covered versions",
@@ -1758,20 +1879,18 @@ it("discards a slow old stream policy after a reset and applies NoCache", async 
     api: {
       syncGet: vi.fn().mockImplementation(() => identity.promise),
       syncPost: vi.fn(),
-      saved: vi
-        .fn()
-        .mockImplementation((key, fallback) =>
-          key === "codex-sync-cache-scope"
-            ? {
-                serverId: "local",
-                credentialId: "",
-                tokenFingerprint: "fixture",
-                workspaceId: f.workspaceId,
-              }
-            : key === "codex-sync-workspace"
-              ? f.workspaceId
-              : fallback,
-        ),
+      saved: vi.fn().mockImplementation((key, fallback) =>
+        key === "codex-sync-cache-scope"
+          ? {
+              serverId: "local",
+              credentialId: "",
+              tokenFingerprint: "fixture",
+              workspaceId: f.workspaceId,
+            }
+          : key === "codex-sync-workspace"
+            ? f.workspaceId
+            : fallback,
+      ),
       save: vi.fn(),
       setWorkspace: vi.fn(),
       isApiSchemaMismatch: () => false,

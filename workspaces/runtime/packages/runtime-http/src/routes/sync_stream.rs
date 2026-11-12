@@ -1865,6 +1865,10 @@ async fn live_frame(state: &ResourceStream, live: LiveEvent) -> Option<Event> {
 async fn next_frame(
     mut state: ResourceStream,
 ) -> Option<(Result<Event, Infallible>, ResourceStream)> {
+    // Discard prepared frames on shutdown instead of draining a slow consumer.
+    if state.changes.borrow().closed {
+        return None;
+    }
     if let Some(event) = state.initial.pop_front() {
         return Some((Ok(event), state));
     }
@@ -7760,6 +7764,22 @@ mod tests {
         let pending = next_frame(state);
         hub.close();
         assert!(pending.await.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_discards_queued_snapshot_frames() {
+        let hub = Arc::new(ChangeNotificationHub::new());
+        let tokens = TokenRateHub::with_change_hub(hub.clone());
+        let notifications = Arc::new(ResourceNotifications::new(hub.clone()));
+        let mut state = test_stream(&hub, &tokens, notifications, &[]);
+        state
+            .initial
+            .push_back(Event::default().data("queued snapshot"));
+        hub.close();
+        assert!(
+            next_frame(state).await.is_none(),
+            "shutdown must discard queued frames instead of draining a slow subscriber"
+        );
     }
 
     #[tokio::test]

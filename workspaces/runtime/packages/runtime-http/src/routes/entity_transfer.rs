@@ -1,4 +1,4 @@
-//! Scoped intervals are read once in one SQLite snapshot. Large intervals spool
+//! Scoped intervals use one short read transaction per page. Large intervals spool
 //! bounded wire frames to an unlinked temporary file, owned by the live stream.
 use std::collections::BTreeMap;
 use std::io::{Seek, Write};
@@ -28,6 +28,12 @@ fn data_error() -> ApiError {
 }
 
 pub(super) struct TransferReader(BufReader<tokio::fs::File>);
+
+#[cfg(test)]
+tokio::task_local! {
+    // Small pages and one deterministic interleaving through the real prepare path.
+    static PAGE_INTERLEAVING: (i64, Box<dyn Fn(i64, i64) -> futures_util::future::BoxFuture<'static, ()> + Send + Sync>);
+}
 impl TransferReader {
     pub(super) async fn next(&mut self) -> Result<Option<Event>, ApiError> {
         let mut line = String::new();
@@ -158,6 +164,74 @@ pub(super) async fn attach_payloads(
     Ok(readers)
 }
 
+async fn read_page(
+    state: &HttpState,
+    resource: &ResourceRef,
+    since: Option<i64>,
+    interval: Option<studio_runtime_store::EntityPage>,
+) -> Result<studio_runtime_store::EntityPage, ApiError> {
+    // Shutdown stops between pages; an in-flight SQLite statement still finishes.
+    if state.sync_changes.snapshot().closed {
+        return Err(io_error());
+    }
+    let (scope, id, agent) =
+        super::subscription_entities::selection(resource).ok_or_else(data_error)?;
+    let collections = studio_json::to_string(&scope.collections).map_err(ApiError::json)?;
+    let id = id.map(str::to_owned);
+    let agent = agent.map(str::to_owned);
+    let limit = SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
+    #[cfg(test)]
+    let limit = PAGE_INTERLEAVING
+        .try_with(|(limit, _)| *limit)
+        .unwrap_or(limit);
+    state
+        .store
+        .as_ref()
+        .ok_or_else(|| ApiError::internal_with_cause(InternalErrorKind::StoreConfiguration))?
+        .read_async("runtime-http/entity-transfer", move |tx| {
+            if let Some(interval) = interval {
+                let (_, durable_floor) = studio_runtime_store::durable_seq::high_and_floor(tx)?;
+                let floor = SyncDocumentsRepository::entity_tombstone_floor(tx)?.max(durable_floor);
+                // A delta cannot skip an unread deletion pruned since its last page.
+                // Reject before publishing the interval cursor; reconnect resets it.
+                if !interval.reset && interval.checkpoint < floor {
+                    return Err(ApiError::new(axum::http::StatusCode::CONFLICT,
+                        "Entity history expired while preparing the sync response; retry the subscription"));
+                }
+                return Ok(studio_runtime_services::entity_scope::continue_page(
+                    tx,
+                    &interval,
+                    Some(&collections),
+                    id.as_deref(),
+                    agent.as_deref(),
+                    scope.include_team_members,
+                    limit,
+                )?);
+            }
+            // Team member insertion, deletion and restoration can replace a scope.
+            let visibility = if scope.include_team_members {
+                agent
+                    .as_deref()
+                    .map(|agent| SyncDocumentsRepository::team_membership_revision(tx, agent))
+                    .transpose()?
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            let since = since.filter(|after| *after >= visibility);
+            Ok(studio_runtime_services::entity_scope::resume(
+                tx,
+                since,
+                Some(&collections),
+                id.as_deref(),
+                agent.as_deref(),
+                scope.include_team_members,
+                limit,
+            )?)
+        })
+        .await
+}
+
 async fn prepare(
     state: &HttpState,
     event: &ResourceChangeEvent,
@@ -171,39 +245,60 @@ async fn prepare(
     ),
     ApiError,
 > {
-    let (scope, id, agent) =
-        super::subscription_entities::selection(&resource).ok_or_else(data_error)?;
-    let collections = studio_json::to_string(&scope.collections).map_err(ApiError::json)?;
-    let id = id.map(str::to_owned);
-    let agent = agent.map(str::to_owned);
     let workspace = state.workspace_id.clone();
     let epoch = event.epoch.clone();
     let revision = event.revision;
     let reason = event.reason.clone();
-    let validators = state.validators.clone();
-    state.store.as_ref().ok_or_else(|| ApiError::internal_with_cause(InternalErrorKind::StoreConfiguration))?.read_async("runtime-http/entity-transfer", move |tx| {
-        let after = since.as_ref().map(|cursor| cursor.seq);
-        // Team member insertion, deletion and restoration can replace a scope.
-        // Ordinary writes and tombstones retain indexed sequence deltas.
-        let visibility = if scope.include_team_members {
-            agent.as_deref().map(|agent| SyncDocumentsRepository::team_membership_revision(tx, agent)).transpose()?.unwrap_or(0)
-        } else { 0 };
-        let after = after.filter(|after| *after >= visibility);
-        let mut page = studio_runtime_services::entity_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
-        let through = page.max_sequence;
-        let snapshot = page.reset;
-        let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
-        let cursor = SubscriptionCursor { terminal_generation: None, workspace_id: workspace.clone(), seq: through };
-        let transfer_id = uuid::Uuid::new_v4().to_string();
-        let metadata = json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":workspace,"epoch":epoch,"revision":revision,"reason":reason,"resource":resource,"cursor":cursor,"replyKind":if snapshot {"snapshot"}else{"delta"},"transferId":transfer_id,"payloadKind":ResourceTransferPayloadKind::Entity});
-        let mut spool = None;
-        let mut page_index = 0;
-        loop {
-            let checkpoint = page.checkpoint;
-            let final_sql_page = checkpoint == through;
+    let mut page = read_page(
+        state,
+        &resource,
+        since.as_ref().map(|cursor| cursor.seq),
+        None,
+    )
+    .await?;
+    #[cfg(test)]
+    if let Ok(interleave) =
+        PAGE_INTERLEAVING.try_with(|(_, hook)| hook(page.checkpoint, page.max_sequence))
+    {
+        interleave.await;
+    }
+    // Pages are at least watermark, not point-in-time: mutable projections
+    // can see newer content. Keep this upper sequence bound and replay from
+    // it afterwards. Keyed upserts/tombstones converge; membership revisions
+    // force scope replacement, including removals. Never restart on drift.
+    let through = page.max_sequence;
+    let snapshot = page.reset;
+    let mut after = if snapshot {
+        0
+    } else {
+        since.as_ref().map_or(0, |cursor| cursor.seq)
+    };
+    let cursor = SubscriptionCursor {
+        terminal_generation: None,
+        workspace_id: workspace.clone(),
+        seq: through,
+    };
+    let transfer_id = uuid::Uuid::new_v4().to_string();
+    let metadata = json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":workspace,"epoch":epoch,"revision":revision,"reason":reason,"resource":resource,"cursor":cursor,"replyKind":if snapshot {"snapshot"}else{"delta"},"transferId":transfer_id,"payloadKind":ResourceTransferPayloadKind::Entity});
+    let mut spool = None;
+    let mut page_index = 0;
+    loop {
+        let checkpoint = page.checkpoint;
+        let final_sql_page = checkpoint == through;
+        let (entry, next_spool, next_index) = {
+            let rows = std::mem::take(&mut page.rows);
+            let validators = state.validators.clone();
+            let resource = resource.clone();
+            let cursor = cursor.clone();
+            let workspace = workspace.clone();
+            let epoch = epoch.clone();
+            let reason = reason.clone();
+            let metadata = metadata.clone();
+            studio_runtime_process::blocking_pool::spawn_blocking("runtime-http/entity-transfer-spool", move || {
+            studio_runtime_store::debug_assert_outside_sql();
             // A stored row the current contract cannot read is skipped with a log line,
             // so one legacy row cannot stop the whole stream.
-            let documents = page.rows.iter().filter(|row| !snapshot || !row.deleted).filter_map(|row| {
+            let documents = rows.iter().filter(|row| !snapshot || !row.deleted).filter_map(|row| {
                 let document = super::sync_documents::entity_document(row);
                 if document.is_none() {
                     eprintln!("warning: sync entity skipped, payload does not match the contract: collection={} id={} seq={}", row.collection, row.id, row.sequence);
@@ -217,20 +312,37 @@ async fn prepare(
                 if page_index == 0 && complete {
                     let entry = ResourceRevisionEntry { resource: Some(Some(resource.clone())), revision: through, cursor: Some(cursor.clone()), reply_kind: Some(if snapshot { crate::generated::SubscriptionReplyKind::Snapshot } else { crate::generated::SubscriptionReplyKind::Delta }), entity_changes: Some(Some(batch.clone())), native_layr_settings: None, discovery_snapshot: None, voice_records: None, view_snapshot: None, draft_changes: None, draft_snapshot: None, entity_sequence_reset: None, entity_sequences: None, terminal_base_offset: None, transcript_changes: None, transcript_snapshot: None };
                     let ordinary = ResourceChangeEvent { protocol: i64::from(studio_runtime_schema::SYNC_PROTOCOL_VERSION), workspace_id: workspace.clone(), epoch: epoch.clone(), revision, reason: reason.clone(), resources: vec![resource.clone()], resource_versions: vec![entry.clone()] };
-                    if "event: resources\nid: \ndata: \n\n".len() + revision.to_string().len() + studio_json::to_vec(&ordinary).map_err(ApiError::json)?.len() <= SYNC_STREAM_EVENT_MAX_BYTES { return Ok((Some(entry), None, cursor)); }
+                    if "event: resources\nid: \ndata: \n\n".len() + revision.to_string().len() + studio_json::to_vec(&ordinary).map_err(ApiError::json)?.len() <= SYNC_STREAM_EVENT_MAX_BYTES { return Ok::<_, ApiError>((Some(entry), None, page_index)); }
                 }
                 let file = match &mut spool { Some(file) => file, None => spool.insert(tempfile::tempfile().map_err(|_| io_error())?) };
                 spool_page(file, &metadata, page_index, complete, batch, &validators)?;
                 page_index += 1;
             }
-            if final_sql_page { break; }
-            after = checkpoint;
-            page = studio_runtime_services::entity_scope::continue_page(tx, &page, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
+            if final_sql_page {
+                spool.as_mut().ok_or_else(data_error)?.rewind().map_err(|_| io_error())?;
+            }
+            Ok((None, spool, page_index))
+            }).await.map_err(|_| io_error())??
+        };
+        if let Some(entry) = entry {
+            return Ok((Some(entry), None, cursor));
         }
-        let mut file = spool.ok_or_else(data_error)?;
-        file.rewind().map_err(|_| io_error())?;
-        Ok((None, Some(TransferReader(BufReader::new(tokio::fs::File::from_std(file)))), cursor))
-    }).await
+        spool = next_spool;
+        page_index = next_index;
+        if final_sql_page {
+            break;
+        }
+        after = checkpoint;
+        page = read_page(state, &resource, None, Some(page)).await?;
+    }
+    let file = spool.ok_or_else(data_error)?;
+    Ok((
+        None,
+        Some(TransferReader(BufReader::new(tokio::fs::File::from_std(
+            file,
+        )))),
+        cursor,
+    ))
 }
 
 /// Split at record boundaries first. A single existing oversized canonical
@@ -285,6 +397,7 @@ fn spool_page(
     page: &impl serde::Serialize,
     validators: &crate::validation::Registry,
 ) -> Result<(), ApiError> {
+    studio_runtime_store::debug_assert_outside_sql();
     let data = studio_json::to_string(page).map_err(ApiError::json)?;
     let mut direct = metadata.clone();
     let fields = direct.as_object_mut().ok_or_else(data_error)?;
@@ -406,6 +519,459 @@ mod tests {
         );
         state.validators = crate::validation::Registry::compile(&[]).expect("canonical validators");
         (directory, state)
+    }
+
+    #[tokio::test]
+    async fn delta_pages_reject_pruned_unread_tombstone_before_watermark() {
+        for durable in [false, true] {
+            let (_directory, state) = fixture().await;
+            let store = state.store.as_ref().expect("store");
+            let resource =
+                ResourceRef::StateResource(studio_runtime_schema::resource_ref::EmptyResource {});
+            let (_, _, baseline) = prepare(&state, &event(&state), resource.clone(), None)
+                .await
+                .expect("baseline");
+            assert_eq!(baseline.seq, 1);
+            store
+                .transaction(|tx| {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        "a",
+                        json!({"stateDir":"a"}),
+                        false,
+                    )?;
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        "current",
+                        json!({}),
+                        true,
+                    )?;
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        "b",
+                        json!({"stateDir":"b"}),
+                        false,
+                    )?;
+                    Ok(())
+                })
+                .await
+                .expect("delta with unread deletion");
+            let prune_store = store.clone();
+            let hook = Box::new(
+                move |checkpoint, watermark| -> futures_util::future::BoxFuture<'static, ()> {
+                    let store = prune_store.clone();
+                    Box::pin(async move {
+                        assert_eq!((checkpoint, watermark), (2, 4));
+                        store
+                        .transaction(move |tx| {
+                            // Exercise the real pruner without creating 10,000 filler tombstones.
+                            studio_runtime_store::test_fixtures::canvas::set_meta(
+                                tx,
+                                "entity_tombstone_count",
+                                Some(
+                                    &(studio_runtime_store::ENTITY_TOMBSTONE_LIMIT + 1).to_string(),
+                                ),
+                            )?;
+                            assert_eq!(SyncDocumentsRepository::prune_entity_tombstones(tx)?, 1);
+                            assert_eq!(SyncDocumentsRepository::entity_tombstone_floor(tx)?, 3);
+                    if durable {
+                        studio_runtime_store::test_fixtures::canvas::set_meta(tx, "entity_tombstone_floor", Some("0"))?;
+                        studio_runtime_store::test_fixtures::canvas::seed_durable_floor(tx, 3)?;
+                    }
+                            Ok(())
+                        })
+                        .await
+                        .expect("prune checkpoint 2 < floor 3 < watermark 4");
+                    })
+                },
+            );
+            let result = PAGE_INTERLEAVING
+                .scope(
+                    (1, hook),
+                    prepare(
+                        &state,
+                        &event(&state),
+                        resource.clone(),
+                        Some(baseline.clone()),
+                    ),
+                )
+                .await;
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("an incomplete delta must never publish watermark 4"),
+            };
+            assert_eq!(error.status(), axum::http::StatusCode::CONFLICT);
+            let (entry, _, _) = prepare(&state, &event(&state), resource, Some(baseline))
+                .await
+                .expect("retry from last delivered cursor");
+            let entry = entry.expect("fresh inline snapshot");
+            assert_eq!(
+                entry.reply_kind,
+                Some(crate::generated::SubscriptionReplyKind::Snapshot)
+            );
+            assert!(!docs_of(Some(entry)).iter().any(|row| row.id == "current"));
+        }
+    }
+
+    async fn transfer_documents(
+        entry: Option<ResourceRevisionEntry>,
+        mut reader: Option<TransferReader>,
+    ) -> Vec<crate::generated::SyncEntity> {
+        let mut documents = entry.map(|entry| docs_of(Some(entry))).unwrap_or_default();
+        if let Some(reader) = reader.as_mut() {
+            while let Some(frame) = reader.next().await.expect("transfer frame") {
+                let bytes = wire(frame).await;
+                let text = std::str::from_utf8(&bytes).expect("UTF-8");
+                let frame: Value = studio_json::from_str(
+                    text.lines()
+                        .find_map(|line| line.strip_prefix("data: "))
+                        .expect("data"),
+                )
+                .expect("frame JSON");
+                assert_eq!(frame["partCount"], 1);
+                let page: EntityChangeBatch =
+                    studio_json::from_str(frame["data"].as_str().expect("page JSON"))
+                        .expect("batch");
+                documents.extend(page.documents);
+            }
+        }
+        documents
+    }
+
+    #[tokio::test]
+    async fn projected_pages_replay_main_row_updates_deletes_and_membership() {
+        for kind in ["state", "work", "tasks", "taskDetail"] {
+            let (_directory, state) = fixture().await;
+            let store = state.store.as_ref().expect("store");
+            studio_runtime_services::entity_publication::install(store)
+                .await
+                .expect("publisher");
+            store
+                .transaction(|tx| {
+                    put_member(tx, "lead", "lead")?;
+                    put_member(tx, "worker", "lead")?;
+                    put_task(tx, "lead-0", "lead", "running")?;
+                    put_task(tx, "lead-1", "lead", "running")?;
+                    put_task(tx, "worker-0", "worker", "running")?;
+                    Ok(())
+                })
+                .await
+                .expect("team and window projections");
+            put_work(
+                store,
+                "w0",
+                Some(work_record("w0", "lead", "lead", "ready", 0)),
+            )
+            .await;
+            put_work(
+                store,
+                "w1",
+                Some(work_record("w1", "lead", "lead", "ready", 0)),
+            )
+            .await;
+            let resource = match kind {
+                "state" => ResourceRef::StateResource(
+                    studio_runtime_schema::resource_ref::EmptyResource {},
+                ),
+                "work" => studio_json::from_str(r#"{"kind":"work","agentId":"lead"}"#)
+                    .expect("work scope"),
+                "tasks" => studio_json::from_str(r#"{"kind":"tasks","agentId":"lead"}"#)
+                    .expect("tasks scope"),
+                _ => studio_json::from_str(r#"{"kind":"taskDetail","taskId":"lead-1"}"#)
+                    .expect("direct projection"),
+            };
+            let changed_store = store.clone();
+            let multipage = kind != "taskDetail";
+            let hook = Box::new(
+                move |checkpoint, watermark| -> futures_util::future::BoxFuture<'static, ()> {
+                    let store = changed_store.clone();
+                    Box::pin(async move {
+                        if multipage {
+                            assert!(
+                                checkpoint < watermark,
+                                "interleave before an unread projection page"
+                            );
+                        }
+                        store
+                            .transaction(|tx| {
+                                let mut lead =
+                                    studio_runtime_store::AgentRepository::get(tx, &"lead".into())?
+                                        .expect("lead");
+                                lead.name = Some("newer".into());
+                                studio_runtime_store::AgentRepository::put(tx, &lead)?;
+                                let mut worker = studio_runtime_store::AgentRepository::get(
+                                    tx,
+                                    &"worker".into(),
+                                )?
+                                .expect("worker");
+                                worker.deleted_at = Some(1.0);
+                                studio_runtime_store::AgentRepository::put(tx, &worker)?;
+                                put_task(tx, "lead-0", "lead", "completed")?;
+                                delete_task(tx, "lead-0")?;
+                                put_task(tx, "lead-1", "lead", "completed")?;
+                                Ok(())
+                            })
+                            .await
+                            .expect("agent projection and membership/window changes");
+                        put_work(
+                            &store,
+                            "w0",
+                            Some(work_record("w0", "lead", "lead", "review", 1)),
+                        )
+                        .await;
+                        put_work(&store, "w0", None).await;
+                        put_work(
+                            &store,
+                            "w1",
+                            Some(work_record("w1", "lead", "lead", "review", 1)),
+                        )
+                        .await;
+                    })
+                },
+            );
+            let (entry, reader, baseline) = PAGE_INTERLEAVING
+                .scope(
+                    (1, hook),
+                    prepare(&state, &event(&state), resource.clone(), None),
+                )
+                .await
+                .expect("snapshot under writes");
+            let _baseline_documents = transfer_documents(entry, reader).await;
+            let (entry, reader, replay) =
+                prepare(&state, &event(&state), resource, Some(baseline.clone()))
+                    .await
+                    .expect("replay from captured watermark");
+            assert!(replay.seq > baseline.seq);
+            let reset = entry.as_ref().and_then(|entry| entry.reply_kind.clone());
+            let rows = transfer_documents(entry, reader).await;
+            let find = |collection: &str, id: &str| {
+                rows.iter()
+                    .find(|row| row.collection == collection && row.id == id)
+            };
+            match kind {
+                "state" => {
+                    let lead = find("agentSummary", "lead").expect("read-time agent projection");
+                    assert_eq!(lead.value.as_ref().expect("value")["name"], "newer");
+                    assert!(lead.seq > baseline.seq);
+                }
+                "work" => {
+                    assert_eq!(
+                        find("workDetail", "w0").expect("update then delete").op,
+                        crate::generated::SyncEntityOp::Delete
+                    );
+                    assert_eq!(
+                        find("workDetail", "w1")
+                            .expect("work projection")
+                            .value
+                            .as_ref()
+                            .expect("value")["status"],
+                        "review"
+                    );
+                    assert!(find("workResult", "w1:0").is_some());
+                }
+                "tasks" => {
+                    assert_eq!(
+                        reset,
+                        Some(crate::generated::SubscriptionReplyKind::Snapshot)
+                    );
+                    assert!(
+                        find("task", "worker-0").is_none(),
+                        "membership removal replaces the scope"
+                    );
+                    assert!(
+                        find("task", "lead-0").is_none(),
+                        "update then delete remains absent"
+                    );
+                    assert_eq!(
+                        find("task", "lead-1")
+                            .expect("remaining window member")
+                            .value
+                            .as_ref()
+                            .expect("value")["status"],
+                        "completed"
+                    );
+                }
+                _ => assert_eq!(
+                    find("taskDetail", "lead-1")
+                        .expect("direct projection")
+                        .value
+                        .as_ref()
+                        .expect("value")["status"],
+                    "completed"
+                ),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_pages_replay_updates_and_tombstones_from_watermark() {
+        let (_directory, state) = fixture().await;
+        let store = state.store.as_ref().expect("store");
+        store
+            .transaction(|tx| {
+                for index in 0..=SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        &format!("page-{index}"),
+                        json!({"stateDir":"before"}),
+                        false,
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .expect("multiple SQL pages");
+        let resource =
+            ResourceRef::StateResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let mut page = read_page(&state, &resource, None, None)
+            .await
+            .expect("first page");
+        let watermark = page.max_sequence;
+        assert!(page.checkpoint < watermark);
+        let mut displayed = BTreeMap::new();
+        for row in std::mem::take(&mut page.rows) {
+            displayed.insert(row.id.clone(), row);
+        }
+        assert!(displayed.contains_key("page-0"));
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(tx, "workspace", "page-0", json!({}), true)?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "workspace",
+                    &format!("page-{SYNC_ENTITY_STREAM_MAX_DOCUMENTS}"),
+                    json!({"stateDir":"newer"}),
+                    false,
+                )?;
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "workspace",
+                    "inserted",
+                    json!({"stateDir":"newer"}),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("delete emitted row, update unread row, insert after watermark");
+        store
+            .flush_wal_for_shutdown()
+            .await
+            .expect("checkpoint between SQL pages");
+        assert_eq!(
+            tokio::fs::metadata(store.root().join("canvas.sqlite3-wal"))
+                .await
+                .expect("WAL")
+                .len(),
+            0
+        );
+        while page.checkpoint < watermark {
+            page = read_page(&state, &resource, None, Some(page))
+                .await
+                .expect("continuation");
+            assert_eq!(
+                page.max_sequence, watermark,
+                "writes cannot move the captured upper bound"
+            );
+            for row in std::mem::take(&mut page.rows) {
+                displayed.insert(row.id.clone(), row);
+            }
+        }
+        let replay = read_page(&state, &resource, Some(watermark), None)
+            .await
+            .expect("replay");
+        assert!(!replay.reset);
+        assert_eq!(replay.rows.len(), 3);
+        for row in &replay.rows {
+            if row.deleted {
+                displayed.remove(&row.id);
+            } else {
+                displayed.insert(row.id.clone(), row.clone());
+            }
+        }
+        assert!(!displayed.contains_key("page-0"));
+        for id in [
+            format!("page-{SYNC_ENTITY_STREAM_MAX_DOCUMENTS}"),
+            "inserted".into(),
+        ] {
+            assert!(
+                displayed[&id]
+                    .payload
+                    .as_ref()
+                    .expect("value")
+                    .contains("newer")
+            );
+        }
+        state.sync_changes.close();
+        assert!(
+            read_page(&state, &resource, None, Some(replay))
+                .await
+                .is_err(),
+            "shutdown refuses another SQL page"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_spooling_and_slow_consumer_release_read_transactions() {
+        let (_directory, state) = fixture().await;
+        let store = state.store.as_ref().expect("store");
+        store
+            .transaction(|tx| {
+                for index in 0..=SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
+                    SyncDocumentsRepository::put_entity(
+                        tx,
+                        "workspace",
+                        &format!("page-{index}"),
+                        json!({"stateDir":"fixture"}),
+                        false,
+                    )?;
+                }
+                Ok(())
+            })
+            .await
+            .expect("multiple SQL pages");
+        // spool_page's SQL boundary assertion also checks every page before any
+        // client I/O: the old implementation spools inside its read transaction.
+        let resource =
+            ResourceRef::StateResource(studio_runtime_schema::resource_ref::EmptyResource {});
+        let (entry, reader, _) = prepare(&state, &event(&state), resource, None)
+            .await
+            .expect("snapshot");
+        assert!(entry.is_none());
+        let mut reader = reader.expect("multi-page transfer");
+        assert!(reader.next().await.expect("first frame").is_some());
+        store
+            .transaction(|tx| {
+                SyncDocumentsRepository::put_entity(
+                    tx,
+                    "workspace",
+                    "later",
+                    json!({"stateDir":"later"}),
+                    false,
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("write while consumer is paused");
+        store
+            .flush_wal_for_shutdown()
+            .await
+            .expect("checkpoint mid-stream");
+        assert_eq!(
+            tokio::fs::metadata(store.root().join("canvas.sqlite3-wal"))
+                .await
+                .expect("WAL")
+                .len(),
+            0
+        );
+        assert!(
+            reader.next().await.expect("remaining frame").is_some(),
+            "checkpoint runs before the consumer finishes"
+        );
     }
     /// Write a task through the canonical task writer, which keeps its window.
     fn put_task(
