@@ -86,6 +86,7 @@ const TRANSCRIPT_SHAPE: &str = studio_db_api::static_sql!(
 index(name="changes_source_rowid",columns(kind,source_rowid),unique),
 index(name="changes_durable_identity",columns(source_label,durable_id),unique,predicate=kind.eq(Kind::DurableRows)),
 index(name="changes_durable_window_members",columns(source_label,deleted,durable_id),predicate=kind.eq(Kind::DurableRows)),
+index(name="changes_durable_label_sequence",columns(source_label,sequence,source_rowid),predicate=kind.eq(Kind::DurableRows)),
 index(name="changes_durable_sequence",columns(sequence,source_rowid),predicate=kind.eq(Kind::DurableRows)),
 index(name="changes_durable_tombstone_at",columns(deleted_at),predicate=DURABLE_TOMBSTONES),
 index(name="changes_durable_task_window",columns(durable_id),predicate=DURABLE_TASK_WINDOW),
@@ -196,7 +197,7 @@ mod tests {
     fn f1_change_partitions_preserve_null_multiplicity_and_kind_isolation() {
         assert_eq!(
             Changes::INDEXES.len(),
-            9,
+            10,
             "the physical owner installs every changes index"
         );
         let mut db = CodecContext::open_in_memory().unwrap();

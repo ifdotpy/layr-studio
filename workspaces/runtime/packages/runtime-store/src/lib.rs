@@ -2603,7 +2603,7 @@ impl RuntimeStore {
             #[cfg(not(feature = "perf-reporting"))]
             let result = snapshot_on(pool.checkout_admitted(permit, started, waited)?, operation);
             #[cfg(feature = "perf-reporting")]
-            perf_reporting::record_wait(&format!("sqlite read {label}"), run_started.elapsed());
+            perf_reporting::record_read(label, run_started.elapsed());
             result
         })
         .await

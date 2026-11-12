@@ -11,6 +11,7 @@ mod m2026_11_11_retired_agent_keys;
 mod m2026_11_11_strict_native_review;
 mod m2026_11_11_writer_query_indexes;
 mod m2026_11_11_writer_receipt_indexes;
+mod m2026_11_12_changes_label_sequence;
 mod m2026_11_12_writer_window_indexes;
 
 use crate::{StoreError, StoreResult};
@@ -185,20 +186,36 @@ fn catalog_through_f1() -> impl Iterator<Item = MigrationDefinition> {
 }
 
 // Append new serving migrations here; the released F1 prefix remains frozen.
-static POST_F1_CATALOG: &[SqlMigration] = &[SqlMigration {
-    definition: MigrationDefinition {
-        id: "2026-11-12-writer-window-indexes",
-        introduced: MigrationDate {
-            year: 2026,
-            month: 11,
-            day: 12,
+static POST_F1_CATALOG: &[SqlMigration] = &[
+    SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-12-writer-window-indexes",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 12,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Consolidated F1 databases without bounded writer window indexes",
+            remove_when: "Supported installations and backups all contain these writer indexes",
         },
-        target: MigrationTarget::Canvas,
-        supported_source: "Consolidated F1 databases without bounded writer window indexes",
-        remove_when: "Supported installations and backups all contain these writer indexes",
+        apply: m2026_11_12_writer_window_indexes::apply,
     },
-    apply: m2026_11_12_writer_window_indexes::apply,
-}];
+    SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-12-changes-label-sequence",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 12,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Consolidated changes without a label and sequence range access path",
+            remove_when: "Supported installations and backups all contain the label sequence index",
+        },
+        apply: m2026_11_12_changes_label_sequence::apply,
+    },
+];
 pub fn catalog() -> impl Iterator<Item = MigrationDefinition> {
     catalog_through_f1().chain(POST_F1_CATALOG.iter().map(SqlMigration::definition))
 }
@@ -664,6 +681,8 @@ const RELEASED_F1_CANVAS_FINGERPRINT: &str =
 #[cfg(test)]
 const RELEASED_CANVAS_CATALOGS: &[&str] = &[
     RELEASED_F1_CANVAS_FINGERPRINT,
+    "aca2e15f31243e831f133e58486adb630a4dd0f929a4e7c5881dcf29d53f2a53",
+    "cc2c41ac023a533092d0d96648db3996bf606f5761d4a653b946049160cf1a89",
     "561c94aa6bffe48d6de89805793b296560ace24b89a3b914d38635215eae5f53",
     "e07877dd5a4eef610f66b99336716fb9e32515094d81713b45d30ec61d09cd63",
     "85c8d18a41f9de456bfa310c7b4f119d2b78045f6a2dabb8fb2634c7b3c29bc9",
@@ -717,6 +736,32 @@ mod released_catalog_tests {
             marker
         );
         assert!(super::catalog_fingerprint(super::CATALOG, MigrationTarget::Canvas) != released);
+    }
+
+    #[test]
+    fn released_canvas_prefix_receives_label_sequence_index_once() {
+        let root = tempfile::tempdir().unwrap();
+        let name = "changes_durable_label_sequence";
+        let mut db =
+            crate::fresh_state::canvas_before_indexes(&root.path().join("canvas.sqlite3"), &[name])
+                .unwrap();
+        let tx = db.transaction().unwrap();
+        super::write_canvas_catalog_at(&tx, 1).unwrap();
+        tx.commit().unwrap();
+        super::upgrade_current_canvas(&mut db).unwrap();
+        assert!(
+            studio_db_api::catalog::export(&db)
+                .unwrap()
+                .iter()
+                .any(|entry| entry.name == name)
+        );
+        let marker =
+            crate::clock_schema::SyncEntityMeta::value(&db, super::MIGRATION_CATALOG_KEY).unwrap();
+        super::upgrade_current_canvas(&mut db).unwrap();
+        assert_eq!(
+            crate::clock_schema::SyncEntityMeta::value(&db, super::MIGRATION_CATALOG_KEY).unwrap(),
+            marker
+        );
     }
 
     #[test]

@@ -432,7 +432,7 @@ pub(crate) mod queries {
     #[derive(DbQuery)]
     #[db_query(database=Canvas,mode=read,cardinality=many,
         result=crate::durable_seq::DurableTombstone,projection=crate::durable_seq::DurableTombstone,
-        tables(rows=crate::change_schema::Changes),indexes(rows=crate::change_schema::Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=rows),
+        tables(rows=crate::change_schema::Changes),indexes(rows=crate::change_schema::Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=rows),
         columns(id=DurableRows::ID,seq=DurableRows::SEQ,value=crate::change_schema::Changes::SEQUENCE,
             actual_id=crate::change_schema::Changes::DURABLE_ID,tbl=crate::change_schema::Changes::SOURCE_LABEL,
             deleted=crate::change_schema::Changes::DELETED),

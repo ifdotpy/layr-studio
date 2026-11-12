@@ -34,3 +34,43 @@ pub(crate) fn explain<P: QueryParams>(
         statement.query_map(bindings, |row| row.get(3))?.collect()
     })
 }
+
+/// Label/range witnesses permit only the explicitly listed aggregate sorts.
+pub(crate) fn assert_label_range<P: QueryParams, R>(
+    connection: &CodecContext,
+    name: &str,
+    expected_index: &str,
+    query: &studio_db_api::NamedQuery<
+        crate::peer_update_settings::Canvas,
+        P,
+        R,
+        studio_db_api::ReadMode,
+        studio_db_api::Many,
+    >,
+    params: &P,
+    aggregate_sort_reason: Option<&str>,
+    budget: u64,
+) {
+    let plan = explain(connection, query.sql(), params).unwrap();
+    assert!(
+        plan.iter()
+            .all(|line| !line.contains("SCAN changes") && !line.contains("AUTOMATIC")),
+        "{name}: {plan:?}"
+    );
+    assert!(
+        plan.iter().any(|line| line.contains(expected_index)),
+        "{name}: {plan:?}"
+    );
+    if aggregate_sort_reason.is_none() {
+        assert!(
+            plan.iter().all(|line| !line.contains("TEMP B-TREE")),
+            "{name}: {plan:?}"
+        );
+    }
+    let (_, steps) = vm_steps(connection, || {
+        crate::peer_update_settings::canvas_read(connection).collect(query, params)
+    })
+    .unwrap();
+    eprintln!("{name}: {steps}/{budget} VM steps; {plan:?}");
+    assert!(steps <= budget, "{name}: {steps} VM steps exceed {budget}");
+}

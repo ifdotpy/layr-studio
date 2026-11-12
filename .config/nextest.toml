@@ -175,6 +175,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_work_keeps_exact_deleted_one_scope_escape)) |
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_history_preserves_raw_tokens_nullable_join_and_tombstones)) |
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_task_owner_union_and_run_fanout_keep_raw_projection_policy)) |
+    (package(=studio-runtime-store) & kind(lib) & test(label_sequence_queries_bound_skewed_changes)) |
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_hot_queries_use_owned_indexes_and_ignore_unrelated_history)) |
     (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
@@ -794,6 +795,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_work_keeps_exact_deleted_one_scope_escape)) |
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_history_preserves_raw_tokens_nullable_join_and_tombstones)) |
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_task_owner_union_and_run_fanout_keep_raw_projection_policy)) |
+    (package(=studio-runtime-store) & kind(lib) & test(label_sequence_queries_bound_skewed_changes)) |
     (package(=studio-runtime-store) & kind(lib) & test(entity_scope_target_hot_queries_use_owned_indexes_and_ignore_unrelated_history)) |
     (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |

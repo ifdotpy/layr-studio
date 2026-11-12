@@ -725,13 +725,13 @@ pub fn transcript_change_cursor(connection: &Connection, agent: &str) -> StoreRe
 }
 
 #[studio_db_api::db_queries]
-mod queries {
+pub(crate) mod queries {
     use super::*;
     use studio_db_api::DbQuery;
 
     #[derive(DbQuery)]
     #[db_query(database=Canvas,mode=read,cardinality=many,result=Vec<u8>,decode=Changes::IDENTITY,
-        tables(rows=Changes),indexes(rows=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=rows),
+        tables(rows=Changes),indexes(rows=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=rows),
         columns(identity=Changes::IDENTITY,label=Changes::SOURCE_LABEL,seq=Changes::SEQUENCE,deleted=Changes::DELETED),
         sql="SELECT {identity} FROM {rows} WHERE {durable} AND {label}=?1 AND {deleted}=0 AND {seq}>?2 AND {seq}<=?3 ORDER BY {seq}")]
     pub struct LiveKeys<'a> {
@@ -1231,7 +1231,15 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(plan.iter().any(|step| step.contains("changes_durable_sequence") && step.contains("sequence>")), "{plan:?}");
+        let index = studio_db_api::query_index::<Canvas, Changes>(
+            &Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE,
+        );
+        assert!(
+            plan.iter().any(|step| step.contains(index)
+                && step.contains("source_label=?")
+                && step.contains("sequence>")),
+            "{plan:?}"
+        );
         assert!(
             high_steps + delta_steps + count < 1000,
             "selected-label reads used high={high_steps}, delta={delta_steps}, window={count} VM steps"

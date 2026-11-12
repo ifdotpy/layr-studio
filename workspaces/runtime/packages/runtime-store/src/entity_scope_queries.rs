@@ -26,11 +26,10 @@ pub type WorkHistoryChangeRow = (
 // Owner: EntityScopeQueries. Unit: durable sequence numbers in a narrow catch-up interval.
 const SEQ_INDEX_RANGE_MAX: i64 = 1024;
 
-// The label-first index reads only the rows of one direct source; the sequence index
-// scanned every durable change in the interval on each snapshot page.
+// Preserve label-first direct reads while seeking the sequence interval in index order.
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64),
-    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_IDENTITY),predicates(durable=changes),
+    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID),
     sql="SELECT {id},{seq},{deleted} FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) WHERE {label}=?1 AND {seq}>?2 AND {seq}<=?3 AND ({deleted}=0 OR {seq}>?4) AND (?5 IS NULL OR {id}=?5) ORDER BY {seq},{rowid} LIMIT ?6")]
 struct DirectChanges<'a> {
@@ -48,6 +47,8 @@ struct DirectChanges<'a> {
     fetch: i64,
 }
 
+// An explicitly selected task and its JSON owner are unique identity probes;
+// a label/range scan here would traverse every task and agent during catch-up.
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64),
     tables(changes=Changes,tasks=TaskRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_IDENTITY),predicates(durable=changes),
@@ -74,7 +75,7 @@ struct TaskChanges<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64),
-    tables(changes=Changes,agents=AgentsStorageRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_IDENTITY),predicates(durable=changes),
+    tables(changes=Changes,agents=AgentsStorageRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,agent_id=AgentsStorageRow::ID,root=AgentsStorageRow::ROOT_ID),
     sql="SELECT {id},MAX({seq}) AS last FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable})
  WHERE {label} IN ('runtime_agents',?1) AND {seq}>?2 AND {seq}<=?3 AND ({deleted}=0 OR {seq}>?4) AND (?5 IS NULL OR {id}=?5)
@@ -99,7 +100,7 @@ struct AgentChanges<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64),
-    tables(changes=Changes,agents=AgentsStorageRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes,agents=AgentsStorageRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,agent_id=AgentsStorageRow::ID,root=AgentsStorageRow::ROOT_ID),
     sql="SELECT {id},MAX({seq}) AS last FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable})
  WHERE {label} IN ('runtime_agents',?1) AND {seq}>?2 AND {seq}<=?3 AND ({deleted}=0 OR {seq}>?4) AND (?5 IS NULL OR {id}=?5)
@@ -124,7 +125,7 @@ struct NarrowAgentChanges<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64),
-    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID),
     sql="SELECT {id},MAX({seq}) FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) WHERE {label} IN ('runtime_agents','runtime_agent_volatile') AND {seq}>?1 AND {seq}<=?2 AND ({deleted}=0 OR {seq}>?3) AND (?4 IS NULL OR {id}=?4) GROUP BY {id} ORDER BY MAX({seq}) LIMIT ?5")]
 struct TailChanges<'a> {
@@ -167,7 +168,7 @@ struct DirectSequence<'a> {
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64),
     tables(changes=Changes,members=Changes),
-    indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE,members=Changes::INDEX_CHANGES_DURABLE_IDENTITY),
+    indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE,members=Changes::INDEX_CHANGES_DURABLE_IDENTITY),
     predicates(durable=changes,membership=members),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID),
     sql="SELECT x.member,MAX(x.number) AS last,w.{deleted} FROM (
@@ -195,7 +196,7 @@ struct WindowChanges<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64),
-    tables(changes=Changes,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,work_id=WorkRow::ID,work_record=WorkRow::RECORD),
     sql="SELECT d.{id},d.{seq},d.{deleted} FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) d LEFT JOIN {works} w ON w.{work_id}=d.{id}
  WHERE d.{label}='runtime_work' AND d.{seq}>?1 AND d.{seq}<=?2 AND (d.{deleted}=0 OR d.{seq}>?3)
@@ -216,7 +217,7 @@ struct WorkChanges<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64,Option<String>,Option<String>,Option<i64>,Option<String>),
-    tables(changes=Changes,children=WorkResultsStorageRow,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes,children=WorkResultsStorageRow,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,child_id=WorkResultsStorageRow::ID,record=WorkResultsStorageRow::RECORD,work=WorkResultsStorageRow::WORK,idx=WorkResultsStorageRow::IDX,work_id=WorkRow::ID,work_record=WorkRow::RECORD),
     sql="SELECT d.{id},d.{seq},d.{deleted},c.{record},c.{work},c.{idx},json_extract(w.{work_record},'$.rootId')
  FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) d LEFT JOIN {children} c ON c.{child_id}=d.{id} LEFT JOIN {works} w ON w.{work_id}=c.{work}
@@ -240,7 +241,7 @@ struct Results<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64,Option<String>,Option<String>,Option<i64>,Option<String>),
-    tables(changes=Changes,children=WorkDecisionsStorageRow,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes,children=WorkDecisionsStorageRow,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,child_id=WorkDecisionsStorageRow::ID,record=WorkDecisionsStorageRow::RECORD,work=WorkDecisionsStorageRow::WORK,idx=WorkDecisionsStorageRow::IDX,work_id=WorkRow::ID,work_record=WorkRow::RECORD),
     sql="SELECT d.{id},d.{seq},d.{deleted},c.{record},c.{work},c.{idx},json_extract(w.{work_record},'$.rootId')
  FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) d LEFT JOIN {children} c ON c.{child_id}=d.{id} LEFT JOIN {works} w ON w.{work_id}=c.{work}
@@ -264,7 +265,7 @@ struct Decisions<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64,i64,Option<String>,Option<String>,Option<i64>,Option<String>),
-    tables(changes=Changes,children=WorkReleasesStorageRow,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes,children=WorkReleasesStorageRow,works=WorkRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,child_id=WorkReleasesStorageRow::ID,record=WorkReleasesStorageRow::RECORD,work=WorkReleasesStorageRow::WORK,idx=WorkReleasesStorageRow::IDX,work_id=WorkRow::ID,work_record=WorkRow::RECORD),
     sql="SELECT d.{id},d.{seq},d.{deleted},c.{record},c.{work},c.{idx},json_extract(w.{work_record},'$.rootId')
  FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) d LEFT JOIN {children} c ON c.{child_id}=d.{id} LEFT JOIN {works} w ON w.{work_id}=c.{work}
@@ -288,7 +289,7 @@ struct Releases<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64),
-    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID),
     sql="SELECT {id},{seq} FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) WHERE {label}=?1 AND {seq}>?2 AND {seq}<=?3 ORDER BY {seq},{rowid} LIMIT ?4")]
 struct ChangedIds<'a> {
@@ -304,7 +305,7 @@ struct ChangedIds<'a> {
 
 #[derive(DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,native,result=(String,i64),
-    tables(changes=Changes,runs=ExecutionRunsRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_SEQUENCE),predicates(durable=changes),
+    tables(changes=Changes,runs=ExecutionRunsRow),indexes(changes=Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE),predicates(durable=changes),
     columns(id=Changes::DURABLE_ID,seq=Changes::SEQUENCE,deleted=Changes::DELETED,label=Changes::SOURCE_LABEL,rowid=Changes::SOURCE_ROWID,agent=ExecutionRunsRow::AGENT,run_id=ExecutionRunsRow::ID),
     sql="SELECT r.{agent},d.{seq} FROM (SELECT {id},{seq},{deleted},{label},{rowid} FROM {changes} WHERE {durable}) d JOIN {runs} r ON r.{run_id}=d.{id} WHERE d.{label}='runtime_execution_runs' AND d.{deleted}=0 AND d.{seq}>?1 AND d.{seq}<=?2 ORDER BY d.{seq},d.{rowid} LIMIT ?3")]
 struct ChangedRuns {
@@ -633,6 +634,297 @@ mod tests {
         canvas_tx(tx)
             .upsert(&WorkRow::from_record(tx, &record).unwrap())
             .unwrap();
+    }
+    #[test]
+    fn label_sequence_queries_bound_skewed_changes() {
+        let mut db = database();
+        let tx = db.transaction().unwrap();
+        // One frequent label and many unrelated labels, all before the catch-up interval.
+        for n in 1..=4000 {
+            change(&tx, "runtime_agents", &format!("hot-{n}"), n, 0, n);
+        }
+        for n in 4001..=16000 {
+            change(&tx, &format!("cold-{}", n % 128), &n.to_string(), n, 0, n);
+        }
+        for (n, label) in [
+            "runtime_agents",
+            "runtime_agent_volatile",
+            "runtime_work",
+            "runtime_work_results",
+            "runtime_work_decisions",
+            "runtime_work_releases",
+            "runtime_execution_runs",
+            "runtime_tasks",
+            "runtime_plans",
+            crate::durable_seq::TASK_WINDOW,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let seq = 30000 + n as i64;
+            change(&tx, label, "candidate", seq, 0, seq);
+        }
+        agent(&tx, "hot-1", "root");
+        let raw = r#"{"id":"candidate","itemId":"candidate","turnId":"turn","type":"commandExecution","name":"command","agent":"hot-1","kind":"command","status":"completed","created":1}"#;
+        canvas_tx(&tx)
+            .upsert(&TaskRow {
+                id: "candidate".into(),
+                record: crate::json_record_codec::RawJsonRecord::from_stored(
+                    &tx,
+                    "candidate",
+                    raw.into(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        canvas_tx(&tx)
+            .upsert(&ExecutionRunsRow {
+                id: "candidate".into(),
+                agent: "hot-1".into(),
+                account: "default".into(),
+                epoch: 1,
+                thread: None,
+                turn: None,
+                created: 1.0,
+                record: "malformed unrelated payload".to_owned().into(),
+                status: None,
+            })
+            .unwrap();
+        // An owner-only interval proves the JSON owner branch contributes a candidate.
+        assert_eq!(
+            EntityScopeQueries::task_changes(&tx, 0, 2, 0, Some("candidate"), 10).unwrap(),
+            vec![("candidate".into(), 1, 0)]
+        );
+        let composite_index = studio_db_api::query_index::<Canvas, Changes>(
+            &Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE,
+        );
+        let identity_index =
+            studio_db_api::query_index::<Canvas, Changes>(&Changes::INDEX_CHANGES_DURABLE_IDENTITY);
+        for after in [0, 29999] {
+            assert_eq!(
+                EntityScopeQueries::task_changes(&tx, after, 30020, 0, Some("candidate"), 10)
+                    .unwrap(),
+                vec![("candidate".into(), 30007, 0)]
+            );
+            assert_eq!(
+                EntityScopeQueries::changed_runs(&tx, after, 30020, 10).unwrap(),
+                vec![("hot-1".into(), 30006)]
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "DirectChanges",
+                composite_index,
+                &DirectChanges::QUERY,
+                &DirectChanges {
+                    source: Some("runtime_plans"),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    id: None,
+                    fetch: 10,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "TaskChanges",
+                identity_index,
+                &TaskChanges::QUERY,
+                &TaskChanges {
+                    source: Some("runtime_tasks"),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    id: Some("candidate"),
+                    fetch: 10,
+                },
+                Some("Task owner union groups candidates and orders their maximum sequence"),
+                1000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "AgentChanges",
+                composite_index,
+                &AgentChanges::QUERY,
+                &AgentChanges {
+                    source: Some(crate::durable_seq::AGENT_VIEW_MARK),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    id: None,
+                    fetch: 10,
+                    root: None,
+                },
+                Some("Two agent labels must group identities and order their maximum sequence"),
+                200000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "NarrowAgentChanges",
+                composite_index,
+                &NarrowAgentChanges::QUERY,
+                &NarrowAgentChanges {
+                    source: Some(crate::durable_seq::AGENT_VIEW_MARK),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    id: None,
+                    fetch: 10,
+                    root: None,
+                },
+                Some("Two agent labels must group identities and order their maximum sequence"),
+                200000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "TailChanges",
+                composite_index,
+                &TailChanges::QUERY,
+                &TailChanges {
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    id: None,
+                    fetch: 10,
+                },
+                Some("Tail combines two labels by identity and orders their maximum sequence"),
+                200000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "WindowChanges",
+                composite_index,
+                &WindowChanges::QUERY,
+                &WindowChanges {
+                    source: Some(crate::durable_seq::TASK_WINDOW),
+                    table: Some("runtime_tasks"),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    id: None,
+                    fetch: 10,
+                },
+                Some("Window membership union groups identities and orders their maximum sequence"),
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "WorkChanges",
+                composite_index,
+                &WorkChanges::QUERY,
+                &WorkChanges {
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    root: None,
+                    fetch: 10,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "Results",
+                composite_index,
+                &Results::QUERY,
+                &Results {
+                    source: Some("runtime_work_results"),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    root: None,
+                    fetch: 10,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "Decisions",
+                composite_index,
+                &Decisions::QUERY,
+                &Decisions {
+                    source: Some("runtime_work_decisions"),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    root: None,
+                    fetch: 10,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "Releases",
+                composite_index,
+                &Releases::QUERY,
+                &Releases {
+                    source: Some("runtime_work_releases"),
+                    after: Some(after),
+                    through: Some(30020),
+                    deletes_after: Some(0),
+                    root: None,
+                    fetch: 10,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "ChangedIds",
+                composite_index,
+                &ChangedIds::QUERY,
+                &ChangedIds {
+                    source: Some("runtime_agents"),
+                    after: Some(after),
+                    through: Some(30020),
+                    fetch: 10,
+                },
+                None,
+                1000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "ChangedRuns",
+                composite_index,
+                &ChangedRuns::QUERY,
+                &ChangedRuns {
+                    after: Some(after),
+                    through: Some(30020),
+                    fetch: 10,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "crate::clock_schema::queries::Tombstones",
+                composite_index,
+                &crate::clock_schema::queries::Tombstones::QUERY,
+                &crate::clock_schema::queries::Tombstones {
+                    table: "runtime_plans",
+                    after,
+                    high: 30020,
+                },
+                None,
+                5000,
+            );
+            crate::query_plan_test_support::assert_label_range(
+                &tx,
+                "crate::durable_seq::queries::LiveKeys",
+                composite_index,
+                &crate::durable_seq::queries::LiveKeys::QUERY,
+                &crate::durable_seq::queries::LiveKeys {
+                    label: Some("runtime_plans"),
+                    after: Some(after),
+                    high: Some(30020),
+                },
+                None,
+                5000,
+            );
+        }
     }
     #[test]
     fn entity_scope_target_direct_candidates_preserve_deleted_selectors_bounds_and_source_ties() {
@@ -970,7 +1262,7 @@ mod tests {
         assert!(
             plan.iter().any(
                 |s| s.contains(studio_db_api::query_index::<Canvas, Changes>(
-                    &Changes::INDEX_CHANGES_DURABLE_SEQUENCE
+                    &Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE
                 ))
             ),
             "{plan:?}"
@@ -1011,7 +1303,7 @@ mod tests {
         assert!(
             plan.iter().any(
                 |s| s.contains(studio_db_api::query_index::<Canvas, Changes>(
-                    &Changes::INDEX_CHANGES_DURABLE_SEQUENCE
+                    &Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE
                 ))
             ),
             "{plan:?}"
@@ -1031,7 +1323,7 @@ mod tests {
         assert!(
             plan.iter().any(
                 |s| s.contains(studio_db_api::query_index::<Canvas, Changes>(
-                    &Changes::INDEX_CHANGES_DURABLE_IDENTITY
+                    &Changes::INDEX_CHANGES_DURABLE_LABEL_SEQUENCE
                 ))
             ),
             "{plan:?}"

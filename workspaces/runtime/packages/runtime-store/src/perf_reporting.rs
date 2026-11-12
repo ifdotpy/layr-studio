@@ -12,6 +12,8 @@ pub const REPORT_INTERVAL_SECONDS: u64 = 60;
 pub const LOG_TABLE_ROWS: usize = 20;
 /// Poll duration in milliseconds above which a poll is recorded.
 pub const SLOW_POLL_MILLISECONDS: u64 = 10;
+/// Named read duration, in milliseconds, above which one immediate warning is emitted.
+const SLOW_READ_MILLISECONDS: u64 = 500;
 /// Maximum distinct labels retained per table, in keys, excluding overflow.
 pub const MAX_AGGREGATE_KEYS: usize = 4096;
 /// Maximum retained label prefix, in bytes. Six full maps retain at most about
@@ -244,6 +246,23 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
 pub fn record_wait(label: &str, elapsed: Duration) {
     update(|data| &mut data.waits, label, elapsed);
 }
+/// Preserve the existing read aggregate and emit an immediate warning only for slow reads.
+pub fn record_read(label: &str, elapsed: Duration) {
+    record_wait(&format!("sqlite read {label}"), elapsed);
+    if let Some(line) = slow_read_line(label, elapsed) {
+        eprintln!("{line}");
+    }
+}
+
+fn slow_read_line(label: &str, elapsed: Duration) -> Option<String> {
+    (elapsed > Duration::from_millis(SLOW_READ_MILLISECONDS)).then(|| {
+        format!(
+            "warning: Canvas read {label} took {} ms",
+            elapsed.as_millis()
+        )
+    })
+}
+
 pub fn record_route(label: &str, elapsed: Duration) {
     update(|data| &mut data.routes, label, elapsed);
 }
@@ -513,6 +532,16 @@ fn collapse_in_lists(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn named_read_warning_is_strictly_above_500_ms() {
+        assert!(slow_read_line("fixture", Duration::from_millis(499)).is_none());
+        assert!(slow_read_line("fixture", Duration::from_millis(500)).is_none());
+        assert_eq!(
+            slow_read_line("fixture", Duration::from_millis(501)).as_deref(),
+            Some("warning: Canvas read fixture took 501 ms")
+        );
+    }
+
     #[test]
     fn sql_normalizes_once_across_profile_rows_and_sweeps() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
