@@ -1489,7 +1489,14 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending, refuse
         assert_eq!(result["stopped"], "unconfirmed");
     }
     let stopped = state.record().await;
-    assert_eq!(stopped["status"], "paused", "{stopped}");
+    // No turn runs before the reattach: a stop fences it and keeps the chat; a
+    // delete pauses it.
+    let expected = if matches!(ending, Ending::Stop) {
+        "interrupted"
+    } else {
+        "paused"
+    };
+    assert_eq!(stopped["status"], expected, "{stopped}");
 
     // A worker reattaches to the same provider generation, where the turn runs.
     // Its startup barrier must not count the first worker's finished pass.
@@ -1559,10 +1566,11 @@ async fn ending_before_worker_reattach_ends_the_turn_work(ending: Ending, refuse
     worker_barrier(&worker).await;
 
     let record = state.record().await;
-    assert_eq!(record["status"], "paused", "{record}");
-    assert!(
-        !studio_runtime_store::truthy(record.get("autoWake")),
-        "the stopped agent does not wake: {record}"
+    assert_eq!(record["status"], expected, "{record}");
+    assert_eq!(
+        studio_runtime_store::truthy(record.get("autoWake")),
+        matches!(ending, Ending::Stop) && studio_runtime_store::truthy(stopped.get("autoWake")),
+        "a delete does not wake; a stop keeps automatic continuation: {record}"
     );
     assert_eq!(
         record["disconnectRecovery"]["stopInterrupt"]["outcome"], "accepted",

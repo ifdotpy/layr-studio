@@ -35,6 +35,15 @@ fn outcome(name: &str, case: Case) -> Value {
     writes.sort_by_key(|write| write["record"]["id"].to_string());
     let mut cancel_pending = decision.cancel_pending;
     cancel_pending.sort();
+    let requeue: Vec<Value> = decision
+        .requeue
+        .iter()
+        .map(|requeue| {
+            json!({"agent":requeue.agent,"from_epoch":requeue.from_epoch,
+                "to_epoch":requeue.to_epoch,"interrupted":requeue.interrupted,
+                "reason":requeue.reason})
+        })
+        .collect();
     let effects: Vec<Value> = decision
         .effects
         .iter()
@@ -47,12 +56,16 @@ fn outcome(name: &str, case: Case) -> Value {
             })
         })
         .collect();
-    json!({
+    let mut outcome = json!({
         "writes": writes,
         "cancel_pending": cancel_pending,
         "effects": effects,
         "result": decision.result,
-    })
+    });
+    if !requeue.is_empty() {
+        outcome["requeue"] = json!(requeue);
+    }
+    outcome
 }
 
 #[test]

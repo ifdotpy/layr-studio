@@ -1,15 +1,69 @@
 {
   "writes": [
-    {"table": "runtime_agents", "record": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 4, "status": "paused", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": false, "inFlight": true, "created": 1.0, "error": "Stopped by user"}}
+    {
+      "table": "runtime_agents",
+      "record": {
+        "id": "lead",
+        "rootId": "lead",
+        "parentId": null,
+        "epoch": 4,
+        "status": "interrupted",
+        "compactions": 0,
+        "name": "Lead",
+        "isLead": true,
+        "autoWake": true,
+        "inFlight": true,
+        "created": 1.0,
+        "error": "Stopped by user"
+      }
+    }
   ],
-  "cancel_pending": ["lead"],
+  "cancel_pending": [],
   "effects": [
     {
       "kind": "interrupt",
-      "before": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 3, "status": "starting", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": true, "inFlight": true, "created": 1.0},
-      "stopped": {"id": "lead", "rootId": "lead", "parentId": null, "epoch": 4, "status": "paused", "compactions": 0, "name": "Lead", "isLead": true, "autoWake": false, "inFlight": true, "created": 1.0, "error": "Stopped by user"},
+      "before": {
+        "id": "lead",
+        "rootId": "lead",
+        "parentId": null,
+        "epoch": 3,
+        "status": "starting",
+        "compactions": 0,
+        "name": "Lead",
+        "isLead": true,
+        "autoWake": true,
+        "inFlight": true,
+        "created": 1.0
+      },
+      "stopped": {
+        "id": "lead",
+        "rootId": "lead",
+        "parentId": null,
+        "epoch": 4,
+        "status": "interrupted",
+        "compactions": 0,
+        "name": "Lead",
+        "isLead": true,
+        "autoWake": true,
+        "inFlight": true,
+        "created": 1.0,
+        "error": "Stopped by user"
+      },
       "at": 1234567.5
     }
   ],
-  "result": {"stopped": ["lead"]}
+  "result": {
+    "stopped": [
+      "lead"
+    ]
+  },
+  "requeue": [
+    {
+      "agent": "lead",
+      "from_epoch": 3,
+      "to_epoch": 4,
+      "interrupted": [],
+      "reason": "Stopped by user"
+    }
+  ]
 }

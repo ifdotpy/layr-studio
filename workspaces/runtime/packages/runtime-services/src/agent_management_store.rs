@@ -469,6 +469,16 @@ fn execute_decision(
     for agent in &decision.cancel_pending {
         repository::settle_inputs(transaction, agent)?;
     }
+    for requeue in &decision.requeue {
+        repository::requeue_inputs(
+            transaction,
+            &requeue.agent,
+            requeue.from_epoch,
+            requeue.to_epoch,
+            &requeue.interrupted,
+            &requeue.reason,
+        )?;
+    }
     if let Some(release) = &decision.archive_release {
         repository::settle_archived_inputs(
             transaction,
