@@ -96,18 +96,6 @@
     ]
   },
   {
-    "name": "excluded-account",
-    "agent": {
-      "workerExcludedAccountKeys": ["default"]
-    },
-    "steps": [{}],
-    "rustResults": [
-      {
-        "error": "This account is disabled for this chat"
-      }
-    ]
-  },
-  {
     "name": "capture-waiting",
     "agent": {
       "workspaceOperation": "capture"

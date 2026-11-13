@@ -2078,6 +2078,13 @@ mod account_wake_index_tests {
         connection
             .execute_batch(&crate::domain::tables_sql())
             .expect("domain tables create");
+        // Migrations create the settings table in every real state; the
+        // scheduler reads the child-result hold from it.
+        connection
+            .execute_batch(
+                "CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT);",
+            )
+            .expect("settings table creates");
         connection
     }
 
