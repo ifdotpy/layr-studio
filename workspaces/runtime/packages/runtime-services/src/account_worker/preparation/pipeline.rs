@@ -1387,7 +1387,10 @@ async fn prepare_native_snapshot(
     )
     .await
     .map_err(|_| WorkerError::TaskFailed)??;
-    let (identity, _) = catalog(resources, &intent)?;
+    let identity = admission
+        .selection
+        .commit_identity(catalog(resources, &intent)?)
+        .map_err(catalog_admission_error)?;
     let state_root = store.root().to_path_buf();
     let intent = intent.clone();
     let observed = if restore_cwd.is_some() {
@@ -1601,7 +1604,13 @@ pub(crate) async fn prepare_ready(
     )
     .await
     .map_err(|_| WorkerError::TaskFailed)??;
-    let (identity, _) = catalog(resources, intent)?;
+    let read = catalog(resources, intent)?;
+    let identity = match &admission {
+        Some(Admission { selection }) => selection
+            .commit_identity(read)
+            .map_err(catalog_admission_error)?,
+        None => read.0,
+    };
     let intent_for_snapshot = intent.clone();
     let token_for_snapshot = token.clone();
     let generation = generation.to_string();
@@ -1851,7 +1860,10 @@ pub(crate) fn commit(
     {
         return Err(refusal("idle-compaction/mode-changed".into()));
     }
-    let (identity, _) = catalog(&guard.resources, &context.intent)?;
+    let identity = guard
+        .selection
+        .commit_identity(catalog(&guard.resources, &context.intent)?)
+        .map_err(catalog_admission_error)?;
     let mut frozen = guard
         .selection
         .freeze_record(&record, &identity, Instant::now())
